@@ -48,20 +48,28 @@ export const SocketContextProvider = ({children}) => {
         })
 
         // Handle call accepted
-        socket.on("callAccepted", (signal) => {
+        socket.on("callAccepted", async (signal) => {
             setCallAccepted(true)
             
             if (connectionRef.current && signal) {
-                connectionRef.current.setRemoteDescription(new RTCSessionDescription(signal))
-                    .catch(err => console.error("Error setting remote description:", err))
+                try {
+                    await connectionRef.current.setRemoteDescription(new RTCSessionDescription(signal))
+                    console.log("Remote description set successfully")
+                } catch (err) {
+                    console.error("Error setting remote description:", err)
+                }
             }
         })
 
         // Handle ICE candidate (for both caller and receiver)
-        socket.on("iceCandidate", ({ candidate }) => {
+        socket.on("iceCandidate", async ({ candidate }) => {
             if (connectionRef.current && candidate) {
-                connectionRef.current.addIceCandidate(new RTCIceCandidate(candidate))
-                    .catch(err => console.error("Error adding ICE candidate:", err))
+                try {
+                    await connectionRef.current.addIceCandidate(new RTCIceCandidate(candidate))
+                    console.log("ICE candidate added successfully")
+                } catch (err) {
+                    console.error("Error adding ICE candidate:", err)
+                }
             }
         })
 
@@ -123,9 +131,16 @@ export const SocketContextProvider = ({children}) => {
 
         // Handle remote stream
         peerConnection.ontrack = (event) => {
-            if (userVideo.current) {
+            console.log("Received remote track", event.streams)
+            if (userVideo.current && event.streams[0]) {
                 userVideo.current.srcObject = event.streams[0]
+                console.log("Remote video stream set")
             }
+        }
+
+        // Handle connection state changes
+        peerConnection.onconnectionstatechange = () => {
+            console.log("Connection state:", peerConnection.connectionState)
         }
 
         // Create offer
@@ -181,15 +196,27 @@ export const SocketContextProvider = ({children}) => {
 
         // Handle remote stream
         peerConnection.ontrack = (event) => {
-            if (userVideo.current) {
+            console.log("Received remote track", event.streams)
+            if (userVideo.current && event.streams[0]) {
                 userVideo.current.srcObject = event.streams[0]
+                console.log("Remote video stream set")
             }
         }
 
+        // Handle connection state changes
+        peerConnection.onconnectionstatechange = () => {
+            console.log("Connection state:", peerConnection.connectionState)
+        }
+
         // Set remote description and create answer
-        await peerConnection.setRemoteDescription(new RTCSessionDescription(call.signal))
-        const answer = await peerConnection.createAnswer()
-        await peerConnection.setLocalDescription(answer)
+        try {
+            await peerConnection.setRemoteDescription(new RTCSessionDescription(call.signal))
+            const answer = await peerConnection.createAnswer()
+            await peerConnection.setLocalDescription(answer)
+            console.log("Answer created and set as local description")
+        } catch (err) {
+            console.error("Error creating answer:", err)
+        }
 
         if (socket) {
             socket.emit("answerCall", {

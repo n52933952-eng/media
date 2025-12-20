@@ -19,12 +19,11 @@ import { UserContext } from '../context/UserContext'
 import { SocketContext } from '../context/SocketContext'
 import useShowToast from '../hooks/useShowToast'
 import { formatDistanceToNow } from 'date-fns'
-import VideoCall from '../Components/VideoCall'
-import { FaPhone } from 'react-icons/fa'
+import { FaPhone, FaPhoneSlash } from 'react-icons/fa'
 
 const MessagesPage = () => {
   const { user } = useContext(UserContext)
-  const { socket, onlineUser, callUser, callAccepted, callEnded } = useContext(SocketContext)
+  const { socket, onlineUser, callUser, callAccepted, callEnded, call, answerCall, leaveCall, myVideo, userVideo, stream } = useContext(SocketContext)
   const showToast = useShowToast()
 
   // State
@@ -95,6 +94,10 @@ const MessagesPage = () => {
               })
               
               if (!userRes.ok) {
+                // Silently skip invalid user IDs (400 errors)
+                if (userRes.status === 400) {
+                  return null
+                }
                 console.log(`Failed to fetch user ${userId}:`, userRes.status)
                 return null
               }
@@ -464,12 +467,119 @@ const MessagesPage = () => {
               </Box>
             </Flex>
 
+            {/* Video Call - Inline in chat */}
+            {callAccepted && !callEnded && stream && (
+              <Box
+                borderBottom="1px solid"
+                borderColor={borderColor}
+                p={{ base: 2, md: 4 }}
+                bg={useColorModeValue('gray.50', 'gray.900')}
+              >
+                <Flex direction="column" gap={3}>
+                  <Flex justifyContent="space-between" alignItems="center">
+                    <Text fontWeight="semibold" fontSize={{ base: "sm", md: "md" }}>
+                      Video Call Active
+                    </Text>
+                    <Button
+                      colorScheme="red"
+                      size="sm"
+                      leftIcon={<FaPhoneSlash />}
+                      onClick={leaveCall}
+                      borderRadius="full"
+                    >
+                      End
+                    </Button>
+                  </Flex>
+                  <Flex gap={3} flexWrap="wrap">
+                    {/* Remote video */}
+                    <Box
+                      flex={1}
+                      minW={{ base: "100%", md: "300px" }}
+                      h={{ base: "200px", md: "250px" }}
+                      borderRadius="md"
+                      overflow="hidden"
+                      bg="black"
+                      position="relative"
+                    >
+                      <video
+                        ref={userVideo}
+                        autoPlay
+                        playsInline
+                        style={{
+                          width: '100%',
+                          height: '100%',
+                          objectFit: 'cover'
+                        }}
+                      />
+                    </Box>
+                    {/* Local video */}
+                    <Box
+                      w={{ base: "100px", md: "150px" }}
+                      h={{ base: "75px", md: "112px" }}
+                      borderRadius="md"
+                      overflow="hidden"
+                      bg="gray.800"
+                      border="2px solid"
+                      borderColor="white"
+                      flexShrink={0}
+                    >
+                      <video
+                        ref={myVideo}
+                        autoPlay
+                        muted
+                        playsInline
+                        style={{
+                          width: '100%',
+                          height: '100%',
+                          objectFit: 'cover'
+                        }}
+                      />
+                    </Box>
+                  </Flex>
+                </Flex>
+              </Box>
+            )}
+
+            {/* Incoming call notification */}
+            {call.isReceivingCall && !callAccepted && (
+              <Box
+                borderBottom="1px solid"
+                borderColor={borderColor}
+                p={{ base: 2, md: 4 }}
+                bg={useColorModeValue('blue.50', 'blue.900')}
+              >
+                <Flex direction="column" gap={3} alignItems="center">
+                  <Text fontWeight="semibold" fontSize={{ base: "sm", md: "md" }}>
+                    {call.name} is calling...
+                  </Text>
+                  <Flex gap={3}>
+                    <Button
+                      colorScheme="green"
+                      leftIcon={<FaPhone />}
+                      onClick={answerCall}
+                      size={{ base: "sm", md: "md" }}
+                    >
+                      Answer
+                    </Button>
+                    <Button
+                      colorScheme="red"
+                      leftIcon={<FaPhoneSlash />}
+                      onClick={leaveCall}
+                      size={{ base: "sm", md: "md" }}
+                    >
+                      Decline
+                    </Button>
+                  </Flex>
+                </Flex>
+              </Box>
+            )}
+
             {/* Messages */}
             <Box
               ref={messagesContainerRef}
               flex={1}
               overflowY="auto"
-              p={4}
+              p={{ base: 2, md: 4 }}
               bg={useColorModeValue('white', '#101010')}
             >
               <VStack align="stretch" spacing={4}>
@@ -484,23 +594,23 @@ const MessagesPage = () => {
                       direction={isOwn ? 'row-reverse' : 'row'}
                     >
                       <Avatar
-                        size="sm"
+                        size={{ base: "xs", md: "sm" }}
                         src={isOwn ? user.profilePic : msg.sender?.profilePic}
                         name={isOwn ? user.name : msg.sender?.name}
                       />
-                      <Flex direction="column" maxW="70%" align={isOwn ? 'flex-end' : 'flex-start'}>
+                      <Flex direction="column" maxW={{ base: "75%", md: "70%" }} align={isOwn ? 'flex-end' : 'flex-start'}>
                         <Box
                           bg={isOwn ? 'blue.500' : useColorModeValue('gray.200', '#1a1a1a')}
                           color={isOwn ? 'white' : useColorModeValue('black', 'white')}
-                          p={3}
+                          p={{ base: 2, md: 3 }}
                           borderRadius="xl"
                           borderTopLeftRadius={isOwn ? 'xl' : 'sm'}
                           borderTopRightRadius={isOwn ? 'sm' : 'xl'}
                         >
-                          <Text>{msg.text}</Text>
+                          <Text fontSize={{ base: "sm", md: "md" }}>{msg.text}</Text>
                         </Box>
                         <Text
-                          fontSize="xs"
+                          fontSize={{ base: "2xs", md: "xs" }}
                           color="gray.500"
                           mt={1}
                           px={2}
