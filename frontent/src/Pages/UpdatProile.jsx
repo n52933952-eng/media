@@ -81,7 +81,7 @@ console.log(image)
  
   try{
  
-    const res = await fetch(`http://localhost:5000/api/user/update/${user._id}`,{
+    const res = await fetch(`${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/user/update/${user._id}`,{
 
         method:"PUT",
 

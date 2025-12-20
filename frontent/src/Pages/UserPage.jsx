@@ -24,7 +24,7 @@ const UserPage = () => {
    const fetchUser = async() => {
        setLoading(true)
       try{
-     const res = await fetch(`http://localhost:5000/api/user/getUserPro/${username}`,{
+     const res = await fetch(`${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/user/getUserPro/${username}`,{
        credentials: "include",
      })
       
@@ -56,7 +56,7 @@ const UserPage = () => {
   
   try{
   
-    const res = await fetch(`http://localhost:5000/api/post/user/${username}`,{
+    const res = await fetch(`${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/post/user/${username}`,{
      
       credentials:"include",
       

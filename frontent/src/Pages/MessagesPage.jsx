@@ -51,7 +51,7 @@ const MessagesPage = () => {
   useEffect(() => {
     const fetchConversations = async () => {
       try {
-        const res = await fetch('http://localhost:5000/api/message/conversations', {
+        const res = await fetch(`${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/message/conversations`, {
           credentials: 'include',
         })
         const data = await res.json()
@@ -77,7 +77,7 @@ const MessagesPage = () => {
       
       try {
         // Get current user's following list
-        const userRes = await fetch(`http://localhost:5000/api/user/getUserPro/${user._id}`, {
+        const userRes = await fetch(`${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/user/getUserPro/${user._id}`, {
           credentials: 'include',
         })
         const userData = await userRes.json()
@@ -90,7 +90,7 @@ const MessagesPage = () => {
                 return null
               }
               
-              const userRes = await fetch(`http://localhost:5000/api/user/getUserPro/${userId}`, {
+              const userRes = await fetch(`${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/user/getUserPro/${userId}`, {
                 credentials: 'include',
               })
               
@@ -131,7 +131,7 @@ const MessagesPage = () => {
       if (!otherUser?._id) return
 
       try {
-        const res = await fetch(`http://localhost:5000/api/message/${otherUser._id}`, {
+        const res = await fetch(`${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/message/${otherUser._id}`, {
           credentials: 'include',
         })
         const data = await res.json()
@@ -185,7 +185,7 @@ const MessagesPage = () => {
 
   const fetchConversations = async () => {
     try {
-      const res = await fetch('http://localhost:5000/api/message/conversations', {
+      const res = await fetch(`${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/message/conversations`, {
         credentials: 'include',
       })
       const data = await res.json()
@@ -212,7 +212,7 @@ const MessagesPage = () => {
       setSelectedConversation(existingConv)
       // Fetch messages for this conversation
       try {
-        const res = await fetch(`http://localhost:5000/api/message/${recipientId}`, {
+        const res = await fetch(`${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/message/${recipientId}`, {
           credentials: 'include',
         })
         const data = await res.json()
@@ -244,7 +244,7 @@ const MessagesPage = () => {
 
     setSending(true)
     try {
-      const res = await fetch('http://localhost:5000/api/message', {
+      const res = await fetch(`${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/message`, {
         method: 'POST',
         credentials: 'include',
         headers: {

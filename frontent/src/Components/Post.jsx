@@ -29,7 +29,7 @@ const showToast = useShowToast()
     try{
     if(!window.confirm("Are you sure you want to delete this post"))return
    
-    const res = await fetch(`http://localhost:5000/api/post/${post._id}`,{
+    const res = await fetch(`${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/post/${post._id}`,{
       credentials:"include",
       method:"DELETE"
     })

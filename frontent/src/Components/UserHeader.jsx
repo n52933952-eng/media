@@ -57,7 +57,7 @@ const UserHeader = ({users}) => {
 
         try{
      
-        const res = await fetch(`http://localhost:5000/api/user/follow/${users._id}`,{
+        const res = await fetch(`${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/user/follow/${users._id}`,{
      
          credentials:"include",
          method:"POST",

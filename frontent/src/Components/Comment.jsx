@@ -91,7 +91,7 @@ const Comment = ({ reply, postId, allReplies }) => {
 
     try {
       const res = await fetch(
-        `http://localhost:5000/api/user/search?search=${encodeURIComponent(searchTerm)}`,
+        `${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/user/search?search=${encodeURIComponent(searchTerm)}`,
         {
           credentials: "include",
           headers: { "Content-Type": "application/json" }
@@ -268,7 +268,7 @@ const Comment = ({ reply, postId, allReplies }) => {
 
     try {
    
-      const res = await fetch(`http://localhost:5000/api/post/reply-comment/${postId}`, {
+      const res = await fetch(`${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/post/reply-comment/${postId}`, {
         method: "PUT",
         credentials: "include",
         headers: {
@@ -329,7 +329,7 @@ const Comment = ({ reply, postId, allReplies }) => {
   setLiked(!liked)
 
   try {
-    const res = await fetch(`http://localhost:5000/api/post/likecoment/${postId}/${reply._id}`, {
+    const res = await fetch(`${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/post/likecoment/${postId}/${reply._id}`, {
       credentials: "include",
       method: "PUT",
       headers: {

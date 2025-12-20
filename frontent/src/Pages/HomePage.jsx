@@ -21,7 +21,7 @@ const getFeedPost = async()=>{
     setLoading(true)
     try{
 
-   const res = await fetch("http://localhost:5000/api/post/feed/feedpost",{
+   const res = await fetch(`${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/post/feed/feedpost`,{
     credentials:"include",
     
 })

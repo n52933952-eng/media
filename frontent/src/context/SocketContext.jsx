@@ -25,8 +25,12 @@ export const SocketContextProvider = ({children}) => {
     const connectionRef = useRef()
 
     useEffect(() => {
-       
-        const socket = io("http://localhost:5000",{
+        // Use current origin for production, or localhost for development
+        const socketUrl = import.meta.env.PROD 
+            ? window.location.origin 
+            : "http://localhost:5000"
+        
+        const socket = io(socketUrl,{
             query:{
                 userId:user?._id
             }

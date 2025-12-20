@@ -48,7 +48,7 @@ const toast =useToast()
 
 	const handleSignup = async () => {
   try {
-    const res = await fetch("http://localhost:5000/api/user/signup", {
+    const res = await fetch(`${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/user/signup`, {
       method: "POST",
       credentials: "include",
       headers: {

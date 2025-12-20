@@ -55,7 +55,7 @@ const Actions = ({post}) => {
      if(!user) return 
 
 	 try{
-    const res = await fetch("http://localhost:5000/api/post/likes/" + post._id,{
+    const res = await fetch(`${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/post/likes/` + post._id,{
 		credentials:"include",
 		method:"PUT",
 		headers:{
@@ -103,7 +103,7 @@ const Actions = ({post}) => {
 	if(!user) return
 	try{
 
-    const res = await fetch("http://localhost:5000/api/post/reply/" + post._id,{
+    const res = await fetch(`${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/post/reply/` + post._id,{
 		credentials:"include",
 
 		method:"PUT",

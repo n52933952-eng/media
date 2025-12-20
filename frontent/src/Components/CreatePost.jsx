@@ -96,7 +96,7 @@ const CreatePost = () => {
      setLoading(true)
   try{
 
- const res = await fetch("http://localhost:5000/api/post/create",{
+ const res = await fetch(`${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/post/create`,{
   
   credentials: "include",
   method:"POST",
