@@ -301,9 +301,7 @@ const MessagesPage = () => {
   }
 
   return (
-    <>
-      <VideoCall />
-      <Flex h="100%" gap={0}>
+    <Flex h="100%" gap={0}>
         {/* Left Sidebar - Conversations & Search */}
       <Box
         w="350px"
@@ -787,7 +785,6 @@ const MessagesPage = () => {
         </VStack>
       </Box>
     </Flex>
-    </>
   )
 }
 
