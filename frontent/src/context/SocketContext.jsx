@@ -63,7 +63,7 @@ export const SocketContextProvider = ({children}) => {
 
         // Handle ICE candidate (for both caller and receiver)
         socket.on("iceCandidate", async ({ candidate }) => {
-            if (connectionRef.current && candidate) {
+            if (connectionRef.current && candidate && connectionRef.current.remoteDescription) {
                 try {
                     await connectionRef.current.addIceCandidate(new RTCIceCandidate(candidate))
                     console.log("ICE candidate added successfully")
@@ -183,9 +183,9 @@ export const SocketContextProvider = ({children}) => {
             peerConnection.addTrack(track, currentStream)
         })
 
-        // Handle ICE candidates
+        // Handle ICE candidates - wait until remote description is set
         peerConnection.onicecandidate = (event) => {
-            if (event.candidate && socket) {
+            if (event.candidate && socket && peerConnection.remoteDescription) {
                 socket.emit("iceCandidate", {
                     userToCall: call.from,
                     candidate: event.candidate,
@@ -209,16 +209,18 @@ export const SocketContextProvider = ({children}) => {
         }
 
         // Set remote description and create answer
+        let answer = null
         try {
             await peerConnection.setRemoteDescription(new RTCSessionDescription(call.signal))
-            const answer = await peerConnection.createAnswer()
+            answer = await peerConnection.createAnswer()
             await peerConnection.setLocalDescription(answer)
             console.log("Answer created and set as local description")
         } catch (err) {
             console.error("Error creating answer:", err)
+            return
         }
 
-        if (socket) {
+        if (socket && answer) {
             socket.emit("answerCall", {
                 signal: answer,
                 to: call.from
