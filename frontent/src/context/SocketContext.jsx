@@ -194,10 +194,12 @@ export const SocketContextProvider = ({children}) => {
         peerRef.current = peer
 
         peer.on('signal', (data) => {
-            socket.emit('answerCall', { 
-                signal: data, 
-                to: call.from 
-            })
+            if (call?.from) {
+                socket.emit('answerCall', { 
+                    signal: data, 
+                    to: call.from 
+                })
+            }
         })
 
         peer.on('stream', (currentStream) => {
@@ -206,7 +208,7 @@ export const SocketContextProvider = ({children}) => {
             }
         })
 
-        if (call.signal) {
+        if (call?.signal) {
             try {
                 peer.signal(call.signal)
             } catch (err) {
@@ -234,7 +236,7 @@ export const SocketContextProvider = ({children}) => {
             getMediaStream()
         }, 500)
 
-        if (socket && (call.from || call.userToCall)) {
+        if (socket && call && (call.from || call.userToCall)) {
             socket.emit('cancelCall', {
                 conversationId: call.userToCall || call.from,
                 sender: user._id

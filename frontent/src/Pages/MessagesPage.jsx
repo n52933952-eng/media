@@ -539,7 +539,7 @@ const MessagesPage = () => {
             )}
 
             {/* Incoming call notification */}
-            {call.isReceivingCall && !callAccepted && (
+            {call?.isReceivingCall && !callAccepted && (
               <Box
                 borderBottom="1px solid"
                 borderColor={borderColor}
@@ -548,7 +548,7 @@ const MessagesPage = () => {
               >
                 <Flex direction="column" gap={3} alignItems="center">
                   <Text fontWeight="semibold" fontSize={{ base: "sm", md: "md" }}>
-                    {call.name} is calling...
+                    {call?.name} is calling...
                   </Text>
                   <Flex gap={3}>
                     <Button
@@ -669,7 +669,7 @@ const MessagesPage = () => {
                 alignItems="center"
                 justifyContent="center"
               >
-                <FaPhone size={{ base: 14, md: 16 }} />
+                <FaPhone size={16} />
               </Button>
               <Input
                 placeholder="write something..."
