@@ -128,6 +128,11 @@ export const SocketContextProvider = ({ children }) => {
   };
 
   const callUser = (id) => {
+    if (!stream || !socket || !me || !user) {
+      console.error("Missing required values for callUser");
+      return;
+    }
+
     cleanupPeer();
     setCallAccepted(false);
     setCallEnded(false);
@@ -136,7 +141,9 @@ export const SocketContextProvider = ({ children }) => {
     peerRef.current = peer;
 
     peer.on('signal', (data) => {
-      socket.emit('callUser', { userToCall: id, signalData: data, from: me, name: user.username });
+      if (socket && me && user) {
+        socket.emit('callUser', { userToCall: id, signalData: data, from: me, name: user.username });
+      }
     });
 
     peer.on('stream', (currentStream) => {
@@ -145,8 +152,10 @@ export const SocketContextProvider = ({ children }) => {
 
     socket.once('callAccepted', (signal) => {
       try {
-        peer.signal(signal);
-        setCallAccepted(true);
+        if (peer) {
+          peer.signal(signal);
+          setCallAccepted(true);
+        }
       } catch (err) {
         console.warn('Error signaling callAccepted:', err.message);
       }
@@ -157,6 +166,11 @@ export const SocketContextProvider = ({ children }) => {
 
   // Answer an incoming call
   const answerCall = () => {
+    if (!stream || !socket || !call || !call.signal || !call.from) {
+      console.error("Missing required values for answerCall");
+      return;
+    }
+
     cleanupPeer();
     setCallAccepted(true);
     setCallEnded(false);
@@ -164,7 +178,9 @@ export const SocketContextProvider = ({ children }) => {
     peerRef.current = peer;
 
     peer.on('signal', (data) => {
-      socket.emit('answerCall', { signal: data, to: call.from });
+      if (socket && call && call.from) {
+        socket.emit('answerCall', { signal: data, to: call.from });
+      }
     });
 
     peer.on('stream', (currentStream) => {
