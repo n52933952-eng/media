@@ -65,6 +65,8 @@ export const initializeSocket = (app) => {
                     userToCall 
                 })
             }
+
+            io.emit("callBusy", { userToCall, from })
         })
 
         // WebRTC: Handle answer call
@@ -99,6 +101,7 @@ export const initializeSocket = (app) => {
             if (senderSocketId) {
                 io.to(senderSocketId).emit("CallCanceled")
             }
+            io.emit("cancleCall")
         })
 
         socket.on("disconnect", () => {

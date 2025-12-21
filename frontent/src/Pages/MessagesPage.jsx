@@ -352,7 +352,7 @@ const MessagesPage = () => {
                       {u.name}
                     </Text>
                   </Box>
-                  {onlineUser?.includes(u._id) && (
+                  {onlineUser?.some(ou => (ou.userId || ou._id) === u._id) && (
                     <Box
                       w={3}
                       h={3}
@@ -410,7 +410,7 @@ const MessagesPage = () => {
                           {otherUser?.name}
                         </Text>
                       </Box>
-                      {onlineUser?.includes(otherUser?._id) && (
+                      {onlineUser?.some(u => (u.userId || u._id) === otherUser?._id) && (
                         <Box
                           w={3}
                           h={3}
@@ -454,7 +454,7 @@ const MessagesPage = () => {
                 >
                   {selectedConversation.participants[0]?.name}
                 </Text>
-                {onlineUser?.includes(selectedConversation.participants[0]?._id) && (
+                {onlineUser?.some(u => (u.userId || u._id) === selectedConversation.participants[0]?._id) && (
                   <Text fontSize={{ base: "2xs", md: "xs" }} color="green.500">
                     Online
                   </Text>
@@ -733,7 +733,7 @@ const MessagesPage = () => {
         
         <VStack align="stretch" spacing={0} p={2}>
           {followedUsers
-            .filter(user => onlineUser?.includes(user._id))
+            .filter(user => onlineUser?.some(ou => (ou.userId || ou._id) === user._id))
             .map((friend) => (
               <Flex
                 key={friend._id}
@@ -774,7 +774,7 @@ const MessagesPage = () => {
                 </Box>
               </Flex>
             ))}
-          {followedUsers.filter(user => onlineUser?.includes(user._id)).length === 0 && (
+          {followedUsers.filter(user => onlineUser?.some(ou => (ou.userId || ou._id) === user._id)).length === 0 && (
             <Text px={4} py={8} color="gray.500" fontSize="sm" textAlign="center">
               No friends online
             </Text>

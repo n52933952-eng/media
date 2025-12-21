@@ -64,10 +64,7 @@ export const SocketContextProvider = ({ children }) => {
     setSocket(newSocket);
     setMe(user._id);
 
-    newSocket?.on('getOnlineUser', (users) => {
-      // Extract userIds from array of objects {userId, onlineAt}
-      setOnlineUser(users.map(u => u.userId || u._id));
-    });
+    newSocket?.on('getOnlineUser', (users) => setOnlineUser(users));
 
     return () => {
       newSocket.close();
