@@ -1,8 +1,7 @@
 
-
-
 import{createContext,useEffect,useState,useContext,useRef} from 'react'
 import io from 'socket.io-client'
+import Peer from 'simple-peer'
 import{UserContext} from './UserContext'
 
 export const SocketContext = createContext()
@@ -23,6 +22,40 @@ export const SocketContextProvider = ({children}) => {
     const myVideo = useRef()
     const userVideo = useRef()
     const connectionRef = useRef()
+    const peerRef = useRef()
+
+    // Get user media (camera and microphone)
+    const getMediaStream = async () => {
+        try {
+            const currentStream = await navigator.mediaDevices.getUserMedia({ 
+                video: true, 
+                audio: true 
+            })
+            
+            // Unmute audio tracks explicitly
+            currentStream.getAudioTracks().forEach(track => {
+                if (!track.enabled) track.enabled = true
+            })
+
+            setStream(currentStream)
+            console.log("Media stream obtained")
+        } catch (error) {
+            console.error('Error getting media stream:', error)
+        }
+    }
+
+    // Get media stream on mount
+    useEffect(() => {
+        getMediaStream()
+    }, [])
+
+    // Assign stream to myVideo when stream changes
+    useEffect(() => {
+        if (myVideo.current && stream) {
+            myVideo.current.srcObject = stream
+            console.log('Assigned stream to myVideo')
+        }
+    }, [stream])
 
     useEffect(() => {
         // Use current origin for production, or localhost for development
@@ -30,61 +63,30 @@ export const SocketContextProvider = ({children}) => {
             ? window.location.origin 
             : "http://localhost:5000"
         
-        const socket = io(socketUrl,{
+        if (!user?._id) return
+
+        const newSocket = io(socketUrl,{
             query:{
-                userId:user?._id
+                userId:user._id
             }
         })
-        setSocket(socket)
-       
+        
+        setSocket(newSocket)
       
-        socket.on("getOnlineUser",(users) => {
-        setOnlineUser(users)
+        newSocket.on("getOnlineUser",(users) => {
+            setOnlineUser(users)
         })
 
         // Handle incoming call
-        socket.on("callUser", ({ signal, from, name, userToCall }) => {
+        const handleCallUser = ({ signal, from, name, userToCall }) => {
             setCall({ isReceivingCall: true, from, name, signal, userToCall })
-        })
+        }
 
-        // Handle call accepted
-        socket.on("callAccepted", async (signal) => {
-            setCallAccepted(true)
-            
-            if (connectionRef.current && signal) {
-                try {
-                    await connectionRef.current.setRemoteDescription(new RTCSessionDescription(signal))
-                    console.log("Remote description set successfully")
-                } catch (err) {
-                    console.error("Error setting remote description:", err)
-                }
-            }
-        })
+        newSocket.on("callUser", handleCallUser)
 
-        // Handle ICE candidate (for both caller and receiver)
-        socket.on("iceCandidate", async ({ candidate }) => {
-            if (connectionRef.current && candidate && connectionRef.current.remoteDescription) {
-                try {
-                    await connectionRef.current.addIceCandidate(new RTCIceCandidate(candidate))
-                    console.log("ICE candidate added successfully")
-                } catch (err) {
-                    console.error("Error adding ICE candidate:", err)
-                }
-            }
-        })
-
-        // Handle call canceled
-        socket.on("CallCanceled", () => {
-            setCall({})
-            setCallAccepted(false)
-            setCallEnded(true)
-            if (stream) {
-                stream.getTracks().forEach(track => track.stop())
-            }
-        })
-    
         return () => {
-            socket && socket.close()
+            newSocket.off("callUser", handleCallUser)
+            newSocket.close()
             if (stream) {
                 stream.getTracks().forEach(track => track.stop())
             }
@@ -92,163 +94,152 @@ export const SocketContextProvider = ({children}) => {
    
     },[user?._id])
 
-   console.log(user)
-    // Call a user
-    const callUser = async (id) => {
-        const currentStream = await navigator.mediaDevices.getUserMedia({ 
-            video: true, 
-            audio: true 
-        })
-        setStream(currentStream)
-        if (myVideo.current) {
-            myVideo.current.srcObject = currentStream
+    // Clean up peer connections
+    const cleanupPeer = () => {
+        if (connectionRef.current) {
+            connectionRef.current.destroy()
+            connectionRef.current = null
         }
-        
-        const peerConnection = new RTCPeerConnection({
-            iceServers: [
-                { urls: 'stun:stun.l.google.com:19302' },
-                { urls: 'stun:stun1.l.google.com:19302' }
-            ]
-        })
-
-        connectionRef.current = peerConnection
-
-        // Add local stream to peer connection
-        currentStream.getTracks().forEach((track) => {
-            peerConnection.addTrack(track, currentStream)
-        })
-
-        // Handle ICE candidates
-        peerConnection.onicecandidate = (event) => {
-            if (event.candidate && socket) {
-                socket.emit("iceCandidate", {
-                    userToCall: id,
-                    candidate: event.candidate,
-                    from: user._id
-                })
-            }
+        if (peerRef.current) {
+            peerRef.current.destroy()
+            peerRef.current = null
         }
-
-        // Handle remote stream
-        peerConnection.ontrack = (event) => {
-            console.log("Received remote track", event.streams)
-            if (userVideo.current && event.streams[0]) {
-                userVideo.current.srcObject = event.streams[0]
-                console.log("Remote video stream set")
-            }
-        }
-
-        // Handle connection state changes
-        peerConnection.onconnectionstatechange = () => {
-            console.log("Connection state:", peerConnection.connectionState)
-        }
-
-        // Create offer
-        const offer = await peerConnection.createOffer()
-        await peerConnection.setLocalDescription(offer)
-
-        if (socket) {
-            socket.emit("callUser", {
-                userToCall: id,
-                signalData: offer,
-                from: user._id,
-                name: user.name || user.username
-            })
+        if (userVideo.current) {
+            userVideo.current.srcObject = null
         }
     }
 
-    // Answer a call
-    const answerCall = async () => {
-        setCallAccepted(true)
-        const currentStream = await navigator.mediaDevices.getUserMedia({ 
-            video: true, 
-            audio: true 
-        })
-        setStream(currentStream)
-        if (myVideo.current) {
-            myVideo.current.srcObject = currentStream
+    // Handle call canceled
+    useEffect(() => {
+        if (!socket) return
+
+        const handleCallCanceled = () => {
+            setCall({})
+            setCallAccepted(false)
+            setCallEnded(true)
+            cleanupPeer()
+            getMediaStream()
         }
 
-        const peerConnection = new RTCPeerConnection({
-            iceServers: [
-                { urls: 'stun:stun.l.google.com:19302' },
-                { urls: 'stun:stun1.l.google.com:19302' }
-            ]
-        })
+        socket.on("CallCanceled", handleCallCanceled)
 
-        connectionRef.current = peerConnection
-
-        // Add local stream to peer connection
-        currentStream.getTracks().forEach((track) => {
-            peerConnection.addTrack(track, currentStream)
-        })
-
-        // Handle ICE candidates - wait until remote description is set
-        peerConnection.onicecandidate = (event) => {
-            if (event.candidate && socket && peerConnection.remoteDescription) {
-                socket.emit("iceCandidate", {
-                    userToCall: call.from,
-                    candidate: event.candidate,
-                    from: user._id
-                })
-            }
+        return () => {
+            socket.off("CallCanceled", handleCallCanceled)
         }
+    }, [socket])
 
-        // Handle remote stream
-        peerConnection.ontrack = (event) => {
-            console.log("Received remote track", event.streams)
-            if (userVideo.current && event.streams[0]) {
-                userVideo.current.srcObject = event.streams[0]
-                console.log("Remote video stream set")
-            }
-        }
+    // Call a user
+    const callUser = (id) => {
+        cleanupPeer()
+        setCallAccepted(false)
+        setCallEnded(false)
 
-        // Handle connection state changes
-        peerConnection.onconnectionstatechange = () => {
-            console.log("Connection state:", peerConnection.connectionState)
-        }
-
-        // Set remote description and create answer
-        let answer = null
-        try {
-            await peerConnection.setRemoteDescription(new RTCSessionDescription(call.signal))
-            answer = await peerConnection.createAnswer()
-            await peerConnection.setLocalDescription(answer)
-            console.log("Answer created and set as local description")
-        } catch (err) {
-            console.error("Error creating answer:", err)
+        if (!stream) {
+            console.error("No stream available")
             return
         }
 
-        if (socket && answer) {
-            socket.emit("answerCall", {
-                signal: answer,
-                to: call.from
+        const peer = new Peer({ 
+            initiator: true, 
+            trickle: false, 
+            stream 
+        })
+        
+        peerRef.current = peer
+
+        peer.on('signal', (data) => {
+            socket.emit('callUser', { 
+                userToCall: id, 
+                signalData: data, 
+                from: user._id, 
+                name: user.name || user.username 
             })
+        })
+
+        peer.on('stream', (currentStream) => {
+            if (userVideo.current) {
+                userVideo.current.srcObject = currentStream
+            }
+        })
+
+        socket.once('callAccepted', (signal) => {
+            try {
+                peer.signal(signal)
+                setCallAccepted(true)
+            } catch (err) {
+                console.warn('Error signaling callAccepted:', err.message)
+            }
+        })
+
+        connectionRef.current = peer
+    }
+
+    // Answer a call
+    const answerCall = () => {
+        cleanupPeer()
+        setCallAccepted(true)
+        setCallEnded(false)
+
+        if (!stream) {
+            console.error("No stream available")
+            return
         }
+
+        const peer = new Peer({ 
+            initiator: false, 
+            trickle: false, 
+            stream 
+        })
+        
+        peerRef.current = peer
+
+        peer.on('signal', (data) => {
+            socket.emit('answerCall', { 
+                signal: data, 
+                to: call.from 
+            })
+        })
+
+        peer.on('stream', (currentStream) => {
+            if (userVideo.current) {
+                userVideo.current.srcObject = currentStream
+            }
+        })
+
+        if (call.signal) {
+            try {
+                peer.signal(call.signal)
+            } catch (err) {
+                console.warn('Error signaling answerCall:', err.message)
+            }
+        }
+
+        connectionRef.current = peer
     }
 
     // Leave/End call
     const leaveCall = () => {
         setCallEnded(true)
         setCallAccepted(false)
-        
-        if (connectionRef.current) {
-            connectionRef.current.close()
-            connectionRef.current = null
-        }
+        setCall({})
+        cleanupPeer()
 
+        // Stop all tracks from the current stream
         if (stream) {
             stream.getTracks().forEach(track => track.stop())
-            setStream(null)
         }
 
-        socket.emit("cancelCall", {
-            conversationId: call.userToCall || call.from,
-            sender: user._id
-        })
+        // Re-request fresh stream
+        setTimeout(() => {
+            getMediaStream()
+        }, 500)
 
-        setCall({})
+        if (socket && (call.from || call.userToCall)) {
+            socket.emit('cancelCall', {
+                conversationId: call.userToCall || call.from,
+                sender: user._id
+            })
+        }
     }
 
     return <SocketContext.Provider value={{
