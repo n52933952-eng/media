@@ -25,18 +25,40 @@ export const initializeSocket = (app) => {
         console.log("user connected", socket.id)
         
         const userId = socket.handshake.query.userId
-        // Fix: Check if userId exists and is not "undefined" string
+        // Store socket info as object like madechess
         if (userId && userId !== "undefined") {
-            userSocketMap[userId] = socket.id
+            userSocketMap[userId] = {
+                socketId: socket.id,
+                onlineAt: Date.now(),
+            }
         }
 
-        io.emit("getOnlineUser", Object.keys(userSocketMap))
+        // Emit online users as array of objects like madechess
+        const onlineArray = Object.entries(userSocketMap).map(([id, data]) => ({
+            userId: id,
+            onlineAt: data.onlineAt,
+        }))
+        io.emit("getOnlineUser", onlineArray)
 
-        // WebRTC: Handle call user
+        // WebRTC: Handle call user - emit to both receiver AND sender like madechess
         socket.on("callUser", ({ userToCall, signalData, from, name }) => {
-            const receiverSocketId = userSocketMap[userToCall]
+            const receiverData = userSocketMap[userToCall]
+            const receiverSocketId = receiverData?.socketId
+
+            const senderData = userSocketMap[from]
+            const senderSocketId = senderData?.socketId
+
             if (receiverSocketId) {
                 io.to(receiverSocketId).emit("callUser", { 
+                    signal: signalData, 
+                    from, 
+                    name, 
+                    userToCall 
+                })
+            }
+
+            if (senderSocketId) {
+                io.to(senderSocketId).emit("callUser", { 
                     signal: signalData, 
                     from, 
                     name, 
@@ -47,7 +69,8 @@ export const initializeSocket = (app) => {
 
         // WebRTC: Handle answer call
         socket.on("answerCall", (data) => {
-            const callerSocketId = userSocketMap[data.to]
+            const callerData = userSocketMap[data.to]
+            const callerSocketId = callerData?.socketId
             if (callerSocketId) {
                 io.to(callerSocketId).emit("callAccepted", data.signal)
             }
@@ -55,31 +78,46 @@ export const initializeSocket = (app) => {
 
         // WebRTC: Handle ICE candidate
         socket.on("iceCandidate", ({ userToCall, candidate, from }) => {
-            const receiverSocketId = userSocketMap[userToCall]
+            const receiverData = userSocketMap[userToCall]
+            const receiverSocketId = receiverData?.socketId
             if (receiverSocketId) {
                 io.to(receiverSocketId).emit("iceCandidate", { candidate, from })
             }
         })
 
-        // WebRTC: Handle cancel call
+        // WebRTC: Handle cancel call - match madechess implementation
         socket.on("cancelCall", ({ conversationId, sender }) => {
-            const receiverSocketId = userSocketMap[conversationId]
-            const senderSocketId = userSocketMap[sender]
+            const receiverData = userSocketMap[conversationId]
+            const receiverSocketId = receiverData?.socketId
+
+            const senderData = userSocketMap[sender]
+            const senderSocketId = senderData?.socketId
 
             if (receiverSocketId) {
                 io.to(receiverSocketId).emit("CallCanceled")
             }
-            if (senderSocketId && senderSocketId !== receiverSocketId) {
+            if (senderSocketId) {
                 io.to(senderSocketId).emit("CallCanceled")
             }
         })
 
         socket.on("disconnect", () => {
             console.log("user disconnected", socket.id)
-            if (userId && userId !== "undefined") {
-                delete userSocketMap[userId]
+            
+            // Remove user from map by matching socket.id like madechess
+            for (const [id, data] of Object.entries(userSocketMap)) {
+                if (data.socketId === socket.id) {
+                    delete userSocketMap[id]
+                    break
+                }
             }
-            io.emit("getOnlineUser", Object.keys(userSocketMap))
+
+            // Emit updated online list as array of objects
+            const updatedOnlineArray = Object.entries(userSocketMap).map(([id, data]) => ({
+                userId: id,
+                onlineAt: data.onlineAt,
+            }))
+            io.emit("getOnlineUser", updatedOnlineArray)
         })
     })
 
@@ -87,7 +125,8 @@ export const initializeSocket = (app) => {
 }
 
 export const getRecipientSockedId = (recipientId) => {
-    return userSocketMap[recipientId]
+    const userData = userSocketMap[recipientId]
+    return userData ? userData.socketId : null
 }
 
 // Export getters for io and server

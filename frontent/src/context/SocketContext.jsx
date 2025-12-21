@@ -74,7 +74,14 @@ export const SocketContextProvider = ({children}) => {
         setMe(user._id)
       
         newSocket.on("getOnlineUser",(users) => {
-            setOnlineUser(users)
+            // Handle both formats: array of objects {userId, onlineAt} or array of IDs
+            if (users && users.length > 0 && typeof users[0] === 'object') {
+                // Extract userIds from array of objects
+                setOnlineUser(users.map(u => u.userId || u._id))
+            } else {
+                // Already array of IDs
+                setOnlineUser(users)
+            }
         })
 
         return () => {
