@@ -77,15 +77,7 @@ export const SocketContextProvider = ({children}) => {
             setOnlineUser(users)
         })
 
-        // Handle incoming call
-        const handleCallUser = ({ signal, from, name, userToCall }) => {
-            setCall({ isReceivingCall: true, from, name, signal, userToCall })
-        }
-
-        newSocket.on("callUser", handleCallUser)
-
         return () => {
-            newSocket.off("callUser", handleCallUser)
             newSocket.close()
             if (stream) {
                 stream.getTracks().forEach(track => track.stop())
@@ -93,6 +85,21 @@ export const SocketContextProvider = ({children}) => {
         }
    
     },[user?._id])
+
+    // Handle incoming call - separate useEffect like working code
+    useEffect(() => {
+        if (!socket) return
+
+        const handleCallUser = ({ signal, from, name, userToCall }) => {
+            setCall({ isReceivingCall: true, from, name, signal, userToCall })
+        }
+
+        socket.on("callUser", handleCallUser)
+
+        return () => {
+            socket.off("callUser", handleCallUser)
+        }
+    }, [socket])
 
     // Clean up peer connections
     const cleanupPeer = () => {
@@ -130,14 +137,14 @@ export const SocketContextProvider = ({children}) => {
 
     // Call a user
     const callUser = (id) => {
+        if (!socket || !stream || !user?._id) {
+            console.error("Missing requirements for call: socket, stream, or user")
+            return
+        }
+
         cleanupPeer()
         setCallAccepted(false)
         setCallEnded(false)
-
-        if (!stream) {
-            console.error("No stream available")
-            return
-        }
 
         const peer = new Peer({ 
             initiator: true, 
@@ -148,12 +155,14 @@ export const SocketContextProvider = ({children}) => {
         peerRef.current = peer
 
         peer.on('signal', (data) => {
-            socket.emit('callUser', { 
-                userToCall: id, 
-                signalData: data, 
-                from: user._id, 
-                name: user.name || user.username 
-            })
+            if (socket) {
+                socket.emit('callUser', { 
+                    userToCall: id, 
+                    signalData: data, 
+                    from: user._id, 
+                    name: user.name || user.username 
+                })
+            }
         })
 
         peer.on('stream', (currentStream) => {
@@ -176,14 +185,14 @@ export const SocketContextProvider = ({children}) => {
 
     // Answer a call
     const answerCall = () => {
+        if (!socket || !stream || !call?.signal || !call?.from) {
+            console.error("Missing requirements for answer: socket, stream, or call data")
+            return
+        }
+
         cleanupPeer()
         setCallAccepted(true)
         setCallEnded(false)
-
-        if (!stream) {
-            console.error("No stream available")
-            return
-        }
 
         const peer = new Peer({ 
             initiator: false, 
@@ -194,7 +203,7 @@ export const SocketContextProvider = ({children}) => {
         peerRef.current = peer
 
         peer.on('signal', (data) => {
-            if (call?.from) {
+            if (socket && call.from) {
                 socket.emit('answerCall', { 
                     signal: data, 
                     to: call.from 
@@ -208,12 +217,10 @@ export const SocketContextProvider = ({children}) => {
             }
         })
 
-        if (call?.signal) {
-            try {
-                peer.signal(call.signal)
-            } catch (err) {
-                console.warn('Error signaling answerCall:', err.message)
-            }
+        try {
+            peer.signal(call.signal)
+        } catch (err) {
+            console.warn('Error signaling answerCall:', err.message)
         }
 
         connectionRef.current = peer
