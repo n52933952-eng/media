@@ -33,6 +33,7 @@ export const SocketContextProvider = ({ children }) => {
   const userVideo = useRef();
   const connectionRef = useRef();
   const peerRef = useRef();
+  const callRef = useRef(call);
 
   // Get user media and unmute audio track explicitly
   const getMediaStream = async () => {
@@ -135,6 +136,8 @@ export const SocketContextProvider = ({ children }) => {
   };
 
   const callUser = (id) => {
+    if (!stream || !socket || !me || !user) return;
+    
     cleanupPeer();
     setCallAccepted(false);
     setCallEnded(false);
@@ -143,7 +146,9 @@ export const SocketContextProvider = ({ children }) => {
     peerRef.current = peer;
 
     peer.on('signal', (data) => {
-      socket.emit('callUser', { userToCall: id, signalData: data, from: me, name: user.username });
+      if (socket && me && user) {
+        socket.emit('callUser', { userToCall: id, signalData: data, from: me, name: user.username });
+      }
     });
 
     peer.on('stream', (currentStream) => {
@@ -152,8 +157,10 @@ export const SocketContextProvider = ({ children }) => {
 
     socket.once('callAccepted', (signal) => {
       try {
-        peer.signal(signal);
-        setCallAccepted(true);
+        if (peer && signal) {
+          peer.signal(signal);
+          setCallAccepted(true);
+        }
       } catch (err) {
         console.warn('Error signaling callAccepted:', err.message);
       }
@@ -162,8 +169,16 @@ export const SocketContextProvider = ({ children }) => {
     connectionRef.current = peer;
   };
 
+  // Keep callRef in sync with call state
+  useEffect(() => {
+    callRef.current = call;
+  }, [call]);
+
   // Answer an incoming call
   const answerCall = () => {
+    const currentCall = callRef.current;
+    if (!currentCall || !currentCall.signal || !currentCall.from || !stream || !socket) return;
+    
     cleanupPeer();
     setCallAccepted(true);
     setCallEnded(false);
@@ -171,16 +186,18 @@ export const SocketContextProvider = ({ children }) => {
     peerRef.current = peer;
 
     peer.on('signal', (data) => {
-      socket.emit('answerCall', { signal: data, to: call.from });
+      if (socket && currentCall && currentCall.from) {
+        socket.emit('answerCall', { signal: data, to: currentCall.from });
+      }
     });
 
     peer.on('stream', (currentStream) => {
       if (userVideo.current) userVideo.current.srcObject = currentStream;
     });
 
-    if (call.signal) {
+    if (currentCall.signal) {
       try {
-        peer.signal(call.signal);
+        peer.signal(currentCall.signal);
       } catch (err) {
         console.warn('Error signaling answerCall:', err.message);
       }

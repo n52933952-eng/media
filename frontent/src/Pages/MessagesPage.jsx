@@ -463,7 +463,7 @@ const MessagesPage = () => {
             </Flex>
 
             {/* Video Call - Inline in chat */}
-            {callAccepted && !callEnded && stream && (
+            {callAccepted && !callEnded && stream && myVideo && userVideo && (
               <Box
                 borderBottom="1px solid"
                 borderColor={borderColor}
@@ -536,7 +536,7 @@ const MessagesPage = () => {
             )}
 
             {/* Incoming call notification */}
-            {call?.isReceivingCall && !callAccepted && (
+            {call && call.isReceivingCall && !callAccepted && (
               <Box
                 borderBottom="1px solid"
                 borderColor={borderColor}
