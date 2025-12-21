@@ -92,7 +92,7 @@ export const SocketContextProvider = ({children}) => {
    
     },[user?._id])
 
-
+   console.log(user)
     // Call a user
     const callUser = async (id) => {
         const currentStream = await navigator.mediaDevices.getUserMedia({ 
