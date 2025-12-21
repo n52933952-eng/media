@@ -7,11 +7,8 @@ import{UserContext} from './UserContext'
 export const SocketContext = createContext()
 
 export const SocketContextProvider = ({children}) => {
-
     const[socket,setSocket]=useState(null)
-   
     const{user}=useContext(UserContext)
-    
     const[onlineUser,setOnlineUser]=useState([])
 
     // WebRTC state
@@ -19,6 +16,8 @@ export const SocketContextProvider = ({children}) => {
     const [callEnded, setCallEnded] = useState(false)
     const [stream, setStream] = useState(null)
     const [call, setCall] = useState({})
+    const [me, setMe] = useState('')
+    
     const myVideo = useRef()
     const userVideo = useRef()
     const connectionRef = useRef()
@@ -57,13 +56,13 @@ export const SocketContextProvider = ({children}) => {
         }
     }, [stream])
 
+    // Setup socket connection
     useEffect(() => {
-        // Use current origin for production, or localhost for development
+        if (!user?._id) return
+
         const socketUrl = import.meta.env.PROD 
             ? window.location.origin 
             : "http://localhost:5000"
-        
-        if (!user?._id) return
 
         const newSocket = io(socketUrl,{
             query:{
@@ -72,6 +71,7 @@ export const SocketContextProvider = ({children}) => {
         })
         
         setSocket(newSocket)
+        setMe(user._id)
       
         newSocket.on("getOnlineUser",(users) => {
             setOnlineUser(users)
@@ -79,14 +79,29 @@ export const SocketContextProvider = ({children}) => {
 
         return () => {
             newSocket.close()
-            if (stream) {
-                stream.getTracks().forEach(track => track.stop())
-            }
         }
-   
-    },[user?._id])
+    },[user])
 
-    // Handle incoming call - separate useEffect like working code
+    // Handle call canceled - separate useEffect
+    useEffect(() => {
+        if (!socket) return
+
+        const handleCallCanceled = () => {
+            setCall({})
+            setCallAccepted(false)
+            setCallEnded(true)
+            cleanupPeer()
+            getMediaStream()
+        }
+
+        socket.on("CallCanceled", handleCallCanceled)
+
+        return () => {
+            socket.off("CallCanceled", handleCallCanceled)
+        }
+    }, [socket])
+
+    // Handle incoming call - separate useEffect
     useEffect(() => {
         if (!socket) return
 
@@ -116,52 +131,31 @@ export const SocketContextProvider = ({children}) => {
         }
     }
 
-    // Handle call canceled
-    useEffect(() => {
-        if (!socket) return
-
-        const handleCallCanceled = () => {
-            setCall({})
-            setCallAccepted(false)
-            setCallEnded(true)
-            cleanupPeer()
-            getMediaStream()
-        }
-
-        socket.on("CallCanceled", handleCallCanceled)
-
-        return () => {
-            socket.off("CallCanceled", handleCallCanceled)
-        }
-    }, [socket])
-
     // Call a user
     const callUser = (id) => {
-        if (!socket || !stream || !user?._id) {
-            console.error("Missing requirements for call: socket, stream, or user")
+        if (!stream) {
+            console.error("Stream not available")
             return
         }
-
+        if (!socket) {
+            console.error("Socket not available")
+            return
+        }
+        if (!me) {
+            console.error("User ID not available")
+            return
+        }
+        
         cleanupPeer()
         setCallAccepted(false)
         setCallEnded(false)
 
-        const peer = new Peer({ 
-            initiator: true, 
-            trickle: false, 
-            stream 
-        })
-        
+        const peer = new Peer({ initiator: true, trickle: false, stream })
         peerRef.current = peer
 
         peer.on('signal', (data) => {
-            if (socket) {
-                socket.emit('callUser', { 
-                    userToCall: id, 
-                    signalData: data, 
-                    from: user._id, 
-                    name: user.name || user.username 
-                })
+            if (socket && me && user) {
+                socket.emit('callUser', { userToCall: id, signalData: data, from: me, name: user.username || user.name })
             }
         })
 
@@ -173,8 +167,10 @@ export const SocketContextProvider = ({children}) => {
 
         socket.once('callAccepted', (signal) => {
             try {
-                peer.signal(signal)
-                setCallAccepted(true)
+                if (peer && signal) {
+                    peer.signal(signal)
+                    setCallAccepted(true)
+                }
             } catch (err) {
                 console.warn('Error signaling callAccepted:', err.message)
             }
@@ -185,29 +181,29 @@ export const SocketContextProvider = ({children}) => {
 
     // Answer a call
     const answerCall = () => {
-        if (!socket || !stream || !call?.signal || !call?.from) {
-            console.error("Missing requirements for answer: socket, stream, or call data")
+        if (!stream) {
+            console.error("Stream not available")
             return
         }
-
+        if (!socket) {
+            console.error("Socket not available")
+            return
+        }
+        if (!call?.signal || !call?.from) {
+            console.error("Call data not available")
+            return
+        }
+        
         cleanupPeer()
         setCallAccepted(true)
         setCallEnded(false)
 
-        const peer = new Peer({ 
-            initiator: false, 
-            trickle: false, 
-            stream 
-        })
-        
+        const peer = new Peer({ initiator: false, trickle: false, stream })
         peerRef.current = peer
 
         peer.on('signal', (data) => {
-            if (socket && call.from) {
-                socket.emit('answerCall', { 
-                    signal: data, 
-                    to: call.from 
-                })
+            if (socket && call?.from) {
+                socket.emit('answerCall', { signal: data, to: call.from })
             }
         })
 
@@ -217,10 +213,12 @@ export const SocketContextProvider = ({children}) => {
             }
         })
 
-        try {
-            peer.signal(call.signal)
-        } catch (err) {
-            console.warn('Error signaling answerCall:', err.message)
+        if (call.signal) {
+            try {
+                peer.signal(call.signal)
+            } catch (err) {
+                console.warn('Error signaling answerCall:', err.message)
+            }
         }
 
         connectionRef.current = peer
