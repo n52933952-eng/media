@@ -4,7 +4,20 @@ import io from 'socket.io-client';
 import Peer from 'simple-peer';
 import { UserContext } from './UserContext';
 
-export const SocketContext = createContext();
+export const SocketContext = createContext({
+  socket: null,
+  call: {},
+  callAccepted: false,
+  callEnded: false,
+  myVideo: { current: null },
+  userVideo: { current: null },
+  stream: null,
+  me: '',
+  callUser: () => {},
+  answerCall: () => {},
+  leaveCall: () => {},
+  onlineUser: [],
+});
 
 export const SocketContextProvider = ({ children }) => {
   const { user } = useContext(UserContext);

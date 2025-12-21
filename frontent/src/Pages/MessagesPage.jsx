@@ -23,7 +23,8 @@ import { FaPhone, FaPhoneSlash } from 'react-icons/fa'
 
 const MessagesPage = () => {
   const { user } = useContext(UserContext)
-  const { socket, onlineUser, callUser, callAccepted, callEnded, call, answerCall, leaveCall, myVideo, userVideo, stream } = useContext(SocketContext)
+  const socketContext = useContext(SocketContext)
+  const { socket, onlineUser, callUser, callAccepted, callEnded, call, answerCall, leaveCall, myVideo, userVideo, stream } = socketContext || {}
   const showToast = useShowToast()
 
   // State
@@ -94,11 +95,7 @@ const MessagesPage = () => {
               })
               
               if (!userRes.ok) {
-                // Silently skip invalid user IDs (400 errors)
-                if (userRes.status === 400) {
-                  return null
-                }
-                console.log(`Failed to fetch user ${userId}:`, userRes.status)
+                // Silently skip invalid user IDs (400 errors) - don't log to console
                 return null
               }
               
@@ -482,7 +479,7 @@ const MessagesPage = () => {
                       colorScheme="red"
                       size="sm"
                       leftIcon={<FaPhoneSlash />}
-                      onClick={leaveCall}
+                      onClick={() => leaveCall?.()}
                       borderRadius="full"
                     >
                       End
@@ -554,7 +551,7 @@ const MessagesPage = () => {
                     <Button
                       colorScheme="green"
                       leftIcon={<FaPhone />}
-                      onClick={answerCall}
+                      onClick={() => answerCall?.()}
                       size={{ base: "sm", md: "md" }}
                     >
                       Answer
@@ -562,7 +559,7 @@ const MessagesPage = () => {
                     <Button
                       colorScheme="red"
                       leftIcon={<FaPhoneSlash />}
-                      onClick={leaveCall}
+                      onClick={() => leaveCall?.()}
                       size={{ base: "sm", md: "md" }}
                     >
                       Decline
@@ -655,13 +652,13 @@ const MessagesPage = () => {
                 _hover={{ bg: 'blue.600' }}
                 onClick={() => {
                   const recipientId = selectedConversation?.participants[0]?._id
-                  if (recipientId) {
+                  if (recipientId && callUser) {
                     callUser(recipientId)
                   }
                 }}
                 borderRadius="full"
                 size={{ base: "sm", md: "md" }}
-                isDisabled={!selectedConversation?.participants[0]?._id || callAccepted}
+                isDisabled={!selectedConversation?.participants[0]?._id || callAccepted || !callUser}
                 minW={{ base: "36px", md: "auto" }}
                 px={{ base: 2, md: 4 }}
                 flexShrink={0}
