@@ -663,12 +663,15 @@ const MessagesPage = () => {
             {/* Message Input - Mobile optimized */}
             <Flex
               p={{ base: 2, md: 4 }}
+              pb={{ base: '16px', md: 4 }}
+              pt={{ base: 2, md: 4 }}
               borderTop="1px solid"
               borderColor={borderColor}
               gap={{ base: 1.5, md: 2 }}
               alignItems="center"
               bg={bgColor}
               flexWrap="wrap"
+              mb={{ base: 'env(safe-area-inset-bottom)', md: 0 }}
             >
               {/* Game button - Hide on very small screens */}
               <Box
