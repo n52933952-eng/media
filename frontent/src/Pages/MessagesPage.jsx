@@ -351,22 +351,32 @@ const MessagesPage = () => {
                   borderBottom="1px solid"
                   borderColor={borderColor}
                 >
-                  <Avatar size="md" src={u.profilePic} name={u.name} />
-                  <Box flex={1}>
-                    <Text fontWeight="semibold" color={useColorModeValue('black', 'white')}>
-                      {u.name}
-                    </Text>
+                  <Box position="relative">
+                    <Avatar size="md" src={u.profilePic} name={u.name || u.username} />
+                    {onlineUser?.some(ou => (ou.userId || ou._id) === u._id) && (
+                      <Box
+                        position="absolute"
+                        bottom={0}
+                        right={0}
+                        w={3}
+                        h={3}
+                        bg="green.500"
+                        borderRadius="full"
+                        border="2px solid"
+                        borderColor={bgColor}
+                      />
+                    )}
                   </Box>
-                  {onlineUser?.some(ou => (ou.userId || ou._id) === u._id) && (
-                    <Box
-                      w={3}
-                      h={3}
-                      bg="green.500"
-                      borderRadius="full"
-                      border="2px solid"
-                      borderColor={bgColor}
-                    />
-                  )}
+                  <Box flex={1} minW={0}>
+                    <Text fontWeight="semibold" noOfLines={1} color={useColorModeValue('black', 'white')}>
+                      {u.name || u.username || 'Unknown User'}
+                    </Text>
+                    {u.username && u.name !== u.username && (
+                      <Text fontSize="xs" color="gray.500" noOfLines={1} mt={0.5}>
+                        @{u.username}
+                      </Text>
+                    )}
+                  </Box>
                 </Flex>
               ))}
               {filteredUsers.length === 0 && (
@@ -405,26 +415,36 @@ const MessagesPage = () => {
                       alignItems="center"
                       gap={3}
                     >
-                      <Avatar
-                        size="md"
-                        src={otherUser?.profilePic}
-                        name={otherUser?.name}
-                      />
+                      <Box position="relative">
+                        <Avatar
+                          size="md"
+                          src={otherUser?.profilePic}
+                          name={otherUser?.name}
+                        />
+                        {onlineUser?.some(u => (u.userId || u._id) === otherUser?._id) && (
+                          <Box
+                            position="absolute"
+                            bottom={0}
+                            right={0}
+                            w={3}
+                            h={3}
+                            bg="green.500"
+                            borderRadius="full"
+                            border="2px solid"
+                            borderColor={bgColor}
+                          />
+                        )}
+                      </Box>
                       <Box flex={1} minW={0}>
                         <Text fontWeight="semibold" noOfLines={1} color={useColorModeValue('black', 'white')}>
-                          {otherUser?.name}
+                          {otherUser?.name || otherUser?.username || 'Unknown User'}
                         </Text>
+                        {otherUser?.username && otherUser?.name !== otherUser?.username && (
+                          <Text fontSize="xs" color="gray.500" noOfLines={1} mt={0.5}>
+                            @{otherUser.username}
+                          </Text>
+                        )}
                       </Box>
-                      {onlineUser?.some(u => (u.userId || u._id) === otherUser?._id) && (
-                        <Box
-                          w={3}
-                          h={3}
-                          bg="green.500"
-                          borderRadius="full"
-                          border="2px solid"
-                          borderColor={bgColor}
-                        />
-                      )}
                     </Flex>
                   )
                 })
