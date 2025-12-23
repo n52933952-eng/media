@@ -673,20 +673,20 @@ const MessagesPage = () => {
               flexWrap="wrap"
               mb={{ base: 'env(safe-area-inset-bottom)', md: 0 }}
             >
-              {/* Game button - Hide on very small screens */}
+              {/* Game button - Show on all screens now */}
               <Box
-                w={{ base: 8, sm: 10 }}
-                h={{ base: 8, sm: 10 }}
+                w={{ base: 10, sm: 10 }}
+                h={{ base: 10, sm: 10 }}
                 bg="green.500"
                 borderRadius="full"
-                display={{ base: "none", sm: "flex" }}
+                display="flex"
                 alignItems="center"
                 justifyContent="center"
                 cursor="pointer"
                 _hover={{ bg: 'green.600' }}
                 flexShrink={0}
               >
-                <Text color="white" fontWeight="bold" fontSize={{ base: "sm", md: "lg" }}>G</Text>
+                <Text color="white" fontWeight="bold" fontSize={{ base: "md", md: "lg" }}>G</Text>
               </Box>
               {/* Call button - Optimized for mobile */}
               <IconButton
@@ -737,7 +737,8 @@ const MessagesPage = () => {
                 flex={1}
                 minW={{ base: "120px", sm: "150px" }}
                 fontSize={{ base: "sm", md: "md" }}
-                size={{ base: "sm", md: "md" }}
+                h={{ base: "44px", md: "40px" }}
+                py={{ base: 3, md: 2 }}
               />
               <Button
                 bg="green.500"
