@@ -13,8 +13,9 @@ import {
   InputGroup,
   InputLeftElement,
   Spinner,
+  IconButton,
 } from '@chakra-ui/react'
-import { SearchIcon } from '@chakra-ui/icons'
+import { SearchIcon, ArrowBackIcon } from '@chakra-ui/icons'
 import { UserContext } from '../context/UserContext'
 import { SocketContext } from '../context/SocketContext'
 import useShowToast from '../hooks/useShowToast'
@@ -298,16 +299,20 @@ const MessagesPage = () => {
   }
 
   return (
-    <Flex h="100%" gap={0}>
+    <Flex h="100%" gap={0} position="relative">
         {/* Left Sidebar - Conversations & Search */}
       <Box
-        w="350px"
+        w={{ base: "100%", md: "350px" }}
         borderRight="1px solid"
         borderColor={borderColor}
         bg={bgColor}
         display={{ base: selectedConversation ? 'none' : 'flex', md: 'flex' }}
         h="100%"
         flexDirection="column"
+        position={{ base: 'absolute', md: 'relative' }}
+        left={0}
+        top={0}
+        zIndex={{ base: 10, md: 'auto' }}
       >
         <Box p={4} borderBottom="1px solid" borderColor={borderColor}>
           <Text fontSize="xl" fontWeight="bold" mb={4} color={useColorModeValue('black', 'white')}>
@@ -430,19 +435,36 @@ const MessagesPage = () => {
       </Box>
 
       {/* Main Chat Area */}
-      <Box flex={1} display="flex" flexDirection="column" bg={bgColor}>
+      <Box 
+        flex={1} 
+        display="flex" 
+        flexDirection="column" 
+        bg={bgColor}
+        w={{ base: "100%", md: "auto" }}
+        minW={0}
+      >
         {selectedConversation ? (
           <>
-            {/* Chat Header - Responsive */}
+            {/* Chat Header - Responsive with back button */}
             <Flex
-              p={{ base: 3, md: 4 }}
+              p={{ base: 2, md: 4 }}
               borderBottom="1px solid"
               borderColor={borderColor}
               alignItems="center"
               gap={{ base: 2, md: 3 }}
             >
+              {/* Back button for mobile */}
+              <IconButton
+                icon={<ArrowBackIcon />}
+                aria-label="Back to conversations"
+                onClick={() => setSelectedConversation(null)}
+                display={{ base: 'flex', md: 'none' }}
+                variant="ghost"
+                size="sm"
+                mr={-2}
+              />
               <Avatar
-                size={{ base: "xs", md: "sm" }}
+                size={{ base: "sm", md: "sm" }}
                 src={selectedConversation.participants[0]?.profilePic}
                 name={selectedConversation.participants[0]?.name}
               />
@@ -451,6 +473,7 @@ const MessagesPage = () => {
                   fontWeight="semibold"
                   fontSize={{ base: "sm", md: "md" }}
                   noOfLines={1}
+                  color={useColorModeValue('black', 'white')}
                 >
                   {selectedConversation.participants[0]?.name}
                 </Text>
@@ -462,7 +485,7 @@ const MessagesPage = () => {
               </Box>
             </Flex>
 
-            {/* Video Call - Inline in chat */}
+            {/* Video Call - Inline in chat - Mobile optimized */}
             {callAccepted && !callEnded && stream && myVideo && userVideo && (
               <Box
                 borderBottom="1px solid"
@@ -470,31 +493,37 @@ const MessagesPage = () => {
                 p={{ base: 2, md: 4 }}
                 bg={useColorModeValue('gray.50', 'gray.900')}
               >
-                <Flex direction="column" gap={3}>
-                  <Flex justifyContent="space-between" alignItems="center">
-                    <Text fontWeight="semibold" fontSize={{ base: "sm", md: "md" }}>
+                <Flex direction="column" gap={{ base: 2, md: 3 }}>
+                  <Flex justifyContent="space-between" alignItems="center" flexWrap="wrap" gap={2}>
+                    <Text fontWeight="semibold" fontSize={{ base: "xs", md: "md" }} color={useColorModeValue('black', 'white')}>
                       Video Call Active
                     </Text>
                     <Button
                       colorScheme="red"
-                      size="sm"
+                      size={{ base: "xs", md: "sm" }}
                       leftIcon={<FaPhoneSlash />}
                       onClick={() => leaveCall?.()}
                       borderRadius="full"
                     >
-                      End
+                      <Text display={{ base: 'none', sm: 'block' }}>End</Text>
                     </Button>
                   </Flex>
-                  <Flex gap={3} flexWrap="wrap">
-                    {/* Remote video */}
+                  <Flex 
+                    gap={{ base: 2, md: 3 }} 
+                    flexDirection={{ base: "column", md: "row" }}
+                    alignItems={{ base: "stretch", md: "flex-start" }}
+                  >
+                    {/* Remote video - Full width on mobile */}
                     <Box
-                      flex={1}
+                      flex={{ base: 0, md: 1 }}
+                      w={{ base: "100%", md: "auto" }}
                       minW={{ base: "100%", md: "300px" }}
-                      h={{ base: "200px", md: "250px" }}
+                      h={{ base: "250px", sm: "300px", md: "250px" }}
                       borderRadius="md"
                       overflow="hidden"
                       bg="black"
                       position="relative"
+                      order={{ base: 1, md: 1 }}
                     >
                       <video
                         ref={userVideo}
@@ -507,16 +536,18 @@ const MessagesPage = () => {
                         }}
                       />
                     </Box>
-                    {/* Local video */}
+                    {/* Local video - Smaller on mobile, positioned better */}
                     <Box
-                      w={{ base: "100px", md: "150px" }}
-                      h={{ base: "75px", md: "112px" }}
+                      w={{ base: "120px", md: "150px" }}
+                      h={{ base: "90px", md: "112px" }}
                       borderRadius="md"
                       overflow="hidden"
                       bg="gray.800"
                       border="2px solid"
-                      borderColor="white"
+                      borderColor={useColorModeValue('gray.200', 'white')}
                       flexShrink={0}
+                      alignSelf={{ base: "flex-end", md: "flex-start" }}
+                      order={{ base: 2, md: 2 }}
                     >
                       <video
                         ref={myVideo}
@@ -535,24 +566,26 @@ const MessagesPage = () => {
               </Box>
             )}
 
-            {/* Incoming call notification */}
+            {/* Incoming call notification - Mobile optimized */}
             {call && call.isReceivingCall && !callAccepted && (
               <Box
                 borderBottom="1px solid"
                 borderColor={borderColor}
-                p={{ base: 2, md: 4 }}
+                p={{ base: 3, md: 4 }}
                 bg={useColorModeValue('blue.50', 'blue.900')}
               >
-                <Flex direction="column" gap={3} alignItems="center">
-                  <Text fontWeight="semibold" fontSize={{ base: "sm", md: "md" }}>
+                <Flex direction="column" gap={{ base: 2, md: 3 }} alignItems="center">
+                  <Text fontWeight="semibold" fontSize={{ base: "sm", md: "md" }} textAlign="center" color={useColorModeValue('black', 'white')}>
                     {call?.name} is calling...
                   </Text>
-                  <Flex gap={3}>
+                  <Flex gap={{ base: 2, md: 3 }} w="full" justifyContent="center" flexWrap="wrap">
                     <Button
                       colorScheme="green"
                       leftIcon={<FaPhone />}
                       onClick={() => answerCall?.()}
                       size={{ base: "sm", md: "md" }}
+                      flex={{ base: 1, sm: 0 }}
+                      minW={{ base: "auto", sm: "120px" }}
                     >
                       Answer
                     </Button>
@@ -561,6 +594,8 @@ const MessagesPage = () => {
                       leftIcon={<FaPhoneSlash />}
                       onClick={() => leaveCall?.()}
                       size={{ base: "sm", md: "md" }}
+                      flex={{ base: 1, sm: 0 }}
+                      minW={{ base: "auto", sm: "120px" }}
                     >
                       Decline
                     </Button>
@@ -569,15 +604,15 @@ const MessagesPage = () => {
               </Box>
             )}
 
-            {/* Messages */}
+            {/* Messages - Mobile optimized */}
             <Box
               ref={messagesContainerRef}
               flex={1}
               overflowY="auto"
-              p={{ base: 2, md: 4 }}
+              p={{ base: 2, sm: 3, md: 4 }}
               bg={useColorModeValue('white', '#101010')}
             >
-              <VStack align="stretch" spacing={4}>
+              <VStack align="stretch" spacing={{ base: 3, md: 4 }}>
                 {messages.map((msg) => {
                   const isOwn = msg.sender?._id === user._id
                   return (
@@ -585,29 +620,31 @@ const MessagesPage = () => {
                       key={msg._id}
                       justifyContent={isOwn ? 'flex-end' : 'flex-start'}
                       alignItems="flex-end"
-                      gap={2}
+                      gap={{ base: 1.5, md: 2 }}
                       direction={isOwn ? 'row-reverse' : 'row'}
                     >
                       <Avatar
-                        size={{ base: "xs", md: "sm" }}
+                        size={{ base: "xs", sm: "sm" }}
                         src={isOwn ? user.profilePic : msg.sender?.profilePic}
                         name={isOwn ? user.name : msg.sender?.name}
+                        display={{ base: "none", sm: "flex" }}
                       />
-                      <Flex direction="column" maxW={{ base: "75%", md: "70%" }} align={isOwn ? 'flex-end' : 'flex-start'}>
+                      <Flex direction="column" maxW={{ base: "85%", sm: "75%", md: "70%" }} align={isOwn ? 'flex-end' : 'flex-start'}>
                         <Box
                           bg={isOwn ? 'blue.500' : useColorModeValue('gray.200', '#1a1a1a')}
                           color={isOwn ? 'white' : useColorModeValue('black', 'white')}
-                          p={{ base: 2, md: 3 }}
+                          p={{ base: 2.5, md: 3 }}
                           borderRadius="xl"
                           borderTopLeftRadius={isOwn ? 'xl' : 'sm'}
                           borderTopRightRadius={isOwn ? 'sm' : 'xl'}
+                          wordBreak="break-word"
                         >
-                          <Text fontSize={{ base: "sm", md: "md" }}>{msg.text}</Text>
+                          <Text fontSize={{ base: "sm", md: "md" }} whiteSpace="pre-wrap">{msg.text}</Text>
                         </Box>
                         <Text
                           fontSize={{ base: "2xs", md: "xs" }}
                           color="gray.500"
-                          mt={1}
+                          mt={0.5}
                           px={2}
                         >
                           {msg.createdAt &&
@@ -623,21 +660,23 @@ const MessagesPage = () => {
               </VStack>
             </Box>
 
-            {/* Message Input - Responsive */}
+            {/* Message Input - Mobile optimized */}
             <Flex
               p={{ base: 2, md: 4 }}
               borderTop="1px solid"
               borderColor={borderColor}
-              gap={{ base: 1, md: 2 }}
+              gap={{ base: 1.5, md: 2 }}
               alignItems="center"
               bg={bgColor}
+              flexWrap="wrap"
             >
+              {/* Game button - Hide on very small screens */}
               <Box
-                w={{ base: 8, md: 10 }}
-                h={{ base: 8, md: 10 }}
+                w={{ base: 8, sm: 10 }}
+                h={{ base: 8, sm: 10 }}
                 bg="green.500"
                 borderRadius="full"
-                display="flex"
+                display={{ base: "none", sm: "flex" }}
                 alignItems="center"
                 justifyContent="center"
                 cursor="pointer"
@@ -646,7 +685,10 @@ const MessagesPage = () => {
               >
                 <Text color="white" fontWeight="bold" fontSize={{ base: "sm", md: "lg" }}>G</Text>
               </Box>
-              <Button
+              {/* Call button - Optimized for mobile */}
+              <IconButton
+                aria-label="Start video call"
+                icon={<FaPhone size={14} />}
                 bg="blue.500"
                 color="white"
                 _hover={{ bg: 'blue.600' }}
@@ -670,22 +712,15 @@ const MessagesPage = () => {
                   busyUsers?.has(selectedConversation?.participants[0]?._id) ||
                   busyUsers?.has(user?._id)
                 }
-                minW={{ base: "36px", md: "auto" }}
-                px={{ base: 2, md: 4 }}
                 flexShrink={0}
-                display="flex"
-                alignItems="center"
-                justifyContent="center"
                 title={
                   busyUsers?.has(selectedConversation?.participants[0]?._id) || busyUsers?.has(user?._id)
                     ? "User is currently in a call"
                     : "Start video call"
                 }
-              >
-                <FaPhone size={16} />
-              </Button>
+              />
               <Input
-                placeholder="write something..."
+                placeholder="Message..."
                 value={newMessage}
                 onChange={(e) => setNewMessage(e.target.value)}
                 onKeyPress={(e) => {
@@ -697,6 +732,7 @@ const MessagesPage = () => {
                 bg={inputBg}
                 borderRadius="full"
                 flex={1}
+                minW={{ base: "120px", sm: "150px" }}
                 fontSize={{ base: "sm", md: "md" }}
                 size={{ base: "sm", md: "md" }}
               />
@@ -707,12 +743,13 @@ const MessagesPage = () => {
                 onClick={handleSendMessage}
                 isLoading={sending}
                 borderRadius="md"
-                px={{ base: 4, md: 6 }}
+                px={{ base: 3, sm: 4, md: 6 }}
                 size={{ base: "sm", md: "md" }}
                 fontSize={{ base: "sm", md: "md" }}
                 flexShrink={0}
               >
-                Send
+                <Text display={{ base: "none", sm: "block" }}>Send</Text>
+                <Text display={{ base: "block", sm: "none" }}>✓</Text>
               </Button>
             </Flex>
           </>
