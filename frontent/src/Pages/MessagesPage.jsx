@@ -352,7 +352,11 @@ const MessagesPage = () => {
                   borderColor={borderColor}
                 >
                   <Box position="relative">
-                    <Avatar size="md" src={u.profilePic} name={u.name || u.username} />
+                    <Avatar 
+                      size="md" 
+                      src={u.profilePic} 
+                      name={u.name || u.username || 'User'}
+                    />
                     {onlineUser?.some(ou => (ou.userId || ou._id) === u._id) && (
                       <Box
                         position="absolute"
@@ -419,7 +423,7 @@ const MessagesPage = () => {
                         <Avatar
                           size="md"
                           src={otherUser?.profilePic}
-                          name={otherUser?.name}
+                          name={otherUser?.name || otherUser?.username || 'User'}
                         />
                         {onlineUser?.some(u => (u.userId || u._id) === otherUser?._id) && (
                           <Box
@@ -486,7 +490,7 @@ const MessagesPage = () => {
               <Avatar
                 size={{ base: "sm", md: "sm" }}
                 src={selectedConversation.participants[0]?.profilePic}
-                name={selectedConversation.participants[0]?.name}
+                name={selectedConversation.participants[0]?.name || selectedConversation.participants[0]?.username || 'User'}
               />
               <Flex flex={1} minW={0} alignItems="center" gap={2} flexWrap="wrap">
                 <Text 
@@ -495,7 +499,7 @@ const MessagesPage = () => {
                   noOfLines={1}
                   color={useColorModeValue('black', 'white')}
                 >
-                  {selectedConversation.participants[0]?.name}
+                  {selectedConversation.participants[0]?.name || selectedConversation.participants[0]?.username || 'Unknown User'}
                 </Text>
                 {onlineUser?.some(u => (u.userId || u._id) === selectedConversation.participants[0]?._id) && (
                   <>
@@ -831,7 +835,7 @@ const MessagesPage = () => {
                   <Avatar
                     size="md"
                     src={friend.profilePic}
-                    name={friend.name}
+                    name={friend.name || friend.username || 'User'}
                   />
                   <Box
                     position="absolute"
