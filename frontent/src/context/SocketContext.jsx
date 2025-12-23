@@ -15,6 +15,7 @@ export const SocketContextProvider = ({ children }) => {
   const [callEnded, setCallEnded] = useState(false);
   const [stream, setStream] = useState();
   const [me, setMe] = useState('');
+  const [busyUsers, setBusyUsers] = useState(new Set()); // Track which users are busy
 
   const myVideo = useRef();
   const userVideo = useRef();
@@ -89,6 +90,66 @@ export const SocketContextProvider = ({ children }) => {
     };
   }, [socket]);
 
+  // Handle callBusy event - track which users are busy
+  useEffect(() => {
+    if (!socket) return;
+
+    const handleCallBusy = ({ userToCall, from }) => {
+      setBusyUsers(prev => {
+        const newSet = new Set(prev);
+        newSet.add(userToCall);
+        newSet.add(from);
+        return newSet;
+      });
+    };
+
+    socket.on("callBusy", handleCallBusy);
+
+    return () => {
+      socket.off("callBusy", handleCallBusy);
+    };
+  }, [socket]);
+
+  // Handle call cancelled - clear busy state
+  useEffect(() => {
+    if (!socket) return;
+
+    const handleCallCancelled = ({ userToCall, from }) => {
+      setBusyUsers(prev => {
+        const newSet = new Set(prev);
+        if (userToCall) newSet.delete(userToCall);
+        if (from) newSet.delete(from);
+        return newSet;
+      });
+    };
+
+    socket.on("cancleCall", handleCallCancelled);
+
+    return () => {
+      socket.off("cancleCall", handleCallCancelled);
+    };
+  }, [socket]);
+
+  // Handle callBusyError - when trying to call a busy user
+  useEffect(() => {
+    if (!socket) return;
+
+    const handleCallBusyError = ({ message, busyUserId }) => {
+      console.warn(message, busyUserId);
+      // You could show a toast notification here if needed
+      cleanupPeer();
+      setCall({});
+      setCallAccepted(false);
+      setCallEnded(true);
+    };
+
+    socket.on("callBusyError", handleCallBusyError);
+
+    return () => {
+      socket.off("callBusyError", handleCallBusyError);
+    };
+  }, [socket]);
+
   useEffect(() => {
     if (!socket) return;
 
@@ -151,6 +212,17 @@ export const SocketContextProvider = ({ children }) => {
     cleanupPeer();
     setCallAccepted(true);
     setCallEnded(false);
+    
+    // Ensure both users are marked as busy when call is answered
+    if (call.from) {
+      setBusyUsers(prev => {
+        const newSet = new Set(prev);
+        newSet.add(call.from);
+        newSet.add(me);
+        return newSet;
+      });
+    }
+    
     const peer = new Peer({ initiator: false, trickle: false, stream });
     peerRef.current = peer;
 
@@ -177,6 +249,17 @@ export const SocketContextProvider = ({ children }) => {
   const leaveCall = () => {
     setCallEnded(true);
     setCallAccepted(false);
+    
+    // Clear busy state for both users
+    if (call.from || call.userToCall) {
+      setBusyUsers(prev => {
+        const newSet = new Set(prev);
+        if (call.from) newSet.delete(call.from);
+        if (call.userToCall) newSet.delete(call.userToCall);
+        return newSet;
+      });
+    }
+
     setCall({});
     cleanupPeer();
 
@@ -213,6 +296,7 @@ export const SocketContextProvider = ({ children }) => {
         answerCall,
         leaveCall,
         onlineUser,
+        busyUsers, // Export busyUsers so components can check if a user is busy
       }}
     >
       {children}

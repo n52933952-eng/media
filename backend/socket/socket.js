@@ -7,6 +7,8 @@ let io = null
 let server = null
 
 const userSocketMap = {}
+// Track active calls: { callId: { user1, user2 } }
+const activeCalls = new Map()
 
 export const initializeSocket = (app) => {
     // Create HTTP server from Express app
@@ -40,8 +42,32 @@ export const initializeSocket = (app) => {
         }))
         io.emit("getOnlineUser", onlineArray)
 
+        // Helper function to check if user is busy
+        const isUserBusy = (userId) => {
+            for (const [callId, callData] of activeCalls.entries()) {
+                if (callData.user1 === userId || callData.user2 === userId) {
+                    return true
+                }
+            }
+            return false
+        }
+
         // WebRTC: Handle call user - emit to both receiver AND sender like madechess
         socket.on("callUser", ({ userToCall, signalData, from, name }) => {
+            // Check if either user is already in a call
+            if (isUserBusy(userToCall) || isUserBusy(from)) {
+                // Notify sender that the call cannot be made (user is busy)
+                const senderData = userSocketMap[from]
+                const senderSocketId = senderData?.socketId
+                if (senderSocketId) {
+                    io.to(senderSocketId).emit("callBusyError", { 
+                        message: "User is currently in a call",
+                        busyUserId: isUserBusy(userToCall) ? userToCall : from
+                    })
+                }
+                return
+            }
+
             const receiverData = userSocketMap[userToCall]
             const receiverSocketId = receiverData?.socketId
 
@@ -66,6 +92,10 @@ export const initializeSocket = (app) => {
                 })
             }
 
+            // Mark both users as busy
+            const callId = `${from}-${userToCall}`
+            activeCalls.set(callId, { user1: from, user2: userToCall })
+            
             io.emit("callBusy", { userToCall, from })
         })
 
@@ -75,6 +105,7 @@ export const initializeSocket = (app) => {
             const callerSocketId = callerData?.socketId
             if (callerSocketId) {
                 io.to(callerSocketId).emit("callAccepted", data.signal)
+                // Call is now active - both users are busy (already marked in callUser)
             }
         })
 
@@ -95,23 +126,51 @@ export const initializeSocket = (app) => {
             const senderData = userSocketMap[sender]
             const senderSocketId = senderData?.socketId
 
+            // Remove from active calls - try both possible call IDs
+            const callId1 = `${sender}-${conversationId}`
+            const callId2 = `${conversationId}-${sender}`
+            if (activeCalls.has(callId1)) {
+                activeCalls.delete(callId1)
+            } else if (activeCalls.has(callId2)) {
+                activeCalls.delete(callId2)
+            }
+
             if (receiverSocketId) {
                 io.to(receiverSocketId).emit("CallCanceled")
             }
             if (senderSocketId) {
                 io.to(senderSocketId).emit("CallCanceled")
             }
-            io.emit("cancleCall")
+            io.emit("cancleCall", { userToCall: conversationId, from: sender })
         })
 
         socket.on("disconnect", () => {
             console.log("user disconnected", socket.id)
             
+            let disconnectedUserId = null
+            
             // Remove user from map by matching socket.id like madechess
             for (const [id, data] of Object.entries(userSocketMap)) {
                 if (data.socketId === socket.id) {
+                    disconnectedUserId = id
                     delete userSocketMap[id]
                     break
+                }
+            }
+
+            // Clean up active calls for disconnected user
+            if (disconnectedUserId) {
+                for (const [callId, callData] of activeCalls.entries()) {
+                    if (callData.user1 === disconnectedUserId || callData.user2 === disconnectedUserId) {
+                        activeCalls.delete(callId)
+                        // Notify the other user
+                        const otherUserId = callData.user1 === disconnectedUserId ? callData.user2 : callData.user1
+                        const otherUserData = userSocketMap[otherUserId]
+                        if (otherUserData) {
+                            io.to(otherUserData.socketId).emit("CallCanceled")
+                            io.emit("cancleCall", { userToCall: otherUserId, from: disconnectedUserId })
+                        }
+                    }
                 }
             }
 

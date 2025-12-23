@@ -24,7 +24,7 @@ import { FaPhone, FaPhoneSlash } from 'react-icons/fa'
 const MessagesPage = () => {
   const { user } = useContext(UserContext)
   const socketContext = useContext(SocketContext)
-  const { socket, onlineUser, callUser, callAccepted, callEnded, call, answerCall, leaveCall, myVideo, userVideo, stream } = socketContext || {}
+  const { socket, onlineUser, callUser, callAccepted, callEnded, call, answerCall, leaveCall, myVideo, userVideo, stream, busyUsers } = socketContext || {}
   const showToast = useShowToast()
 
   // State
@@ -653,18 +653,34 @@ const MessagesPage = () => {
                 onClick={() => {
                   const recipientId = selectedConversation?.participants[0]?._id
                   if (recipientId && callUser) {
+                    // Check if user is busy before calling
+                    if (busyUsers?.has(recipientId) || busyUsers?.has(user?._id)) {
+                      showToast('Error', 'User is currently in a call', 'error')
+                      return
+                    }
                     callUser(recipientId)
                   }
                 }}
                 borderRadius="full"
                 size={{ base: "sm", md: "md" }}
-                isDisabled={!selectedConversation?.participants[0]?._id || callAccepted || !callUser}
+                isDisabled={
+                  !selectedConversation?.participants[0]?._id || 
+                  callAccepted || 
+                  !callUser ||
+                  busyUsers?.has(selectedConversation?.participants[0]?._id) ||
+                  busyUsers?.has(user?._id)
+                }
                 minW={{ base: "36px", md: "auto" }}
                 px={{ base: 2, md: 4 }}
                 flexShrink={0}
                 display="flex"
                 alignItems="center"
                 justifyContent="center"
+                title={
+                  busyUsers?.has(selectedConversation?.participants[0]?._id) || busyUsers?.has(user?._id)
+                    ? "User is currently in a call"
+                    : "Start video call"
+                }
               >
                 <FaPhone size={16} />
               </Button>
