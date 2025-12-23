@@ -468,7 +468,7 @@ const MessagesPage = () => {
                 src={selectedConversation.participants[0]?.profilePic}
                 name={selectedConversation.participants[0]?.name}
               />
-              <Box flex={1} minW={0}>
+              <Flex flex={1} minW={0} alignItems="center" gap={2} flexWrap="wrap">
                 <Text 
                   fontWeight="semibold"
                   fontSize={{ base: "sm", md: "md" }}
@@ -478,11 +478,16 @@ const MessagesPage = () => {
                   {selectedConversation.participants[0]?.name}
                 </Text>
                 {onlineUser?.some(u => (u.userId || u._id) === selectedConversation.participants[0]?._id) && (
-                  <Text fontSize={{ base: "2xs", md: "xs" }} color="green.500">
-                    Online
-                  </Text>
+                  <>
+                    <Text fontSize={{ base: "2xs", md: "xs" }} color="gray.500">
+                      •
+                    </Text>
+                    <Text fontSize={{ base: "2xs", md: "xs" }} color="green.500">
+                      Online
+                    </Text>
+                  </>
                 )}
-              </Box>
+              </Flex>
             </Flex>
 
             {/* Video Call - Inline in chat - Mobile optimized */}
