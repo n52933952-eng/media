@@ -663,7 +663,7 @@ const MessagesPage = () => {
             {/* Message Input - Mobile optimized */}
             <Flex
               p={{ base: 2, md: 4 }}
-              pb={{ base: '24px', md: 4 }}
+              pb={{ base: '40px', md: 4 }}
               pt={{ base: 2, md: 4 }}
               borderTop="1px solid"
               borderColor={borderColor}
