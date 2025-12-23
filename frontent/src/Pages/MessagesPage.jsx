@@ -356,6 +356,7 @@ const MessagesPage = () => {
                       size="md" 
                       src={u.profilePic} 
                       name={u.name || u.username || 'User'}
+                      bg={useColorModeValue('blue.500', 'blue.600')}
                     />
                     {onlineUser?.some(ou => (ou.userId || ou._id) === u._id) && (
                       <Box
@@ -424,6 +425,7 @@ const MessagesPage = () => {
                           size="md"
                           src={otherUser?.profilePic}
                           name={otherUser?.name || otherUser?.username || 'User'}
+                          bg={useColorModeValue('blue.500', 'blue.600')}
                         />
                         {onlineUser?.some(u => (u.userId || u._id) === otherUser?._id) && (
                           <Box
@@ -491,6 +493,7 @@ const MessagesPage = () => {
                 size={{ base: "sm", md: "sm" }}
                 src={selectedConversation.participants[0]?.profilePic}
                 name={selectedConversation.participants[0]?.name || selectedConversation.participants[0]?.username || 'User'}
+                bg={useColorModeValue('blue.500', 'blue.600')}
               />
               <Flex flex={1} minW={0} alignItems="center" gap={2} flexWrap="wrap">
                 <Text 
@@ -643,7 +646,7 @@ const MessagesPage = () => {
             >
               <VStack align="stretch" spacing={{ base: 3, md: 4 }}>
                 {messages.map((msg) => {
-                  const isOwn = msg.sender?._id === user._id
+                  const isOwn = msg.sender?._id === user?._id || msg.sender?._id?.toString() === user?._id?.toString()
                   return (
                     <Flex
                       key={msg._id}
@@ -654,9 +657,10 @@ const MessagesPage = () => {
                     >
                       <Avatar
                         size={{ base: "xs", sm: "sm" }}
-                        src={isOwn ? user.profilePic : msg.sender?.profilePic}
-                        name={isOwn ? user.name : msg.sender?.name}
+                        src={isOwn ? user?.profilePic : msg.sender?.profilePic}
+                        name={isOwn ? (user?.name || user?.username || 'You') : (msg.sender?.name || msg.sender?.username || 'User')}
                         display={{ base: "none", sm: "flex" }}
+                        bg={useColorModeValue('blue.500', 'blue.600')}
                       />
                       <Flex direction="column" maxW={{ base: "85%", sm: "75%", md: "70%" }} align={isOwn ? 'flex-end' : 'flex-start'}>
                         <Box
@@ -836,6 +840,7 @@ const MessagesPage = () => {
                     size="md"
                     src={friend.profilePic}
                     name={friend.name || friend.username || 'User'}
+                    bg={useColorModeValue('blue.500', 'blue.600')}
                   />
                   <Box
                     position="absolute"
