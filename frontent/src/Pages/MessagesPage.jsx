@@ -21,6 +21,7 @@ import { SocketContext } from '../context/SocketContext'
 import useShowToast from '../hooks/useShowToast'
 import { formatDistanceToNow } from 'date-fns'
 import { FaPhone, FaPhoneSlash } from 'react-icons/fa'
+import { BsCheck2All } from 'react-icons/bs'
 
 const MessagesPage = () => {
   const { user } = useContext(UserContext)
@@ -181,6 +182,79 @@ const MessagesPage = () => {
 
     return () => {
       socket.off('newMessage', handleNewMessage)
+    }
+  }, [socket, selectedConversation?._id])
+
+  // Mark messages as seen when viewing messages from other user
+  useEffect(() => {
+    if (!socket || !selectedConversation?._id || !user?._id || messages.length === 0) return
+
+    // Check if the last message is from the other user (not current user)
+    const lastMessage = messages[messages.length - 1]
+    if (!lastMessage) return
+
+    let lastMessageSenderId = ''
+    if (lastMessage.sender?._id) {
+      lastMessageSenderId = typeof lastMessage.sender._id === 'string' ? lastMessage.sender._id : lastMessage.sender._id.toString()
+    } else if (lastMessage.sender) {
+      lastMessageSenderId = typeof lastMessage.sender === 'string' ? lastMessage.sender : String(lastMessage.sender)
+    }
+
+    let currentUserId = ''
+    if (user?._id) {
+      currentUserId = typeof user._id === 'string' ? user._id : user._id.toString()
+    }
+
+    // If last message is from the other user, mark messages as seen
+    if (lastMessageSenderId !== '' && currentUserId !== '' && lastMessageSenderId !== currentUserId) {
+      const otherUser = selectedConversation.participants[0]
+      if (otherUser?._id) {
+        socket.emit("markmessageasSeen", {
+          conversationId: selectedConversation._id,
+          userId: otherUser._id
+        })
+      }
+    }
+  }, [socket, selectedConversation, user?._id, messages])
+
+  // Handle messagesSeen event to update message seen status
+  useEffect(() => {
+    if (!socket) return
+
+    const handleMessagesSeen = ({ conversationId }) => {
+      if (selectedConversation?._id && conversationId === selectedConversation._id.toString()) {
+        // Update messages to mark them as seen
+        setMessages((prev) => {
+          return prev.map((message) => {
+            if (!message.seen) {
+              return { ...message, seen: true }
+            }
+            return message
+          })
+        })
+
+        // Update conversations list to mark lastMessage as seen
+        setConversations((prev) => {
+          return prev.map((conv) => {
+            if (conv._id && conv._id.toString() === conversationId) {
+              return {
+                ...conv,
+                lastMessage: {
+                  ...conv.lastMessage,
+                  seen: true
+                }
+              }
+            }
+            return conv
+          })
+        })
+      }
+    }
+
+    socket.on("messagesSeen", handleMessagesSeen)
+
+    return () => {
+      socket.off("messagesSeen", handleMessagesSeen)
     }
   }, [socket, selectedConversation?._id])
 
@@ -460,6 +534,51 @@ const MessagesPage = () => {
                             @{otherUser.username}
                           </Text>
                         )}
+                        {/* Last message with seen indicator */}
+                        {conv.lastMessage && (() => {
+                          // Check if last message is from current user
+                          let lastMessageSenderId = ''
+                          if (conv.lastMessage.sender?._id) {
+                            lastMessageSenderId = typeof conv.lastMessage.sender._id === 'string' 
+                              ? conv.lastMessage.sender._id 
+                              : conv.lastMessage.sender._id.toString()
+                          } else if (conv.lastMessage.sender) {
+                            lastMessageSenderId = typeof conv.lastMessage.sender === 'string' 
+                              ? conv.lastMessage.sender 
+                              : String(conv.lastMessage.sender)
+                          }
+                          
+                          let currentUserId = ''
+                          if (user?._id) {
+                            currentUserId = typeof user._id === 'string' ? user._id : user._id.toString()
+                          }
+                          
+                          const isLastMessageFromMe = lastMessageSenderId !== '' && 
+                                                     currentUserId !== '' && 
+                                                     lastMessageSenderId === currentUserId
+                          
+                          return (
+                            <Flex alignItems="center" gap={1} mt={0.5}>
+                              {/* Show seen indicator only if current user sent the last message */}
+                              {isLastMessageFromMe && (
+                                <Box color={conv.lastMessage.seen ? "blue.400" : useColorModeValue('gray.400', 'gray.500')}>
+                                  <BsCheck2All size={14} />
+                                </Box>
+                              )}
+                              <Text 
+                                fontSize="xs" 
+                                color="gray.500" 
+                                noOfLines={1}
+                                flex={1}
+                                minW={0}
+                              >
+                                {conv.lastMessage.text?.length > 30 
+                                  ? conv.lastMessage.text.substring(0, 30) + "..." 
+                                  : conv.lastMessage.text || "📷 Image"}
+                              </Text>
+                            </Flex>
+                          )
+                        })()}
                       </Box>
                     </Flex>
                   )
@@ -708,7 +827,7 @@ const MessagesPage = () => {
                         ml={isOwn ? 'auto' : 0}
                         mr={isOwn ? 0 : 'auto'}
                       >
-                        <Box
+                        <Flex
                           bg={isOwn ? 'blue.500' : useColorModeValue('gray.200', '#1a1a1a')}
                           color={isOwn ? 'white' : useColorModeValue('black', 'white')}
                           p={{ base: 2.5, md: 3 }}
@@ -716,9 +835,16 @@ const MessagesPage = () => {
                           borderTopLeftRadius={isOwn ? 'xl' : 'sm'}
                           borderTopRightRadius={isOwn ? 'sm' : 'xl'}
                           wordBreak="break-word"
+                          alignItems="flex-end"
+                          gap={1}
                         >
-                          <Text fontSize={{ base: "sm", md: "md" }} whiteSpace="pre-wrap">{msg.text}</Text>
-                        </Box>
+                          <Text fontSize={{ base: "sm", md: "md" }} whiteSpace="pre-wrap" flex={1}>{msg.text}</Text>
+                          {isOwn && (
+                            <Box alignSelf="flex-end" color={msg.seen ? "blue.300" : "white"} flexShrink={0} ml={1}>
+                              <BsCheck2All size={16} />
+                            </Box>
+                          )}
+                        </Flex>
                         <Text
                           fontSize={{ base: "2xs", md: "xs" }}
                           color="gray.500"

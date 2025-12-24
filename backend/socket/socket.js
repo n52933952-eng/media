@@ -1,6 +1,8 @@
 
 import { Server } from 'socket.io'
 import http from 'http'
+import Message from '../models/message.js'
+import Conversation from '../models/conversation.js'
 
 // This will be set from index.js
 let io = null
@@ -142,6 +144,31 @@ export const initializeSocket = (app) => {
                 io.to(senderSocketId).emit("CallCanceled")
             }
             io.emit("cancleCall", { userToCall: conversationId, from: sender })
+        })
+
+        // Mark messages as seen
+        socket.on("markmessageasSeen", async ({ conversationId, userId }) => {
+            try {
+                // Update all unseen messages in the conversation to seen: true
+                await Message.updateMany(
+                    { conversationId: conversationId, seen: false },
+                    { $set: { seen: true } }
+                )
+                // Update conversation's lastMessage.seen to true
+                await Conversation.updateOne(
+                    { _id: conversationId },
+                    { $set: { "lastMessage.seen": true } }
+                )
+                
+                // Emit to the sender (the userId is the sender of the messages)
+                const senderData = userSocketMap[userId]
+                const senderSocketId = senderData?.socketId
+                if (senderSocketId) {
+                    io.to(senderSocketId).emit("messagesSeen", { conversationId })
+                }
+            } catch (error) {
+                console.log("Error marking messages as seen:", error)
+            }
         })
 
         socket.on("disconnect", () => {
