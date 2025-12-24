@@ -259,7 +259,17 @@ const MessagesPage = () => {
 
       const data = await res.json()
       if (res.ok) {
-        setMessages((prev) => [...prev, data])
+        // Ensure the message has sender data from current user context
+        const messageWithSender = {
+          ...data,
+          sender: data.sender || {
+            _id: user._id,
+            name: user.name,
+            username: user.username,
+            profilePic: user.profilePic
+          }
+        }
+        setMessages((prev) => [...prev, messageWithSender])
         setNewMessage('')
         
         // Refresh conversations list
@@ -641,28 +651,63 @@ const MessagesPage = () => {
               ref={messagesContainerRef}
               flex={1}
               overflowY="auto"
-              p={{ base: 2, sm: 3, md: 4 }}
+              py={{ base: 2, sm: 3, md: 4 }}
               bg={useColorModeValue('white', '#101010')}
             >
-              <VStack align="stretch" spacing={{ base: 3, md: 4 }}>
+              <VStack align="stretch" spacing={{ base: 3, md: 4 }} px={{ base: 2, sm: 3, md: 4 }}>
                 {messages.map((msg) => {
-                  const isOwn = msg.sender?._id === user?._id || msg.sender?._id?.toString() === user?._id?.toString()
-                  return (
-                    <Flex
-                      key={msg._id}
-                      justifyContent={isOwn ? 'flex-end' : 'flex-start'}
-                      alignItems="flex-end"
-                      gap={{ base: 1.5, md: 2 }}
-                      direction={isOwn ? 'row-reverse' : 'row'}
-                    >
+                    // Better comparison for message ownership - handle all cases
+                    let msgSenderId = ''
+                    if (msg.sender?._id) {
+                      msgSenderId = typeof msg.sender._id === 'string' ? msg.sender._id : msg.sender._id.toString()
+                    } else if (msg.sender) {
+                      msgSenderId = typeof msg.sender === 'string' ? msg.sender : String(msg.sender)
+                    }
+                    
+                    let currentUserId = ''
+                    if (user?._id) {
+                      currentUserId = typeof user._id === 'string' ? user._id : user._id.toString()
+                    }
+                    
+                    const isOwn = msgSenderId !== '' && currentUserId !== '' && msgSenderId === currentUserId
+                    
+                    // Get the correct user data for avatar
+                    let senderUser = msg.sender || {}
+                    if (isOwn && user) {
+                      // For own messages, always use current user data
+                      senderUser = {
+                        _id: user._id,
+                        name: user.name,
+                        username: user.username,
+                        profilePic: user.profilePic,
+                        ...(msg.sender || {}) // Merge with any sender data from message
+                      }
+                    }
+                    
+                    return (
+                      <Flex
+                        key={msg._id || Math.random()}
+                        justifyContent={isOwn ? 'flex-end' : 'flex-start'}
+                        alignItems="flex-end"
+                        gap={{ base: 1.5, md: 2 }}
+                        direction={isOwn ? 'row-reverse' : 'row'}
+                        w="100%"
+                      >
                       <Avatar
                         size={{ base: "xs", sm: "sm" }}
-                        src={isOwn ? user?.profilePic : msg.sender?.profilePic}
-                        name={isOwn ? (user?.name || user?.username || 'You') : (msg.sender?.name || msg.sender?.username || 'User')}
+                        src={senderUser?.profilePic || undefined}
+                        name={senderUser?.name || senderUser?.username || 'User'}
                         display={{ base: "none", sm: "flex" }}
                         bg={useColorModeValue('blue.500', 'blue.600')}
                       />
-                      <Flex direction="column" maxW={{ base: "85%", sm: "75%", md: "70%" }} align={isOwn ? 'flex-end' : 'flex-start'}>
+                      <Flex 
+                        direction="column" 
+                        maxW={{ base: "85%", sm: "75%", md: "70%" }} 
+                        align={isOwn ? 'flex-end' : 'flex-start'} 
+                        minW={0}
+                        ml={isOwn ? 'auto' : 0}
+                        mr={isOwn ? 0 : 'auto'}
+                      >
                         <Box
                           bg={isOwn ? 'blue.500' : useColorModeValue('gray.200', '#1a1a1a')}
                           color={isOwn ? 'white' : useColorModeValue('black', 'white')}

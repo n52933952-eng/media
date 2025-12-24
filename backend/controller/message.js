@@ -25,6 +25,9 @@ const newMessage = new Message({conversationId:conversation._id,sender:senderId,
 
 await Promise.all([newMessage.save(),conversation.updateOne({lastMessage:{text:message,sender:senderId}})])
   
+// Populate sender data before sending
+await newMessage.populate("sender", "username profilePic name")
+
 const recipentSockedId = getRecipientSockedId(recipientId)
 const io = getIO() // Get io instance
 
@@ -57,7 +60,7 @@ export const getMessage = async(req,res) => {
         return res.status(200).json([]) // Return empty array if no conversation exists
     }
    
-    const messages = await Message.find({conversationId:conversation._id}).populate("sender", "username profilePic").sort({createdAt:1})
+    const messages = await Message.find({conversationId:conversation._id}).populate("sender", "username profilePic name").sort({createdAt:1})
    
     res.status(200).json(messages)
    
