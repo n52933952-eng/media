@@ -171,6 +171,24 @@ export const initializeSocket = (app) => {
             }
         })
 
+        // Typing indicator - user started typing
+        socket.on("typingStart", ({ from, to, conversationId }) => {
+            const recipientData = userSocketMap[to]
+            const recipientSocketId = recipientData?.socketId
+            if (recipientSocketId) {
+                io.to(recipientSocketId).emit("userTyping", { userId: from, conversationId, isTyping: true })
+            }
+        })
+
+        // Typing indicator - user stopped typing
+        socket.on("typingStop", ({ from, to, conversationId }) => {
+            const recipientData = userSocketMap[to]
+            const recipientSocketId = recipientData?.socketId
+            if (recipientSocketId) {
+                io.to(recipientSocketId).emit("userTyping", { userId: from, conversationId, isTyping: false })
+            }
+        })
+
         socket.on("disconnect", () => {
             console.log("user disconnected", socket.id)
             

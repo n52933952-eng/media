@@ -27,3 +27,14 @@
 ::-webkit-scrollbar-thumb {
 	background-color: #555;
 }
+
+@keyframes typing {
+	0%, 60%, 100% {
+		transform: translateY(0);
+		opacity: 0.7;
+	}
+	30% {
+		transform: translateY(-10px);
+		opacity: 1;
+	}
+}

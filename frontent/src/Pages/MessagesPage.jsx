@@ -38,10 +38,12 @@ const MessagesPage = () => {
   const [sending, setSending] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [followedUsers, setFollowedUsers] = useState([])
+  const [isTyping, setIsTyping] = useState(false)
 
   // Refs
   const messagesEndRef = useRef(null)
   const messagesContainerRef = useRef(null)
+  const typingTimeoutRef = useRef(null)
 
   // Theme colors - white for light mode, dark for dark mode
   const bgColor = useColorModeValue('white', '#101010')  // White in light mode, dark in dark mode
@@ -126,6 +128,12 @@ const MessagesPage = () => {
 
   // Fetch messages for selected conversation
   useEffect(() => {
+    // Reset typing indicator when conversation changes
+    setIsTyping(false)
+    if (typingTimeoutRef.current) {
+      clearTimeout(typingTimeoutRef.current)
+    }
+
     const fetchMessages = async () => {
       if (!selectedConversation) return
 
@@ -258,6 +266,62 @@ const MessagesPage = () => {
     }
   }, [socket, selectedConversation?._id])
 
+  // Listen for typing indicator from other user
+  useEffect(() => {
+    if (!socket || !selectedConversation?._id) return
+
+    const handleUserTyping = ({ userId, conversationId, isTyping: typingStatus }) => {
+      // Check if this is for the current conversation
+      if (selectedConversation?._id && conversationId === selectedConversation._id.toString()) {
+        setIsTyping(typingStatus)
+      }
+    }
+
+    socket.on("userTyping", handleUserTyping)
+
+    return () => {
+      socket.off("userTyping", handleUserTyping)
+    }
+  }, [socket, selectedConversation?._id])
+
+  // Handle typing indicator - emit typingStart when user types
+  const handleTyping = () => {
+    if (!socket || !selectedConversation?._id || !user?._id) return
+
+    const recipientId = selectedConversation.participants[0]?._id
+    if (!recipientId) return
+
+    // Emit typing start
+    socket.emit("typingStart", {
+      from: user._id,
+      to: recipientId,
+      conversationId: selectedConversation._id
+    })
+
+    // Clear existing timeout
+    if (typingTimeoutRef.current) {
+      clearTimeout(typingTimeoutRef.current)
+    }
+
+    // Set timeout to emit typing stop after 2 seconds of no typing
+    typingTimeoutRef.current = setTimeout(() => {
+      socket.emit("typingStop", {
+        from: user._id,
+        to: recipientId,
+        conversationId: selectedConversation._id
+      })
+    }, 2000)
+  }
+
+  // Cleanup typing timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (typingTimeoutRef.current) {
+        clearTimeout(typingTimeoutRef.current)
+      }
+    }
+  }, [])
+
   const fetchConversations = async () => {
     try {
       const res = await fetch(`${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/message/conversations`, {
@@ -316,6 +380,18 @@ const MessagesPage = () => {
 
     const recipientId = selectedConversation.participants[0]?._id
     if (!recipientId) return
+
+    // Stop typing indicator when sending message
+    if (socket && selectedConversation?._id && user?._id) {
+      socket.emit("typingStop", {
+        from: user._id,
+        to: recipientId,
+        conversationId: selectedConversation._id
+      })
+    }
+    if (typingTimeoutRef.current) {
+      clearTimeout(typingTimeoutRef.current)
+    }
 
     setSending(true)
     try {
@@ -561,7 +637,7 @@ const MessagesPage = () => {
                             <Flex alignItems="center" gap={1} mt={0.5}>
                               {/* Show seen indicator only if current user sent the last message */}
                               {isLastMessageFromMe && (
-                                <Box color={conv.lastMessage.seen ? "blue.400" : useColorModeValue('gray.400', 'gray.500')}>
+                                <Box color={conv.lastMessage.seen ? "blue.600" : "white"}>
                                   <BsCheck2All size={14} />
                                 </Box>
                               )}
@@ -828,8 +904,8 @@ const MessagesPage = () => {
                         mr={isOwn ? 0 : 'auto'}
                       >
                         <Flex
-                          bg={isOwn ? 'blue.500' : useColorModeValue('gray.200', '#1a1a1a')}
-                          color={isOwn ? 'white' : useColorModeValue('black', 'white')}
+                          bg={isOwn ? 'white' : useColorModeValue('gray.200', '#1a1a1a')}
+                          color={isOwn ? 'black' : useColorModeValue('black', 'white')}
                           p={{ base: 2.5, md: 3 }}
                           borderRadius="xl"
                           borderTopLeftRadius={isOwn ? 'xl' : 'sm'}
@@ -840,7 +916,7 @@ const MessagesPage = () => {
                         >
                           <Text fontSize={{ base: "sm", md: "md" }} whiteSpace="pre-wrap" flex={1}>{msg.text}</Text>
                           {isOwn && (
-                            <Box alignSelf="flex-end" color={msg.seen ? "blue.300" : "white"} flexShrink={0} ml={1}>
+                            <Box alignSelf="flex-end" color={msg.seen ? "blue.600" : "gray.600"} flexShrink={0} ml={1}>
                               <BsCheck2All size={16} />
                             </Box>
                           )}
@@ -860,6 +936,64 @@ const MessagesPage = () => {
                     </Flex>
                   )
                 })}
+                {/* Typing indicator */}
+                {isTyping && (
+                  <Flex
+                    justifyContent="flex-start"
+                    alignItems="flex-end"
+                    gap={2}
+                    w="100%"
+                    px={2}
+                  >
+                    <Avatar
+                      size="xs"
+                      src={selectedConversation.participants[0]?.profilePic}
+                      name={selectedConversation.participants[0]?.name || selectedConversation.participants[0]?.username || 'User'}
+                      bg={useColorModeValue('blue.500', 'blue.600')}
+                      display={{ base: "none", sm: "flex" }}
+                    />
+                    <Flex
+                      bg={useColorModeValue('gray.200', '#1a1a1a')}
+                      p={3}
+                      borderRadius="xl"
+                      borderTopLeftRadius="sm"
+                      borderTopRightRadius="xl"
+                    >
+                      <Flex gap={1.5} alignItems="center">
+                        <Box
+                          w={2}
+                          h={2}
+                          bg="gray.500"
+                          borderRadius="full"
+                          sx={{
+                            animation: 'typing 1.4s infinite',
+                            animationDelay: '0s'
+                          }}
+                        />
+                        <Box
+                          w={2}
+                          h={2}
+                          bg="gray.500"
+                          borderRadius="full"
+                          sx={{
+                            animation: 'typing 1.4s infinite',
+                            animationDelay: '0.2s'
+                          }}
+                        />
+                        <Box
+                          w={2}
+                          h={2}
+                          bg="gray.500"
+                          borderRadius="full"
+                          sx={{
+                            animation: 'typing 1.4s infinite',
+                            animationDelay: '0.4s'
+                          }}
+                        />
+                      </Flex>
+                    </Flex>
+                  </Flex>
+                )}
                 <div ref={messagesEndRef} />
               </VStack>
             </Box>
@@ -929,7 +1063,10 @@ const MessagesPage = () => {
               <Input
                 placeholder="Message..."
                 value={newMessage}
-                onChange={(e) => setNewMessage(e.target.value)}
+                onChange={(e) => {
+                  setNewMessage(e.target.value)
+                  handleTyping()
+                }}
                 onKeyPress={(e) => {
                   if (e.key === 'Enter' && !e.shiftKey) {
                     e.preventDefault()
