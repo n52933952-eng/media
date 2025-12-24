@@ -198,8 +198,8 @@ const MessagesPage = () => {
       const scrollTop = container.scrollTop
       const scrollHeight = container.scrollHeight
       const clientHeight = container.clientHeight
-      // Check if at bottom - use a small threshold (5px) to account for rounding
-      const isAtBottom = scrollHeight - scrollTop - clientHeight <= 5
+      // Check if at bottom - use a small threshold (10px) to account for rounding
+      const isAtBottom = scrollHeight - scrollTop - clientHeight <= 10
 
       setIsAtBottom(isAtBottom)
       isUserScrollingRef.current = true // User is manually scrolling
@@ -232,44 +232,37 @@ const MessagesPage = () => {
     }
   }, [selectedConversation?._id]) // Re-run when conversation changes
 
-  // Auto-scroll when at bottom and messages change (only if user is not manually scrolling)
+  // Auto-scroll when at bottom and messages change
   useEffect(() => {
     const container = messagesContainerRef.current
     if (!container || messages.length === 0) return
 
-    // Use requestAnimationFrame to ensure DOM has updated with new messages
-    requestAnimationFrame(() => {
-      // Check actual scroll position
+    // Wait for DOM to update, then check and scroll
+    const timeoutId = setTimeout(() => {
+      if (!container) return
+      
+      // When new messages are added, scrollHeight increases
+      // Check if user is within reasonable distance (150px = ~2-3 messages) from bottom
+      // This accounts for the fact that scrollHeight increased but scrollTop didn't
       const scrollTop = container.scrollTop
       const scrollHeight = container.scrollHeight
       const clientHeight = container.clientHeight
       const distanceFromBottom = scrollHeight - scrollTop - clientHeight
-      const isAtBottomPosition = distanceFromBottom <= 5
       
-      // Only auto-scroll if:
-      // 1. User is at bottom (check actual position)
-      // 2. User is not currently manually scrolling
-      if (isAtBottomPosition && !isUserScrollingRef.current) {
-        // Small delay to ensure everything is settled
-        setTimeout(() => {
-          if (!isUserScrollingRef.current && container) {
-            // Double-check position before scrolling
-            const currentScrollTop = container.scrollTop
-            const currentScrollHeight = container.scrollHeight
-            const currentClientHeight = container.clientHeight
-            const currentDistance = currentScrollHeight - currentScrollTop - currentClientHeight
-            
-            if (currentDistance <= 10) { // Allow slightly more tolerance
-              container.scrollTop = container.scrollHeight
-            }
-          }
-        }, 50)
+      // If we were near bottom (within 150px), auto-scroll to new bottom
+      // Also check if user is not currently manually scrolling
+      if (distanceFromBottom <= 150 && !isUserScrollingRef.current) {
+        // Scroll to bottom
+        container.scrollTop = container.scrollHeight
+        setIsAtBottom(true)
+        setUnreadCountInView(0)
       }
-    })
+    }, 100) // Small delay to let DOM update
+
+    return () => clearTimeout(timeoutId)
   }, [messages.length]) // Trigger when message count changes
 
   // Track new messages when scrolled up (only count messages from other user)
-  // This must run BEFORE the scroll state update to avoid race conditions
   useEffect(() => {
     if (messages.length > lastMessageCountRef.current && user?._id) {
       const container = messagesContainerRef.current
@@ -278,67 +271,55 @@ const MessagesPage = () => {
         return
       }
 
-      // Use requestAnimationFrame to ensure DOM has updated after messages are added
-      requestAnimationFrame(() => {
-        // Check actual scroll position instead of just state
+      // Get new messages that were just added
+      const newMessages = messages.slice(lastMessageCountRef.current)
+      
+      // Count only messages from the other user (not from current user)
+      const unreadFromOthers = newMessages.filter(msg => {
+        let msgSenderId = ''
+        if (msg.sender?._id) {
+          msgSenderId = typeof msg.sender._id === 'string' ? msg.sender._id : msg.sender._id.toString()
+        } else if (msg.sender) {
+          msgSenderId = typeof msg.sender === 'string' ? msg.sender : String(msg.sender)
+        }
+        const currentUserId = typeof user._id === 'string' ? user._id : user._id.toString()
+        return msgSenderId !== currentUserId
+      }).length
+      
+      // Wait for DOM to update and auto-scroll to complete
+      const timeoutId = setTimeout(() => {
+        if (!container) return
+        
+        // Check actual scroll position after DOM update
         const scrollTop = container.scrollTop
         const scrollHeight = container.scrollHeight
         const clientHeight = container.clientHeight
         const distanceFromBottom = scrollHeight - scrollTop - clientHeight
-        // Check if at bottom - use a small threshold (5px) to account for rounding
-        const isActuallyAtBottom = distanceFromBottom <= 5
-
-        // Get new messages that were just added
-        const newMessages = messages.slice(lastMessageCountRef.current)
-        // Count only messages from the other user (not from current user)
-        const unreadFromOthers = newMessages.filter(msg => {
-          let msgSenderId = ''
-          if (msg.sender?._id) {
-            msgSenderId = typeof msg.sender._id === 'string' ? msg.sender._id : msg.sender._id.toString()
-          } else if (msg.sender) {
-            msgSenderId = typeof msg.sender === 'string' ? msg.sender : String(msg.sender)
-          }
-          const currentUserId = typeof user._id === 'string' ? user._id : user._id.toString()
-          return msgSenderId !== currentUserId
-        }).length
+        // Use 150px threshold (same as auto-scroll) to be consistent
+        const isActuallyAtBottom = distanceFromBottom <= 150
         
-        // If user is scrolled up (not at bottom) and there are new messages from others, increment counter
-        if (!isActuallyAtBottom && unreadFromOthers > 0) {
-          setUnreadCountInView(prev => prev + unreadFromOthers)
-          // Also update isAtBottom state to match actual position
-          setIsAtBottom(false)
-        } else if (isActuallyAtBottom) {
+        // Update state based on position
+        if (isActuallyAtBottom) {
           // If at bottom, clear unread count
           setUnreadCountInView(0)
           setIsAtBottom(true)
+        } else if (unreadFromOthers > 0) {
+          // If scrolled up (more than 150px from bottom) and there are new messages from others, increment counter
+          setUnreadCountInView(prev => prev + unreadFromOthers)
+          setIsAtBottom(false)
+        } else {
+          // Just update the bottom state (user scrolled up but no new messages from others)
+          setIsAtBottom(false)
         }
-      })
+      }, 200) // Wait for DOM and auto-scroll to complete
+
+      lastMessageCountRef.current = messages.length
+      return () => clearTimeout(timeoutId)
+    } else {
+      lastMessageCountRef.current = messages.length
     }
-    lastMessageCountRef.current = messages.length
-  }, [messages, user?._id])
+  }, [messages.length, user?._id])
 
-  // Update scroll state when messages change (to catch scroll position changes)
-  // This runs after tracking to update state based on final position
-  useEffect(() => {
-    const container = messagesContainerRef.current
-    if (!container) return
-
-    // Use requestAnimationFrame to ensure DOM has updated
-    requestAnimationFrame(() => {
-      const scrollTop = container.scrollTop
-      const scrollHeight = container.scrollHeight
-      const clientHeight = container.clientHeight
-      const distanceFromBottom = scrollHeight - scrollTop - clientHeight
-      const isAtBottomPosition = distanceFromBottom <= 5
-      
-      setIsAtBottom(isAtBottomPosition)
-      
-      // Only clear unread count if we're actually at bottom and there are no pending updates
-      if (isAtBottomPosition) {
-        setUnreadCountInView(0)
-      }
-    })
-  }, [messages.length]) // Only when message count changes
 
   // Listen for new messages via Socket.io
   useEffect(() => {
