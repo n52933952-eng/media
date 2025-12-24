@@ -32,6 +32,12 @@ const MessageSchema = new mongoose.Schema({
         emoji: String
     }],
 
+    replyTo: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Message",
+        default: null
+    },
+
 },{timestamps:true})
 
 const Message = mongoose.model("Message",MessageSchema)

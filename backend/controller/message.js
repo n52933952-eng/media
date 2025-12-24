@@ -7,7 +7,7 @@ export const sendMessaeg = async(req,res) => {
 
   try{
   
- const{recipientId,message}= req.body
+ const{recipientId,message,replyTo}= req.body
  const senderId = req.user._id  // Fix: Use _id instead of id
  let{img}= req.body
  let conversation = await Conversation.findOne({ participants:{$all:[senderId,recipientId]}})
@@ -21,12 +21,28 @@ export const sendMessaeg = async(req,res) => {
     await conversation.save()
  }
 
-const newMessage = new Message({conversationId:conversation._id,sender:senderId,text:message,img})
+const newMessage = new Message({
+  conversationId:conversation._id,
+  sender:senderId,
+  text:message,
+  img,
+  replyTo: replyTo || null
+})
 
 await Promise.all([newMessage.save(),conversation.updateOne({lastMessage:{text:message,sender:senderId}})])
   
-// Populate sender data before sending
+// Populate sender data and replyTo message before sending
 await newMessage.populate("sender", "username profilePic name")
+if (newMessage.replyTo) {
+  await newMessage.populate({
+    path: "replyTo",
+    select: "text sender",
+    populate: {
+      path: "sender",
+      select: "username name profilePic"
+    }
+  })
+}
 
 const recipentSockedId = getRecipientSockedId(recipientId)
 const io = getIO() // Get io instance
@@ -63,6 +79,14 @@ export const getMessage = async(req,res) => {
     const messages = await Message.find({conversationId:conversation._id})
       .populate("sender", "username profilePic name")
       .populate("reactions.userId", "username name profilePic")
+      .populate({
+        path: "replyTo",
+        select: "text sender",
+        populate: {
+          path: "sender",
+          select: "username name profilePic"
+        }
+      })
       .sort({createdAt:1})
    
     res.status(200).json(messages)

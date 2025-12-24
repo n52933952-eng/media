@@ -22,7 +22,7 @@ import { SocketContext } from '../context/SocketContext'
 import useShowToast from '../hooks/useShowToast'
 import { formatDistanceToNow } from 'date-fns'
 import { FaPhone, FaPhoneSlash } from 'react-icons/fa'
-import { BsCheck2All } from 'react-icons/bs'
+import { BsCheck2All, BsReply } from 'react-icons/bs'
 import EmojiPicker from 'emoji-picker-react'
 
 const MessagesPage = () => {
@@ -44,6 +44,7 @@ const MessagesPage = () => {
   const [emojiPickerOpen, setEmojiPickerOpen] = useState(null) // Store messageId when picker is open
   const [isAtBottom, setIsAtBottom] = useState(true) // Track if user is scrolled to bottom
   const [unreadCountInView, setUnreadCountInView] = useState(0) // Count of unread messages while scrolled up
+  const [replyingTo, setReplyingTo] = useState(null) // Store message being replied to
 
   // Refs
   const messagesEndRef = useRef(null)
@@ -613,6 +614,19 @@ const MessagesPage = () => {
     setEmojiPickerOpen(emojiPickerOpen === messageId ? null : messageId)
   }
 
+  // Handle reply to message
+  const handleReply = (message) => {
+    setReplyingTo(message)
+    setEmojiPickerOpen(null) // Close emoji picker if open
+    // Focus on input (optional)
+    // inputRef.current?.focus()
+  }
+
+  // Cancel reply
+  const handleCancelReply = () => {
+    setReplyingTo(null)
+  }
+
   // Close emoji picker when clicking outside
   useEffect(() => {
     function handleClickOutside(event) {
@@ -660,6 +674,7 @@ const MessagesPage = () => {
         body: JSON.stringify({
           recipientId,
           message: newMessage,
+          replyTo: replyingTo?._id || null,
         }),
       })
 
@@ -677,6 +692,7 @@ const MessagesPage = () => {
         }
         setMessages((prev) => [...prev, messageWithSender])
         setNewMessage('')
+        setReplyingTo(null) // Clear reply after sending
         setSending(false) // Stop spinner immediately after message is added
         
         // Refresh conversations list in background (don't wait for it)
@@ -1200,6 +1216,50 @@ const MessagesPage = () => {
                         mr={isOwn ? 0 : 'auto'}
                       >
                         <Flex
+                          direction="column"
+                          w="100%"
+                        >
+                          {/* Quoted message (replyTo) */}
+                          {msg.replyTo && (
+                            <Box
+                              w="100%"
+                              mb={1}
+                              p={2}
+                              bg={useColorModeValue('gray.100', 'gray.800')}
+                              borderRadius="md"
+                              borderLeft="3px solid"
+                              borderLeftColor="blue.500"
+                              cursor="pointer"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                // Scroll to original message
+                                const originalMsg = document.querySelector(`[data-message-id="${msg.replyTo._id}"]`)
+                                if (originalMsg) {
+                                  originalMsg.scrollIntoView({ behavior: 'smooth', block: 'center' })
+                                  const bgColor = useColorModeValue('yellow.100', 'yellow.900')
+                                  originalMsg.style.transition = 'background-color 0.3s'
+                                  originalMsg.style.backgroundColor = bgColor
+                                  setTimeout(() => {
+                                    originalMsg.style.backgroundColor = ''
+                                  }, 2000)
+                                }
+                              }}
+                            >
+                              <Text fontSize="xs" color="blue.500" fontWeight="semibold" mb={0.5}>
+                                {(() => {
+                                  const replySenderId = msg.replyTo.sender?._id ? 
+                                    (typeof msg.replyTo.sender._id === 'string' ? msg.replyTo.sender._id : msg.replyTo.sender._id.toString()) :
+                                    (typeof msg.replyTo.sender === 'string' ? msg.replyTo.sender : String(msg.replyTo.sender))
+                                  const currentUserId = typeof user._id === 'string' ? user._id : user._id.toString()
+                                  return replySenderId === currentUserId ? 'You' : (msg.replyTo.sender?.name || msg.replyTo.sender?.username || 'User')
+                                })()}
+                              </Text>
+                              <Text fontSize="xs" color={useColorModeValue('gray.600', 'gray.400')} noOfLines={1}>
+                                {msg.replyTo.text || 'Message'}
+                              </Text>
+                            </Box>
+                          )}
+                          <Flex
                           bg={isOwn ? 'white' : useColorModeValue('gray.200', '#1a1a1a')}
                           color={isOwn ? 'black' : useColorModeValue('black', 'white')}
                           p={{ base: 2.5, md: 3 }}
@@ -1212,6 +1272,7 @@ const MessagesPage = () => {
                           cursor="pointer"
                           onClick={(e) => handleMessageClick(e, msg._id)}
                           _hover={{ opacity: 0.9 }}
+                          data-message-id={msg._id}
                         >
                           <Text fontSize={{ base: "sm", md: "md" }} whiteSpace="pre-wrap" flex={1}>{msg.text}</Text>
                           {isOwn && (
@@ -1219,6 +1280,7 @@ const MessagesPage = () => {
                               <BsCheck2All size={16} />
                             </Box>
                           )}
+                        </Flex>
                         </Flex>
                         <Text
                           fontSize={{ base: "2xs", md: "xs" }}
@@ -1307,6 +1369,29 @@ const MessagesPage = () => {
                                 animation: 'slideUp 0.2s ease-out'
                               }}
                             >
+                              {/* Reply button */}
+                              <Box
+                                as="button"
+                                fontSize={{ base: "lg", md: "xl" }}
+                                p={{ base: 1, md: 1.5 }}
+                                borderRadius="full"
+                                _hover={{ 
+                                  bg: useColorModeValue('gray.100', 'gray.700'),
+                                  transform: 'scale(1.3)'
+                                }}
+                                transition="all 0.15s ease"
+                                cursor="pointer"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  handleReply(msg)
+                                }}
+                                _active={{
+                                  transform: 'scale(1.1)'
+                                }}
+                                title="Reply"
+                              >
+                                <BsReply />
+                              </Box>
                               {['👍', '❤️', '😂', '😮', '😢', '🙏', '🎉'].map((emoji) => (
                                 <Box
                                   key={emoji}
@@ -1459,17 +1544,52 @@ const MessagesPage = () => {
 
             {/* Message Input - Mobile optimized */}
             <Flex
-              p={{ base: 2, md: 4 }}
-              pb={{ base: '60px', md: 4 }}
-              pt={{ base: 2, md: 4 }}
+              direction="column"
               borderTop="1px solid"
               borderColor={borderColor}
-              gap={{ base: 1.5, md: 2 }}
-              alignItems="center"
               bg={bgColor}
-              flexWrap="wrap"
               mb={{ base: 'env(safe-area-inset-bottom)', md: 0 }}
             >
+              {/* Quoted message preview (when replying) */}
+              {replyingTo && (
+                <Flex
+                  p={2}
+                  bg={useColorModeValue('gray.100', 'gray.800')}
+                  borderBottom="1px solid"
+                  borderColor={borderColor}
+                  alignItems="center"
+                  gap={2}
+                >
+                  <Box
+                    flex={1}
+                    borderLeft="3px solid"
+                    borderLeftColor="blue.500"
+                    pl={2}
+                  >
+                    <Text fontSize="xs" color="blue.500" fontWeight="semibold" mb={0.5}>
+                      Replying to {replyingTo.sender?._id === user?._id ? 'yourself' : (replyingTo.sender?.name || replyingTo.sender?.username || 'User')}
+                    </Text>
+                    <Text fontSize="xs" color={useColorModeValue('gray.600', 'gray.400')} noOfLines={1}>
+                      {replyingTo.text || 'Message'}
+                    </Text>
+                  </Box>
+                  <IconButton
+                    aria-label="Cancel reply"
+                    icon={<Text fontSize="lg">×</Text>}
+                    size="sm"
+                    variant="ghost"
+                    onClick={handleCancelReply}
+                  />
+                </Flex>
+              )}
+              <Flex
+                p={{ base: 2, md: 4 }}
+                pb={{ base: '60px', md: 4 }}
+                pt={{ base: 2, md: 4 }}
+                gap={{ base: 1.5, md: 2 }}
+                alignItems="center"
+                flexWrap="wrap"
+              >
               {/* Game button - Show on all screens now */}
               <Box
                 w={{ base: 10, sm: 10 }}
@@ -1555,6 +1675,7 @@ const MessagesPage = () => {
                 <Text display={{ base: "none", sm: "block" }}>Send</Text>
                 <Text display={{ base: "block", sm: "none" }}>✓</Text>
               </Button>
+              </Flex>
             </Flex>
           </>
         ) : (
