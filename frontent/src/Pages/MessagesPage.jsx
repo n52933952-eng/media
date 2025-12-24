@@ -214,7 +214,7 @@ const MessagesPage = () => {
         isUserScrollingRef.current = false
       }, 300)
       
-      // If scrolled to bottom, clear unread count
+      // If scrolled to bottom, clear unread count and update state
       if (isAtBottom) {
         setUnreadCountInView(0)
       }
@@ -263,9 +263,15 @@ const MessagesPage = () => {
       const clientHeight = container.clientHeight
       const distanceFromBottomBefore = scrollHeightBefore - scrollTopBefore - clientHeight
       
+      // Store the fact that we have unread messages from others
+      const hasUnreadFromOthers = unreadFromOthers > 0
+      
       // Wait for DOM to update with new messages
       const timeoutId = setTimeout(() => {
-        if (!container) return
+        if (!container) {
+          lastMessageCountRef.current = messages.length
+          return
+        }
         
         // Check scroll position AFTER new messages are added
         const scrollTopAfter = container.scrollTop
@@ -279,13 +285,18 @@ const MessagesPage = () => {
           container.scrollTop = container.scrollHeight
           setIsAtBottom(true)
           setUnreadCountInView(0)
-        } else if (distanceFromBottomAfter > 150 && unreadFromOthers > 0) {
-          // User is scrolled up (more than 150px from bottom) and there are new messages from others
-          setUnreadCountInView(prev => prev + unreadFromOthers)
+        } else if (distanceFromBottomAfter > 10 && hasUnreadFromOthers) {
+          // User is scrolled up (more than 10px from bottom) and there are new messages from others
+          // Increment unread count
+          setUnreadCountInView(prev => {
+            const newCount = prev + unreadFromOthers
+            return newCount
+          })
           setIsAtBottom(false)
-        } else if (distanceFromBottomAfter > 150) {
+        } else if (distanceFromBottomAfter > 10) {
           // User is scrolled up but no new messages from others (or it's their own message)
           setIsAtBottom(false)
+          // Don't clear unread count here - let it stay if there are previous unread messages
         } else {
           // User is at bottom
           setIsAtBottom(true)
@@ -1133,7 +1144,22 @@ const MessagesPage = () => {
               position="relative"
             >
               {/* Unread message indicator (WhatsApp style) */}
-              {unreadCountInView > 0 && !isAtBottom && (
+              {(() => {
+                // Always check actual scroll position to determine if we should show indicator
+                if (unreadCountInView === 0) return false
+                
+                const container = messagesContainerRef.current
+                if (!container) return !isAtBottom // Fallback to state
+                
+                const scrollTop = container.scrollTop
+                const scrollHeight = container.scrollHeight
+                const clientHeight = container.clientHeight
+                const distanceFromBottom = scrollHeight - scrollTop - clientHeight
+                const isActuallyAtBottom = distanceFromBottom <= 10
+                
+                // Show indicator if we have unread messages AND we're not at bottom
+                return !isActuallyAtBottom
+              })() && (
                 <Box
                   position="absolute"
                   bottom={4}
