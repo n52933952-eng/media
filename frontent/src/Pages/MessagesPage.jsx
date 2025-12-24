@@ -1559,6 +1559,8 @@ const MessagesPage = () => {
                   borderColor={borderColor}
                   alignItems="center"
                   gap={2}
+                  position="relative"
+                  zIndex={1}
                 >
                   <Box
                     flex={1}
@@ -1567,7 +1569,13 @@ const MessagesPage = () => {
                     pl={2}
                   >
                     <Text fontSize="xs" color="blue.500" fontWeight="semibold" mb={0.5}>
-                      Replying to {replyingTo.sender?._id === user?._id ? 'yourself' : (replyingTo.sender?.name || replyingTo.sender?.username || 'User')}
+                      Replying to {(() => {
+                        const replySenderId = replyingTo.sender?._id ? 
+                          (typeof replyingTo.sender._id === 'string' ? replyingTo.sender._id : replyingTo.sender._id.toString()) :
+                          (typeof replyingTo.sender === 'string' ? replyingTo.sender : String(replyingTo.sender))
+                        const currentUserId = typeof user._id === 'string' ? user._id : user._id.toString()
+                        return replySenderId === currentUserId ? 'yourself' : (replyingTo.sender?.name || replyingTo.sender?.username || 'User')
+                      })()}
                     </Text>
                     <Text fontSize="xs" color={useColorModeValue('gray.600', 'gray.400')} noOfLines={1}>
                       {replyingTo.text || 'Message'}
@@ -1589,6 +1597,8 @@ const MessagesPage = () => {
                 gap={{ base: 1.5, md: 2 }}
                 alignItems="center"
                 flexWrap="wrap"
+                position="relative"
+                zIndex={2}
               >
               {/* Game button - Show on all screens now */}
               <Box
@@ -1640,7 +1650,7 @@ const MessagesPage = () => {
                 }
               />
               <Input
-                placeholder="Message..."
+                placeholder={replyingTo ? "Type a reply..." : "Message..."}
                 value={newMessage}
                 onChange={(e) => {
                   setNewMessage(e.target.value)
@@ -1659,6 +1669,7 @@ const MessagesPage = () => {
                 fontSize={{ base: "sm", md: "md" }}
                 h={{ base: "44px", md: "40px" }}
                 py={{ base: 3, md: 2 }}
+                isDisabled={sending}
               />
               <Button
                 bg="green.500"
@@ -1666,6 +1677,7 @@ const MessagesPage = () => {
                 _hover={{ bg: 'green.600' }}
                 onClick={handleSendMessage}
                 isLoading={sending}
+                isDisabled={sending || !newMessage.trim()}
                 borderRadius="md"
                 px={{ base: 3, sm: 4, md: 6 }}
                 size={{ base: "sm", md: "md" }}
