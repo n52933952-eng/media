@@ -1143,60 +1143,63 @@ const MessagesPage = () => {
               bg={useColorModeValue('white', '#101010')}
               position="relative"
             >
-              {/* Unread message indicator (WhatsApp style) */}
-              {(() => {
-                // Always check actual scroll position to determine if we should show indicator
-                if (unreadCountInView === 0) return false
-                
-                const container = messagesContainerRef.current
-                if (!container) return !isAtBottom // Fallback to state
-                
-                const scrollTop = container.scrollTop
-                const scrollHeight = container.scrollHeight
-                const clientHeight = container.clientHeight
-                const distanceFromBottom = scrollHeight - scrollTop - clientHeight
-                const isActuallyAtBottom = distanceFromBottom <= 10
-                
-                // Show indicator if we have unread messages AND we're not at bottom
-                return !isActuallyAtBottom
-              })() && (
-                <Box
-                  position="absolute"
-                  bottom={4}
-                  left="50%"
-                  transform="translateX(-50%)"
-                  zIndex={100}
-                  cursor="pointer"
-                  onClick={() => {
-                    if (messagesContainerRef.current) {
-                      const container = messagesContainerRef.current
-                      isUserScrollingRef.current = false // Reset scroll tracking
-                      container.scrollTop = container.scrollHeight // Direct scroll to bottom
-                      setUnreadCountInView(0)
-                      setIsAtBottom(true)
-                    }
-                  }}
-                >
-                  <Flex
-                    bg="blue.500"
-                    color="white"
-                    px={4}
-                    py={2}
-                    borderRadius="full"
-                    alignItems="center"
-                    gap={2}
-                    boxShadow="lg"
-                    _hover={{ bg: 'blue.600' }}
-                    transition="all 0.2s"
-                  >
-                    <Text fontSize="sm" fontWeight="semibold">
-                      {unreadCountInView} new {unreadCountInView === 1 ? 'message' : 'messages'}
-                    </Text>
-                    <Box as="span" fontSize="lg">↓</Box>
-                  </Flex>
-                </Box>
-              )}
               <VStack align="stretch" spacing={{ base: 3, md: 4 }} px={{ base: 2, sm: 3, md: 4 }}>
+                {/* Unread message indicator (WhatsApp style) - Sticky at bottom of visible area */}
+                {(() => {
+                  // Always check actual scroll position to determine if we should show indicator
+                  if (unreadCountInView === 0) return null
+                  
+                  const container = messagesContainerRef.current
+                  if (!container) return null
+                  
+                  const scrollTop = container.scrollTop
+                  const scrollHeight = container.scrollHeight
+                  const clientHeight = container.clientHeight
+                  const distanceFromBottom = scrollHeight - scrollTop - clientHeight
+                  const isActuallyAtBottom = distanceFromBottom <= 10
+                  
+                  // Show indicator if we have unread messages AND we're not at bottom
+                  if (isActuallyAtBottom) return null
+                  
+                  return (
+                    <Box
+                      position="sticky"
+                      bottom={4}
+                      zIndex={100}
+                      cursor="pointer"
+                      w="fit-content"
+                      mx="auto"
+                      my={2}
+                      onClick={() => {
+                        if (messagesContainerRef.current) {
+                          const container = messagesContainerRef.current
+                          isUserScrollingRef.current = false // Reset scroll tracking
+                          container.scrollTop = container.scrollHeight // Direct scroll to bottom
+                          setUnreadCountInView(0)
+                          setIsAtBottom(true)
+                        }
+                      }}
+                    >
+                      <Flex
+                        bg="blue.500"
+                        color="white"
+                        px={4}
+                        py={2}
+                        borderRadius="full"
+                        alignItems="center"
+                        gap={2}
+                        boxShadow="lg"
+                        _hover={{ bg: 'blue.600' }}
+                        transition="all 0.2s"
+                      >
+                        <Text fontSize="sm" fontWeight="semibold">
+                          {unreadCountInView} new {unreadCountInView === 1 ? 'message' : 'messages'}
+                        </Text>
+                        <Box as="span" fontSize="lg">↓</Box>
+                      </Flex>
+                    </Box>
+                  )
+                })()}
                 {messages.map((msg) => {
                     // Better comparison for message ownership - handle all cases
                     let msgSenderId = ''
