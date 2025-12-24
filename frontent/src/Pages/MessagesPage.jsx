@@ -54,6 +54,7 @@ const MessagesPage = () => {
   const lastMessageCountRef = useRef(0) // Track message count to detect new messages
   const isUserScrollingRef = useRef(false) // Track if user is manually scrolling
   const scrollTimeoutRef = useRef(null) // Timeout to detect when user stops scrolling
+  const messageInputRef = useRef(null) // Ref for message input field
 
   // Theme colors - white for light mode, dark for dark mode
   const bgColor = useColorModeValue('white', '#101010')  // White in light mode, dark in dark mode
@@ -618,8 +619,10 @@ const MessagesPage = () => {
   const handleReply = (message) => {
     setReplyingTo(message)
     setEmojiPickerOpen(null) // Close emoji picker if open
-    // Focus on input (optional)
-    // inputRef.current?.focus()
+    // Focus on input after a small delay to ensure it's rendered
+    setTimeout(() => {
+      messageInputRef.current?.focus()
+    }, 100)
   }
 
   // Cancel reply
@@ -1580,6 +1583,9 @@ const MessagesPage = () => {
                     <Text fontSize="xs" color={useColorModeValue('gray.600', 'gray.400')} noOfLines={1}>
                       {replyingTo.text || 'Message'}
                     </Text>
+                    <Text fontSize="2xs" color={useColorModeValue('gray.500', 'gray.500')} mt={1} fontStyle="italic">
+                      Type your reply in the input field below
+                    </Text>
                   </Box>
                   <IconButton
                     aria-label="Cancel reply"
@@ -1650,6 +1656,7 @@ const MessagesPage = () => {
                 }
               />
               <Input
+                ref={messageInputRef}
                 placeholder={replyingTo ? "Type a reply..." : "Message..."}
                 value={newMessage}
                 onChange={(e) => {
@@ -1670,6 +1677,8 @@ const MessagesPage = () => {
                 h={{ base: "44px", md: "40px" }}
                 py={{ base: 3, md: 2 }}
                 isDisabled={sending}
+                border={replyingTo ? "2px solid" : "1px solid"}
+                borderColor={replyingTo ? "blue.500" : borderColor}
               />
               <Button
                 bg="green.500"
