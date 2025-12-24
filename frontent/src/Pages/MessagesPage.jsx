@@ -23,6 +23,7 @@ import useShowToast from '../hooks/useShowToast'
 import { formatDistanceToNow } from 'date-fns'
 import { FaPhone, FaPhoneSlash } from 'react-icons/fa'
 import { BsCheck2All } from 'react-icons/bs'
+import EmojiPicker from 'emoji-picker-react'
 
 const MessagesPage = () => {
   const { user } = useContext(UserContext)
@@ -40,17 +41,25 @@ const MessagesPage = () => {
   const [searchQuery, setSearchQuery] = useState('')
   const [followedUsers, setFollowedUsers] = useState([])
   const [isTyping, setIsTyping] = useState(false)
+  const [emojiPickerOpen, setEmojiPickerOpen] = useState(null) // Store messageId when picker is open
+  const [isAtBottom, setIsAtBottom] = useState(true) // Track if user is scrolled to bottom
+  const [unreadCountInView, setUnreadCountInView] = useState(0) // Count of unread messages while scrolled up
 
   // Refs
   const messagesEndRef = useRef(null)
   const messagesContainerRef = useRef(null)
   const typingTimeoutRef = useRef(null)
+  const emojiPickerRef = useRef(null)
+  const lastMessageCountRef = useRef(0) // Track message count to detect new messages
+  const isUserScrollingRef = useRef(false) // Track if user is manually scrolling
+  const scrollTimeoutRef = useRef(null) // Timeout to detect when user stops scrolling
 
   // Theme colors - white for light mode, dark for dark mode
   const bgColor = useColorModeValue('white', '#101010')  // White in light mode, dark in dark mode
   const borderColor = useColorModeValue('gray.200', '#1a1a1a')  // Light gray border in light mode
   const inputBg = useColorModeValue('gray.100', '#1a1a1a')  // Light gray input in light mode
   const hoverBg = useColorModeValue('gray.50', '#1a1a1a')  // Light hover in light mode
+  const emojiPickerTheme = useColorModeValue('light', 'dark')
 
   // Fetch conversations
   useEffect(() => {
@@ -129,10 +138,17 @@ const MessagesPage = () => {
 
   // Fetch messages for selected conversation
   useEffect(() => {
-    // Reset typing indicator when conversation changes
+    // Reset typing indicator and scroll state when conversation changes
     setIsTyping(false)
+    setUnreadCountInView(0)
+    setIsAtBottom(true)
+    lastMessageCountRef.current = 0
+    isUserScrollingRef.current = false
     if (typingTimeoutRef.current) {
       clearTimeout(typingTimeoutRef.current)
+    }
+    if (scrollTimeoutRef.current) {
+      clearTimeout(scrollTimeoutRef.current)
     }
 
     const fetchMessages = async () => {
@@ -148,6 +164,16 @@ const MessagesPage = () => {
         const data = await res.json()
         if (res.ok) {
           setMessages(data)
+          lastMessageCountRef.current = data.length
+          setUnreadCountInView(0)
+          setIsAtBottom(true)
+          // Scroll to bottom when conversation is opened (WhatsApp style)
+          setTimeout(() => {
+            if (messagesContainerRef.current) {
+              const container = messagesContainerRef.current
+              container.scrollTop = container.scrollHeight // Direct scroll without animation
+            }
+          }, 100)
         }
       } catch (error) {
         showToast('Error', 'Failed to load messages', 'error')
@@ -163,12 +189,101 @@ const MessagesPage = () => {
     }
   }, [selectedConversation?._id, selectedConversation?.participants, showToast])
 
-  // Scroll to bottom when messages change
+  // Track scroll position
   useEffect(() => {
-    if (messagesEndRef.current) {
-      messagesEndRef.current.scrollIntoView({ behavior: 'smooth' })
+    const container = messagesContainerRef.current
+    if (!container) return
+
+    const handleScroll = () => {
+      const scrollTop = container.scrollTop
+      const scrollHeight = container.scrollHeight
+      const clientHeight = container.clientHeight
+      const isNearBottom = scrollHeight - scrollTop - clientHeight < 100
+
+      setIsAtBottom(isNearBottom)
+      isUserScrollingRef.current = true // User is manually scrolling
+      
+      // Clear existing timeout
+      if (scrollTimeoutRef.current) {
+        clearTimeout(scrollTimeoutRef.current)
+      }
+      
+      // Set timeout to detect when user stops scrolling (after 300ms of no scrolling)
+      scrollTimeoutRef.current = setTimeout(() => {
+        isUserScrollingRef.current = false
+      }, 300)
+      
+      // If scrolled to bottom, clear unread count
+      if (isNearBottom) {
+        setUnreadCountInView(0)
+      }
     }
-  }, [messages])
+
+    container.addEventListener('scroll', handleScroll, { passive: true })
+    // Check initial position
+    handleScroll()
+    
+    return () => {
+      container.removeEventListener('scroll', handleScroll)
+      if (scrollTimeoutRef.current) {
+        clearTimeout(scrollTimeoutRef.current)
+      }
+    }
+  }, [selectedConversation?._id]) // Re-run when conversation changes
+
+  // Auto-scroll when at bottom and messages change (only if user is not manually scrolling)
+  useEffect(() => {
+    const container = messagesContainerRef.current
+    if (!container || messages.length === 0) return
+
+    // Only auto-scroll if:
+    // 1. User is at bottom (according to state)
+    // 2. User is not currently manually scrolling
+    if (isAtBottom && !isUserScrollingRef.current) {
+      // Use a delay to ensure user has stopped scrolling
+      const timeoutId = setTimeout(() => {
+        // Double-check user is still at bottom and not scrolling
+        if (!isUserScrollingRef.current && container) {
+          const scrollTop = container.scrollTop
+          const scrollHeight = container.scrollHeight
+          const clientHeight = container.clientHeight
+          const distanceFromBottom = scrollHeight - scrollTop - clientHeight
+          
+          // Only scroll if still near bottom (within 200px)
+          if (distanceFromBottom < 200) {
+            // Use direct scrollTop manipulation instead of scrollIntoView to avoid conflicts
+            container.scrollTop = container.scrollHeight
+          }
+        }
+      }, 200) // Wait 200ms after user stops scrolling
+      
+      return () => clearTimeout(timeoutId)
+    }
+  }, [messages, isAtBottom])
+
+  // Track new messages when scrolled up (only count messages from other user)
+  useEffect(() => {
+    if (messages.length > lastMessageCountRef.current && !isAtBottom && user?._id) {
+      // Get new messages that were just added
+      const newMessages = messages.slice(lastMessageCountRef.current)
+      // Count only messages from the other user (not from current user)
+      const unreadFromOthers = newMessages.filter(msg => {
+        let msgSenderId = ''
+        if (msg.sender?._id) {
+          msgSenderId = typeof msg.sender._id === 'string' ? msg.sender._id : msg.sender._id.toString()
+        } else if (msg.sender) {
+          msgSenderId = typeof msg.sender === 'string' ? msg.sender : String(msg.sender)
+        }
+        const currentUserId = typeof user._id === 'string' ? user._id : user._id.toString()
+        return msgSenderId !== currentUserId
+      }).length
+      
+      if (unreadFromOthers > 0) {
+        setUnreadCountInView(prev => prev + unreadFromOthers)
+      }
+    }
+    lastMessageCountRef.current = messages.length
+  }, [messages, isAtBottom, user?._id])
 
   // Listen for new messages via Socket.io
   useEffect(() => {
@@ -309,6 +424,38 @@ const MessagesPage = () => {
     }
   }, [socket, selectedConversation?._id])
 
+  // Listen for reaction updates
+  useEffect(() => {
+    if (!socket || !selectedConversation?._id) return
+
+    const handleReactionUpdate = async ({ conversationId, messageId }) => {
+      // Check if this is for the current conversation
+      if (selectedConversation?._id && conversationId === selectedConversation._id.toString()) {
+        // Refetch messages to get updated reactions
+        try {
+          const otherUser = selectedConversation.participants[0]
+          if (otherUser?._id) {
+            const res = await fetch(`${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/message/${otherUser._id}`, {
+              credentials: 'include',
+            })
+            const data = await res.json()
+            if (res.ok) {
+              setMessages(data)
+            }
+          }
+        } catch (error) {
+          console.log('Error fetching updated messages:', error)
+        }
+      }
+    }
+
+    socket.on("messageReactionUpdated", handleReactionUpdate)
+
+    return () => {
+      socket.off("messageReactionUpdated", handleReactionUpdate)
+    }
+  }, [socket, selectedConversation?._id])
+
   // Handle typing indicator - emit typingStart when user types
   const handleTyping = () => {
     if (!socket || !selectedConversation?._id || !user?._id) return
@@ -398,6 +545,63 @@ const MessagesPage = () => {
       }
     }
   }
+
+  // Handle reaction toggle
+  const handleReaction = async (messageId, emoji) => {
+    if (!user?._id) return
+
+    try {
+      const res = await fetch(`${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/message/reaction/${messageId}`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ emoji }),
+      })
+
+      const updatedMessage = await res.json()
+      if (res.ok) {
+        // Update the message in the messages array
+        setMessages((prev) =>
+          prev.map((msg) => (msg._id === messageId ? updatedMessage : msg))
+        )
+      }
+    } catch (error) {
+      console.log('Error toggling reaction:', error)
+    }
+  }
+
+  // Handle emoji picker click
+  const handleEmojiClick = (emojiData, messageId) => {
+    const emoji = emojiData.emoji || emojiData
+    handleReaction(messageId, emoji)
+    setEmojiPickerOpen(null)
+  }
+
+  // Handle message click to show emoji picker
+  const handleMessageClick = (e, messageId) => {
+    e.stopPropagation()
+    // Toggle emoji picker for this message
+    setEmojiPickerOpen(emojiPickerOpen === messageId ? null : messageId)
+  }
+
+  // Close emoji picker when clicking outside
+  useEffect(() => {
+    function handleClickOutside(event) {
+      if (emojiPickerRef.current && !emojiPickerRef.current.contains(event.target)) {
+        // Also check if click is not on a message bubble
+        const messageBubble = event.target.closest('[data-message-id]')
+        if (!messageBubble) {
+          setEmojiPickerOpen(null)
+        }
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside)
+    }
+  }, [])
 
   // Send message
   const handleSendMessage = async () => {
@@ -907,7 +1111,46 @@ const MessagesPage = () => {
               overflowY="auto"
               py={{ base: 2, sm: 3, md: 4 }}
               bg={useColorModeValue('white', '#101010')}
+              position="relative"
             >
+              {/* Unread message indicator (WhatsApp style) */}
+              {unreadCountInView > 0 && !isAtBottom && (
+                <Box
+                  position="absolute"
+                  bottom={4}
+                  left="50%"
+                  transform="translateX(-50%)"
+                  zIndex={100}
+                  cursor="pointer"
+                  onClick={() => {
+                    if (messagesContainerRef.current) {
+                      const container = messagesContainerRef.current
+                      isUserScrollingRef.current = false // Reset scroll tracking
+                      container.scrollTop = container.scrollHeight // Direct scroll to bottom
+                      setUnreadCountInView(0)
+                      setIsAtBottom(true)
+                    }
+                  }}
+                >
+                  <Flex
+                    bg="blue.500"
+                    color="white"
+                    px={4}
+                    py={2}
+                    borderRadius="full"
+                    alignItems="center"
+                    gap={2}
+                    boxShadow="lg"
+                    _hover={{ bg: 'blue.600' }}
+                    transition="all 0.2s"
+                  >
+                    <Text fontSize="sm" fontWeight="semibold">
+                      {unreadCountInView} new {unreadCountInView === 1 ? 'message' : 'messages'}
+                    </Text>
+                    <Box as="span" fontSize="lg">↓</Box>
+                  </Flex>
+                </Box>
+              )}
               <VStack align="stretch" spacing={{ base: 3, md: 4 }} px={{ base: 2, sm: 3, md: 4 }}>
                 {messages.map((msg) => {
                     // Better comparison for message ownership - handle all cases
@@ -946,6 +1189,8 @@ const MessagesPage = () => {
                         gap={{ base: 1.5, md: 2 }}
                         direction={isOwn ? 'row-reverse' : 'row'}
                         w="100%"
+                        position="relative"
+                        data-message-id={msg._id}
                       >
                       <Avatar
                         size={{ base: "xs", sm: "sm" }}
@@ -972,6 +1217,9 @@ const MessagesPage = () => {
                           wordBreak="break-word"
                           alignItems="flex-end"
                           gap={1}
+                          cursor="pointer"
+                          onClick={(e) => handleMessageClick(e, msg._id)}
+                          _hover={{ opacity: 0.9 }}
                         >
                           <Text fontSize={{ base: "sm", md: "md" }} whiteSpace="pre-wrap" flex={1}>{msg.text}</Text>
                           {isOwn && (
@@ -991,6 +1239,109 @@ const MessagesPage = () => {
                               addSuffix: true,
                             })}
                         </Text>
+                        {/* Message Reactions */}
+                        {msg.reactions && msg.reactions.length > 0 && (
+                          <Flex
+                            gap={1}
+                            mt={1}
+                            px={2}
+                            flexWrap="wrap"
+                            alignItems="center"
+                          >
+                            {Object.entries(
+                              msg.reactions.reduce((acc, reaction) => {
+                                const emoji = reaction.emoji
+                                if (!acc[emoji]) {
+                                  acc[emoji] = []
+                                }
+                                acc[emoji].push(reaction)
+                                return acc
+                              }, {})
+                            ).map(([emoji, reactions]) => {
+                              const hasUserReacted = reactions.some(r => {
+                                const reactUserId = r.userId?._id ? 
+                                  (typeof r.userId._id === 'string' ? r.userId._id : r.userId._id.toString()) :
+                                  (typeof r.userId === 'string' ? r.userId : String(r.userId))
+                                return reactUserId === currentUserId
+                              })
+                              
+                              return (
+                                <Flex
+                                  key={emoji}
+                                  alignItems="center"
+                                  gap={1}
+                                  bg={hasUserReacted ? useColorModeValue('blue.100', 'blue.900') : useColorModeValue('gray.100', 'gray.800')}
+                                  px={2}
+                                  py={0.5}
+                                  borderRadius="full"
+                                  cursor="pointer"
+                                  _hover={{ bg: useColorModeValue('gray.200', 'gray.700') }}
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    handleReaction(msg._id, emoji)
+                                  }}
+                                >
+                                  <Text fontSize="sm">{emoji}</Text>
+                                  <Text fontSize="xs" color="gray.500">
+                                    {reactions.length}
+                                  </Text>
+                                </Flex>
+                              )
+                            })}
+                          </Flex>
+                        )}
+                        {/* Quick Reaction Bar (WhatsApp style) */}
+                        {emojiPickerOpen === msg._id && (
+                          <Box
+                            ref={emojiPickerRef}
+                            position="absolute"
+                            left={isOwn ? 'auto' : 0}
+                            right={isOwn ? 0 : 'auto'}
+                            bottom="100%"
+                            mb={2}
+                            zIndex={1000}
+                          >
+                            <Flex
+                              bg={useColorModeValue('white', '#2a2a2a')}
+                              borderRadius="full"
+                              px={2}
+                              py={1.5}
+                              gap={0.5}
+                              alignItems="center"
+                              boxShadow="0 4px 12px rgba(0,0,0,0.15)"
+                              border="1px solid"
+                              borderColor={useColorModeValue('gray.200', 'gray.700')}
+                              sx={{
+                                animation: 'slideUp 0.2s ease-out'
+                              }}
+                            >
+                              {['👍', '❤️', '😂', '😮', '😢', '🙏', '🎉'].map((emoji) => (
+                                <Box
+                                  key={emoji}
+                                  as="button"
+                                  fontSize={{ base: "lg", md: "xl" }}
+                                  p={{ base: 1, md: 1.5 }}
+                                  borderRadius="full"
+                                  _hover={{ 
+                                    bg: useColorModeValue('gray.100', 'gray.700'),
+                                    transform: 'scale(1.3)'
+                                  }}
+                                  transition="all 0.15s ease"
+                                  cursor="pointer"
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    handleEmojiClick({ emoji }, msg._id)
+                                  }}
+                                  _active={{
+                                    transform: 'scale(1.1)'
+                                  }}
+                                >
+                                  {emoji}
+                                </Box>
+                              ))}
+                            </Flex>
+                          </Box>
+                        )}
                       </Flex>
                     </Flex>
                   )

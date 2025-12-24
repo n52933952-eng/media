@@ -60,7 +60,10 @@ export const getMessage = async(req,res) => {
         return res.status(200).json([]) // Return empty array if no conversation exists
     }
    
-    const messages = await Message.find({conversationId:conversation._id}).populate("sender", "username profilePic name").sort({createdAt:1})
+    const messages = await Message.find({conversationId:conversation._id})
+      .populate("sender", "username profilePic name")
+      .populate("reactions.userId", "username name profilePic")
+      .sort({createdAt:1})
    
     res.status(200).json(messages)
    
@@ -129,4 +132,64 @@ res.status(200).json("all deleted")
      res.status(500).json(error)
      console.log(error)
  }
+}
+
+// Add or remove reaction to a message
+export const toggleReaction = async (req, res) => {
+  try {
+    const { messageId } = req.params
+    const { emoji } = req.body
+    const userId = req.user._id
+
+    const message = await Message.findById(messageId)
+    if (!message) {
+      return res.status(404).json({ error: 'Message not found' })
+    }
+
+    // Check if user already has ANY reaction on this message
+    const existingUserReactionIndex = message.reactions.findIndex(
+      r => r.userId.toString() === userId.toString()
+    )
+
+    if (existingUserReactionIndex > -1) {
+      const existingReaction = message.reactions[existingUserReactionIndex]
+      // If user clicked the same emoji, remove it
+      if (existingReaction.emoji === emoji) {
+        message.reactions.splice(existingUserReactionIndex, 1)
+      } else {
+        // Replace old reaction with new one
+        message.reactions[existingUserReactionIndex].emoji = emoji
+      }
+    } else {
+      // User doesn't have any reaction yet, add new one
+      message.reactions.push({ userId, emoji })
+    }
+
+    await message.save()
+    
+    // Populate userId in reactions for response
+    await message.populate('reactions.userId', 'username name profilePic')
+
+    // Emit socket event to notify all participants in the conversation
+    const conversation = await Conversation.findById(message.conversationId)
+    if (conversation) {
+      const io = getIO()
+      if (io) {
+        // Emit to all participants
+        conversation.participants.forEach(participantId => {
+          // Find socket ID for this participant
+          // We'll emit to all connected sockets since we need to notify all participants
+          io.emit("messageReactionUpdated", { 
+            conversationId: message.conversationId.toString(),
+            messageId: message._id.toString()
+          })
+        })
+      }
+    }
+
+    res.status(200).json(message)
+  } catch (error) {
+    res.status(500).json({ error: error.message })
+    console.log(error)
+  }
 }

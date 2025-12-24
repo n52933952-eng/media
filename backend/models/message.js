@@ -24,6 +24,14 @@ const MessageSchema = new mongoose.Schema({
         default:""
     },
 
+    reactions: [{
+        userId: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "User"
+        },
+        emoji: String
+    }],
+
 },{timestamps:true})
 
 const Message = mongoose.model("Message",MessageSchema)
