@@ -149,6 +149,9 @@ export const initializeSocket = (app) => {
         // Mark messages as seen
         socket.on("markmessageasSeen", async ({ conversationId, userId }) => {
             try {
+                // Get the current user's ID from socket
+                const currentUserId = socket.handshake.query.userId
+                
                 // Update all unseen messages in the conversation to seen: true
                 await Message.updateMany(
                     { conversationId: conversationId, seen: false },
@@ -165,6 +168,15 @@ export const initializeSocket = (app) => {
                 const senderSocketId = senderData?.socketId
                 if (senderSocketId) {
                     io.to(senderSocketId).emit("messagesSeen", { conversationId })
+                }
+                
+                // Also emit to the current user who marked messages as seen (to update their count)
+                if (currentUserId && currentUserId !== userId) {
+                    const currentUserData = userSocketMap[currentUserId]
+                    const currentUserSocketId = currentUserData?.socketId
+                    if (currentUserSocketId) {
+                        io.to(currentUserSocketId).emit("messagesSeen", { conversationId })
+                    }
                 }
             } catch (error) {
                 console.log("Error marking messages as seen:", error)

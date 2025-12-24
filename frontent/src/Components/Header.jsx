@@ -7,6 +7,7 @@ import { FaRegMessage } from "react-icons/fa6";
 import { IoNotificationsOutline } from "react-icons/io5";
 
 import{UserContext} from '../context/UserContext'
+import{SocketContext} from '../context/SocketContext'
 import{Link} from 'react-router-dom'
 
 
@@ -15,36 +16,53 @@ const Header = () => {
   const{colorMode,toggleColorMode}=useColorMode()
 
    const{user}=useContext(UserContext)
+   const {socket} = useContext(SocketContext) || {}
    const [totalUnreadCount, setTotalUnreadCount] = useState(0)
 
    // Fetch total unread count
-   useEffect(() => {
+   const fetchUnreadCount = async () => {
      if (!user) {
        setTotalUnreadCount(0)
        return
      }
 
-     const fetchUnreadCount = async () => {
-       try {
-         const res = await fetch(`${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/message/conversations`, {
-           credentials: 'include',
-         })
-         const data = await res.json()
-         if (res.ok) {
-           const total = data.reduce((sum, conv) => sum + (conv.unreadCount || 0), 0)
-           setTotalUnreadCount(total)
-         }
-       } catch (error) {
-         console.log('Error fetching unread count:', error)
+     try {
+       const res = await fetch(`${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/message/conversations`, {
+         credentials: 'include',
+       })
+       const data = await res.json()
+       if (res.ok) {
+         const total = data.reduce((sum, conv) => sum + (conv.unreadCount || 0), 0)
+         setTotalUnreadCount(total)
        }
+     } catch (error) {
+       console.log('Error fetching unread count:', error)
      }
+   }
 
+   useEffect(() => {
      fetchUnreadCount()
      
-     // Refresh every 5 seconds to get real-time updates
-     const interval = setInterval(fetchUnreadCount, 5000)
+     // Refresh every 3 seconds to get real-time updates
+     const interval = setInterval(fetchUnreadCount, 3000)
      return () => clearInterval(interval)
    }, [user])
+
+   // Listen for messagesSeen event to update total count immediately
+   useEffect(() => {
+     if (!socket) return
+
+     const handleMessagesSeen = () => {
+       // Refresh count when messages are marked as seen
+       fetchUnreadCount()
+     }
+
+     socket.on("messagesSeen", handleMessagesSeen)
+
+     return () => {
+       socket.off("messagesSeen", handleMessagesSeen)
+     }
+   }, [socket, user])
   
   
   
