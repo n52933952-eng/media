@@ -237,55 +237,39 @@ const MessagesPage = () => {
     const container = messagesContainerRef.current
     if (!container || messages.length === 0) return
 
-    // Only auto-scroll if:
-    // 1. User is at bottom (according to state)
-    // 2. User is not currently manually scrolling
-    if (isAtBottom && !isUserScrollingRef.current) {
-      // Use a delay to ensure user has stopped scrolling
-      const timeoutId = setTimeout(() => {
-        // Double-check user is still at bottom and not scrolling
-        if (!isUserScrollingRef.current && container) {
-          const scrollTop = container.scrollTop
-          const scrollHeight = container.scrollHeight
-          const clientHeight = container.clientHeight
-          // Check if at bottom - use a small threshold (5px) to account for rounding
-          const isAtBottomPosition = scrollHeight - scrollTop - clientHeight <= 5
-          
-          // Only scroll if still at bottom
-          if (isAtBottomPosition) {
-            // Use direct scrollTop manipulation instead of scrollIntoView to avoid conflicts
-            container.scrollTop = container.scrollHeight
-          }
-        }
-      }, 200) // Wait 200ms after user stops scrolling
-      
-      return () => clearTimeout(timeoutId)
-    }
-  }, [messages, isAtBottom])
-
-  // Update scroll state when messages change (to catch scroll position changes)
-  useEffect(() => {
-    const container = messagesContainerRef.current
-    if (!container) return
-
-    // Use requestAnimationFrame to ensure DOM has updated
+    // Use requestAnimationFrame to ensure DOM has updated with new messages
     requestAnimationFrame(() => {
+      // Check actual scroll position
       const scrollTop = container.scrollTop
       const scrollHeight = container.scrollHeight
       const clientHeight = container.clientHeight
       const distanceFromBottom = scrollHeight - scrollTop - clientHeight
       const isAtBottomPosition = distanceFromBottom <= 5
       
-      setIsAtBottom(isAtBottomPosition)
-      
-      // Clear unread count if at bottom
-      if (isAtBottomPosition) {
-        setUnreadCountInView(0)
+      // Only auto-scroll if:
+      // 1. User is at bottom (check actual position)
+      // 2. User is not currently manually scrolling
+      if (isAtBottomPosition && !isUserScrollingRef.current) {
+        // Small delay to ensure everything is settled
+        setTimeout(() => {
+          if (!isUserScrollingRef.current && container) {
+            // Double-check position before scrolling
+            const currentScrollTop = container.scrollTop
+            const currentScrollHeight = container.scrollHeight
+            const currentClientHeight = container.clientHeight
+            const currentDistance = currentScrollHeight - currentScrollTop - currentClientHeight
+            
+            if (currentDistance <= 10) { // Allow slightly more tolerance
+              container.scrollTop = container.scrollHeight
+            }
+          }
+        }, 50)
       }
     })
-  }, [messages.length]) // Only when message count changes
+  }, [messages.length]) // Trigger when message count changes
 
   // Track new messages when scrolled up (only count messages from other user)
+  // This must run BEFORE the scroll state update to avoid race conditions
   useEffect(() => {
     if (messages.length > lastMessageCountRef.current && user?._id) {
       const container = messagesContainerRef.current
@@ -323,11 +307,38 @@ const MessagesPage = () => {
           setUnreadCountInView(prev => prev + unreadFromOthers)
           // Also update isAtBottom state to match actual position
           setIsAtBottom(false)
+        } else if (isActuallyAtBottom) {
+          // If at bottom, clear unread count
+          setUnreadCountInView(0)
+          setIsAtBottom(true)
         }
       })
     }
     lastMessageCountRef.current = messages.length
   }, [messages, user?._id])
+
+  // Update scroll state when messages change (to catch scroll position changes)
+  // This runs after tracking to update state based on final position
+  useEffect(() => {
+    const container = messagesContainerRef.current
+    if (!container) return
+
+    // Use requestAnimationFrame to ensure DOM has updated
+    requestAnimationFrame(() => {
+      const scrollTop = container.scrollTop
+      const scrollHeight = container.scrollHeight
+      const clientHeight = container.clientHeight
+      const distanceFromBottom = scrollHeight - scrollTop - clientHeight
+      const isAtBottomPosition = distanceFromBottom <= 5
+      
+      setIsAtBottom(isAtBottomPosition)
+      
+      // Only clear unread count if we're actually at bottom and there are no pending updates
+      if (isAtBottomPosition) {
+        setUnreadCountInView(0)
+      }
+    })
+  }, [messages.length]) // Only when message count changes
 
   // Listen for new messages via Socket.io
   useEffect(() => {
@@ -1161,25 +1172,7 @@ const MessagesPage = () => {
               position="relative"
             >
               {/* Unread message indicator (WhatsApp style) */}
-              {(() => {
-                // Check actual scroll position to determine if we should show indicator
-                const container = messagesContainerRef.current
-                let shouldShow = unreadCountInView > 0
-                
-                if (container && shouldShow) {
-                  const scrollTop = container.scrollTop
-                  const scrollHeight = container.scrollHeight
-                  const clientHeight = container.clientHeight
-                  const distanceFromBottom = scrollHeight - scrollTop - clientHeight
-                  // Show if not at bottom (more than 5px from bottom)
-                  shouldShow = distanceFromBottom > 5
-                } else {
-                  // Fallback to state check
-                  shouldShow = shouldShow && !isAtBottom
-                }
-                
-                return shouldShow
-              })() && (
+              {unreadCountInView > 0 && !isAtBottom && (
                 <Box
                   position="absolute"
                   bottom={4}
