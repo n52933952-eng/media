@@ -83,14 +83,30 @@ export const mycon = async(req,res) => {
 			select: "username profilePic",
     }).sort({createdAt:-1});
 
-    conversations.forEach((conversation) => {
-			conversation.participants = conversation.participants.filter(
-				(participant) => participant._id.toString() !== userId.toString()
-			);
-		});
+    // Calculate unread counts for each conversation
+    const conversationsWithUnread = await Promise.all(
+      conversations.map(async (conversation) => {
+        // Filter participants to get the other user
+        conversation.participants = conversation.participants.filter(
+          (participant) => participant._id.toString() !== userId.toString()
+        );
 
+        // Count unread messages (messages not seen and not sent by current user)
+        const unreadCount = await Message.countDocuments({
+          conversationId: conversation._id,
+          seen: false,
+          sender: { $ne: userId }
+        });
 
-res.status(200).json(conversations);
+        // Convert to plain object and add unreadCount
+        const convObj = conversation.toObject();
+        convObj.unreadCount = unreadCount;
+        
+        return convObj;
+      })
+    );
+
+res.status(200).json(conversationsWithUnread);
 	} catch (error) {
 		res.status(500).json({ error: error.message });
 	}

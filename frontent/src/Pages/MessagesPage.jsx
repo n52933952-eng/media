@@ -14,6 +14,7 @@ import {
   InputLeftElement,
   Spinner,
   IconButton,
+  Badge,
 } from '@chakra-ui/react'
 import { SearchIcon, ArrowBackIcon } from '@chakra-ui/icons'
 import { UserContext } from '../context/UserContext'
@@ -181,6 +182,29 @@ const MessagesPage = () => {
         message.conversationId.toString() === selectedConversation._id.toString()
       ) {
         setMessages((prev) => [...prev, message])
+      } else {
+        // If message is for a different conversation, increment unread count
+        setConversations(prev => prev.map(conv => {
+          if (conv._id && message.conversationId && conv._id.toString() === message.conversationId.toString()) {
+            // Only increment if message is not from current user
+            let messageSenderId = ''
+            if (message.sender?._id) {
+              messageSenderId = typeof message.sender._id === 'string' ? message.sender._id : message.sender._id.toString()
+            } else if (message.sender) {
+              messageSenderId = typeof message.sender === 'string' ? message.sender : String(message.sender)
+            }
+            
+            let currentUserId = ''
+            if (user?._id) {
+              currentUserId = typeof user._id === 'string' ? user._id : user._id.toString()
+            }
+            
+            if (messageSenderId !== currentUserId) {
+              return { ...conv, unreadCount: (conv.unreadCount || 0) + 1 }
+            }
+          }
+          return conv
+        }))
       }
       // Always refresh conversations to update last message preview
       fetchConversations()
@@ -191,7 +215,7 @@ const MessagesPage = () => {
     return () => {
       socket.off('newMessage', handleNewMessage)
     }
-  }, [socket, selectedConversation?._id])
+  }, [socket, selectedConversation?._id, user?._id])
 
   // Mark messages as seen when viewing messages from other user
   useEffect(() => {
@@ -241,7 +265,7 @@ const MessagesPage = () => {
           })
         })
 
-        // Update conversations list to mark lastMessage as seen
+        // Update conversations list to mark lastMessage as seen and clear unread count
         setConversations((prev) => {
           return prev.map((conv) => {
             if (conv._id && conv._id.toString() === conversationId) {
@@ -250,7 +274,8 @@ const MessagesPage = () => {
                 lastMessage: {
                   ...conv.lastMessage,
                   seen: true
-                }
+                },
+                unreadCount: 0
               }
             }
             return conv
@@ -574,11 +599,20 @@ const MessagesPage = () => {
                       cursor="pointer"
                       bg={isSelected ? hoverBg : 'transparent'}
                       _hover={{ bg: hoverBg }}
-                      onClick={() => setSelectedConversation(conv)}
+                      onClick={() => {
+                        setSelectedConversation(conv)
+                        // Clear unread count for this conversation
+                        if (conv.unreadCount > 0) {
+                          setConversations(prev => prev.map(c => 
+                            c._id === conv._id ? { ...c, unreadCount: 0 } : c
+                          ))
+                        }
+                      }}
                       borderBottom="1px solid"
                       borderColor={borderColor}
                       alignItems="center"
                       gap={3}
+                      position="relative"
                     >
                       <Box position="relative">
                         <Avatar
@@ -601,10 +635,28 @@ const MessagesPage = () => {
                           />
                         )}
                       </Box>
-                      <Box flex={1} minW={0}>
-                        <Text fontWeight="semibold" noOfLines={1} color={useColorModeValue('black', 'white')}>
-                          {otherUser?.name || otherUser?.username || 'Unknown User'}
-                        </Text>
+                      <Box flex={1} minW={0} position="relative">
+                        <Flex alignItems="center" gap={2}>
+                          <Text fontWeight="semibold" noOfLines={1} color={useColorModeValue('black', 'white')}>
+                            {otherUser?.name || otherUser?.username || 'Unknown User'}
+                          </Text>
+                          {conv.unreadCount > 0 && (
+                            <Badge
+                              borderRadius="full"
+                              bg="red.500"
+                              color="white"
+                              fontSize="10px"
+                              minW="20px"
+                              h="20px"
+                              display="flex"
+                              alignItems="center"
+                              justifyContent="center"
+                              px={1.5}
+                            >
+                              {conv.unreadCount > 99 ? '99+' : conv.unreadCount}
+                            </Badge>
+                          )}
+                        </Flex>
                         {otherUser?.username && otherUser?.name !== otherUser?.username && (
                           <Text fontSize="xs" color="gray.500" noOfLines={1} mt={0.5}>
                             @{otherUser.username}
