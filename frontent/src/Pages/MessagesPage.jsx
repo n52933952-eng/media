@@ -263,7 +263,20 @@ const MessagesPage = () => {
 
   // Track new messages when scrolled up (only count messages from other user)
   useEffect(() => {
-    if (messages.length > lastMessageCountRef.current && !isAtBottom && user?._id) {
+    if (messages.length > lastMessageCountRef.current && user?._id) {
+      const container = messagesContainerRef.current
+      if (!container) {
+        lastMessageCountRef.current = messages.length
+        return
+      }
+
+      // Check actual scroll position instead of just state
+      const scrollTop = container.scrollTop
+      const scrollHeight = container.scrollHeight
+      const clientHeight = container.clientHeight
+      const distanceFromBottom = scrollHeight - scrollTop - clientHeight
+      const isActuallyAtBottom = distanceFromBottom < 100
+
       // Get new messages that were just added
       const newMessages = messages.slice(lastMessageCountRef.current)
       // Count only messages from the other user (not from current user)
@@ -278,12 +291,15 @@ const MessagesPage = () => {
         return msgSenderId !== currentUserId
       }).length
       
-      if (unreadFromOthers > 0) {
+      // If user is scrolled up (not at bottom) and there are new messages from others, increment counter
+      if (!isActuallyAtBottom && unreadFromOthers > 0) {
         setUnreadCountInView(prev => prev + unreadFromOthers)
+        // Also update isAtBottom state to match actual position
+        setIsAtBottom(false)
       }
     }
     lastMessageCountRef.current = messages.length
-  }, [messages, isAtBottom, user?._id])
+  }, [messages, user?._id])
 
   // Listen for new messages via Socket.io
   useEffect(() => {
