@@ -232,37 +232,7 @@ const MessagesPage = () => {
     }
   }, [selectedConversation?._id]) // Re-run when conversation changes
 
-  // Auto-scroll when at bottom and messages change
-  useEffect(() => {
-    const container = messagesContainerRef.current
-    if (!container || messages.length === 0) return
-
-    // Wait for DOM to update, then check and scroll
-    const timeoutId = setTimeout(() => {
-      if (!container) return
-      
-      // When new messages are added, scrollHeight increases
-      // Check if user is within reasonable distance (150px = ~2-3 messages) from bottom
-      // This accounts for the fact that scrollHeight increased but scrollTop didn't
-      const scrollTop = container.scrollTop
-      const scrollHeight = container.scrollHeight
-      const clientHeight = container.clientHeight
-      const distanceFromBottom = scrollHeight - scrollTop - clientHeight
-      
-      // If we were near bottom (within 150px), auto-scroll to new bottom
-      // Also check if user is not currently manually scrolling
-      if (distanceFromBottom <= 150 && !isUserScrollingRef.current) {
-        // Scroll to bottom
-        container.scrollTop = container.scrollHeight
-        setIsAtBottom(true)
-        setUnreadCountInView(0)
-      }
-    }, 100) // Small delay to let DOM update
-
-    return () => clearTimeout(timeoutId)
-  }, [messages.length]) // Trigger when message count changes
-
-  // Track new messages when scrolled up (only count messages from other user)
+  // Track new messages and handle auto-scroll/unread indicator
   useEffect(() => {
     if (messages.length > lastMessageCountRef.current && user?._id) {
       const container = messagesContainerRef.current
@@ -286,32 +256,42 @@ const MessagesPage = () => {
         return msgSenderId !== currentUserId
       }).length
       
-      // Wait for DOM to update and auto-scroll to complete
+      // Check scroll position BEFORE new messages are added to DOM
+      // We need to check immediately, before DOM updates
+      const scrollTopBefore = container.scrollTop
+      const scrollHeightBefore = container.scrollHeight
+      const clientHeight = container.clientHeight
+      const distanceFromBottomBefore = scrollHeightBefore - scrollTopBefore - clientHeight
+      
+      // Wait for DOM to update with new messages
       const timeoutId = setTimeout(() => {
         if (!container) return
         
-        // Check actual scroll position after DOM update
-        const scrollTop = container.scrollTop
-        const scrollHeight = container.scrollHeight
-        const clientHeight = container.clientHeight
-        const distanceFromBottom = scrollHeight - scrollTop - clientHeight
-        // Use 150px threshold (same as auto-scroll) to be consistent
-        const isActuallyAtBottom = distanceFromBottom <= 150
+        // Check scroll position AFTER new messages are added
+        const scrollTopAfter = container.scrollTop
+        const scrollHeightAfter = container.scrollHeight
+        const distanceFromBottomAfter = scrollHeightAfter - scrollTopAfter - clientHeight
         
-        // Update state based on position
-        if (isActuallyAtBottom) {
-          // If at bottom, clear unread count
-          setUnreadCountInView(0)
+        // If user was near bottom (within 150px) before new message, auto-scroll
+        // Also check if user is not currently manually scrolling
+        if (distanceFromBottomBefore <= 150 && !isUserScrollingRef.current) {
+          // Auto-scroll to bottom
+          container.scrollTop = container.scrollHeight
           setIsAtBottom(true)
-        } else if (unreadFromOthers > 0) {
-          // If scrolled up (more than 150px from bottom) and there are new messages from others, increment counter
+          setUnreadCountInView(0)
+        } else if (distanceFromBottomAfter > 150 && unreadFromOthers > 0) {
+          // User is scrolled up (more than 150px from bottom) and there are new messages from others
           setUnreadCountInView(prev => prev + unreadFromOthers)
           setIsAtBottom(false)
-        } else {
-          // Just update the bottom state (user scrolled up but no new messages from others)
+        } else if (distanceFromBottomAfter > 150) {
+          // User is scrolled up but no new messages from others (or it's their own message)
           setIsAtBottom(false)
+        } else {
+          // User is at bottom
+          setIsAtBottom(true)
+          setUnreadCountInView(0)
         }
-      }, 200) // Wait for DOM and auto-scroll to complete
+      }, 100) // Small delay to let DOM update
 
       lastMessageCountRef.current = messages.length
       return () => clearTimeout(timeoutId)
