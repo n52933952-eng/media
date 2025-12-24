@@ -198,9 +198,10 @@ const MessagesPage = () => {
       const scrollTop = container.scrollTop
       const scrollHeight = container.scrollHeight
       const clientHeight = container.clientHeight
-      const isNearBottom = scrollHeight - scrollTop - clientHeight < 100
+      // Check if at bottom - use a small threshold (5px) to account for rounding
+      const isAtBottom = scrollHeight - scrollTop - clientHeight <= 5
 
-      setIsAtBottom(isNearBottom)
+      setIsAtBottom(isAtBottom)
       isUserScrollingRef.current = true // User is manually scrolling
       
       // Clear existing timeout
@@ -214,7 +215,7 @@ const MessagesPage = () => {
       }, 300)
       
       // If scrolled to bottom, clear unread count
-      if (isNearBottom) {
+      if (isAtBottom) {
         setUnreadCountInView(0)
       }
     }
@@ -247,10 +248,11 @@ const MessagesPage = () => {
           const scrollTop = container.scrollTop
           const scrollHeight = container.scrollHeight
           const clientHeight = container.clientHeight
-          const distanceFromBottom = scrollHeight - scrollTop - clientHeight
+          // Check if at bottom - use a small threshold (5px) to account for rounding
+          const isAtBottomPosition = scrollHeight - scrollTop - clientHeight <= 5
           
-          // Only scroll if still near bottom (within 200px)
-          if (distanceFromBottom < 200) {
+          // Only scroll if still at bottom
+          if (isAtBottomPosition) {
             // Use direct scrollTop manipulation instead of scrollIntoView to avoid conflicts
             container.scrollTop = container.scrollHeight
           }
@@ -274,8 +276,8 @@ const MessagesPage = () => {
       const scrollTop = container.scrollTop
       const scrollHeight = container.scrollHeight
       const clientHeight = container.clientHeight
-      const distanceFromBottom = scrollHeight - scrollTop - clientHeight
-      const isActuallyAtBottom = distanceFromBottom < 100
+      // Check if at bottom - use a small threshold (5px) to account for rounding
+      const isActuallyAtBottom = scrollHeight - scrollTop - clientHeight <= 5
 
       // Get new messages that were just added
       const newMessages = messages.slice(lastMessageCountRef.current)
@@ -666,26 +668,29 @@ const MessagesPage = () => {
         }
         setMessages((prev) => [...prev, messageWithSender])
         setNewMessage('')
+        setSending(false) // Stop spinner immediately after message is added
         
-        // Refresh conversations list
-        const updatedConversations = await fetchConversations()
-        
-        // If this was a new conversation, update selectedConversation to the real one
-        if (selectedConversation && !selectedConversation._id && data.conversationId) {
-          const updatedConv = updatedConversations.find(c => 
-            c._id && c._id.toString() === data.conversationId.toString()
-          )
-          if (updatedConv) {
-            setSelectedConversation(updatedConv)
+        // Refresh conversations list in background (don't wait for it)
+        fetchConversations().then(updatedConversations => {
+          // If this was a new conversation, update selectedConversation to the real one
+          if (selectedConversation && !selectedConversation._id && data.conversationId) {
+            const updatedConv = updatedConversations.find(c => 
+              c._id && c._id.toString() === data.conversationId.toString()
+            )
+            if (updatedConv) {
+              setSelectedConversation(updatedConv)
+            }
           }
-        }
+        }).catch(err => {
+          console.log('Error refreshing conversations:', err)
+        })
       } else {
+        setSending(false)
         showToast('Error', data.error || 'Failed to send message', 'error')
       }
     } catch (error) {
-      showToast('Error', 'Failed to send message', 'error')
-    } finally {
       setSending(false)
+      showToast('Error', 'Failed to send message', 'error')
     }
   }
 
