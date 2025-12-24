@@ -263,6 +263,28 @@ const MessagesPage = () => {
     }
   }, [messages, isAtBottom])
 
+  // Update scroll state when messages change (to catch scroll position changes)
+  useEffect(() => {
+    const container = messagesContainerRef.current
+    if (!container) return
+
+    // Use requestAnimationFrame to ensure DOM has updated
+    requestAnimationFrame(() => {
+      const scrollTop = container.scrollTop
+      const scrollHeight = container.scrollHeight
+      const clientHeight = container.clientHeight
+      const distanceFromBottom = scrollHeight - scrollTop - clientHeight
+      const isAtBottomPosition = distanceFromBottom <= 5
+      
+      setIsAtBottom(isAtBottomPosition)
+      
+      // Clear unread count if at bottom
+      if (isAtBottomPosition) {
+        setUnreadCountInView(0)
+      }
+    })
+  }, [messages.length]) // Only when message count changes
+
   // Track new messages when scrolled up (only count messages from other user)
   useEffect(() => {
     if (messages.length > lastMessageCountRef.current && user?._id) {
@@ -272,33 +294,37 @@ const MessagesPage = () => {
         return
       }
 
-      // Check actual scroll position instead of just state
-      const scrollTop = container.scrollTop
-      const scrollHeight = container.scrollHeight
-      const clientHeight = container.clientHeight
-      // Check if at bottom - use a small threshold (5px) to account for rounding
-      const isActuallyAtBottom = scrollHeight - scrollTop - clientHeight <= 5
+      // Use requestAnimationFrame to ensure DOM has updated after messages are added
+      requestAnimationFrame(() => {
+        // Check actual scroll position instead of just state
+        const scrollTop = container.scrollTop
+        const scrollHeight = container.scrollHeight
+        const clientHeight = container.clientHeight
+        const distanceFromBottom = scrollHeight - scrollTop - clientHeight
+        // Check if at bottom - use a small threshold (5px) to account for rounding
+        const isActuallyAtBottom = distanceFromBottom <= 5
 
-      // Get new messages that were just added
-      const newMessages = messages.slice(lastMessageCountRef.current)
-      // Count only messages from the other user (not from current user)
-      const unreadFromOthers = newMessages.filter(msg => {
-        let msgSenderId = ''
-        if (msg.sender?._id) {
-          msgSenderId = typeof msg.sender._id === 'string' ? msg.sender._id : msg.sender._id.toString()
-        } else if (msg.sender) {
-          msgSenderId = typeof msg.sender === 'string' ? msg.sender : String(msg.sender)
+        // Get new messages that were just added
+        const newMessages = messages.slice(lastMessageCountRef.current)
+        // Count only messages from the other user (not from current user)
+        const unreadFromOthers = newMessages.filter(msg => {
+          let msgSenderId = ''
+          if (msg.sender?._id) {
+            msgSenderId = typeof msg.sender._id === 'string' ? msg.sender._id : msg.sender._id.toString()
+          } else if (msg.sender) {
+            msgSenderId = typeof msg.sender === 'string' ? msg.sender : String(msg.sender)
+          }
+          const currentUserId = typeof user._id === 'string' ? user._id : user._id.toString()
+          return msgSenderId !== currentUserId
+        }).length
+        
+        // If user is scrolled up (not at bottom) and there are new messages from others, increment counter
+        if (!isActuallyAtBottom && unreadFromOthers > 0) {
+          setUnreadCountInView(prev => prev + unreadFromOthers)
+          // Also update isAtBottom state to match actual position
+          setIsAtBottom(false)
         }
-        const currentUserId = typeof user._id === 'string' ? user._id : user._id.toString()
-        return msgSenderId !== currentUserId
-      }).length
-      
-      // If user is scrolled up (not at bottom) and there are new messages from others, increment counter
-      if (!isActuallyAtBottom && unreadFromOthers > 0) {
-        setUnreadCountInView(prev => prev + unreadFromOthers)
-        // Also update isAtBottom state to match actual position
-        setIsAtBottom(false)
-      }
+      })
     }
     lastMessageCountRef.current = messages.length
   }, [messages, user?._id])
@@ -1135,7 +1161,25 @@ const MessagesPage = () => {
               position="relative"
             >
               {/* Unread message indicator (WhatsApp style) */}
-              {unreadCountInView > 0 && !isAtBottom && (
+              {(() => {
+                // Check actual scroll position to determine if we should show indicator
+                const container = messagesContainerRef.current
+                let shouldShow = unreadCountInView > 0
+                
+                if (container && shouldShow) {
+                  const scrollTop = container.scrollTop
+                  const scrollHeight = container.scrollHeight
+                  const clientHeight = container.clientHeight
+                  const distanceFromBottom = scrollHeight - scrollTop - clientHeight
+                  // Show if not at bottom (more than 5px from bottom)
+                  shouldShow = distanceFromBottom > 5
+                } else {
+                  // Fallback to state check
+                  shouldShow = shouldShow && !isAtBottom
+                }
+                
+                return shouldShow
+              })() && (
                 <Box
                   position="absolute"
                   bottom={4}
