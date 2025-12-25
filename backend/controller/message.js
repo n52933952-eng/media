@@ -174,6 +174,55 @@ res.status(200).json("all deleted")
  }
 }
 
+// Delete a single message
+export const deleteMessage = async (req, res) => {
+  try {
+    const { messageId } = req.params
+    const userId = req.user._id
+
+    const message = await Message.findById(messageId)
+    if (!message) {
+      return res.status(404).json({ error: 'Message not found' })
+    }
+
+    // Check if user is a participant in the conversation (any participant can delete any message)
+    const conversation = await Conversation.findById(message.conversationId)
+    if (!conversation) {
+      return res.status(404).json({ error: 'Conversation not found' })
+    }
+
+    const isParticipant = conversation.participants.some(
+      participantId => participantId.toString() === userId.toString()
+    )
+
+    if (!isParticipant) {
+      return res.status(403).json({ error: 'You can only delete messages in conversations you are part of' })
+    }
+
+    // Delete the message
+    await Message.findByIdAndDelete(messageId)
+
+    // Emit socket event to notify other participants (conversation already fetched above)
+    if (conversation) {
+      const io = getIO()
+      if (io) {
+        // Emit to all participants in the conversation
+        conversation.participants.forEach(participantId => {
+          io.emit("messageDeleted", { 
+            conversationId: message.conversationId.toString(),
+            messageId: messageId
+          })
+        })
+      }
+    }
+
+    res.status(200).json({ message: 'Message deleted successfully' })
+  } catch (error) {
+    res.status(500).json({ error: error.message })
+    console.log(error)
+  }
+}
+
 // Add or remove reaction to a message
 export const toggleReaction = async (req, res) => {
   try {

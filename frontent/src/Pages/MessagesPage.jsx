@@ -31,7 +31,8 @@ import { SocketContext } from '../context/SocketContext'
 import useShowToast from '../hooks/useShowToast'
 import { formatDistanceToNow } from 'date-fns'
 import { FaPhone, FaPhoneSlash } from 'react-icons/fa'
-import { BsCheck2All, BsReply, BsFillImageFill } from 'react-icons/bs'
+import { BsCheck2All, BsReply, BsFillImageFill, BsTrash } from 'react-icons/bs'
+import { MdDelete } from 'react-icons/md'
 import EmojiPicker from 'emoji-picker-react'
 
 const MessagesPage = () => {
@@ -492,8 +493,17 @@ const MessagesPage = () => {
 
     socket.on("messageReactionUpdated", handleReactionUpdate)
 
+    // Listen for message deletion
+    const handleMessageDeleted = ({ conversationId, messageId }) => {
+      if (selectedConversation?._id && selectedConversation._id.toString() === conversationId) {
+        setMessages((prev) => prev.filter((msg) => msg._id !== messageId))
+      }
+    }
+    socket.on("messageDeleted", handleMessageDeleted)
+
     return () => {
       socket.off("messageReactionUpdated", handleReactionUpdate)
+      socket.off("messageDeleted", handleMessageDeleted)
     }
   }, [socket, selectedConversation?._id])
 
@@ -640,6 +650,61 @@ const MessagesPage = () => {
   // Cancel reply
   const handleCancelReply = () => {
     setReplyingTo(null)
+  }
+
+  // Delete message
+  const handleDeleteMessage = async (messageId) => {
+    if (!window.confirm('Are you sure you want to delete this message?')) return
+
+    try {
+      const res = await fetch(`${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/message/message/${messageId}`, {
+        method: 'DELETE',
+        credentials: 'include',
+      })
+
+      const data = await res.json()
+
+      if (res.ok) {
+        // Remove message from local state
+        setMessages((prev) => prev.filter((msg) => msg._id !== messageId))
+        showToast('Success', 'Message deleted successfully', 'success')
+      } else {
+        showToast('Error', data.error || 'Failed to delete message', 'error')
+      }
+    } catch (error) {
+      showToast('Error', 'Failed to delete message', 'error')
+      console.log('Error deleting message:', error)
+    }
+  }
+
+  // Delete conversation
+  const handleDeleteConversation = async (conversationId) => {
+    if (!window.confirm('Are you sure you want to delete this conversation? This will delete all messages.')) return
+
+    try {
+      const res = await fetch(`${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/message/conversation/${conversationId}`, {
+        method: 'DELETE',
+        credentials: 'include',
+      })
+
+      const data = await res.json()
+
+      if (res.ok) {
+        // Remove conversation from list
+        setConversations((prev) => prev.filter((conv) => conv._id !== conversationId))
+        // Clear selected conversation and messages
+        if (selectedConversation?._id === conversationId) {
+          setSelectedConversation(null)
+          setMessages([])
+        }
+        showToast('Success', 'Conversation deleted successfully', 'success')
+      } else {
+        showToast('Error', data.error || 'Failed to delete conversation', 'error')
+      }
+    } catch (error) {
+      showToast('Error', 'Failed to delete conversation', 'error')
+      console.log('Error deleting conversation:', error)
+    }
   }
 
   // Cleanup preview URL on unmount or when image changes
@@ -1113,6 +1178,16 @@ const MessagesPage = () => {
                   </>
                 )}
               </Flex>
+              {/* Delete conversation button */}
+              <IconButton
+                aria-label="Delete conversation"
+                icon={<MdDelete size={18} />}
+                size="sm"
+                variant="ghost"
+                colorScheme="red"
+                _hover={{ bg: useColorModeValue('red.100', 'red.900') }}
+                onClick={() => handleDeleteConversation(selectedConversation._id)}
+              />
             </Flex>
 
             {/* Video Call - Inline in chat - Mobile optimized */}
@@ -1530,6 +1605,31 @@ const MessagesPage = () => {
                                 title="Reply"
                               >
                                 <BsReply />
+                              </Box>
+                              {/* Delete button - show for all messages (any participant can delete) */}
+                              <Box
+                                as="button"
+                                fontSize={{ base: "lg", md: "xl" }}
+                                p={{ base: 1, md: 1.5 }}
+                                borderRadius="full"
+                                color="red.500"
+                                _hover={{ 
+                                  bg: useColorModeValue('red.100', 'red.900'),
+                                  transform: 'scale(1.3)'
+                                }}
+                                transition="all 0.15s ease"
+                                cursor="pointer"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  handleDeleteMessage(msg._id)
+                                  setEmojiPickerOpen(null)
+                                }}
+                                _active={{
+                                  transform: 'scale(1.1)'
+                                }}
+                                title="Delete message"
+                              >
+                                <BsTrash />
                               </Box>
                               {['👍', '❤️', '😂', '😮', '😢', '🙏', '🎉'].map((emoji) => (
                                 <Box

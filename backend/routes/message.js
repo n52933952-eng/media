@@ -1,6 +1,6 @@
 import express from 'express'
 
-import{sendMessaeg,getMessage,mycon,deletconversation,toggleReaction} from '../controller/message.js'
+import{sendMessaeg,getMessage,mycon,deletconversation,toggleReaction,deleteMessage} from '../controller/message.js'
 
 import protectRoute from '../middlware/protectRoute.js'
 import upload from '../middlware/upload.js'
@@ -15,7 +15,9 @@ router.get("/conversations",protectRoute,mycon)
 
 router.get("/:otherUserId",protectRoute,getMessage)
 
-router.delete("/:id",protectRoute,deletconversation)
+router.delete("/conversation/:id",protectRoute,deletconversation)
+
+router.delete("/message/:messageId",protectRoute,deleteMessage)
 
 router.post("/reaction/:messageId",protectRoute,toggleReaction)
 
