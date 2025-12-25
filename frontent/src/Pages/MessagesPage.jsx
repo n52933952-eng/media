@@ -57,6 +57,7 @@ const MessagesPage = () => {
   const [replyingTo, setReplyingTo] = useState(null) // Store message being replied to
   const [image, setImage] = useState(null) // File object for image/video
   const [imagePreview, setImagePreview] = useState('') // Preview URL for display
+  const [uploadProgress, setUploadProgress] = useState(0) // Upload progress percentage
 
   // Refs
   const messagesEndRef = useRef(null)
@@ -801,6 +802,7 @@ const MessagesPage = () => {
     }
 
     setSending(true)
+    setUploadProgress(0) // Reset progress
     try {
       // Use FormData to send file
       const formData = new FormData()
@@ -813,15 +815,55 @@ const MessagesPage = () => {
         formData.append('replyTo', replyingTo._id)
       }
       
-      const res = await fetch(`${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/message`, {
-        method: 'POST',
-        credentials: 'include',
-        // Don't set Content-Type header - browser will set it with boundary for FormData
-        body: formData,
+      // Use XMLHttpRequest to track upload progress
+      const data = await new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest()
+        const url = `${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/message`
+        
+        // Track upload progress
+        xhr.upload.addEventListener('progress', (e) => {
+          if (e.lengthComputable) {
+            const percentComplete = Math.round((e.loaded / e.total) * 100)
+            setUploadProgress(percentComplete)
+          }
+        })
+        
+        // Handle completion
+        xhr.addEventListener('load', () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            try {
+              const response = JSON.parse(xhr.responseText)
+              resolve(response)
+            } catch (error) {
+              reject(new Error('Failed to parse response'))
+            }
+          } else {
+            try {
+              const errorResponse = JSON.parse(xhr.responseText)
+              reject(new Error(errorResponse.error || 'Request failed'))
+            } catch {
+              reject(new Error('Request failed'))
+            }
+          }
+        })
+        
+        // Handle errors
+        xhr.addEventListener('error', () => {
+          reject(new Error('Network error'))
+        })
+        
+        // Handle abort
+        xhr.addEventListener('abort', () => {
+          reject(new Error('Upload aborted'))
+        })
+        
+        xhr.open('POST', url)
+        xhr.withCredentials = true // Include credentials
+        xhr.send(formData)
       })
 
-      const data = await res.json()
-      if (res.ok) {
+      // Data is already parsed from XMLHttpRequest promise
+      if (data) {
         // Ensure the message has sender data from current user context
         const messageWithSender = {
           ...data,
@@ -842,6 +884,7 @@ const MessagesPage = () => {
           URL.revokeObjectURL(currentPreview)
         }
         setReplyingTo(null) // Clear reply after sending
+        setUploadProgress(0) // Reset progress
         setSending(false) // Stop spinner immediately after message is added
         
         // Refresh conversations list in background (don't wait for it)
@@ -858,13 +901,11 @@ const MessagesPage = () => {
         }).catch(err => {
           console.log('Error refreshing conversations:', err)
         })
-      } else {
-        setSending(false)
-        showToast('Error', data.error || 'Failed to send message', 'error')
       }
     } catch (error) {
+      setUploadProgress(0)
       setSending(false)
-      showToast('Error', 'Failed to send message', 'error')
+      showToast('Error', error.message || 'Failed to send message', 'error')
     }
   }
 
@@ -1832,8 +1873,36 @@ const MessagesPage = () => {
                   />
                 </Flex>
               )}
+              {/* Upload progress bar */}
+              {uploadProgress > 0 && uploadProgress < 100 && (
+                <Flex
+                  p={3}
+                  bg={useColorModeValue('blue.50', 'blue.900')}
+                  borderBottom="1px solid"
+                  borderColor={borderColor}
+                  alignItems="center"
+                  gap={3}
+                  flexDirection="column"
+                >
+                  <Flex w="100%" alignItems="center" gap={2}>
+                    <Spinner size="sm" color="blue.500" />
+                    <Text fontSize="sm" color={useColorModeValue('blue.700', 'blue.300')} fontWeight="semibold" flex={1}>
+                      Uploading {image?.type?.startsWith('image/') ? 'image' : 'video'}... {uploadProgress}%
+                    </Text>
+                  </Flex>
+                  <Box w="100%" bg={useColorModeValue('blue.200', 'blue.700')} borderRadius="full" h={2} overflow="hidden">
+                    <Box
+                      bg="blue.500"
+                      h="100%"
+                      w={`${uploadProgress}%`}
+                      transition="width 0.3s ease"
+                      borderRadius="full"
+                    />
+                  </Box>
+                </Flex>
+              )}
               {/* Image/Video preview */}
-              {imagePreview && (
+              {imagePreview && uploadProgress === 0 && (
                 <Flex
                   p={2}
                   bg={useColorModeValue('gray.100', 'gray.800')}
@@ -1978,8 +2047,8 @@ const MessagesPage = () => {
                 color="white"
                 _hover={{ bg: 'green.600' }}
                 onClick={handleSendMessage}
-                isLoading={sending}
-                isDisabled={sending || (!newMessage.trim() && !imagePreview)}
+                isLoading={sending || (uploadProgress > 0 && uploadProgress < 100)}
+                isDisabled={sending || (uploadProgress > 0 && uploadProgress < 100) || (!newMessage.trim() && !imagePreview)}
                 borderRadius="md"
                 px={{ base: 3, sm: 4, md: 6 }}
                 size={{ base: "sm", md: "md" }}
