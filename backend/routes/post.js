@@ -4,8 +4,9 @@ const router = express.Router()
 
 import{LikeComent,ReplyToComment,createPost,getPost,deletePost,LikePost,ReplyPost,getFeedPost,getUserPosts} from '../controller/post.js'
 import protectRoute from '../middlware/protectRoute.js'
+import upload from '../middlware/upload.js'
 
-router.post("/create",protectRoute,createPost)
+router.post("/create",protectRoute,upload.single('file'),createPost)
 router.get("/:id",getPost)
 router.get("/user/:username",getUserPosts)
 

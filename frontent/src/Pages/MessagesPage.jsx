@@ -15,6 +15,15 @@ import {
   Spinner,
   IconButton,
   Badge,
+  Image,
+  CloseButton,
+  Modal,
+  ModalOverlay,
+  ModalContent,
+  ModalHeader,
+  ModalBody,
+  ModalCloseButton,
+  useDisclosure,
 } from '@chakra-ui/react'
 import { SearchIcon, ArrowBackIcon } from '@chakra-ui/icons'
 import { UserContext } from '../context/UserContext'
@@ -22,7 +31,7 @@ import { SocketContext } from '../context/SocketContext'
 import useShowToast from '../hooks/useShowToast'
 import { formatDistanceToNow } from 'date-fns'
 import { FaPhone, FaPhoneSlash } from 'react-icons/fa'
-import { BsCheck2All, BsReply } from 'react-icons/bs'
+import { BsCheck2All, BsReply, BsFillImageFill } from 'react-icons/bs'
 import EmojiPicker from 'emoji-picker-react'
 
 const MessagesPage = () => {
@@ -45,6 +54,8 @@ const MessagesPage = () => {
   const [isAtBottom, setIsAtBottom] = useState(true) // Track if user is scrolled to bottom
   const [unreadCountInView, setUnreadCountInView] = useState(0) // Count of unread messages while scrolled up
   const [replyingTo, setReplyingTo] = useState(null) // Store message being replied to
+  const [image, setImage] = useState(null) // File object for image/video
+  const [imagePreview, setImagePreview] = useState('') // Preview URL for display
 
   // Refs
   const messagesEndRef = useRef(null)
@@ -55,6 +66,7 @@ const MessagesPage = () => {
   const isUserScrollingRef = useRef(false) // Track if user is manually scrolling
   const scrollTimeoutRef = useRef(null) // Timeout to detect when user stops scrolling
   const messageInputRef = useRef(null) // Ref for message input field
+  const imageInputRef = useRef(null) // Ref for image/video file input
 
   // Theme colors - white for light mode, dark for dark mode
   const bgColor = useColorModeValue('white', '#101010')  // White in light mode, dark in dark mode
@@ -630,6 +642,62 @@ const MessagesPage = () => {
     setReplyingTo(null)
   }
 
+  // Cleanup preview URL on unmount or when image changes
+  useEffect(() => {
+    return () => {
+      if (imagePreview && imagePreview.startsWith('blob:')) {
+        URL.revokeObjectURL(imagePreview)
+      }
+    }
+  }, [imagePreview])
+
+  // Handle image/video file selection
+  const handleImageChange = (event) => {
+    const file = event.target.files[0]
+    
+    if (!file) return
+
+    // Check if file is image or video
+    if (file.type.startsWith("image/") || file.type.startsWith("video/")) {
+      // Check file size (500MB limit)
+      const maxSize = 500 * 1024 * 1024 // 500MB
+      if (file.size > maxSize) {
+        showToast("File too large", "Please select a file smaller than 500MB", "error")
+        if (imageInputRef.current) {
+          imageInputRef.current.value = ''
+        }
+        return
+      }
+      
+      // Store the file object for sending
+      setImage(file) // Store file object instead of base64
+      
+      // Create preview URL for display
+      const previewURL = URL.createObjectURL(file)
+      setImagePreview(previewURL)
+    } else {
+      showToast("Invalid file type", "Please select an image or video file", "error")
+    }
+    
+    // Reset input value to allow selecting same file again
+    if (imageInputRef.current) {
+      imageInputRef.current.value = ''
+    }
+  }
+
+  // Clear image preview
+  const handleClearImage = () => {
+    // Revoke object URL to free memory
+    if (imagePreview && imagePreview.startsWith('blob:')) {
+      URL.revokeObjectURL(imagePreview)
+    }
+    setImage(null)
+    setImagePreview('')
+    if (imageInputRef.current) {
+      imageInputRef.current.value = ''
+    }
+  }
+
   // Close emoji picker when clicking outside
   useEffect(() => {
     function handleClickOutside(event) {
@@ -649,7 +717,8 @@ const MessagesPage = () => {
 
   // Send message
   const handleSendMessage = async () => {
-    if (!newMessage.trim() || !selectedConversation) return
+    // Allow sending if there's text, image, or both, but require at least one
+    if ((!newMessage.trim() && !image) || !selectedConversation) return
 
     const recipientId = selectedConversation.participants[0]?._id
     if (!recipientId) return
@@ -668,17 +737,22 @@ const MessagesPage = () => {
 
     setSending(true)
     try {
+      // Use FormData to send file
+      const formData = new FormData()
+      formData.append('recipientId', recipientId)
+      formData.append('message', newMessage || '')
+      if (image) {
+        formData.append('file', image)
+      }
+      if (replyingTo?._id) {
+        formData.append('replyTo', replyingTo._id)
+      }
+      
       const res = await fetch(`${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/message`, {
         method: 'POST',
         credentials: 'include',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          recipientId,
-          message: newMessage,
-          replyTo: replyingTo?._id || null,
-        }),
+        // Don't set Content-Type header - browser will set it with boundary for FormData
+        body: formData,
       })
 
       const data = await res.json()
@@ -695,6 +769,13 @@ const MessagesPage = () => {
         }
         setMessages((prev) => [...prev, messageWithSender])
         setNewMessage('')
+        // Revoke object URL to free memory
+        const currentPreview = imagePreview
+        setImage(null) // Clear image after sending
+        setImagePreview('') // Clear image preview first
+        if (currentPreview && currentPreview.startsWith('blob:')) {
+          URL.revokeObjectURL(currentPreview)
+        }
         setReplyingTo(null) // Clear reply after sending
         setSending(false) // Stop spinner immediately after message is added
         
@@ -1262,28 +1343,83 @@ const MessagesPage = () => {
                               </Text>
                             </Box>
                           )}
-                          <Flex
-                          bg={isOwn ? 'white' : useColorModeValue('gray.200', '#1a1a1a')}
-                          color={isOwn ? 'black' : useColorModeValue('black', 'white')}
-                          p={{ base: 2.5, md: 3 }}
-                          borderRadius="xl"
-                          borderTopLeftRadius={isOwn ? 'xl' : 'sm'}
-                          borderTopRightRadius={isOwn ? 'sm' : 'xl'}
-                          wordBreak="break-word"
-                          alignItems="flex-end"
-                          gap={1}
-                          cursor="pointer"
-                          onClick={(e) => handleMessageClick(e, msg._id)}
-                          _hover={{ opacity: 0.9 }}
-                          data-message-id={msg._id}
-                        >
-                          <Text fontSize={{ base: "sm", md: "md" }} whiteSpace="pre-wrap" flex={1}>{msg.text}</Text>
-                          {isOwn && (
-                            <Box alignSelf="flex-end" color={msg.seen ? "blue.600" : "gray.600"} flexShrink={0} ml={1}>
-                              <BsCheck2All size={16} />
+                          {/* Image/Video display */}
+                          {msg.img && (
+                            <Box
+                              mb={msg.text ? 2 : 0}
+                              borderRadius="md"
+                              overflow="hidden"
+                              maxW={{ base: "200px", sm: "250px", md: "300px" }}
+                              position="relative"
+                              cursor="pointer"
+                              onClick={(e) => handleMessageClick(e, msg._id)}
+                            >
+                              {msg.img.match(/\.(mp4|webm|ogg|mov)$/i) || msg.img.includes('/video/upload/') ? (
+                                <Box
+                                  as="video"
+                                  src={msg.img}
+                                  controls
+                                  maxW="100%"
+                                  maxH="400px"
+                                  borderRadius="md"
+                                  onClick={(e) => e.stopPropagation()}
+                                />
+                              ) : (
+                                <Image
+                                  src={msg.img}
+                                  alt="Message attachment"
+                                  maxW="100%"
+                                  maxH="400px"
+                                  borderRadius="md"
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    // Open image in modal or full view
+                                    window.open(msg.img, '_blank')
+                                  }}
+                                />
+                              )}
+                              {/* Seen status for image-only messages - overlay */}
+                              {!msg.text && isOwn && (
+                                <Box
+                                  position="absolute"
+                                  bottom={2}
+                                  right={2}
+                                  bg={useColorModeValue('rgba(255,255,255,0.9)', 'rgba(0,0,0,0.7)')}
+                                  borderRadius="full"
+                                  p={1}
+                                >
+                                  <Box as="span" color={msg.seen ? "blue.600" : "gray.600"}>
+                                    <BsCheck2All size={14} />
+                                  </Box>
+                                </Box>
+                              )}
                             </Box>
                           )}
-                        </Flex>
+                          {/* Text message bubble */}
+                          {msg.text && (
+                            <Flex
+                              bg={isOwn ? 'white' : useColorModeValue('gray.200', '#1a1a1a')}
+                              color={isOwn ? 'black' : useColorModeValue('black', 'white')}
+                              p={{ base: 2.5, md: 3 }}
+                              borderRadius="xl"
+                              borderTopLeftRadius={isOwn ? 'xl' : 'sm'}
+                              borderTopRightRadius={isOwn ? 'sm' : 'xl'}
+                              wordBreak="break-word"
+                              alignItems="flex-end"
+                              gap={1}
+                              cursor="pointer"
+                              onClick={(e) => handleMessageClick(e, msg._id)}
+                              _hover={{ opacity: 0.9 }}
+                              data-message-id={msg._id}
+                            >
+                              <Text fontSize={{ base: "sm", md: "md" }} whiteSpace="pre-wrap" flex={1}>{msg.text}</Text>
+                              {isOwn && (
+                                <Box alignSelf="flex-end" color={msg.seen ? "blue.600" : "gray.600"} flexShrink={0} ml={1}>
+                                  <BsCheck2All size={16} />
+                                </Box>
+                              )}
+                            </Flex>
+                          )}
                         </Flex>
                         <Text
                           fontSize={{ base: "2xs", md: "xs" }}
@@ -1596,6 +1732,43 @@ const MessagesPage = () => {
                   />
                 </Flex>
               )}
+              {/* Image/Video preview */}
+              {imagePreview && (
+                <Flex
+                  p={2}
+                  bg={useColorModeValue('gray.100', 'gray.800')}
+                  borderBottom="1px solid"
+                  borderColor={borderColor}
+                  alignItems="center"
+                  gap={2}
+                  position="relative"
+                >
+                  <Box position="relative" maxW="100px" maxH="100px">
+                    {image?.type?.startsWith('image/') ? (
+                      <Image src={imagePreview} alt="Preview" borderRadius="md" maxW="100px" maxH="100px" />
+                    ) : (
+                      <Box
+                        as="video"
+                        src={imagePreview}
+                        controls={false}
+                        maxW="100px"
+                        maxH="100px"
+                        borderRadius="md"
+                      />
+                    )}
+                  </Box>
+                  <Text fontSize="xs" color={useColorModeValue('gray.600', 'gray.400')} flex={1} noOfLines={1}>
+                    {image?.type?.startsWith('image/') ? 'Image' : 'Video'} selected
+                  </Text>
+                  <IconButton
+                    aria-label="Remove image"
+                    icon={<Text fontSize="lg">×</Text>}
+                    size="sm"
+                    variant="ghost"
+                    onClick={handleClearImage}
+                  />
+                </Flex>
+              )}
               <Flex
                 p={{ base: 2, md: 4 }}
                 pb={{ base: '60px', md: 4 }}
@@ -1621,6 +1794,26 @@ const MessagesPage = () => {
               >
                 <Text color="white" fontWeight="bold" fontSize={{ base: "md", md: "lg" }}>G</Text>
               </Box>
+              {/* Image/Video upload button */}
+              <IconButton
+                aria-label="Upload image or video"
+                icon={<BsFillImageFill size={18} />}
+                bg={useColorModeValue('gray.300', 'gray.600')}
+                color={useColorModeValue('black', 'white')}
+                _hover={{ bg: useColorModeValue('gray.400', 'gray.500') }}
+                onClick={() => imageInputRef.current?.click()}
+                borderRadius="full"
+                size={{ base: "sm", md: "md" }}
+                flexShrink={0}
+                title="Upload image or video"
+              />
+              <Input
+                type="file"
+                accept="image/*,video/*"
+                hidden
+                ref={imageInputRef}
+                onChange={handleImageChange}
+              />
               {/* Call button - Optimized for mobile */}
               <IconButton
                 aria-label="Start video call"
@@ -1686,7 +1879,7 @@ const MessagesPage = () => {
                 _hover={{ bg: 'green.600' }}
                 onClick={handleSendMessage}
                 isLoading={sending}
-                isDisabled={sending || !newMessage.trim()}
+                isDisabled={sending || (!newMessage.trim() && !imagePreview)}
                 borderRadius="md"
                 px={{ base: 3, sm: 4, md: 6 }}
                 size={{ base: "sm", md: "md" }}

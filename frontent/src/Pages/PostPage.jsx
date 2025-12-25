@@ -138,8 +138,18 @@ if(!post) return
 
     <Text my={3}>{post?.text}</Text>
 
-    <Box borderRadius={16} overflow={"hidden"} border={"1px solid"} borderColor={"gray.light"}>
-    <Image src={post?.img} w={"full"} objectFit="contain" maxH="300px" />
+    <Box borderRadius={16} overflow={"hidden"} border={"1px solid"} borderColor={"gray.light"} my={3}>
+      {post?.img && (post.img.match(/\.(mp4|webm|ogg|mov)$/i) || post.img.includes('/video/upload/')) ? (
+        <Box
+          as="video"
+          src={post.img}
+          controls
+          w="full"
+          maxH="500px"
+        />
+      ) : (
+        <Image src={post?.img} w={"full"} objectFit="contain" maxH="500px" />
+      )}
     </Box>
 
 

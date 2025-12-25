@@ -1,6 +1,7 @@
 import Conversation from '../models/conversation.js'
 import Message from '../models/message.js'
 import { getRecipientSockedId, getIO } from '../socket/socket.js'
+import {v2 as cloudinary} from 'cloudinary'
 
 
 export const sendMessaeg = async(req,res) => {
@@ -9,7 +10,22 @@ export const sendMessaeg = async(req,res) => {
   
  const{recipientId,message,replyTo}= req.body
  const senderId = req.user._id  // Fix: Use _id instead of id
- let{img}= req.body
+ let img = ''
+ 
+ // Upload file to Cloudinary if provided (from multer)
+ if(req.file){
+   // Convert buffer to base64 for Cloudinary
+   const base64String = `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}`
+   
+   // Upload to Cloudinary
+   const uploadOptions = {
+     resource_type: req.file.mimetype.startsWith('video/') ? 'video' : 'image'
+   }
+   
+   const uploadResponse = await cloudinary.uploader.upload(base64String, uploadOptions)
+   img = uploadResponse.secure_url
+ }
+ 
  let conversation = await Conversation.findOne({ participants:{$all:[senderId,recipientId]}})
 
  if(!conversation){
@@ -43,7 +59,7 @@ if (newMessage.replyTo) {
     }
   })
 }
-
+  
 const recipentSockedId = getRecipientSockedId(recipientId)
 const io = getIO() // Get io instance
 
@@ -114,7 +130,7 @@ export const mycon = async(req,res) => {
     const conversationsWithUnread = await Promise.all(
       conversations.map(async (conversation) => {
         // Filter participants to get the other user
-        conversation.participants = conversation.participants.filter(
+			conversation.participants = conversation.participants.filter(
           (participant) => participant._id.toString() !== userId.toString()
         );
 
@@ -214,6 +230,6 @@ export const toggleReaction = async (req, res) => {
     res.status(200).json(message)
   } catch (error) {
     res.status(500).json({ error: error.message })
-    console.log(error)
-  }
+     console.log(error)
+ }
 }

@@ -10,7 +10,7 @@ export const createPost = async(req,res) => {
   
         const{postedBy,text}= req.body
          
-      let {img}= req.body
+      let img = ''
 
 
         if(!postedBy || !text){
@@ -33,10 +33,18 @@ export const createPost = async(req,res) => {
         return res.status(500).json({error:"post text must be 500 or less"})
        }
 
-
-       if(img){
-        const uploadResponse = await cloudinary.uploader.upload(img)
-        img = uploadResponse.secure_url
+       // Upload file to Cloudinary if provided (from multer)
+       if(req.file){
+         // Convert buffer to base64 for Cloudinary
+         const base64String = `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}`
+         
+         // Upload to Cloudinary with proper resource type
+         const uploadOptions = {
+           resource_type: req.file.mimetype.startsWith('video/') ? 'video' : 'image'
+         }
+         
+         const uploadResponse = await cloudinary.uploader.upload(base64String, uploadOptions)
+         img = uploadResponse.secure_url
        }
 
 

@@ -26,8 +26,9 @@ cloudinary.config({
 
 })
 
-app.use(express.json({ limit: "20mb" }));
-app.use(express.urlencoded({ limit: "20mb", extended: true }));
+app.use(express.json({ limit: "50mb" })); // Increased for other endpoints
+app.use(express.urlencoded({ limit: "50mb", extended: true })); // Increased for other endpoints
+// Note: File uploads via Multer use multipart/form-data and have their own 500MB limit
 
 app.use(cookieParser())
 // CORS - allow both localhost (dev) and your Render frontend URL (prod)

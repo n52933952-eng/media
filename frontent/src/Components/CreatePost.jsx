@@ -16,7 +16,8 @@ import {Button,useColorModeValue,useDisclosure,
   Input,
   Image,
   CloseButton,
-  Flex
+  Flex,
+  Box
 } from "@chakra-ui/react";
 
 import { BsFileImageFill } from "react-icons/bs";
@@ -35,7 +36,8 @@ const CreatePost = () => {
    const{isOpen,onOpen,onClose}=useDisclosure()
    
     const[postText,setPostText]=useState('')
-    const[image,setImage]=useState('')
+    const[image,setImage]=useState(null) // File object instead of base64
+    const[imagePreview,setImagePreview]=useState('') // Preview URL
     const[loading,setLoading]=useState(false)
 
 
@@ -66,18 +68,36 @@ const CreatePost = () => {
 
 
   const handleImageChange = (event) => {
-  const file = event.target.files[0]
-  
-   if(file && file.type.startsWith("image/")){
-    const reader = new FileReader()
+    const file = event.target.files[0]
+    
+    if (!file) return
 
-    reader.onload = () => {
-        setImage(reader.result)
+    // Check if file is image or video
+    if (file.type.startsWith("image/") || file.type.startsWith("video/")) {
+      // Check file size (500MB limit)
+      const maxSize = 500 * 1024 * 1024 // 500MB
+      if (file.size > maxSize) {
+        showToast("File too large", "Please select a file smaller than 500MB", "error")
+        if (imageInput.current) {
+          imageInput.current.value = ''
+        }
+        return
+      }
+      
+      // Store the file object for sending
+      setImage(file)
+      
+      // Create preview URL for display
+      const previewURL = URL.createObjectURL(file)
+      setImagePreview(previewURL)
+    } else {
+      showToast("Invalid file type", "Please select an image or video file", "error")
     }
-    reader.readAsDataURL(file)
-   }else{
-    showToast("Please select an image","Invalid image type","error")
-   }
+    
+    // Reset input value to allow selecting same file again
+    if (imageInput.current) {
+      imageInput.current.value = ''
+    }
   }
 
 
@@ -95,33 +115,41 @@ const CreatePost = () => {
    const handleCreatePost = async() => {
      setLoading(true)
   try{
+    // Use FormData to send file
+    const formData = new FormData()
+    formData.append('postedBy', user._id)
+    formData.append('text', postText)
+    if (image) {
+      formData.append('file', image)
+    }
 
- const res = await fetch(`${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/post/create`,{
-  
-  credentials: "include",
-  method:"POST",
-
-  headers:{
-    "Content-Type" : "application/json"
-  },
-  body:JSON.stringify({postedBy:user._id,text:postText,img:image})
- })
+    const res = await fetch(`${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/post/create`,{
+      credentials: "include",
+      method:"POST",
+      // Don't set Content-Type header - browser will set it with boundary for FormData
+      body: formData
+    })
 
 
- const data = await res.json()
+    const data = await res.json()
 
-if(data.error){
-  showToast("Error",data.error,"error")
-  return
-}
+    if(data.error){
+      showToast("Error",data.error,"error")
+      return
+    }
 
-showToast("Success","Post created sucfully","success")
-onClose()
-setPostText("")
-setImage("")
+    showToast("Success","Post created sucfully","success")
+    onClose()
+    setPostText("")
+    // Revoke object URL to free memory
+    if (imagePreview && imagePreview.startsWith('blob:')) {
+      URL.revokeObjectURL(imagePreview)
+    }
+    setImage(null)
+    setImagePreview("")
   }
   catch(error){
-    showToast("Errir",error,"error")
+    showToast("Error",error,"error")
   }finally{
     setLoading(false)
   }
@@ -172,14 +200,34 @@ setImage("")
           
             <Text fontSize="sm" fontWeight="bold" textAlign="right" color="gray.500">{remaingChar}/{MAX_CHAR}</Text>
          
-            <Input  type="file" hidden ref={imageInput} onChange={handleImageChange} />
+            <Input  type="file" accept="image/*,video/*" hidden ref={imageInput} onChange={handleImageChange} />
 
             <BsFileImageFill onClick={() => imageInput.current.click()} />
                
-               {image && 
+               {imagePreview && 
                  <Flex mt={5} position="relative" w="full">
-                     <Image src={image} />
-                     <CloseButton onClick={() => setImage("")} position="absolute" top={2} right={2} bg={"gray.500"}/>
+                     {image?.type?.startsWith('image/') ? (
+                       <Image src={imagePreview} alt="Preview" maxH="400px" borderRadius="md" />
+                     ) : (
+                       <Box as="video" src={imagePreview} controls maxH="400px" borderRadius="md" />
+                     )}
+                     <CloseButton 
+                       onClick={() => {
+                         // Revoke object URL to free memory
+                         if (imagePreview && imagePreview.startsWith('blob:')) {
+                           URL.revokeObjectURL(imagePreview)
+                         }
+                         setImage(null)
+                         setImagePreview('')
+                         if (imageInput.current) {
+                           imageInput.current.value = ''
+                         }
+                       }} 
+                       position="absolute" 
+                       top={2} 
+                       right={2} 
+                       bg={"gray.500"}
+                     />
                  </Flex>
                  }
             
