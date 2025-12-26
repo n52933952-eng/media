@@ -16,53 +16,7 @@ const Header = () => {
   const{colorMode,toggleColorMode}=useColorMode()
 
    const{user}=useContext(UserContext)
-   const {socket} = useContext(SocketContext) || {}
-   const [totalUnreadCount, setTotalUnreadCount] = useState(0)
-
-   // Fetch total unread count
-   const fetchUnreadCount = async () => {
-     if (!user) {
-       setTotalUnreadCount(0)
-       return
-     }
-
-     try {
-       const res = await fetch(`${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/message/conversations`, {
-         credentials: 'include',
-       })
-       const data = await res.json()
-       if (res.ok) {
-         const total = data.reduce((sum, conv) => sum + (conv.unreadCount || 0), 0)
-         setTotalUnreadCount(total)
-       }
-     } catch (error) {
-       console.log('Error fetching unread count:', error)
-     }
-   }
-
-   useEffect(() => {
-     fetchUnreadCount()
-     
-     // Refresh every 3 seconds to get real-time updates
-     const interval = setInterval(fetchUnreadCount, 3000)
-     return () => clearInterval(interval)
-   }, [user])
-
-   // Listen for messagesSeen event to update total count immediately
-   useEffect(() => {
-     if (!socket) return
-
-     const handleMessagesSeen = () => {
-       // Refresh count when messages are marked as seen
-       fetchUnreadCount()
-     }
-
-     socket.on("messagesSeen", handleMessagesSeen)
-
-     return () => {
-       socket.off("messagesSeen", handleMessagesSeen)
-     }
-   }, [socket, user])
+   const {socket, totalUnreadCount} = useContext(SocketContext) || {}
   
   
   

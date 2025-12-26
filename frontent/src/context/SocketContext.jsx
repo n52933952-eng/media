@@ -18,6 +18,7 @@ export const SocketContextProvider = ({ children }) => {
   const [stream, setStream] = useState();
   const [me, setMe] = useState('');
   const [busyUsers, setBusyUsers] = useState(new Set()); // Track which users are busy
+  const [totalUnreadCount, setTotalUnreadCount] = useState(0); // Global unread message count
 
   const myVideo = useRef();
   const userVideo = useRef();
@@ -73,7 +74,38 @@ export const SocketContextProvider = ({ children }) => {
 
     newSocket?.on('getOnlineUser', (users) => setOnlineUser(users));
 
+    // Listen for unread count updates
+    newSocket?.on('unreadCountUpdate', ({ totalUnread }) => {
+      setTotalUnreadCount(totalUnread || 0);
+    });
+
+    // Fetch initial unread count
+    const fetchInitialUnreadCount = async () => {
+      if (!user?._id) {
+        setTotalUnreadCount(0);
+        return;
+      }
+      try {
+        const socketUrl = import.meta.env.PROD 
+          ? window.location.origin 
+          : "http://localhost:5000";
+        const res = await fetch(`${socketUrl}/api/message/conversations?limit=1`, {
+          credentials: 'include',
+        });
+        const data = await res.json();
+        if (res.ok) {
+          const conversations = data.conversations || data || [];
+          const total = conversations.reduce((sum, conv) => sum + (conv.unreadCount || 0), 0);
+          setTotalUnreadCount(total);
+        }
+      } catch (error) {
+        console.log('Error fetching initial unread count:', error);
+      }
+    };
+    fetchInitialUnreadCount();
+
     return () => {
+      newSocket?.off('unreadCountUpdate');
       newSocket.close();
     };
   }, [user]);
@@ -383,6 +415,7 @@ export const SocketContextProvider = ({ children }) => {
         leaveCall,
         onlineUser,
         busyUsers, // Export busyUsers so components can check if a user is busy
+        totalUnreadCount, // Export total unread message count
       }}
     >
       {children}

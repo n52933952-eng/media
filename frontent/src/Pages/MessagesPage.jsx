@@ -640,14 +640,49 @@ const MessagesPage = () => {
             }
             
             if (messageSenderId !== currentUserId) {
-              return { ...conv, unreadCount: (conv.unreadCount || 0) + 1 }
+              return { ...conv, unreadCount: (conv.unreadCount || 0) + 1, lastMessage: message.lastMessage || conv.lastMessage || { text: message.text || '', sender: message.sender } }
             }
           }
           return conv
         }))
+        
+        // Refresh conversations to update last message preview, but preserve unread counts
+        // Don't fetch immediately - let the UI update first, then fetch in background
+        // This prevents overwriting the unread count we just incremented
+        setTimeout(async () => {
+          try {
+            const url = `${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/message/conversations?limit=20`
+            const res = await fetch(url, { credentials: 'include' })
+            const updatedData = await res.json()
+            
+            if (res.ok) {
+              const updatedConversations = updatedData.conversations || updatedData || []
+              if (Array.isArray(updatedConversations)) {
+                // Merge unread counts from local state with fetched data
+                setConversations(prev => {
+                  return prev.map(localConv => {
+                    const fetchedConv = updatedConversations.find(fc => fc._id?.toString() === localConv._id?.toString())
+                    if (fetchedConv) {
+                      // If local unread count is higher (we just incremented it), keep the local one
+                      // Otherwise use the fetched one (which has accurate count from server)
+                      const maxUnreadCount = Math.max(localConv.unreadCount || 0, fetchedConv.unreadCount || 0)
+                      return {
+                        ...fetchedConv,
+                        unreadCount: maxUnreadCount,
+                        lastMessage: fetchedConv.lastMessage || localConv.lastMessage
+                      }
+                    }
+                    return localConv
+                  })
+                })
+              }
+            }
+          } catch (error) {
+            // Silently fail - unread count update is already in place
+            console.log('Error refreshing conversations:', error)
+          }
+        }, 300)
       }
-      // Always refresh conversations to update last message preview
-      fetchConversations()
     }
 
     socket.on('newMessage', handleNewMessage)
@@ -2870,10 +2905,15 @@ const MessagesPage = () => {
                 borderColor={replyingTo ? "blue.500" : borderColor}
               />
               <Button
+                type="button"
                 bg="green.500"
                 color="white"
                 _hover={{ bg: 'green.600' }}
-                onClick={handleSendMessage}
+                onClick={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  handleSendMessage()
+                }}
                 isLoading={sending || (uploadProgress > 0 && uploadProgress < 100) || isProcessing}
                 isDisabled={sending || (uploadProgress > 0 && uploadProgress < 100) || isProcessing || (!newMessage.trim() && !image && !imagePreview)}
                 borderRadius="md"

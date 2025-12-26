@@ -80,6 +80,25 @@ export const sendMessaeg = async(req,res) => {
 
                 if(recipentSockedId && recipientId && io){
                   io.to(recipentSockedId).emit("newMessage",newMessage)
+                  
+                  // Calculate and emit unread count update for recipient
+                  try {
+                    const recipientConversations = await Conversation.find({ participants: recipientId })
+                    const totalUnread = await Promise.all(
+                      recipientConversations.map(async (conv) => {
+                        const unreadCount = await Message.countDocuments({
+                          conversationId: conv._id,
+                          seen: false,
+                          sender: { $ne: recipientId }
+                        })
+                        return unreadCount || 0
+                      })
+                    )
+                    const totalUnreadCount = totalUnread.reduce((sum, count) => sum + count, 0)
+                    io.to(recipentSockedId).emit("unreadCountUpdate", { totalUnread: totalUnreadCount })
+                  } catch (error) {
+                    console.log('Error calculating unread count:', error)
+                  }
                 }
 
                 if (!res.headersSent) {
@@ -147,6 +166,25 @@ const io = getIO() // Get io instance
 
 if(recipentSockedId && recipientId && io){
   io.to(recipentSockedId).emit("newMessage",newMessage)
+  
+  // Calculate and emit unread count update for recipient
+  try {
+    const recipientConversations = await Conversation.find({ participants: recipientId })
+    const totalUnread = await Promise.all(
+      recipientConversations.map(async (conv) => {
+        const unreadCount = await Message.countDocuments({
+          conversationId: conv._id,
+          seen: false,
+          sender: { $ne: recipientId }
+        })
+        return unreadCount || 0
+      })
+    )
+    const totalUnreadCount = totalUnread.reduce((sum, count) => sum + count, 0)
+    io.to(recipentSockedId).emit("unreadCountUpdate", { totalUnread: totalUnreadCount })
+  } catch (error) {
+    console.log('Error calculating unread count:', error)
+  }
 }
 
 

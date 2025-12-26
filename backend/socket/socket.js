@@ -183,6 +183,25 @@ export const initializeSocket = (app) => {
                     const currentUserSocketId = currentUserData?.socketId
                     if (currentUserSocketId) {
                         io.to(currentUserSocketId).emit("messagesSeen", { conversationId })
+                        
+                        // Update unread count for the user who marked messages as seen
+                        try {
+                            const userConversations = await Conversation.find({ participants: currentUserId })
+                            const totalUnread = await Promise.all(
+                                userConversations.map(async (conv) => {
+                                    const unreadCount = await Message.countDocuments({
+                                        conversationId: conv._id,
+                                        seen: false,
+                                        sender: { $ne: currentUserId }
+                                    })
+                                    return unreadCount || 0
+                                })
+                            )
+                            const totalUnreadCount = totalUnread.reduce((sum, count) => sum + count, 0)
+                            io.to(currentUserSocketId).emit("unreadCountUpdate", { totalUnread: totalUnreadCount })
+                        } catch (error) {
+                            console.log('Error calculating unread count:', error)
+                        }
                     }
                 }
             } catch (error) {
