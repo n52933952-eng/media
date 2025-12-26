@@ -1253,14 +1253,23 @@ const MessagesPage = () => {
 
   // Send message
   const handleSendMessage = async (e) => {
-    // Prevent any default behavior
+    // Prevent any default behavior - CRITICAL to prevent page reload
     if (e) {
       e.preventDefault()
       e.stopPropagation()
+      if (e.nativeEvent) {
+        e.nativeEvent.stopImmediatePropagation()
+      }
     }
     
     // Allow sending if there's text, image, or both, but require at least one
-    if ((!newMessage.trim() && !image && !imagePreview) || !selectedConversation || sending) return
+    if ((!newMessage.trim() && !image && !imagePreview) || !selectedConversation || sending) {
+      if (e) {
+        e.preventDefault()
+        e.stopPropagation()
+      }
+      return false
+    }
 
     const recipientId = selectedConversation.participants[0]?._id
     if (!recipientId) return
@@ -1281,6 +1290,33 @@ const MessagesPage = () => {
     setUploadProgress(0) // Reset progress
     
     try {
+      // If no file, send as JSON (no FormData needed)
+      if (!image || !(image instanceof File)) {
+        const url = `${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/message`
+        
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            recipientId,
+            message: newMessage || '',
+            replyTo: replyingTo?._id || null
+          }),
+          credentials: 'include'
+        })
+        
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}))
+          throw new Error(errorData.error || errorData.message || 'Failed to send message')
+        }
+        
+        const data = await response.json()
+        handleMessageSent(data)
+        return
+      }
+      
       // Upload file via Multer to Cloudinary (backend handles upload)
       const formData = new FormData()
       formData.append('recipientId', recipientId)
@@ -1369,11 +1405,43 @@ const MessagesPage = () => {
         }
       }
       
+      // If no file, use JSON instead of FormData
+      if (!image || !(image instanceof File)) {
+        const url = `${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/message`
+        
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            recipientId,
+            message: newMessage || '',
+            replyTo: replyingTo?._id || null
+          }),
+          credentials: 'include'
+        })
+        
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}))
+          throw new Error(errorData.error || errorData.message || 'Failed to send message')
+        }
+        
+        const data = await response.json()
+        
+        // Handle successful message send
+        handleMessageSent(data)
+        
+        return // Exit early, response handled above
+      }
+      
+      // If we have a file but it's not a File object, handle it
       if (replyingTo?._id) {
         formData.append('replyTo', replyingTo._id)
       }
       
-      // No file upload - just send message data
+      // This should not be reached if image is a File (handled above) or if no image (handled in JSON block)
+      // But keeping as fallback
       const url = `${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/message`
       
       const response = await fetch(url, {
