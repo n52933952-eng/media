@@ -8,6 +8,7 @@ import upload from '../middlware/upload.js'
 const router = express.Router()
 
 
+// Route for sending messages - files are uploaded via Multer to Cloudinary
 router.post("/",protectRoute,upload.single('file'),sendMessaeg)
 
 // Put more specific routes before parameterized routes to avoid conflicts

@@ -22,6 +22,7 @@ import {Button,useColorModeValue,useDisclosure,
 
 import { BsFileImageFill } from "react-icons/bs";
 import useShowToast from '../hooks/useShowToast.js'
+import { compressVideo, needsCompression } from '../utils/videoCompress'
 
 import{UserContext} from '../context/UserContext'
 
@@ -36,9 +37,11 @@ const CreatePost = () => {
    const{isOpen,onOpen,onClose}=useDisclosure()
    
     const[postText,setPostText]=useState('')
-    const[image,setImage]=useState(null) // File object instead of base64
+    const[image,setImage]=useState(null) // File object or Supabase URL object
     const[imagePreview,setImagePreview]=useState('') // Preview URL
     const[loading,setLoading]=useState(false)
+    const[uploadProgress,setUploadProgress]=useState(0)
+    const[isUploading,setIsUploading]=useState(false)
 
 
 
@@ -67,34 +70,81 @@ const CreatePost = () => {
 
 
 
-  const handleImageChange = (event) => {
+  const handleImageChange = async (event) => {
     const file = event.target.files[0]
     
     if (!file) return
 
     // Check if file is image or video
-    if (file.type.startsWith("image/") || file.type.startsWith("video/")) {
-      // Check file size (500MB limit)
-      const maxSize = 500 * 1024 * 1024 // 500MB
-      if (file.size > maxSize) {
-        showToast("File too large", "Please select a file smaller than 500MB", "error")
+    if (!file.type.startsWith("image/") && !file.type.startsWith("video/")) {
+      showToast("Invalid file type", "Please select an image or video file", "error")
+      return
+    }
+
+    // Check file size (100MB limit for Cloudinary free tier)
+    const maxSize = 100 * 1024 * 1024 // 100MB
+    const fileSizeMB = file.size / (1024 * 1024)
+    
+    if (file.size > maxSize) {
+      showToast("File too large", `File (${fileSizeMB.toFixed(1)}MB) exceeds Cloudinary's 100MB limit. Please compress the file or use a smaller one.`, "error")
+      if (imageInput.current) {
+        imageInput.current.value = ''
+      }
+      return
+    }
+
+    // Store file for preview
+    setImage(file)
+    const previewURL = URL.createObjectURL(file)
+    setImagePreview(previewURL)
+    setUploadProgress(0)
+    setIsUploading(false)
+
+    // Compress video if needed
+    if (needsCompression(file)) {
+      setIsUploading(true)
+      setUploadProgress(10)
+      
+      try {
+        showToast("Compressing video", "Please wait while we compress your video...", "info", 5000)
+        
+        const compressedFile = await compressVideo(file, {
+          maxSizeMB: 95,
+          quality: fileSizeMB > 50 ? 'low' : 'medium',
+          progressCallback: (progress) => {
+            setUploadProgress(10 + (progress * 0.8))
+          }
+        })
+        
+        const compressedSizeMB = compressedFile.size / (1024 * 1024)
+        console.log(`Video compressed: ${fileSizeMB.toFixed(2)}MB → ${compressedSizeMB.toFixed(2)}MB`)
+        
+        setImage(compressedFile)
+        
+        if (previewURL && previewURL.startsWith('blob:')) {
+          URL.revokeObjectURL(previewURL)
+        }
+        const newPreviewURL = URL.createObjectURL(compressedFile)
+        setImagePreview(newPreviewURL)
+        
+        setUploadProgress(100)
+        setIsUploading(false)
+        showToast("Compression complete", `Video compressed to ${compressedSizeMB.toFixed(2)}MB`, "success")
+      } catch (error) {
+        console.error('Video compression error:', error)
+        setUploadProgress(0)
+        setIsUploading(false)
+        setImage(null)
+        setImagePreview('')
+        showToast("Compression failed", error.message || "Failed to compress video", "error")
+        
         if (imageInput.current) {
           imageInput.current.value = ''
         }
-        return
       }
-      
-      // Store the file object for sending
-      setImage(file)
-      
-      // Create preview URL for display
-      const previewURL = URL.createObjectURL(file)
-      setImagePreview(previewURL)
-    } else {
-      showToast("Invalid file type", "Please select an image or video file", "error")
     }
     
-    // Reset input value to allow selecting same file again
+    // Reset input value
     if (imageInput.current) {
       imageInput.current.value = ''
     }
@@ -113,45 +163,133 @@ const CreatePost = () => {
 
 
    const handleCreatePost = async() => {
+     if (isUploading) {
+       showToast("Please wait", "File is still processing. Please wait for it to complete.", "warning")
+       return
+     }
+
      setLoading(true)
+     setUploadProgress(0)
+     
   try{
-    // Use FormData to send file
+    // Upload file via Multer to Cloudinary (backend handles upload)
     const formData = new FormData()
     formData.append('postedBy', user._id)
     formData.append('text', postText)
+    
     if (image) {
-      formData.append('file', image)
+      // Check if image is a File object (needs upload) or URL string
+      if (image instanceof File) {
+        formData.append('file', image)
+        
+        // Track upload progress
+        const xhr = new XMLHttpRequest()
+        
+        xhr.upload.addEventListener('progress', (e) => {
+          if (e.lengthComputable) {
+            setUploadProgress((e.loaded / e.total) * 100)
+          }
+        })
+        
+        xhr.addEventListener('load', () => {
+          if (xhr.status === 200) {
+            setUploadProgress(100)
+          }
+        })
+        
+        xhr.open('POST', `${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/post/create`)
+        xhr.withCredentials = true
+        xhr.timeout = 1200000 // 20 minutes
+        
+        xhr.onload = () => {
+          if (xhr.status === 200) {
+            try {
+              const data = JSON.parse(xhr.responseText)
+              
+              if(data.error){
+                showToast("Error", data.error, "error")
+                setLoading(false)
+                setUploadProgress(0)
+                return
+              }
+
+              showToast("Success", "Post created successfully", "success")
+              onClose()
+              setPostText("")
+              if (imagePreview && imagePreview.startsWith('blob:')) {
+                URL.revokeObjectURL(imagePreview)
+              }
+              setImage(null)
+              setImagePreview("")
+              setUploadProgress(0)
+              setLoading(false)
+            } catch (error) {
+              showToast("Error", "Failed to parse server response", "error")
+              setLoading(false)
+              setUploadProgress(0)
+            }
+          } else {
+            try {
+              const errorData = JSON.parse(xhr.responseText)
+              showToast("Error", errorData.error || "Failed to create post", "error")
+            } catch (error) {
+              showToast("Error", "Failed to create post", "error")
+            }
+            setLoading(false)
+            setUploadProgress(0)
+          }
+        }
+        
+        xhr.onerror = () => {
+          showToast("Error", "Network error while creating post", "error")
+          setLoading(false)
+          setUploadProgress(0)
+        }
+        
+        xhr.ontimeout = () => {
+          showToast("Error", "Upload timeout. Please try again.", "error")
+          setLoading(false)
+          setUploadProgress(0)
+        }
+        
+        xhr.send(formData)
+        return // Exit early, response handled in xhr callbacks
+      } else {
+        // Image is already a URL (shouldn't happen, but handle it)
+        formData.append('fileUrl', image)
+      }
     }
 
+    // No file - just send post data
     const res = await fetch(`${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/post/create`,{
       credentials: "include",
       method:"POST",
-      // Don't set Content-Type header - browser will set it with boundary for FormData
       body: formData
     })
-
 
     const data = await res.json()
 
     if(data.error){
-      showToast("Error",data.error,"error")
+      showToast("Error", data.error, "error")
+      setLoading(false)
       return
     }
 
-    showToast("Success","Post created sucfully","success")
+    showToast("Success", "Post created successfully", "success")
     onClose()
     setPostText("")
-    // Revoke object URL to free memory
     if (imagePreview && imagePreview.startsWith('blob:')) {
       URL.revokeObjectURL(imagePreview)
     }
     setImage(null)
     setImagePreview("")
+    setUploadProgress(0)
+    setLoading(false)
   }
   catch(error){
-    showToast("Error",error,"error")
-  }finally{
+    showToast("Error", error.message || error, "error")
     setLoading(false)
+    setUploadProgress(0)
   }
 
 

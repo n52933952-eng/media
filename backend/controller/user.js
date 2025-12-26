@@ -1,8 +1,9 @@
 import User from '../models/user.js'
 import bcryptjs from 'bcryptjs' 
 import GenerateToken from '../utils/GenerateToken.js'
-import{v2 as cloudinary} from 'cloudinary'
 import mongoose from 'mongoose'
+import { v2 as cloudinary } from 'cloudinary'
+import { Readable } from 'stream'
 
 
 
@@ -160,9 +161,9 @@ export const UpdateUser = async(req,res) => {
 
         let user = await User.findById(userId)
         
-        let {profilePic} = req.body
+        let profilePic = req.body.profilePic
          
- 
+
         if(!user){
             return res.status(400).json({error:"no user"})
         }
@@ -176,23 +177,76 @@ export const UpdateUser = async(req,res) => {
         user.password = hashPassword
       }
        
-      if(profilePic){
-         
-        if(user.profilePic){
-          await cloudinary.uploader.destroy(user.profilePic.split("/").pop().split(".")[0])
-        }
-        const uploadedResponse = await cloudinary.uploader.upload(profilePic)
-         profilePic = uploadedResponse.secure_url
+      // Handle file upload via Multer to Cloudinary
+      if(req.file) {
+        return new Promise((resolve, reject) => {
+          
+          const stream = cloudinary.uploader.upload_stream(
+            {
+              resource_type: 'image',
+              folder: 'profile-pics',
+            },
+            async (error, result) => {
+              if (error) {
+                console.error('Cloudinary upload error:', error)
+                if (!res.headersSent) {
+                  res.status(500).json({ 
+                    error: 'Failed to upload profile picture',
+                    details: error.message 
+                  })
+                }
+                reject(error)
+                return
+              }
+              
+              profilePic = result.secure_url
+              
+              try {
+                user.name = name || user.name
+                user.username = username || user.username 
+                user.email = email || user.email 
+                user.profilePic = profilePic || user.profilePic 
+                user.bio = bio || user.bio
+
+                user = await user.save()
+
+                // Return safe fields only (exclude password)
+                if (!res.headersSent) {
+                  res.status(200).json({
+                    _id: user._id,
+                    name: user.name,
+                    username: user.username,
+                    email: user.email,
+                    bio: user.bio,
+                    profilePic: user.profilePic
+                  })
+                }
+                resolve()
+              } catch (error) {
+                console.error('Error updating user after upload:', error)
+                if (!res.headersSent) {
+                  res.status(500).json({ 
+                    error: error.message || 'Failed to update profile' 
+                  })
+                }
+                reject(error)
+              }
+            }
+          )
+          
+          const bufferStream = new Readable()
+          bufferStream.push(req.file.buffer)
+          bufferStream.push(null)
+          bufferStream.pipe(stream)
+        })
       }
 
-       user.name = name || user.name
-       user.username = username || user.username 
-       user.email = email || user.email 
-
-        user.profilePic = profilePic || user.profilePic 
-        user.bio = bio || user.bio
-  
- 
+      // No file upload - update user immediately
+      user.name = name || user.name
+      user.username = username || user.username 
+      user.email = email || user.email 
+      user.profilePic = profilePic || user.profilePic 
+      user.bio = bio || user.bio
 
       user = await user.save()
 

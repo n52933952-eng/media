@@ -13,6 +13,8 @@ export const SocketContextProvider = ({ children }) => {
   const [call, setCall] = useState({});
   const [callAccepted, setCallAccepted] = useState(false);
   const [callEnded, setCallEnded] = useState(false);
+  const [isCalling, setIsCalling] = useState(false); // Track if current user is calling (ringing state)
+  const [callType, setCallType] = useState('video'); // 'audio' or 'video'
   const [stream, setStream] = useState();
   const [me, setMe] = useState('');
   const [busyUsers, setBusyUsers] = useState(new Set()); // Track which users are busy
@@ -23,9 +25,13 @@ export const SocketContextProvider = ({ children }) => {
   const peerRef = useRef();
 
   // Get user media and unmute audio track explicitly
-  const getMediaStream = async () => {
+  const getMediaStream = async (type = 'video') => {
     try {
-      const currentStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      const constraints = {
+        audio: true,
+        video: type === 'video' ? true : false
+      };
+      const currentStream = await navigator.mediaDevices.getUserMedia(constraints);
       
       // Unmute audio tracks explicitly (enabled=true)
       currentStream.getAudioTracks().forEach(track => {
@@ -33,14 +39,14 @@ export const SocketContextProvider = ({ children }) => {
       });
 
       setStream(currentStream);
-      console.log("Media stream obtained");
+      console.log("Media stream obtained", type);
     } catch (error) {
       console.error('Error getting media stream:', error);
     }
   };
 
   useEffect(() => {
-    getMediaStream();
+    getMediaStream('video'); // Default to video call
   }, []);
 
   useEffect(() => {
@@ -79,6 +85,7 @@ export const SocketContextProvider = ({ children }) => {
       setCall({});
       setCallAccepted(false);
       setCallEnded(true);
+      setIsCalling(false); // Stop ringing when call is canceled
       cleanupPeer();
       getMediaStream();
     };
@@ -153,8 +160,26 @@ export const SocketContextProvider = ({ children }) => {
   useEffect(() => {
     if (!socket) return;
 
-    const handleCallcomming = ({ from, name: callerName, signal, userToCall }) => {
-      setCall({ isReceivingCall: true, from, name: callerName, signal, userToCall });
+    const handleCallcomming = ({ from, name: callerName, signal, userToCall, callType: incomingCallType = 'video' }) => {
+      // Check if this is an incoming call (we're the receiver) or outgoing call (we're the caller)
+      const currentUserId = me || user?._id
+      
+      // If userToCall matches current user, we're receiving the call
+      if (userToCall === currentUserId && from !== currentUserId) {
+        // We are receiving the call (incoming)
+        setCallType(incomingCallType);
+        setCall({ isReceivingCall: true, from, name: callerName, signal, userToCall, callType: incomingCallType });
+        setIsCalling(false);
+        // Get appropriate media stream for incoming call
+        getMediaStream(incomingCallType);
+      } 
+      // If from matches current user, we're making the call (ringing state)
+      // Don't update if we already set isCalling in callUser function
+      else if (from === currentUserId && !isCalling) {
+        // We are making the call - show ringing state
+        setIsCalling(true);
+        setCall({ isCalling: true, userToCall, from, name: callerName, callType: incomingCallType });
+      }
     };
 
     socket.on("callUser", handleCallcomming);
@@ -179,16 +204,44 @@ export const SocketContextProvider = ({ children }) => {
     }
   };
 
-  const callUser = (id) => {
+  const callUser = async (id, recipientName = null, type = 'video') => {
     cleanupPeer();
     setCallAccepted(false);
     setCallEnded(false);
+    setIsCalling(true); // Start ringing state when calling
+    setCallType(type);
+    setCall({ isCalling: true, userToCall: id, recipientName: recipientName, callType: type });
 
-    const peer = new Peer({ initiator: true, trickle: false, stream });
+    // Get appropriate media stream based on call type
+    // Check if we need a new stream (different type than current)
+    let currentStream = stream;
+    const needsNewStream = !currentStream || 
+      (type === 'audio' && currentStream.getVideoTracks().length > 0) || 
+      (type === 'video' && currentStream.getVideoTracks().length === 0);
+
+    if (needsNewStream) {
+      // Stop old tracks if they exist
+      if (currentStream) {
+        currentStream.getTracks().forEach(track => track.stop());
+      }
+      // Get new stream with correct type
+      const constraints = {
+        audio: true,
+        video: type === 'video' ? true : false
+      };
+      currentStream = await navigator.mediaDevices.getUserMedia(constraints);
+      // Unmute audio tracks explicitly
+      currentStream.getAudioTracks().forEach(track => {
+        if (!track.enabled) track.enabled = true;
+      });
+      setStream(currentStream);
+    }
+
+    const peer = new Peer({ initiator: true, trickle: false, stream: currentStream });
     peerRef.current = peer;
 
     peer.on('signal', (data) => {
-      socket.emit('callUser', { userToCall: id, signalData: data, from: me, name: user.username });
+      socket.emit('callUser', { userToCall: id, signalData: data, from: me, name: user.username, callType: type });
     });
 
     peer.on('stream', (currentStream) => {
@@ -199,6 +252,7 @@ export const SocketContextProvider = ({ children }) => {
       try {
         peer.signal(signal);
         setCallAccepted(true);
+        setIsCalling(false); // Stop ringing when call is accepted
       } catch (err) {
         console.warn('Error signaling callAccepted:', err.message);
       }
@@ -208,10 +262,39 @@ export const SocketContextProvider = ({ children }) => {
   };
 
   // Answer an incoming call
-  const answerCall = () => {
+  const answerCall = async () => {
     cleanupPeer();
     setCallAccepted(true);
     setCallEnded(false);
+    setIsCalling(false); // Stop ringing when answering
+    
+    // Ensure we have the right stream type
+    const callTypeForAnswer = call.callType || 'video';
+    setCallType(callTypeForAnswer);
+    
+    // Check if we need a new stream (different type than current)
+    let currentStream = stream;
+    const needsNewStream = !currentStream || 
+      (callTypeForAnswer === 'audio' && currentStream.getVideoTracks().length > 0) || 
+      (callTypeForAnswer === 'video' && currentStream.getVideoTracks().length === 0);
+
+    if (needsNewStream) {
+      // Stop old tracks if they exist
+      if (currentStream) {
+        currentStream.getTracks().forEach(track => track.stop());
+      }
+      // Get new stream with correct type
+      const constraints = {
+        audio: true,
+        video: callTypeForAnswer === 'video' ? true : false
+      };
+      currentStream = await navigator.mediaDevices.getUserMedia(constraints);
+      // Unmute audio tracks explicitly
+      currentStream.getAudioTracks().forEach(track => {
+        if (!track.enabled) track.enabled = true;
+      });
+      setStream(currentStream);
+    }
     
     // Ensure both users are marked as busy when call is answered
     if (call.from) {
@@ -223,7 +306,7 @@ export const SocketContextProvider = ({ children }) => {
       });
     }
     
-    const peer = new Peer({ initiator: false, trickle: false, stream });
+    const peer = new Peer({ initiator: false, trickle: false, stream: currentStream });
     peerRef.current = peer;
 
     peer.on('signal', (data) => {
@@ -249,6 +332,7 @@ export const SocketContextProvider = ({ children }) => {
   const leaveCall = () => {
     setCallEnded(true);
     setCallAccepted(false);
+    setIsCalling(false); // Stop ringing when leaving call
     
     // Clear busy state for both users
     if (call.from || call.userToCall) {
@@ -288,6 +372,8 @@ export const SocketContextProvider = ({ children }) => {
         call,
         callAccepted,
         callEnded,
+        isCalling, // Export ringing state
+        callType, // Export call type (audio/video)
         myVideo,
         userVideo,
         stream,

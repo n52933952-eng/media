@@ -1,7 +1,8 @@
 
 import User from '../models/user.js'
 import Post from '../models/post.js'
-import{v2 as cloudinary} from 'cloudinary'
+import { v2 as cloudinary } from 'cloudinary'
+import { Readable } from 'stream'
 
 
 export const createPost = async(req,res) => {
@@ -33,24 +34,61 @@ export const createPost = async(req,res) => {
         return res.status(500).json({error:"post text must be 500 or less"})
        }
 
-       // Upload file to Cloudinary if provided (from multer)
-       if(req.file){
-         // Convert buffer to base64 for Cloudinary
-         const base64String = `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}`
-         
-         // Upload to Cloudinary with proper resource type
-         const uploadOptions = {
-           resource_type: req.file.mimetype.startsWith('video/') ? 'video' : 'image'
-         }
-         
-         const uploadResponse = await cloudinary.uploader.upload(base64String, uploadOptions)
-         img = uploadResponse.secure_url
+       // Handle file upload via Multer to Cloudinary
+       if(req.file) {
+         return new Promise((resolve, reject) => {
+           const stream = cloudinary.uploader.upload_stream(
+             {
+               resource_type: req.file.mimetype.startsWith('video/') ? 'video' : 'image',
+               folder: 'posts',
+               timeout: 1200000,
+               chunk_size: 6000000,
+             },
+             async (error, result) => {
+               if (error) {
+                 console.error('Cloudinary upload error:', error)
+                 if (!res.headersSent) {
+                   res.status(500).json({ 
+                     error: 'Failed to upload file to Cloudinary',
+                     details: error.message 
+                   })
+                 }
+                 reject(error)
+                 return
+               }
+               
+               img = result.secure_url
+               
+               try {
+                 const newPost = new Post({postedBy,text,img})
+                 await newPost.save()
+                 if (!res.headersSent) {
+                   res.status(200).json({message:"post created sufully", post: newPost})
+                 }
+                 resolve()
+               } catch (error) {
+                 console.error('Error creating post after upload:', error)
+                 if (!res.headersSent) {
+                   res.status(500).json({ 
+                     error: error.message || 'Failed to create post. Please try again.' 
+                   })
+                 }
+                 reject(error)
+               }
+             }
+           )
+           
+           const bufferStream = new Readable()
+           bufferStream.push(req.file.buffer)
+           bufferStream.push(null)
+           bufferStream.pipe(stream)
+         })
        }
 
-
+       // No file - create post immediately
        const newPost = new Post({postedBy,text,img})
        await newPost.save()
-       res.status(200).json({message:"post created sufully"})
+       res.status(200).json({message:"post created sufully", post: newPost})
 
     }
     catch(error){
@@ -90,28 +128,75 @@ export const getPost = async(req,res) => {
 
 
 export const deletePost = async(req,res) => {
-
     try{
+      const post = await Post.findById(req.params.id)
 
-  const post = await Post.findById(req.params.id)
+      if(!post){
+        return res.status(400).json({message:"no post"})
+      }
 
-  if(!post){
-    return res.status(400).json({message:"no post"})
-  }
+      if(post.postedBy.toString() !== req.user._id.toString()){
+        return res.status(400).json({message:"you cant delete other users post"})
+      }
 
-if(post.postedBy.toString() !== req.user._id.toString()){
-    return res.status(400).json({message:"you cant delete other users post"})
-}
+      // Delete image/video from Cloudinary if it exists
+      if(post.img && post.img.includes('cloudinary')){
+        try {
+          // Determine resource type (image or video)
+          const isVideo = post.img.includes('/video/upload/') || 
+                         post.img.match(/\.(mp4|webm|ogg|mov)$/i) ||
+                         (post.img.includes('cloudinary') && post.img.includes('video'))
+          
+          // Extract public ID from Cloudinary URL
+          // URL format: https://res.cloudinary.com/{cloud_name}/{resource_type}/upload/{version}/{folder}/{filename}.{ext}
+          // We need to extract: {folder}/{filename} (public ID)
+          const urlParts = post.img.split('/')
+          const uploadIndex = urlParts.findIndex(part => part === 'upload')
+          
+          if(uploadIndex !== -1 && uploadIndex < urlParts.length - 1){
+            // Get everything after 'upload' (skip version if present)
+            let publicIdParts = urlParts.slice(uploadIndex + 1)
+            
+            // Remove version if it's a numeric v{timestamp}
+            if(publicIdParts.length > 0 && /^v\d+$/.test(publicIdParts[0])){
+              publicIdParts = publicIdParts.slice(1)
+            }
+            
+            // Join remaining parts to get public ID
+            let publicId = publicIdParts.join('/')
+            
+            // Remove file extension
+            publicId = publicId.replace(/\.(jpg|jpeg|png|gif|webp|bmp|mp4|webm|ogg|mov)$/i, '')
+            
+            // Delete from Cloudinary
+            if(publicId){
+              await cloudinary.uploader.destroy(publicId, {
+                resource_type: isVideo ? 'video' : 'image'
+              })
+              console.log(`Deleted ${isVideo ? 'video' : 'image'} from Cloudinary: ${publicId}`)
+            }
+          } else {
+            // Fallback: try to extract public ID using simpler method
+            const filename = urlParts[urlParts.length - 1]
+            const publicId = filename.split('.')[0]
+            if(publicId){
+              await cloudinary.uploader.destroy(publicId, {
+                resource_type: isVideo ? 'video' : 'image'
+              })
+              console.log(`Deleted ${isVideo ? 'video' : 'image'} from Cloudinary (fallback): ${publicId}`)
+            }
+          }
+        } catch (cloudinaryError) {
+          // Log error but don't fail the post deletion
+          console.error('Error deleting file from Cloudinary:', cloudinaryError)
+          // Continue with post deletion even if Cloudinary deletion fails
+        }
+      }
 
+      // Delete the post from MongoDB
+      await Post.findByIdAndDelete(req.params.id)
 
-if(post.img){
- const imgId = post.img.split("/").pop().split(".")[0]
- await cloudinary.uploader.destroy(imgId)   
-}
-
-await Post.findByIdAndDelete(req.params.id)
-
-res.status(200).json({message:"post has deleted sucsfully"})
+      res.status(200).json({message:"post has deleted sucsfully"})
     }
     catch(error){
         console.log(error)

@@ -55,7 +55,7 @@ export const initializeSocket = (app) => {
         }
 
         // WebRTC: Handle call user - emit to both receiver AND sender like madechess
-        socket.on("callUser", ({ userToCall, signalData, from, name }) => {
+        socket.on("callUser", ({ userToCall, signalData, from, name, callType = 'video' }) => {
             // Check if either user is already in a call
             if (isUserBusy(userToCall) || isUserBusy(from)) {
                 // Notify sender that the call cannot be made (user is busy)
@@ -81,7 +81,8 @@ export const initializeSocket = (app) => {
                     signal: signalData, 
                     from, 
                     name, 
-                    userToCall 
+                    userToCall,
+                    callType
                 })
             }
 
@@ -90,7 +91,8 @@ export const initializeSocket = (app) => {
                     signal: signalData, 
                     from, 
                     name, 
-                    userToCall 
+                    userToCall,
+                    callType
                 })
             }
 
@@ -152,9 +154,14 @@ export const initializeSocket = (app) => {
                 // Get the current user's ID from socket
                 const currentUserId = socket.handshake.query.userId
                 
-                // Update all unseen messages in the conversation to seen: true
+                // Update only messages sent by userId (the other user) to seen: true
+                // This marks messages from userId as "seen by currentUserId"
                 await Message.updateMany(
-                    { conversationId: conversationId, seen: false },
+                    { 
+                        conversationId: conversationId, 
+                        sender: userId,  // Only messages sent by userId
+                        seen: false 
+                    },
                     { $set: { seen: true } }
                 )
                 // Update conversation's lastMessage.seen to true

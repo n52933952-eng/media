@@ -24,25 +24,33 @@ import {
   ModalBody,
   ModalCloseButton,
   useDisclosure,
+  Menu,
+  MenuButton,
+  MenuList,
+  MenuItem,
 } from '@chakra-ui/react'
 import { SearchIcon, ArrowBackIcon } from '@chakra-ui/icons'
 import { UserContext } from '../context/UserContext'
 import { SocketContext } from '../context/SocketContext'
 import useShowToast from '../hooks/useShowToast'
 import { formatDistanceToNow } from 'date-fns'
-import { FaPhone, FaPhoneSlash } from 'react-icons/fa'
+import { FaPhone, FaPhoneSlash, FaVideo } from 'react-icons/fa'
 import { BsCheck2All, BsReply, BsFillImageFill, BsTrash } from 'react-icons/bs'
 import { MdDelete } from 'react-icons/md'
 import EmojiPicker from 'emoji-picker-react'
+import { compressVideo, needsCompression } from '../utils/videoCompress'
 
 const MessagesPage = () => {
   const { user } = useContext(UserContext)
   const socketContext = useContext(SocketContext)
-  const { socket, onlineUser, callUser, callAccepted, callEnded, call, answerCall, leaveCall, myVideo, userVideo, stream, busyUsers } = socketContext || {}
+  const { socket, onlineUser, callUser, callAccepted, callEnded, isCalling, callType, call, answerCall, leaveCall, myVideo, userVideo, stream, busyUsers } = socketContext || {}
   const showToast = useShowToast()
 
   // State
   const [conversations, setConversations] = useState([])
+  const [hasMoreConversations, setHasMoreConversations] = useState(false)
+  const [loadingMoreConversations, setLoadingMoreConversations] = useState(false)
+  const conversationsContainerRef = useRef(null) // Ref for conversations scroll container
   const [selectedConversation, setSelectedConversation] = useState(null)
   const [messages, setMessages] = useState([])
   const [newMessage, setNewMessage] = useState('')
@@ -52,23 +60,30 @@ const MessagesPage = () => {
   const [followedUsers, setFollowedUsers] = useState([])
   const [isTyping, setIsTyping] = useState(false)
   const [emojiPickerOpen, setEmojiPickerOpen] = useState(null) // Store messageId when picker is open
+  const [emojiPickerForMessage, setEmojiPickerForMessage] = useState(false) // Track if emoji picker is open for sending messages
   const [isAtBottom, setIsAtBottom] = useState(true) // Track if user is scrolled to bottom
   const [unreadCountInView, setUnreadCountInView] = useState(0) // Count of unread messages while scrolled up
   const [replyingTo, setReplyingTo] = useState(null) // Store message being replied to
   const [image, setImage] = useState(null) // File object for image/video
   const [imagePreview, setImagePreview] = useState('') // Preview URL for display
   const [uploadProgress, setUploadProgress] = useState(0) // Upload progress percentage
+  const [isProcessing, setIsProcessing] = useState(false) // Track if server is processing (after 100% upload)
+  const [hasMoreMessages, setHasMoreMessages] = useState(false) // Track if there are more messages to load
+  const [loadingMoreMessages, setLoadingMoreMessages] = useState(false) // Track if loading older messages
 
   // Refs
   const messagesEndRef = useRef(null)
   const messagesContainerRef = useRef(null)
   const typingTimeoutRef = useRef(null)
   const emojiPickerRef = useRef(null)
+  const emojiPickerForMessageRef = useRef(null) // Ref for emoji picker in message input area
   const lastMessageCountRef = useRef(0) // Track message count to detect new messages
   const isUserScrollingRef = useRef(false) // Track if user is manually scrolling
   const scrollTimeoutRef = useRef(null) // Timeout to detect when user stops scrolling
   const messageInputRef = useRef(null) // Ref for message input field
   const imageInputRef = useRef(null) // Ref for image/video file input
+  const firstMessageIdRef = useRef(null) // Track first message ID to detect pagination vs new messages
+  const shouldScrollToBottomRef = useRef(false) // Track if we should scroll to bottom (only on initial load)
 
   // Theme colors - white for light mode, dark for dark mode
   const bgColor = useColorModeValue('white', '#101010')  // White in light mode, dark in dark mode
@@ -77,28 +92,65 @@ const MessagesPage = () => {
   const hoverBg = useColorModeValue('gray.50', '#1a1a1a')  // Light hover in light mode
   const emojiPickerTheme = useColorModeValue('light', 'dark')
 
-  // Fetch conversations
-  useEffect(() => {
-    const fetchConversations = async () => {
-      try {
-        const res = await fetch(`${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/message/conversations`, {
-          credentials: 'include',
-        })
-        const data = await res.json()
-        if (res.ok) {
-          setConversations(data)
+  // Function to fetch conversations with pagination
+  const fetchConversations = async (loadMore = false, beforeId = null) => {
+    if (loadMore) {
+      setLoadingMoreConversations(true)
+    } else {
+      setLoading(true)
+    }
+
+    try {
+      // Build URL with pagination parameters
+      let url = `${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/message/conversations?limit=20`
+      if (beforeId) {
+        url += `&beforeId=${beforeId}`
+      }
+
+      const res = await fetch(url, {
+        credentials: 'include',
+      })
+      const data = await res.json()
+      if (res.ok) {
+        if (loadMore && beforeId && data.conversations) {
+          // Loading more conversations - append to existing
+          setConversations(prev => [...prev, ...data.conversations])
+        } else {
+          // Initial load - replace all conversations
+          setConversations(data.conversations || data || [])
         }
-      } catch (error) {
+        setHasMoreConversations(data.hasMore || false)
+      }
+    } catch (error) {
+      if (!loadMore) {
         showToast('Error', 'Failed to load conversations', 'error')
-      } finally {
+      }
+    } finally {
+      if (loadMore) {
+        setLoadingMoreConversations(false)
+      } else {
         setLoading(false)
       }
     }
+  }
 
+  // Load more conversations when scrolling to bottom
+  const loadMoreConversations = async () => {
+    if (!hasMoreConversations || loadingMoreConversations || conversations.length === 0) return
+
+    const oldestConversation = conversations[conversations.length - 1]
+    if (!oldestConversation?._id) return
+
+    await fetchConversations(true, oldestConversation._id)
+  }
+
+  // Fetch conversations on component mount
+  useEffect(() => {
     if (user) {
       fetchConversations()
     }
-  }, [user, showToast])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user])
 
   // Fetch followed users for search
   useEffect(() => {
@@ -166,44 +218,225 @@ const MessagesPage = () => {
     if (scrollTimeoutRef.current) {
       clearTimeout(scrollTimeoutRef.current)
     }
+    
+    // Reset state
+    firstMessageIdRef.current = null // Reset first message ID
+    shouldScrollToBottomRef.current = true // Enable scroll to bottom for initial load
+    
+    // Clear messages first to ensure clean state
+    setMessages([])
+    
+    // Reset scroll position immediately when conversation changes
+    // This ensures we don't remember previous scroll position
+    // But we'll scroll to bottom after messages load
+    if (messagesContainerRef.current) {
+      const container = messagesContainerRef.current
+      container.scrollTop = 0
+    }
 
-    const fetchMessages = async () => {
+    const fetchMessages = async (loadMore = false, beforeId = null) => {
       if (!selectedConversation) return
 
       const otherUser = selectedConversation.participants[0]
       if (!otherUser?._id) return
 
+      if (loadMore) {
+        setLoadingMoreMessages(true)
+      }
+
       try {
-        const res = await fetch(`${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/message/${otherUser._id}`, {
+        // Build URL with pagination parameters
+        let url = `${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/message/${otherUser._id}?limit=12`
+        if (beforeId) {
+          url += `&beforeId=${beforeId}`
+        }
+
+        const res = await fetch(url, {
           credentials: 'include',
         })
         const data = await res.json()
         if (res.ok) {
-          setMessages(data)
-          lastMessageCountRef.current = data.length
-          setUnreadCountInView(0)
-          setIsAtBottom(true)
-          // Scroll to bottom when conversation is opened (WhatsApp style)
-          setTimeout(() => {
-            if (messagesContainerRef.current) {
-              const container = messagesContainerRef.current
-              container.scrollTop = container.scrollHeight // Direct scroll without animation
+          if (loadMore && beforeId) {
+            // Loading older messages - prepend to existing messages
+            // Update firstMessageIdRef before prepending to detect this is pagination
+            if (data.messages && data.messages.length > 0) {
+              firstMessageIdRef.current = data.messages[0]._id
             }
-          }, 100)
+            setMessages((prev) => [...data.messages, ...prev])
+            // Don't update lastMessageCountRef here - pagination shouldn't trigger unread count
+            return // Exit early, don't trigger unread detection
+          } else {
+            // Initial load - replace all messages
+            const messagesToSet = data.messages || []
+            
+            // Set lastMessageCountRef BEFORE setting messages to prevent unread detection on initial load
+            lastMessageCountRef.current = messagesToSet.length
+            setUnreadCountInView(0) // Clear unread count when opening conversation
+            setIsAtBottom(true)
+            
+            // Track first message ID for pagination detection
+            if (messagesToSet.length > 0) {
+              firstMessageIdRef.current = messagesToSet[0]._id
+            } else {
+              firstMessageIdRef.current = null
+            }
+            
+            // Set messages
+            setMessages(messagesToSet)
+            
+            // Mark that we should scroll to bottom after messages render (initial load only)
+            shouldScrollToBottomRef.current = true
+            
+            // Mark messages as seen when opening conversation
+            const otherUser = selectedConversation.participants[0]
+            if (otherUser?._id && socket) {
+              socket.emit("markmessageasSeen", {
+                conversationId: selectedConversation._id,
+                userId: otherUser._id
+              })
+            }
+          }
+          
+          // Update pagination state
+          setHasMoreMessages(data.hasMore || false)
         }
       } catch (error) {
         showToast('Error', 'Failed to load messages', 'error')
+      } finally {
+        if (loadMore) {
+          setLoadingMoreMessages(false)
+        }
       }
     }
 
     // Only fetch messages if conversation has _id (existing conversation)
     // New conversations (no _id) start with empty messages
     if (selectedConversation && selectedConversation._id) {
-      fetchMessages()
+      fetchMessages(false, null) // Initial load
     } else if (selectedConversation) {
       setMessages([])
+      setHasMoreMessages(false)
     }
   }, [selectedConversation?._id, selectedConversation?.participants, showToast])
+
+  // Scroll to bottom when messages are initially loaded (not pagination)
+  useEffect(() => {
+    // Only scroll on initial load, not when loading older messages
+    // Check if we should scroll (only true on initial load)
+    const isInitialLoad = shouldScrollToBottomRef.current && 
+                         messages.length > 0 && 
+                         !loadingMoreMessages && 
+                         selectedConversation?._id
+    
+    if (isInitialLoad) {
+      // Use multiple approaches to ensure scroll works
+      const scrollToBottom = () => {
+        if (messagesContainerRef.current) {
+          const container = messagesContainerRef.current
+          // Force scroll to absolute bottom
+          container.scrollTop = container.scrollHeight
+          // Also use scrollTo as backup
+          container.scrollTo({
+            top: container.scrollHeight,
+            behavior: 'auto'
+          })
+          // Method 3: scrollIntoView on messagesEndRef
+          if (messagesEndRef.current) {
+            messagesEndRef.current.scrollIntoView({ behavior: 'auto', block: 'end' })
+          }
+        }
+      }
+      
+      // Immediate scroll attempt
+      scrollToBottom()
+      
+      // Wait for DOM to update, then scroll multiple times
+      requestAnimationFrame(() => {
+        scrollToBottom()
+      })
+      
+      // Multiple delayed attempts to ensure it works
+      setTimeout(scrollToBottom, 10)
+      setTimeout(scrollToBottom, 50)
+      setTimeout(scrollToBottom, 100)
+      setTimeout(scrollToBottom, 200)
+      setTimeout(scrollToBottom, 300)
+      
+      // Final verification and force scroll
+      setTimeout(() => {
+        if (messagesContainerRef.current) {
+          const container = messagesContainerRef.current
+          const scrollHeight = container.scrollHeight
+          const clientHeight = container.clientHeight
+          const scrollTop = container.scrollTop
+          const distanceFromBottom = scrollHeight - scrollTop - clientHeight
+          
+          // If not at bottom, force scroll
+          if (distanceFromBottom > 10) {
+            container.scrollTop = scrollHeight
+            // Double check
+            setTimeout(() => {
+              if (messagesContainerRef.current) {
+                messagesContainerRef.current.scrollTop = messagesContainerRef.current.scrollHeight
+              }
+            }, 50)
+          }
+        }
+        // Reset the flag after scrolling is complete
+        shouldScrollToBottomRef.current = false
+      }, 400)
+    }
+  }, [messages.length, selectedConversation?._id, loadingMoreMessages]) // Only when messages change and it's initial load
+
+  // Function to load older messages (called when scrolling to top)
+  const loadOlderMessages = async () => {
+    if (!hasMoreMessages || loadingMoreMessages || !messages.length) return
+
+    const oldestMessage = messages[0]
+    if (!oldestMessage?._id) return
+
+    // Store current scroll position
+    const container = messagesContainerRef.current
+    if (!container) return
+
+    const previousScrollHeight = container.scrollHeight
+    const previousScrollTop = container.scrollTop
+
+    try {
+      const otherUser = selectedConversation?.participants[0]
+      if (!otherUser?._id) return
+
+      setLoadingMoreMessages(true)
+
+      const url = `${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/message/${otherUser._id}?limit=12&beforeId=${oldestMessage._id}`
+      const res = await fetch(url, {
+        credentials: 'include',
+      })
+      const data = await res.json()
+
+      if (res.ok && data.messages && data.messages.length > 0) {
+        // Prepend older messages
+        setMessages((prev) => [...data.messages, ...prev])
+        setHasMoreMessages(data.hasMore || false)
+
+        // Maintain scroll position after loading
+        setTimeout(() => {
+          if (container) {
+            const newScrollHeight = container.scrollHeight
+            const scrollDifference = newScrollHeight - previousScrollHeight
+            container.scrollTop = previousScrollTop + scrollDifference
+          }
+        }, 50)
+      } else {
+        setHasMoreMessages(false)
+      }
+    } catch (error) {
+      console.error('Error loading older messages:', error)
+      showToast('Error', 'Failed to load older messages', 'error')
+    } finally {
+      setLoadingMoreMessages(false)
+    }
+  }
 
   // Track scroll position
   useEffect(() => {
@@ -214,11 +447,22 @@ const MessagesPage = () => {
       const scrollTop = container.scrollTop
       const scrollHeight = container.scrollHeight
       const clientHeight = container.clientHeight
-      // Check if at bottom - use a small threshold (10px) to account for rounding
-      const isAtBottom = scrollHeight - scrollTop - clientHeight <= 10
+      // Check if at bottom - use a small threshold (20px) to account for rounding and smooth scrolling
+      const distanceFromBottom = scrollHeight - scrollTop - clientHeight
+      const isAtBottom = distanceFromBottom <= 20
 
       setIsAtBottom(isAtBottom)
       isUserScrollingRef.current = true // User is manually scrolling
+      
+      // Check if scrolled to top (load older messages)
+      if (scrollTop <= 50 && hasMoreMessages && !loadingMoreMessages) {
+        loadOlderMessages()
+      }
+      
+      // If scrolled to bottom, clear unread count immediately
+      if (isAtBottom && unreadCountInView > 0) {
+        setUnreadCountInView(0)
+      }
       
       // Clear existing timeout
       if (scrollTimeoutRef.current) {
@@ -228,12 +472,21 @@ const MessagesPage = () => {
       // Set timeout to detect when user stops scrolling (after 300ms of no scrolling)
       scrollTimeoutRef.current = setTimeout(() => {
         isUserScrollingRef.current = false
+        
+        // Final check when scrolling stops - if at bottom, clear unread count
+        if (messagesContainerRef.current) {
+          const container = messagesContainerRef.current
+          const finalScrollTop = container.scrollTop
+          const finalScrollHeight = container.scrollHeight
+          const finalClientHeight = container.clientHeight
+          const finalDistanceFromBottom = finalScrollHeight - finalScrollTop - finalClientHeight
+          
+          if (finalDistanceFromBottom <= 20 && unreadCountInView > 0) {
+            setUnreadCountInView(0)
+            setIsAtBottom(true)
+          }
+        }
       }, 300)
-      
-      // If scrolled to bottom, clear unread count and update state
-      if (isAtBottom) {
-        setUnreadCountInView(0)
-      }
     }
 
     container.addEventListener('scroll', handleScroll, { passive: true })
@@ -246,18 +499,40 @@ const MessagesPage = () => {
         clearTimeout(scrollTimeoutRef.current)
       }
     }
-  }, [selectedConversation?._id]) // Re-run when conversation changes
+  }, [selectedConversation?._id, hasMoreMessages, loadingMoreMessages]) // Re-run when conversation changes or pagination state changes
 
   // Track new messages and handle auto-scroll/unread indicator
+  // This should ONLY trigger when NEW messages arrive (appended to end), NOT when loading older messages (prepended)
   useEffect(() => {
-    if (messages.length > lastMessageCountRef.current && user?._id) {
+    // Skip if this is the initial load (lastMessageCountRef is 0 and we're setting messages for first time)
+    // This prevents counting initial messages as "new"
+    if (messages.length > lastMessageCountRef.current && user?._id && lastMessageCountRef.current > 0) {
       const container = messagesContainerRef.current
       if (!container) {
         lastMessageCountRef.current = messages.length
         return
       }
 
-      // Get new messages that were just added
+      // Check if new messages were appended to END (new messages from socket) or prepended to START (pagination)
+      // If first message ID changed from what we tracked, it means older messages were loaded (pagination)
+      const currentFirstMessageId = messages[0]?._id
+      const wasPagination = firstMessageIdRef.current !== null && 
+                           currentFirstMessageId !== null &&
+                           currentFirstMessageId !== firstMessageIdRef.current
+      
+      // If this is pagination (loading older messages), update refs and return
+      if (wasPagination) {
+        firstMessageIdRef.current = currentFirstMessageId
+        lastMessageCountRef.current = messages.length
+        return // Don't show unread indicator for pagination
+      }
+      
+      // Update first message ID ref if it changed (but not due to pagination)
+      if (currentFirstMessageId !== firstMessageIdRef.current) {
+        firstMessageIdRef.current = currentFirstMessageId
+      }
+
+      // Get new messages that were just added (appended to end - these are REAL new messages)
       const newMessages = messages.slice(lastMessageCountRef.current)
       
       // Count only messages from the other user (not from current user)
@@ -339,7 +614,14 @@ const MessagesPage = () => {
         selectedConversation._id &&
         message.conversationId.toString() === selectedConversation._id.toString()
       ) {
-        setMessages((prev) => [...prev, message])
+        // New message from socket - append to end
+        setMessages((prev) => {
+          // Update first message ID ref if this is the first message
+          if (prev.length === 0 && message._id) {
+            firstMessageIdRef.current = message._id
+          }
+          return [...prev, message]
+        })
       } else {
         // If message is for a different conversation, increment unread count
         setConversations(prev => prev.map(conv => {
@@ -413,10 +695,22 @@ const MessagesPage = () => {
 
     const handleMessagesSeen = ({ conversationId }) => {
       if (selectedConversation?._id && conversationId === selectedConversation._id.toString()) {
-        // Update messages to mark them as seen
+        // Update messages to mark them as seen - ONLY for messages sent by current user
         setMessages((prev) => {
           return prev.map((message) => {
-            if (!message.seen) {
+            // Only mark as seen if this message was sent by the current user
+            let msgSenderId = ''
+            if (message.sender?._id) {
+              msgSenderId = typeof message.sender._id === 'string' ? message.sender._id : message.sender._id.toString()
+            } else if (message.sender) {
+              msgSenderId = typeof message.sender === 'string' ? message.sender : String(message.sender)
+            }
+            
+            const currentUserId = typeof user._id === 'string' ? user._id : user._id.toString()
+            const isOwnMessage = msgSenderId !== '' && currentUserId !== '' && msgSenderId === currentUserId
+            
+            // Only update seen status for messages sent by current user
+            if (isOwnMessage && !message.seen) {
               return { ...message, seen: true }
             }
             return message
@@ -424,14 +718,33 @@ const MessagesPage = () => {
         })
 
         // Update conversations list to mark lastMessage as seen and clear unread count
+        // Only update if the last message was sent by current user
         setConversations((prev) => {
           return prev.map((conv) => {
             if (conv._id && conv._id.toString() === conversationId) {
+              // Check if last message is from current user
+              let lastMessageSenderId = ''
+              if (conv.lastMessage?.sender?._id) {
+                lastMessageSenderId = typeof conv.lastMessage.sender._id === 'string' 
+                  ? conv.lastMessage.sender._id 
+                  : conv.lastMessage.sender._id.toString()
+              } else if (conv.lastMessage?.sender) {
+                lastMessageSenderId = typeof conv.lastMessage.sender === 'string' 
+                  ? conv.lastMessage.sender 
+                  : String(conv.lastMessage.sender)
+              }
+              
+              const currentUserId = typeof user._id === 'string' ? user._id : user._id.toString()
+              const isLastMessageFromMe = lastMessageSenderId !== '' && 
+                                         currentUserId !== '' && 
+                                         lastMessageSenderId === currentUserId
+              
               return {
                 ...conv,
                 lastMessage: {
                   ...conv.lastMessage,
-                  seen: true
+                  // Only mark as seen if it's the current user's message
+                  seen: isLastMessageFromMe ? true : conv.lastMessage?.seen || false
                 },
                 unreadCount: 0
               }
@@ -478,12 +791,13 @@ const MessagesPage = () => {
         try {
           const otherUser = selectedConversation.participants[0]
           if (otherUser?._id) {
-            const res = await fetch(`${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/message/${otherUser._id}`, {
+            const res = await fetch(`${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/message/${otherUser._id}?limit=12`, {
               credentials: 'include',
             })
             const data = await res.json()
             if (res.ok) {
-              setMessages(data)
+              setMessages(data.messages || [])
+              setHasMoreMessages(data.hasMore || false)
             }
           }
         } catch (error) {
@@ -546,23 +860,6 @@ const MessagesPage = () => {
     }
   }, [])
 
-  const fetchConversations = async () => {
-    try {
-      const res = await fetch(`${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/message/conversations`, {
-        credentials: 'include',
-      })
-      const data = await res.json()
-      if (res.ok) {
-        setConversations(data)
-        return data
-      }
-      return []
-    } catch (error) {
-      console.log('Error fetching conversations:', error)
-      return []
-    }
-  }
-
   // Start conversation with a user
   const startConversation = async (recipientId) => {
     setSearchQuery('')
@@ -575,12 +872,13 @@ const MessagesPage = () => {
       setSelectedConversation(existingConv)
       // Fetch messages for this conversation
       try {
-        const res = await fetch(`${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/message/${recipientId}`, {
+        const res = await fetch(`${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/message/${recipientId}?limit=12`, {
           credentials: 'include',
         })
         const data = await res.json()
         if (res.ok) {
-          setMessages(data)
+          setMessages(data.messages || [])
+          setHasMoreMessages(data.hasMore || false)
         }
       } catch (error) {
         showToast('Error', 'Failed to load messages', 'error')
@@ -717,38 +1015,166 @@ const MessagesPage = () => {
     }
   }, [imagePreview])
 
-  // Handle image/video file selection
-  const handleImageChange = (event) => {
+  // Handle file selection with video compression if needed
+  const handleFileSelect = async (event) => {
     const file = event.target.files[0]
-    
     if (!file) return
 
     // Check if file is image or video
-    if (file.type.startsWith("image/") || file.type.startsWith("video/")) {
-      // Check file size (500MB limit)
-      const maxSize = 500 * 1024 * 1024 // 500MB
+    if (!file.type.startsWith("image/") && !file.type.startsWith("video/")) {
+      showToast("Invalid file type", "Please select an image or video file", "error")
+      return
+    }
+
+    const fileSizeMB = file.size / (1024 * 1024)
+    const maxSize = 100 * 1024 * 1024 // 100MB
+    
+    // For images, check size immediately (no compression)
+    if (file.type.startsWith("image/")) {
       if (file.size > maxSize) {
-        showToast("File too large", "Please select a file smaller than 500MB", "error")
+        showToast("File too large", `Image (${fileSizeMB.toFixed(1)}MB) exceeds Cloudinary's 100MB limit. Please use a smaller image.`, "error")
         if (imageInputRef.current) {
           imageInputRef.current.value = ''
         }
         return
       }
-      
-      // Store the file object for sending
-      setImage(file) // Store file object instead of base64
-      
-      // Create preview URL for display
-      const previewURL = URL.createObjectURL(file)
-      setImagePreview(previewURL)
-    } else {
-      showToast("Invalid file type", "Please select an image or video file", "error")
     }
     
-    // Reset input value to allow selecting same file again
-    if (imageInputRef.current) {
-      imageInputRef.current.value = ''
+    // For videos, check duration and warn (Cloudinary free tier only allows 10 seconds)
+    if (file.type.startsWith('video/')) {
+      // Check video duration and warn user (don't block - let them try)
+      try {
+        const video = document.createElement('video')
+        video.preload = 'metadata'
+        const videoUrl = URL.createObjectURL(file)
+        video.src = videoUrl
+        
+        await new Promise((resolve, reject) => {
+          video.onloadedmetadata = () => {
+            URL.revokeObjectURL(videoUrl)
+            const duration = video.duration
+            if (duration > 10) {
+              // Warn but don't block - user can still try to upload
+              showToast(
+                "Warning: Video Duration", 
+                `Your video is ${duration.toFixed(1)} seconds. Cloudinary free tier only supports videos up to 10 seconds. The upload may fail. Consider upgrading Cloudinary or trimming the video.`, 
+                "warning", 
+                8000
+              )
+            }
+            resolve() // Always resolve - don't block upload
+          }
+          video.onerror = () => {
+            URL.revokeObjectURL(videoUrl)
+            // Don't block on metadata error, just continue
+            resolve()
+          }
+          // Timeout after 3 seconds - don't block upload
+          setTimeout(() => {
+            URL.revokeObjectURL(videoUrl)
+            resolve() // Resolve anyway, don't block
+          }, 3000)
+        })
+      } catch (error) {
+        // Don't block on error, just log it
+        console.warn('Could not check video duration:', error)
+      }
     }
+
+    // Store file for preview
+    setImage(file)
+    const previewURL = URL.createObjectURL(file)
+    setImagePreview(previewURL)
+    setUploadProgress(0)
+    setIsProcessing(false)
+
+    // Compress videos only if they're over 100MB (Cloudinary's limit)
+    // Videos under 100MB can upload directly without compression (faster)
+    if (file.type.startsWith('video/')) {
+      // Only compress if file is over Cloudinary's 100MB limit
+      if (fileSizeMB > 95) {
+        setIsProcessing(true)
+        setUploadProgress(10) // Show initial progress
+        
+        try {
+          showToast("Compressing video", "Please wait while we compress your video for optimal upload...", "info", 5000)
+          
+          console.log('Starting compression for file:', file.name, 'Size:', fileSizeMB.toFixed(2), 'MB')
+          
+          // Add compression timeout (2 minutes)
+          const compressionTimeout = setTimeout(() => {
+            console.warn('Compression taking too long, might skip...')
+          }, 120000)
+          
+          const compressedFile = await Promise.race([
+            compressVideo(file, {
+              maxSizeMB: 95, // Target under 100MB Cloudinary limit
+              quality: fileSizeMB > 100 ? 'low' : 'medium',
+              timeout: 120000, // 2 minutes timeout
+              progressCallback: (progress) => {
+                // Compression progress: 10-80% of total (80% for compression, 20% for upload)
+                const calculatedProgress = 10 + (progress * 0.7)
+                setUploadProgress(calculatedProgress)
+                console.log('Compression progress:', calculatedProgress.toFixed(1) + '%')
+              }
+            }),
+            new Promise((_, reject) => 
+              setTimeout(() => reject(new Error('Compression timeout after 2 minutes')), 120000)
+            )
+          ])
+          
+          clearTimeout(compressionTimeout)
+          
+          const compressedSizeMB = compressedFile.size / (1024 * 1024)
+          console.log(`Video compressed: ${fileSizeMB.toFixed(2)}MB → ${compressedSizeMB.toFixed(2)}MB`)
+          
+          // Update with compressed file
+          setImage(compressedFile)
+          
+          // Update preview with compressed file
+          if (previewURL && previewURL.startsWith('blob:')) {
+            URL.revokeObjectURL(previewURL)
+          }
+          const newPreviewURL = URL.createObjectURL(compressedFile)
+          setImagePreview(newPreviewURL)
+          
+          setUploadProgress(80) // Ready for upload
+          setIsProcessing(false)
+          
+          // Check if compressed file is still too large
+          if (compressedSizeMB > 95) {
+            showToast("Warning", `Video compressed to ${compressedSizeMB.toFixed(2)}MB, which is close to the limit. Upload may fail if it exceeds 100MB.`, "warning", 5000)
+          } else {
+            showToast("Compression complete", `Video compressed to ${compressedSizeMB.toFixed(2)}MB`, "success")
+          }
+      } catch (error) {
+        console.error('Video compression error:', error)
+        setUploadProgress(0)
+        setIsProcessing(false)
+        
+        // If compression fails, try uploading original file if it's under 100MB
+        if (fileSizeMB < 100) {
+          showToast("Compression skipped", "Uploading original file without compression...", "info", 3000)
+          // Keep the original file for upload - don't clear it
+        } else {
+          setImage(null)
+          setImagePreview('')
+          showToast("Compression failed", error.message || "Failed to compress video. Please try a smaller file or check your browser console.", "error", 8000)
+          
+          if (imageInputRef.current) {
+            imageInputRef.current.value = ''
+          }
+          return
+        }
+      }
+      } // Close if (fileSizeMB > 95)
+      // Videos under 95MB: file already set on line 789, no compression needed - proceed with upload
+    }
+  }
+
+  // Handle image/video file selection (fallback - use handleFileSelect instead)
+  const handleImageChange = (event) => {
+    handleFileSelect(event)
   }
 
   // Clear image preview
@@ -767,11 +1193,20 @@ const MessagesPage = () => {
   // Close emoji picker when clicking outside
   useEffect(() => {
     function handleClickOutside(event) {
+      // Close reaction emoji picker
       if (emojiPickerRef.current && !emojiPickerRef.current.contains(event.target)) {
         // Also check if click is not on a message bubble
         const messageBubble = event.target.closest('[data-message-id]')
         if (!messageBubble) {
           setEmojiPickerOpen(null)
+        }
+      }
+      // Close message emoji picker (G button)
+      if (emojiPickerForMessageRef.current && !emojiPickerForMessageRef.current.contains(event.target)) {
+        // Check if click is not on the G button
+        const gButton = event.target.closest('[title="Send emoji"]')
+        if (!gButton) {
+          setEmojiPickerForMessage(false)
         }
       }
     }
@@ -803,109 +1238,174 @@ const MessagesPage = () => {
 
     setSending(true)
     setUploadProgress(0) // Reset progress
+    
     try {
-      // Use FormData to send file
+      // Upload file via Multer to Cloudinary (backend handles upload)
       const formData = new FormData()
       formData.append('recipientId', recipientId)
       formData.append('message', newMessage || '')
+      
       if (image) {
-        formData.append('file', image)
+        // Check if image is a File object (needs upload) or URL string
+        if (image instanceof File) {
+          // Upload file via Multer
+          formData.append('file', image)
+          
+          // Track upload progress
+          const xhr = new XMLHttpRequest()
+          
+          // Upload progress tracking
+          xhr.upload.addEventListener('progress', (e) => {
+            if (e.lengthComputable) {
+              // Progress: 80-100% (compression was 0-80%)
+              const progress = 80 + ((e.loaded / e.total) * 20)
+              setUploadProgress(Math.min(progress, 100))
+            }
+          })
+          
+          xhr.addEventListener('load', () => {
+            if (xhr.status === 201) {
+              setUploadProgress(100)
+            }
+          })
+          
+          xhr.open('POST', `${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/message`)
+          xhr.withCredentials = true
+          
+          // Add replyTo to formData if exists
+          if (replyingTo?._id) {
+            formData.append('replyTo', replyingTo._id)
+          }
+          
+          xhr.send(formData)
+          
+          // Handle response
+          xhr.onload = () => {
+            if (xhr.status === 201) {
+              try {
+                const data = JSON.parse(xhr.responseText)
+                handleMessageSent(data)
+              } catch (error) {
+                console.error('Error parsing response:', error)
+                showToast('Error', 'Failed to parse server response', 'error')
+                setIsProcessing(false)
+                setUploadProgress(0)
+                setSending(false)
+              }
+            } else {
+              try {
+                const errorData = JSON.parse(xhr.responseText)
+                showToast('Error', errorData.error || errorData.message || 'Failed to send message', 'error')
+              } catch (error) {
+                showToast('Error', `Failed to send message: ${xhr.statusText}`, 'error')
+              }
+              setIsProcessing(false)
+              setUploadProgress(0)
+              setSending(false)
+            }
+          }
+          
+          xhr.onerror = () => {
+            showToast('Error', 'Network error while sending message', 'error')
+            setIsProcessing(false)
+            setUploadProgress(0)
+            setSending(false)
+          }
+          
+          xhr.ontimeout = () => {
+            showToast('Error', 'Upload timeout. Please try again.', 'error')
+            setIsProcessing(false)
+            setUploadProgress(0)
+            setSending(false)
+          }
+          
+          xhr.timeout = 1200000 // 20 minutes timeout for large uploads
+          
+          return // Exit early, response handled in xhr callbacks
+        } else {
+          // Image is already a URL (shouldn't happen in this flow, but handle it)
+          formData.append('fileUrl', image)
+        }
       }
+      
       if (replyingTo?._id) {
         formData.append('replyTo', replyingTo._id)
       }
       
-      // Use XMLHttpRequest to track upload progress
-      const data = await new Promise((resolve, reject) => {
-        const xhr = new XMLHttpRequest()
-        const url = `${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/message`
-        
-        // Track upload progress
-        xhr.upload.addEventListener('progress', (e) => {
-          if (e.lengthComputable) {
-            const percentComplete = Math.round((e.loaded / e.total) * 100)
-            setUploadProgress(percentComplete)
-          }
-        })
-        
-        // Handle completion
-        xhr.addEventListener('load', () => {
-          if (xhr.status >= 200 && xhr.status < 300) {
-            try {
-              const response = JSON.parse(xhr.responseText)
-              resolve(response)
-            } catch (error) {
-              reject(new Error('Failed to parse response'))
-            }
-          } else {
-            try {
-              const errorResponse = JSON.parse(xhr.responseText)
-              reject(new Error(errorResponse.error || 'Request failed'))
-            } catch {
-              reject(new Error('Request failed'))
-            }
-          }
-        })
-        
-        // Handle errors
-        xhr.addEventListener('error', () => {
-          reject(new Error('Network error'))
-        })
-        
-        // Handle abort
-        xhr.addEventListener('abort', () => {
-          reject(new Error('Upload aborted'))
-        })
-        
-        xhr.open('POST', url)
-        xhr.withCredentials = true // Include credentials
-        xhr.send(formData)
+      // No file upload - just send message data
+      const url = `${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/message`
+      
+      const response = await fetch(url, {
+        method: 'POST',
+        body: formData,
+        credentials: 'include'
       })
-
-      // Data is already parsed from XMLHttpRequest promise
-      if (data) {
-        // Ensure the message has sender data from current user context
-        const messageWithSender = {
-          ...data,
-          sender: data.sender || {
-            _id: user._id,
-            name: user.name,
-            username: user.username,
-            profilePic: user.profilePic
-          }
-        }
-        setMessages((prev) => [...prev, messageWithSender])
-        setNewMessage('')
-        // Revoke object URL to free memory
-        const currentPreview = imagePreview
-        setImage(null) // Clear image after sending
-        setImagePreview('') // Clear image preview first
-        if (currentPreview && currentPreview.startsWith('blob:')) {
-          URL.revokeObjectURL(currentPreview)
-        }
-        setReplyingTo(null) // Clear reply after sending
-        setUploadProgress(0) // Reset progress
-        setSending(false) // Stop spinner immediately after message is added
-        
-        // Refresh conversations list in background (don't wait for it)
-        fetchConversations().then(updatedConversations => {
-          // If this was a new conversation, update selectedConversation to the real one
-          if (selectedConversation && !selectedConversation._id && data.conversationId) {
-            const updatedConv = updatedConversations.find(c => 
-              c._id && c._id.toString() === data.conversationId.toString()
-            )
-            if (updatedConv) {
-              setSelectedConversation(updatedConv)
-            }
-          }
-        }).catch(err => {
-          console.log('Error refreshing conversations:', err)
-        })
+      
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}))
+        throw new Error(errorData.error || errorData.message || 'Failed to send message')
       }
+      
+      const data = await response.json()
+      
+      // Handle successful message send
+      handleMessageSent(data)
+      
+      return // Exit early, response handled above
     } catch (error) {
+      console.error('Error sending message:', error)
+      showToast('Error', error.message || 'Failed to send message', 'error')
+      setIsProcessing(false)
       setUploadProgress(0)
       setSending(false)
-      showToast('Error', error.message || 'Failed to send message', 'error')
+    }
+  }
+  
+  // Helper function to handle successful message send
+  const handleMessageSent = (data) => {
+    // Clear processing state
+    setIsProcessing(false)
+    setUploadProgress(0)
+
+    if (data) {
+      // Ensure the message has sender data from current user context
+      const messageWithSender = {
+        ...data,
+        sender: data.sender || {
+          _id: user._id,
+          name: user.name,
+          username: user.username,
+          profilePic: user.profilePic
+        }
+      }
+      setMessages((prev) => [...prev, messageWithSender])
+      setNewMessage('')
+      // Revoke object URL to free memory
+      const currentPreview = imagePreview
+      setImage(null) // Clear image after sending
+      setImagePreview('') // Clear image preview first
+      if (currentPreview && currentPreview.startsWith('blob:')) {
+        URL.revokeObjectURL(currentPreview)
+      }
+      setReplyingTo(null) // Clear reply after sending
+      setUploadProgress(0) // Reset progress
+      setIsProcessing(false) // Clear processing state
+      setSending(false) // Stop spinner immediately after message is added
+      
+      // Refresh conversations list in background (don't wait for it)
+      fetchConversations().then(updatedConversations => {
+        // If this was a new conversation, update selectedConversation to the real one
+        if (selectedConversation && !selectedConversation._id && data.conversationId) {
+          const updatedConv = updatedConversations.find(c => 
+            c._id && c._id.toString() === data.conversationId.toString()
+          )
+          if (updatedConv) {
+            setSelectedConversation(updatedConv)
+          }
+        }
+      }).catch(err => {
+        console.log('Error refreshing conversations:', err)
+      })
     }
   }
 
@@ -960,7 +1460,18 @@ const MessagesPage = () => {
           </InputGroup>
         </Box>
 
-        <Box overflowY="auto" flex={1}>
+        <Box 
+          ref={conversationsContainerRef}
+          overflowY="auto" 
+          flex={1}
+          onScroll={(e) => {
+            const container = e.target
+            // Check if scrolled to bottom (within 50px)
+            if (container.scrollHeight - container.scrollTop - container.clientHeight <= 50) {
+              loadMoreConversations()
+            }
+          }}
+        >
           {/* Search Results */}
           {searchQuery && (
             <VStack align="stretch" p={2} spacing={0}>
@@ -1020,12 +1531,17 @@ const MessagesPage = () => {
           {/* Conversations List */}
           {!searchQuery && (
             <VStack align="stretch" spacing={0}>
-              {conversations.length === 0 ? (
+              {loading && conversations.length === 0 ? (
+                <Flex justify="center" py={8}>
+                  <Spinner size="lg" />
+                </Flex>
+              ) : conversations.length === 0 ? (
                 <Text px={4} py={8} color="gray.500" textAlign="center" fontSize="sm">
                   No conversations yet. Search for friends to start chatting!
                 </Text>
               ) : (
-                conversations.map((conv) => {
+                <>
+                  {conversations.map((conv) => {
                   const otherUser = conv.participants[0]
                   const isSelected =
                     selectedConversation?._id === conv._id ||
@@ -1157,7 +1673,14 @@ const MessagesPage = () => {
                       </Box>
                     </Flex>
                   )
-                })
+                  })}
+                  {/* Loading indicator for more conversations */}
+                  {loadingMoreConversations && (
+                    <Flex justify="center" py={4}>
+                      <Spinner size="sm" color="blue.500" />
+                    </Flex>
+                  )}
+                </>
               )}
             </VStack>
           )}
@@ -1231,7 +1754,7 @@ const MessagesPage = () => {
               />
             </Flex>
 
-            {/* Video Call - Inline in chat - Mobile optimized */}
+            {/* Call - Inline in chat - Mobile optimized */}
             {callAccepted && !callEnded && stream && myVideo && userVideo && (
               <Box
                 borderBottom="1px solid"
@@ -1242,7 +1765,7 @@ const MessagesPage = () => {
                 <Flex direction="column" gap={{ base: 2, md: 3 }}>
                   <Flex justifyContent="space-between" alignItems="center" flexWrap="wrap" gap={2}>
                     <Text fontWeight="semibold" fontSize={{ base: "xs", md: "md" }} color={useColorModeValue('black', 'white')}>
-                      Video Call Active
+                      {callType === 'audio' ? 'Voice' : 'Video'} Call Active
                     </Text>
                     <Button
                       colorScheme="red"
@@ -1254,75 +1777,125 @@ const MessagesPage = () => {
                       <Text display={{ base: 'none', sm: 'block' }}>End</Text>
                     </Button>
                   </Flex>
-                  <Flex 
-                    gap={{ base: 2, md: 3 }} 
-                    flexDirection={{ base: "column", md: "row" }}
-                    alignItems={{ base: "stretch", md: "flex-start" }}
-                  >
-                    {/* Remote video - Full width on mobile */}
-                    <Box
-                      flex={{ base: 0, md: 1 }}
-                      w={{ base: "100%", md: "auto" }}
-                      minW={{ base: "100%", md: "300px" }}
-                      h={{ base: "250px", sm: "300px", md: "250px" }}
-                      borderRadius="md"
-                      overflow="hidden"
-                      bg="black"
-                      position="relative"
-                      order={{ base: 1, md: 1 }}
+                  {callType === 'video' ? (
+                    <Flex 
+                      gap={{ base: 2, md: 3 }} 
+                      flexDirection={{ base: "column", md: "row" }}
+                      alignItems={{ base: "stretch", md: "flex-start" }}
                     >
-                      <video
-                        ref={userVideo}
-                        autoPlay
-                        playsInline
-                        style={{
-                          width: '100%',
-                          height: '100%',
-                          objectFit: 'cover'
-                        }}
-                      />
-                    </Box>
-                    {/* Local video - Smaller on mobile, positioned better */}
-                    <Box
-                      w={{ base: "120px", md: "150px" }}
-                      h={{ base: "90px", md: "112px" }}
-                      borderRadius="md"
-                      overflow="hidden"
-                      bg="gray.800"
-                      border="2px solid"
-                      borderColor={useColorModeValue('gray.200', 'white')}
-                      flexShrink={0}
-                      alignSelf={{ base: "flex-end", md: "flex-start" }}
-                      order={{ base: 2, md: 2 }}
+                      {/* Remote video - Full width on mobile */}
+                      <Box
+                        flex={{ base: 0, md: 1 }}
+                        w={{ base: "100%", md: "auto" }}
+                        minW={{ base: "100%", md: "300px" }}
+                        h={{ base: "250px", sm: "300px", md: "250px" }}
+                        borderRadius="md"
+                        overflow="hidden"
+                        bg="black"
+                        position="relative"
+                        order={{ base: 1, md: 1 }}
+                      >
+                        <video
+                          ref={userVideo}
+                          autoPlay
+                          playsInline
+                          style={{
+                            width: '100%',
+                            height: '100%',
+                            objectFit: 'cover'
+                          }}
+                        />
+                      </Box>
+                      {/* Local video - Smaller on mobile, positioned better */}
+                      <Box
+                        w={{ base: "120px", md: "150px" }}
+                        h={{ base: "90px", md: "112px" }}
+                        borderRadius="md"
+                        overflow="hidden"
+                        bg="gray.800"
+                        border="2px solid"
+                        borderColor={useColorModeValue('gray.200', 'white')}
+                        flexShrink={0}
+                        alignSelf={{ base: "flex-end", md: "flex-start" }}
+                        order={{ base: 2, md: 2 }}
+                      >
+                        <video
+                          ref={myVideo}
+                          autoPlay
+                          muted
+                          playsInline
+                          style={{
+                            width: '100%',
+                            height: '100%',
+                            objectFit: 'cover'
+                          }}
+                        />
+                      </Box>
+                    </Flex>
+                  ) : (
+                    /* Audio call UI - Show avatar and call info */
+                    <Flex 
+                      direction="column"
+                      alignItems="center"
+                      gap={4}
+                      py={4}
                     >
-                      <video
-                        ref={myVideo}
-                        autoPlay
-                        muted
-                        playsInline
-                        style={{
-                          width: '100%',
-                          height: '100%',
-                          objectFit: 'cover'
-                        }}
+                      <Avatar
+                        src={selectedConversation?.participants[0]?.profilePic}
+                        name={selectedConversation?.participants[0]?.username}
+                        size="xl"
                       />
-                    </Box>
-                  </Flex>
+                      <Text fontSize="lg" fontWeight="semibold" color={useColorModeValue('black', 'white')}>
+                        {selectedConversation?.participants[0]?.name || selectedConversation?.participants[0]?.username}
+                      </Text>
+                      <Text fontSize="sm" color={useColorModeValue('gray.600', 'gray.400')}>
+                        Voice Call
+                      </Text>
+                    </Flex>
+                  )}
                 </Flex>
               </Box>
             )}
 
             {/* Incoming call notification - Mobile optimized */}
+            {/* Ringing state - When you are calling someone */}
+            {isCalling && call?.isCalling && !callAccepted && (
+              <Box
+                borderBottom="1px solid"
+                borderColor={borderColor}
+                p={{ base: 3, md: 4 }}
+                bg={useColorModeValue('blue.600', 'blue.900')}
+              >
+                <Flex direction="column" gap={{ base: 2, md: 3 }} alignItems="center">
+                  <Text fontWeight="bold" fontSize={{ base: "md", md: "lg" }} textAlign="center" color="white">
+                    Ringing...
+                  </Text>
+                  <Text fontSize={{ base: "sm", md: "md" }} color="whiteAlpha.800" textAlign="center">
+                    {call?.callType === 'audio' ? 'Voice ' : 'Video '}Calling {call?.recipientName || selectedConversation?.participants[0]?.name || selectedConversation?.participants[0]?.username || 'User'}...
+                  </Text>
+                  <Button
+                    colorScheme="red"
+                    leftIcon={<FaPhoneSlash />}
+                    onClick={() => leaveCall?.()}
+                    size={{ base: "sm", md: "md" }}
+                  >
+                    Cancel
+                  </Button>
+                </Flex>
+              </Box>
+            )}
+
+            {/* Incoming call notification - When someone is calling you */}
             {call && call.isReceivingCall && !callAccepted && (
               <Box
                 borderBottom="1px solid"
                 borderColor={borderColor}
                 p={{ base: 3, md: 4 }}
-                bg={useColorModeValue('blue.50', 'blue.900')}
+                bg={useColorModeValue('blue.600', 'blue.900')}
               >
                 <Flex direction="column" gap={{ base: 2, md: 3 }} alignItems="center">
-                  <Text fontWeight="semibold" fontSize={{ base: "sm", md: "md" }} textAlign="center" color={useColorModeValue('black', 'white')}>
-                    {call?.name} is calling...
+                  <Text fontWeight="semibold" fontSize={{ base: "sm", md: "md" }} textAlign="center" color="white">
+                    {call?.name} is {call?.callType === 'audio' ? 'voice ' : 'video '}calling...
                   </Text>
                   <Flex gap={{ base: 2, md: 3 }} w="full" justifyContent="center" flexWrap="wrap">
                     <Button
@@ -1360,6 +1933,12 @@ const MessagesPage = () => {
               position="relative"
             >
               <VStack align="stretch" spacing={{ base: 3, md: 4 }} px={{ base: 2, sm: 3, md: 4 }}>
+                {/* Loading indicator for older messages */}
+                {loadingMoreMessages && (
+                  <Flex justify="center" py={2}>
+                    <Spinner size="sm" color="blue.500" />
+                  </Flex>
+                )}
                 {messages.map((msg) => {
                     // Better comparison for message ownership - handle all cases
                     let msgSenderId = ''
@@ -1460,7 +2039,7 @@ const MessagesPage = () => {
                             </Box>
                           )}
                           {/* Image/Video display */}
-                          {msg.img && (
+                          {msg.img && typeof msg.img === 'string' && msg.img.trim() !== '' && (
                             <Box
                               mb={msg.text ? 2 : 0}
                               borderRadius="md"
@@ -1468,32 +2047,114 @@ const MessagesPage = () => {
                               maxW={{ base: "200px", sm: "250px", md: "300px" }}
                               position="relative"
                               cursor="pointer"
+                              bg="transparent" // No background for images
                               onClick={(e) => handleMessageClick(e, msg._id)}
+                              onContextMenu={(e) => {
+                                // Right-click also opens menu
+                                e.preventDefault()
+                                handleMessageClick(e, msg._id)
+                              }}
                             >
-                              {msg.img.match(/\.(mp4|webm|ogg|mov)$/i) || msg.img.includes('/video/upload/') ? (
-                                <Box
-                                  as="video"
-                                  src={msg.img}
-                                  controls
-                                  maxW="100%"
-                                  maxH="400px"
-                                  borderRadius="md"
-                                  onClick={(e) => e.stopPropagation()}
-                                />
-                              ) : (
-                                <Image
-                                  src={msg.img}
-                                  alt="Message attachment"
-                                  maxW="100%"
-                                  maxH="400px"
-                                  borderRadius="md"
-                                  onClick={(e) => {
-                                    e.stopPropagation()
-                                    // Open image in modal or full view
-                                    window.open(msg.img, '_blank')
-                                  }}
-                                />
-                              )}
+                              {(() => {
+                                const imgUrl = typeof msg.img === 'string' ? msg.img : msg.img?.url || ''
+                                if (!imgUrl) return null
+                                
+                                // Check if it's a video (Cloudinary videos have /video/upload/ in URL)
+                                const isVideo = imgUrl.includes('/video/upload/') ||
+                                                imgUrl.includes('/v1/video/upload/') ||
+                                                imgUrl.match(/\.(mp4|webm|ogg|mov)$/i) ||
+                                                (imgUrl.includes('cloudinary.com') && imgUrl.includes('/video/'))
+                                
+                                // Check if it's an image (Cloudinary images have /image/upload/ or /upload/)
+                                const isImage = imgUrl.includes('/image/upload/') ||
+                                                (imgUrl.includes('cloudinary.com') && !imgUrl.includes('/video/') && !isVideo) ||
+                                                imgUrl.match(/\.(jpg|jpeg|png|gif|webp|bmp|svg)$/i) ||
+                                                !isVideo // Default to image if not video
+                                
+                                if (isVideo) {
+                                  return (
+                                    <Box position="relative" bg="transparent">
+                                      <Box
+                                        as="video"
+                                        src={imgUrl}
+                                        controls
+                                        maxW="100%"
+                                        maxH="400px"
+                                        borderRadius="md"
+                                        bg="transparent"
+                                      />
+                                      {/* Menu button overlay - always visible for easy access */}
+                                      <Box
+                                        position="absolute"
+                                        top={2}
+                                        right={2}
+                                        bg={useColorModeValue('rgba(0,0,0,0.7)', 'rgba(0,0,0,0.7)')}
+                                        borderRadius="full"
+                                        p={1.5}
+                                        cursor="pointer"
+                                        onClick={(e) => {
+                                          e.stopPropagation()
+                                          handleMessageClick(e, msg._id)
+                                        }}
+                                        onContextMenu={(e) => {
+                                          e.preventDefault()
+                                          handleMessageClick(e, msg._id)
+                                        }}
+                                        title="Click for options (delete, reply, etc.)"
+                                        _hover={{ bg: useColorModeValue('rgba(0,0,0,0.9)', 'rgba(0,0,0,0.9)') }}
+                                        transition="background 0.2s"
+                                        zIndex={10}
+                                      >
+                                        <Text fontSize="xs" color="white" fontWeight="bold">⋯</Text>
+                                      </Box>
+                                    </Box>
+                                  )
+                                } else if (isImage) {
+                                  return (
+                                    <Box position="relative" bg="transparent">
+                                      <Image
+                                        src={imgUrl}
+                                        alt="Message attachment"
+                                        maxW="100%"
+                                        maxH="400px"
+                                        borderRadius="md"
+                                        objectFit="contain"
+                                        bg="transparent" // No white background for images
+                                        onDoubleClick={(e) => {
+                                          // Double-click opens in new tab
+                                          e.stopPropagation()
+                                          window.open(imgUrl, '_blank')
+                                        }}
+                                        onError={(e) => {
+                                          console.error('Image load error:', imgUrl)
+                                          e.target.style.display = 'none'
+                                        }}
+                                        // Single click shows menu (handled by parent)
+                                      />
+                                      {/* Menu button overlay */}
+                                      <Box
+                                        position="absolute"
+                                        top={2}
+                                        right={2}
+                                        bg={useColorModeValue('rgba(0,0,0,0.7)', 'rgba(0,0,0,0.7)')}
+                                        borderRadius="full"
+                                        p={1.5}
+                                        cursor="pointer"
+                                        onClick={(e) => {
+                                          e.stopPropagation()
+                                          handleMessageClick(e, msg._id)
+                                        }}
+                                        title="Click for options"
+                                        _hover={{ bg: useColorModeValue('rgba(0,0,0,0.9)', 'rgba(0,0,0,0.9)') }}
+                                        transition="background 0.2s"
+                                      >
+                                        <Text fontSize="xs" color="white" fontWeight="bold">⋯</Text>
+                                      </Box>
+                                    </Box>
+                                  )
+                                }
+                                return null
+                              })()}
                               {/* Seen status for image-only messages - overlay */}
                               {!msg.text && isOwn && (
                                 <Box
@@ -1512,30 +2173,42 @@ const MessagesPage = () => {
                             </Box>
                           )}
                           {/* Text message bubble */}
-                          {msg.text && (
-                            <Flex
-                              bg={isOwn ? 'white' : useColorModeValue('gray.200', '#1a1a1a')}
-                              color={isOwn ? 'black' : useColorModeValue('black', 'white')}
-                              p={{ base: 2.5, md: 3 }}
-                              borderRadius="xl"
-                              borderTopLeftRadius={isOwn ? 'xl' : 'sm'}
-                              borderTopRightRadius={isOwn ? 'sm' : 'xl'}
-                              wordBreak="break-word"
-                              alignItems="flex-end"
-                              gap={1}
-                              cursor="pointer"
-                              onClick={(e) => handleMessageClick(e, msg._id)}
-                              _hover={{ opacity: 0.9 }}
-                              data-message-id={msg._id}
-                            >
-                              <Text fontSize={{ base: "sm", md: "md" }} whiteSpace="pre-wrap" flex={1}>{msg.text}</Text>
-                              {isOwn && (
-                                <Box alignSelf="flex-end" color={msg.seen ? "blue.600" : "gray.600"} flexShrink={0} ml={1}>
-                                  <BsCheck2All size={16} />
-                                </Box>
-                              )}
-                            </Flex>
-                          )}
+                          {msg.text && (() => {
+                            // Check if message is emoji-only (contains only emojis and whitespace)
+                            const emojiOnlyRegex = /^[\s\p{Emoji}]+$/u
+                            const isEmojiOnly = emojiOnlyRegex.test(msg.text.trim())
+                            
+                            return (
+                              <Flex
+                                bg={isEmojiOnly ? 'transparent' : (isOwn ? 'white' : useColorModeValue('gray.200', '#1a1a1a'))}
+                                color={isOwn ? 'black' : useColorModeValue('black', 'white')}
+                                p={isEmojiOnly ? 0 : { base: 2.5, md: 3 }}
+                                borderRadius={isEmojiOnly ? 0 : "xl"}
+                                borderTopLeftRadius={isEmojiOnly ? 0 : (isOwn ? 'xl' : 'sm')}
+                                borderTopRightRadius={isEmojiOnly ? 0 : (isOwn ? 'sm' : 'xl')}
+                                wordBreak="break-word"
+                                alignItems="flex-end"
+                                gap={1}
+                                cursor="pointer"
+                                onClick={(e) => handleMessageClick(e, msg._id)}
+                                _hover={{ opacity: 0.9 }}
+                                data-message-id={msg._id}
+                              >
+                                <Text 
+                                  fontSize={isEmojiOnly ? { base: "2xl", md: "3xl" } : { base: "sm", md: "md" }} 
+                                  whiteSpace="pre-wrap" 
+                                  flex={1}
+                                >
+                                  {msg.text}
+                                </Text>
+                                {isOwn && (
+                                  <Box alignSelf="flex-end" color={msg.seen ? "blue.600" : "gray.600"} flexShrink={0} ml={1}>
+                                    <BsCheck2All size={16} />
+                                  </Box>
+                                )}
+                              </Flex>
+                            )
+                          })()}
                         </Flex>
                         <Text
                           fontSize={{ base: "2xs", md: "xs" }}
@@ -1774,10 +2447,17 @@ const MessagesPage = () => {
                   const scrollHeight = container.scrollHeight
                   const clientHeight = container.clientHeight
                   const distanceFromBottom = scrollHeight - scrollTop - clientHeight
-                  const isActuallyAtBottom = distanceFromBottom <= 10
+                  const isActuallyAtBottom = distanceFromBottom <= 20
                   
                   // Show indicator if we have unread messages AND we're not at bottom
-                  if (isActuallyAtBottom) return null
+                  // Also hide if unread count is 0 (shouldn't happen, but safety check)
+                  if (isActuallyAtBottom || unreadCountInView === 0) {
+                    // If at bottom, clear the count (in case it wasn't cleared by scroll handler)
+                    if (isActuallyAtBottom && unreadCountInView > 0) {
+                      setUnreadCountInView(0)
+                    }
+                    return null
+                  }
                   
                   return (
                     <Box
@@ -1793,9 +2473,18 @@ const MessagesPage = () => {
                         if (messagesContainerRef.current) {
                           const container = messagesContainerRef.current
                           isUserScrollingRef.current = false
-                          container.scrollTop = container.scrollHeight
+                          // Clear unread count immediately
                           setUnreadCountInView(0)
                           setIsAtBottom(true)
+                          // Scroll to bottom
+                          container.scrollTop = container.scrollHeight
+                          // Verify scroll after a brief delay
+                          setTimeout(() => {
+                            if (messagesContainerRef.current) {
+                              const container = messagesContainerRef.current
+                              container.scrollTop = container.scrollHeight
+                            }
+                          }, 50)
                         }
                       }}
                     >
@@ -1874,7 +2563,7 @@ const MessagesPage = () => {
                 </Flex>
               )}
               {/* Upload progress bar */}
-              {uploadProgress > 0 && uploadProgress < 100 && (
+              {(uploadProgress > 0 && uploadProgress < 100) || isProcessing ? (
                 <Flex
                   p={3}
                   bg={useColorModeValue('blue.50', 'blue.900')}
@@ -1887,22 +2576,24 @@ const MessagesPage = () => {
                   <Flex w="100%" alignItems="center" gap={2}>
                     <Spinner size="sm" color="blue.500" />
                     <Text fontSize="sm" color={useColorModeValue('blue.700', 'blue.300')} fontWeight="semibold" flex={1}>
-                      Uploading {image?.type?.startsWith('image/') ? 'image' : 'video'}... {uploadProgress}%
+                      {uploadProgress === 100 && isProcessing
+                        ? `Processing file on server...` 
+                        : `Uploading to Cloudinary... ${uploadProgress}%`}
                     </Text>
                   </Flex>
                   <Box w="100%" bg={useColorModeValue('blue.200', 'blue.700')} borderRadius="full" h={2} overflow="hidden">
                     <Box
                       bg="blue.500"
                       h="100%"
-                      w={`${uploadProgress}%`}
+                      w={isProcessing ? "100%" : `${uploadProgress}%`}
                       transition="width 0.3s ease"
                       borderRadius="full"
                     />
                   </Box>
                 </Flex>
-              )}
+              ) : null}
               {/* Image/Video preview */}
-              {imagePreview && uploadProgress === 0 && (
+              {imagePreview && (
                 <Flex
                   p={2}
                   bg={useColorModeValue('gray.100', 'gray.800')}
@@ -1913,21 +2604,56 @@ const MessagesPage = () => {
                   position="relative"
                 >
                   <Box position="relative" maxW="100px" maxH="100px">
-                    {image?.type?.startsWith('image/') ? (
-                      <Image src={imagePreview} alt="Preview" borderRadius="md" maxW="100px" maxH="100px" />
-                    ) : (
-                      <Box
-                        as="video"
-                        src={imagePreview}
-                        controls={false}
-                        maxW="100px"
-                        maxH="100px"
-                        borderRadius="md"
-                      />
-                    )}
+                    {(() => {
+                      // Check if preview is image or video
+                      const fileType = image?.type || ''
+                      const previewUrl = typeof imagePreview === 'string' ? imagePreview : ''
+                      
+                      const isVideo = fileType.startsWith('video/') || 
+                                      previewUrl.match(/\.(mp4|webm|ogg|mov)$/i) ||
+                                      previewUrl.includes('blob:') && fileType.startsWith('video/')
+                      
+                      const isImage = fileType.startsWith('image/') || 
+                                      previewUrl.match(/\.(jpg|jpeg|png|gif|webp|bmp|svg)$/i) ||
+                                      (!isVideo && previewUrl) // Default to image if not video
+                      
+                      if (isVideo) {
+                        return (
+                          <Box
+                            as="video"
+                            src={imagePreview}
+                            controls={false}
+                            maxW="100px"
+                            maxH="100px"
+                            borderRadius="md"
+                            objectFit="cover"
+                          />
+                        )
+                      } else if (isImage) {
+                        return (
+                          <Image 
+                            src={imagePreview} 
+                            alt="Preview" 
+                            borderRadius="md" 
+                            maxW="100px" 
+                            maxH="100px"
+                            objectFit="cover"
+                            onError={(e) => {
+                              console.error('Preview image load error:', imagePreview)
+                            }}
+                          />
+                        )
+                      }
+                      return null
+                    })()}
                   </Box>
                   <Text fontSize="xs" color={useColorModeValue('gray.600', 'gray.400')} flex={1} noOfLines={1}>
-                    {image?.type?.startsWith('image/') ? 'Image' : 'Video'} selected
+                    {(() => {
+                      const isImage = typeof image === 'object' && image?.url
+                        ? image.url.match(/\.(jpg|jpeg|png|gif|webp|bmp)$/i) || !image.url.match(/\.(mp4|webm|ogg|mov)$/i)
+                        : image?.type?.startsWith('image/') || imagePreview.match(/\.(jpg|jpeg|png|gif|webp|bmp)$/i) || !imagePreview.match(/\.(mp4|webm|ogg|mov)$/i)
+                      return isImage ? 'Image' : 'Video'
+                    })()} ready
                   </Text>
                   <IconButton
                     aria-label="Remove image"
@@ -1948,22 +2674,49 @@ const MessagesPage = () => {
                 position="relative"
                 zIndex={2}
               >
-              {/* Game button - Show on all screens now */}
+              {/* G button - Opens emoji picker for sending emoji messages */}
               <Box
-                w={{ base: 10, sm: 10 }}
-                h={{ base: 10, sm: 10 }}
-                bg="green.500"
-                borderRadius="full"
-                display="flex"
-                alignItems="center"
-                justifyContent="center"
-                cursor="pointer"
-                _hover={{ bg: 'green.600' }}
+                position="relative"
                 flexShrink={0}
               >
-                <Text color="white" fontWeight="bold" fontSize={{ base: "md", md: "lg" }}>G</Text>
+                <Box
+                  w={{ base: 10, sm: 10 }}
+                  h={{ base: 10, sm: 10 }}
+                  bg="green.500"
+                  borderRadius="full"
+                  display="flex"
+                  alignItems="center"
+                  justifyContent="center"
+                  cursor="pointer"
+                  _hover={{ bg: 'green.600' }}
+                  onClick={() => setEmojiPickerForMessage(!emojiPickerForMessage)}
+                  title="Send emoji"
+                >
+                  <Text color="white" fontWeight="bold" fontSize={{ base: "md", md: "lg" }}>G</Text>
+                </Box>
+                {/* Emoji picker for sending messages */}
+                {emojiPickerForMessage && (
+                  <Box
+                    ref={emojiPickerForMessageRef}
+                    position="absolute"
+                    bottom="100%"
+                    left={0}
+                    mb={2}
+                    zIndex={1000}
+                  >
+                    <EmojiPicker
+                      theme={emojiPickerTheme}
+                      onEmojiClick={(emojiData) => {
+                        // Add emoji to message input
+                        setNewMessage((prev) => prev + emojiData.emoji)
+                        setEmojiPickerForMessage(false)
+                      }}
+                      autoFocusSearch={false}
+                    />
+                  </Box>
+                )}
               </Box>
-              {/* Image/Video upload button */}
+              {/* Image/Video upload button - Uploads to Cloudinary via backend */}
               <IconButton
                 aria-label="Upload image or video"
                 icon={<BsFillImageFill size={18} />}
@@ -1981,42 +2734,116 @@ const MessagesPage = () => {
                 accept="image/*,video/*"
                 hidden
                 ref={imageInputRef}
-                onChange={handleImageChange}
+                onChange={handleFileSelect}
               />
-              {/* Call button - Optimized for mobile */}
-              <IconButton
-                aria-label="Start video call"
-                icon={<FaPhone size={14} />}
-                bg="blue.500"
-                color="white"
-                _hover={{ bg: 'blue.600' }}
-                onClick={() => {
-                  const recipientId = selectedConversation?.participants[0]?._id
-                  if (recipientId && callUser) {
-                    // Check if user is busy before calling
-                    if (busyUsers?.has(recipientId) || busyUsers?.has(user?._id)) {
-                      showToast('Error', 'User is currently in a call', 'error')
-                      return
-                    }
-                    callUser(recipientId)
+              {/* Call button with menu - Optimized for mobile */}
+              <Menu>
+                <MenuButton
+                  as={IconButton}
+                  aria-label="Start call"
+                  icon={<FaPhone size={14} />}
+                  bg="blue.500"
+                  color="white"
+                  _hover={{ bg: 'blue.600' }}
+                  borderRadius="full"
+                  size={{ base: "sm", md: "md" }}
+                  isDisabled={
+                    !selectedConversation?.participants[0]?._id || 
+                    callAccepted || 
+                    !callUser ||
+                    busyUsers?.has(selectedConversation?.participants[0]?._id) ||
+                    busyUsers?.has(user?._id)
                   }
-                }}
-                borderRadius="full"
-                size={{ base: "sm", md: "md" }}
-                isDisabled={
-                  !selectedConversation?.participants[0]?._id || 
-                  callAccepted || 
-                  !callUser ||
-                  busyUsers?.has(selectedConversation?.participants[0]?._id) ||
-                  busyUsers?.has(user?._id)
-                }
-                flexShrink={0}
-                title={
-                  busyUsers?.has(selectedConversation?.participants[0]?._id) || busyUsers?.has(user?._id)
-                    ? "User is currently in a call"
-                    : "Start video call"
-                }
-              />
+                  flexShrink={0}
+                  title={
+                    busyUsers?.has(selectedConversation?.participants[0]?._id) || busyUsers?.has(user?._id)
+                      ? "User is currently in a call"
+                      : "Start call"
+                  }
+                />
+                <MenuList 
+                  bg={bgColor} 
+                  borderColor={borderColor}
+                  borderRadius="lg"
+                  boxShadow="xl"
+                  py={1}
+                  minW="150px"
+                  w="auto"
+                >
+                  <MenuItem
+                    icon={<FaVideo />}
+                    onClick={() => {
+                      const recipientId = selectedConversation?.participants[0]?._id
+                      if (recipientId && callUser) {
+                        // Check if user is busy before calling
+                        if (busyUsers?.has(recipientId) || busyUsers?.has(user?._id)) {
+                          showToast('Error', 'User is currently in a call', 'error')
+                          return
+                        }
+                        // Get recipient name from conversation
+                        const recipientName = selectedConversation?.participants[0]?.name || selectedConversation?.participants[0]?.username
+                        callUser(recipientId, recipientName, 'video')
+                      }
+                    }}
+                    bg={bgColor}
+                    color={useColorModeValue('black', 'white')}
+                    _hover={{
+                      bg: useColorModeValue('blue.50', 'blue.900'),
+                      color: useColorModeValue('blue.600', 'blue.200'),
+                      transform: 'translateX(4px)',
+                      transition: 'all 0.2s ease'
+                    }}
+                    _focus={{
+                      bg: useColorModeValue('blue.50', 'blue.900'),
+                      color: useColorModeValue('blue.600', 'blue.200'),
+                    }}
+                    transition="all 0.2s ease"
+                    cursor="pointer"
+                    borderRadius="md"
+                    py={2}
+                    px={3}
+                    closeOnSelect
+                  >
+                    <Text fontWeight="medium">Video Call</Text>
+                  </MenuItem>
+                  <MenuItem
+                    icon={<FaPhone />}
+                    onClick={() => {
+                      const recipientId = selectedConversation?.participants[0]?._id
+                      if (recipientId && callUser) {
+                        // Check if user is busy before calling
+                        if (busyUsers?.has(recipientId) || busyUsers?.has(user?._id)) {
+                          showToast('Error', 'User is currently in a call', 'error')
+                          return
+                        }
+                        // Get recipient name from conversation
+                        const recipientName = selectedConversation?.participants[0]?.name || selectedConversation?.participants[0]?.username
+                        callUser(recipientId, recipientName, 'audio')
+                      }
+                    }}
+                    bg={bgColor}
+                    color={useColorModeValue('black', 'white')}
+                    _hover={{
+                      bg: useColorModeValue('green.50', 'green.900'),
+                      color: useColorModeValue('green.600', 'green.200'),
+                      transform: 'translateX(4px)',
+                      transition: 'all 0.2s ease'
+                    }}
+                    _focus={{
+                      bg: useColorModeValue('green.50', 'green.900'),
+                      color: useColorModeValue('green.600', 'green.200'),
+                    }}
+                    transition="all 0.2s ease"
+                    cursor="pointer"
+                    borderRadius="md"
+                    py={2}
+                    px={3}
+                    closeOnSelect
+                  >
+                    <Text fontWeight="medium">Voice Call</Text>
+                  </MenuItem>
+                </MenuList>
+              </Menu>
               <Input
                 ref={messageInputRef}
                 placeholder={replyingTo ? "Type a reply..." : "Message..."}
@@ -2047,8 +2874,8 @@ const MessagesPage = () => {
                 color="white"
                 _hover={{ bg: 'green.600' }}
                 onClick={handleSendMessage}
-                isLoading={sending || (uploadProgress > 0 && uploadProgress < 100)}
-                isDisabled={sending || (uploadProgress > 0 && uploadProgress < 100) || (!newMessage.trim() && !imagePreview)}
+                isLoading={sending || (uploadProgress > 0 && uploadProgress < 100) || isProcessing}
+                isDisabled={sending || (uploadProgress > 0 && uploadProgress < 100) || isProcessing || (!newMessage.trim() && !image && !imagePreview)}
                 borderRadius="md"
                 px={{ base: 3, sm: 4, md: 6 }}
                 size={{ base: "sm", md: "md" }}

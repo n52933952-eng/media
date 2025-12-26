@@ -48,22 +48,44 @@ const[inputs,setInputs]=useState({
 
  
  
-const[image,setImage]=useState(null)
+const[image,setImage]=useState(null) // Will store File object for upload
+const[uploadProgress,setUploadProgress]=useState(0)
+const[isUploading,setIsUploading]=useState(false)
 
 
 
-const handleImageChange = (event) => {
+const handleImageChange = async (event) => {
   const file = event.target.files[0];
 
+  if (!file) return;
+
   if (file && file.type.startsWith("image/")) {
-    const reader = new FileReader();
-    reader.onload = () => {
-      setImage(reader.result); 
-    };
-    reader.readAsDataURL(file); 
-  }else{
-   showToast("Please select an image", "Invalid image type", "error");
-  }
+    // Check file size (100MB limit for Cloudinary)
+    const maxSize = 100 * 1024 * 1024 // 100MB
+    if (file.size > maxSize) {
+      showToast("File too large", "Please select an image smaller than 100MB", "error")
+      if (inputRef.current) {
+        inputRef.current.value = ''
+      }
+      return
+    }
+
+    // Store file object (will be uploaded when form is submitted)
+    setImage(file)
+    // Create preview URL
+    const previewURL = URL.createObjectURL(file)
+    setImage(previewURL) // Show preview immediately
+    setUploadProgress(0)
+    setIsUploading(false) // Don't upload immediately, wait for form submit
+      
+    } else {
+      showToast("Please select an image", "Invalid image type", "error");
+    }
+    
+    // Reset input value
+    if (inputRef.current) {
+      inputRef.current.value = ''
+    }
 };
 
 
@@ -74,38 +96,120 @@ console.log(image)
   const handleSubmit = async(e) => {
     e.preventDefault();
    
-
-    if(updating) return 
+    if(updating || isUploading) {
+      return 
+    }
 
     setUpdating(true)
+    setUploadProgress(0)
  
   try{
- 
-    const res = await fetch(`${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/user/update/${user._id}`,{
-
-        method:"PUT",
-
-           headers: { "Content-Type": "application/json" },
-           credentials: "include",
-           body:JSON.stringify({ ...inputs,profilePic:image})
-         })
-   
-     const data= await res.json()
-
-      if(data.error){
-        showToast("Error",data.error,"error")
-        return
+    const formData = new FormData()
+    formData.append('name', inputs.name)
+    formData.append('username', inputs.username)
+    formData.append('email', inputs.email)
+    formData.append('bio', inputs.bio || '')
+    if (inputs.password) {
+      formData.append('password', inputs.password)
+    }
+    
+    // Upload profile picture if a new file was selected
+    if (image instanceof File) {
+      formData.append('file', image)
+      
+      const xhr = new XMLHttpRequest()
+      
+      xhr.upload.addEventListener('progress', (e) => {
+        if (e.lengthComputable) {
+          setUploadProgress((e.loaded / e.total) * 100)
+        }
+      })
+      
+      xhr.open('PUT', `${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/user/update/${user._id}`)
+      xhr.withCredentials = true
+      xhr.timeout = 600000 // 10 minutes
+      
+      xhr.onload = () => {
+        if (xhr.status === 200) {
+          try {
+            const data = JSON.parse(xhr.responseText)
+            
+            if(data.error){
+              showToast("Error", data.error, "error")
+              setUpdating(false)
+              setUploadProgress(0)
+              return
+            }
+            
+            showToast("Success", "Profile updated successfully", "success")
+            setUser(data)
+            localStorage.setItem("userInfo", JSON.stringify(data))
+            
+            // Clear image preview
+            if (image && image.startsWith('blob:')) {
+              URL.revokeObjectURL(image)
+            }
+            setImage(null)
+            setUploadProgress(0)
+            setUpdating(false)
+          } catch (error) {
+            showToast("Error", "Failed to parse server response", "error")
+            setUpdating(false)
+            setUploadProgress(0)
+          }
+        } else {
+          try {
+            const errorData = JSON.parse(xhr.responseText)
+            showToast("Error", errorData.error || "Failed to update profile", "error")
+          } catch (error) {
+            showToast("Error", "Failed to update profile", "error")
+          }
+          setUpdating(false)
+          setUploadProgress(0)
+        }
       }
       
-     showToast("Success","Profile updated successfully","success")
-     setUser(data)
-     localStorage.setItem("userInfo",JSON.stringify(data))
-     
+      xhr.onerror = () => {
+        showToast("Error", "Network error while updating profile", "error")
+        setUpdating(false)
+        setUploadProgress(0)
+      }
+      
+      xhr.ontimeout = () => {
+        showToast("Error", "Upload timeout. Please try again.", "error")
+        setUpdating(false)
+        setUploadProgress(0)
+      }
+      
+      xhr.send(formData)
+      return // Exit early, response handled in xhr callbacks
     }
-  catch(error){
-    showToast("error",error,"error")
-  }finally{
+    
+    // No file upload - just send profile data
+    const res = await fetch(`${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/user/update/${user._id}`,{
+      method:"PUT",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ ...inputs, profilePic: user.profilePic }) // Keep existing profile pic if no new one
+    })
+   
+    const data = await res.json()
+
+    if(data.error){
+      showToast("Error", data.error, "error")
+      setUpdating(false)
+      return
+    }
+    
+    showToast("Success", "Profile updated successfully", "success")
+    setUser(data)
+    localStorage.setItem("userInfo", JSON.stringify(data))
     setUpdating(false)
+  }
+  catch(error){
+    showToast("Error", error.message || error, "error")
+    setUpdating(false)
+    setUploadProgress(0)
   }
 
 }

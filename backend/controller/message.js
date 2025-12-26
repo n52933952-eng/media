@@ -1,7 +1,8 @@
 import Conversation from '../models/conversation.js'
 import Message from '../models/message.js'
 import { getRecipientSockedId, getIO } from '../socket/socket.js'
-import {v2 as cloudinary} from 'cloudinary'
+import { v2 as cloudinary } from 'cloudinary'
+import { Readable } from 'stream'
 
 
 export const sendMessaeg = async(req,res) => {
@@ -9,22 +10,103 @@ export const sendMessaeg = async(req,res) => {
   try{
   
  const{recipientId,message,replyTo}= req.body
- const senderId = req.user._id  // Fix: Use _id instead of id
+ const senderId = req.user._id
  let img = ''
  
- // Upload file to Cloudinary if provided (from multer)
- if(req.file){
-   // Convert buffer to base64 for Cloudinary
-   const base64String = `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}`
-   
-   // Upload to Cloudinary
-   const uploadOptions = {
-     resource_type: req.file.mimetype.startsWith('video/') ? 'video' : 'image'
-   }
-   
-   const uploadResponse = await cloudinary.uploader.upload(base64String, uploadOptions)
-   img = uploadResponse.secure_url
- }
+       // Handle file upload via Multer to Cloudinary
+       if(req.file) {
+         return new Promise((resolve, reject) => {
+           // Create a readable stream from the buffer
+           const stream = cloudinary.uploader.upload_stream(
+             {
+               resource_type: req.file.mimetype.startsWith('video/') ? 'video' : 'image',
+               folder: 'messages',
+               timeout: 1200000, // 20 minutes timeout for large videos
+               chunk_size: 6000000, // 6MB chunks
+             },
+             async (error, result) => {
+               if (error) {
+                 console.error('Cloudinary upload error:', error)
+                 if (!res.headersSent) {
+                   res.status(500).json({ 
+                     error: 'Failed to upload file to Cloudinary',
+                     details: error.message 
+                   })
+                 }
+                 reject(error)
+                 return
+               }
+               
+               img = result.secure_url
+               
+               try {
+                 // Create message after upload completes
+                 let conversation = await Conversation.findOne({ participants:{$all:[senderId,recipientId]}})
+
+                 if(!conversation){
+                    conversation = new Conversation({participants:[senderId,recipientId],
+                        lastMessage:{text:message,
+                            sender:senderId
+                        }
+                    })
+                    await conversation.save()
+                 }
+
+                const newMessage = new Message({
+                  conversationId:conversation._id,
+                  sender:senderId,
+                  text:message,
+                  img,
+                  replyTo: replyTo || null
+                })
+
+                await Promise.all([newMessage.save(),conversation.updateOne({lastMessage:{text:message,sender:senderId}})])
+                  
+                // Populate sender data and replyTo message before sending
+                await newMessage.populate("sender", "username profilePic name")
+                if (newMessage.replyTo) {
+                  await newMessage.populate({
+                    path: "replyTo",
+                    select: "text sender",
+                    populate: {
+                      path: "sender",
+                      select: "username name profilePic"
+                    }
+                  })
+                }
+                  
+                const recipentSockedId = getRecipientSockedId(recipientId)
+                const io = getIO()
+
+                if(recipentSockedId && recipientId && io){
+                  io.to(recipentSockedId).emit("newMessage",newMessage)
+                }
+
+                if (!res.headersSent) {
+                  res.status(201).json(newMessage)
+                }
+                resolve()
+               } catch (error) {
+                 console.error('Error creating message after upload:', error)
+                 if (!res.headersSent) {
+                   res.status(500).json({ 
+                     error: error.message || 'Failed to send message. Please try again.' 
+                   })
+                 }
+                 reject(error)
+               }
+             }
+           )
+           
+           // Convert buffer to stream and pipe to Cloudinary
+           const bufferStream = new Readable()
+           bufferStream.push(req.file.buffer)
+           bufferStream.push(null)
+           bufferStream.pipe(stream)
+         })
+       }
+       
+       // No file upload - proceed normally
  
  let conversation = await Conversation.findOne({ participants:{$all:[senderId,recipientId]}})
 
@@ -71,8 +153,13 @@ if(recipentSockedId && recipientId && io){
 res.status(201).json(newMessage)
   }
   catch(error){
-    res.status(500).json(error)
-    console.log(error)
+    console.error('Error in sendMessaeg:', error)
+    // Make sure to always send a response
+    if (!res.headersSent) {
+      res.status(500).json({ 
+        error: error.message || 'Failed to send message. Please try again.' 
+      })
+    }
   }
 }
 
@@ -89,10 +176,26 @@ export const getMessage = async(req,res) => {
    
     // Fix: Handle case when conversation doesn't exist
     if(!conversation){
-        return res.status(200).json([]) // Return empty array if no conversation exists
+        return res.status(200).json({ messages: [], hasMore: false }) // Return empty array if no conversation exists
     }
    
-    const messages = await Message.find({conversationId:conversation._id})
+    // Pagination parameters
+    const limit = parseInt(req.query.limit) || 12 // Default to 12 messages
+    const beforeId = req.query.beforeId // Message ID to fetch messages before (for pagination)
+    
+    // Build query
+    let query = { conversationId: conversation._id }
+    
+    // If beforeId is provided, fetch messages created before that message
+    if (beforeId) {
+      const beforeMessage = await Message.findById(beforeId)
+      if (beforeMessage) {
+        query.createdAt = { $lt: beforeMessage.createdAt }
+      }
+    }
+    
+    // Fetch messages with pagination
+    const messages = await Message.find(query)
       .populate("sender", "username profilePic name")
       .populate("reactions.userId", "username name profilePic")
       .populate({
@@ -103,9 +206,21 @@ export const getMessage = async(req,res) => {
           select: "username name profilePic"
         }
       })
-      .sort({createdAt:1})
+      .sort({createdAt: -1}) // Sort descending (newest first) for pagination
+      .limit(limit + 1) // Fetch one extra to check if there are more messages
    
-    res.status(200).json(messages)
+    // Check if there are more messages
+    const hasMore = messages.length > limit
+    const messagesToReturn = hasMore ? messages.slice(0, limit) : messages
+    
+    // Reverse to get chronological order (oldest to newest)
+    messagesToReturn.reverse()
+   
+    res.status(200).json({ 
+      messages: messagesToReturn,
+      hasMore: hasMore,
+      totalCount: await Message.countDocuments({ conversationId: conversation._id })
+    })
    
 
 }
@@ -121,14 +236,40 @@ export const mycon = async(req,res) => {
 	try {
 		const userId = req.user._id  // Fix: Use authenticated user's _id
    
-		const conversations = await Conversation.find({participants:userId}).populate({
-			path: "participants",
-			select: "username profilePic",
-    }).sort({createdAt:-1});
+    // Pagination parameters
+    const limit = parseInt(req.query.limit) || 20 // Default to 20 conversations
+    const beforeId = req.query.beforeId // Conversation ID to fetch conversations before (for pagination)
+    
+    // Build query
+    let query = { participants: userId }
+    
+    // If beforeId is provided, fetch conversations created before that conversation
+    if (beforeId) {
+      const beforeConversation = await Conversation.findById(beforeId)
+      if (beforeConversation) {
+        query.createdAt = { $lt: beforeConversation.createdAt }
+      }
+    }
+    
+    // Get total count for pagination
+    const totalCount = await Conversation.countDocuments({ participants: userId })
+    
+    // Fetch conversations with pagination
+    const conversations = await Conversation.find(query)
+      .populate({
+        path: "participants",
+        select: "username profilePic name",
+      })
+      .sort({updatedAt: -1}) // Sort by updatedAt (last message time) instead of createdAt
+      .limit(limit + 1) // Fetch one extra to check if there are more
+
+    // Check if there are more conversations
+    const hasMore = conversations.length > limit
+    const conversationsToReturn = hasMore ? conversations.slice(0, limit) : conversations
 
     // Calculate unread counts for each conversation
     const conversationsWithUnread = await Promise.all(
-      conversations.map(async (conversation) => {
+      conversationsToReturn.map(async (conversation) => {
         // Filter participants to get the other user
 			conversation.participants = conversation.participants.filter(
           (participant) => participant._id.toString() !== userId.toString()
@@ -149,7 +290,11 @@ export const mycon = async(req,res) => {
       })
     );
 
-res.status(200).json(conversationsWithUnread);
+res.status(200).json({ 
+  conversations: conversationsWithUnread, 
+  hasMore,
+  totalCount
+});
 	} catch (error) {
 		res.status(500).json({ error: error.message });
 	}
@@ -197,6 +342,60 @@ export const deleteMessage = async (req, res) => {
 
     if (!isParticipant) {
       return res.status(403).json({ error: 'You can only delete messages in conversations you are part of' })
+    }
+
+    // Delete image/video from Cloudinary if it exists
+    if (message.img && message.img.includes('cloudinary')) {
+      try {
+        // Determine resource type (image or video)
+        const isVideo = message.img.includes('/video/upload/') || 
+                       message.img.match(/\.(mp4|webm|ogg|mov)$/i) ||
+                       (message.img.includes('cloudinary') && message.img.includes('video'))
+        
+        // Extract public ID from Cloudinary URL
+        // URL format: https://res.cloudinary.com/{cloud_name}/{resource_type}/upload/{version}/{folder}/{filename}.{ext}
+        // We need to extract: {folder}/{filename} (public ID)
+        const urlParts = message.img.split('/')
+        const uploadIndex = urlParts.findIndex(part => part === 'upload')
+        
+        if (uploadIndex !== -1 && uploadIndex < urlParts.length - 1) {
+          // Get everything after 'upload' (skip version if present)
+          let publicIdParts = urlParts.slice(uploadIndex + 1)
+          
+          // Remove version if it's a numeric v{timestamp}
+          if (publicIdParts.length > 0 && /^v\d+$/.test(publicIdParts[0])) {
+            publicIdParts = publicIdParts.slice(1)
+          }
+          
+          // Join remaining parts to get public ID
+          let publicId = publicIdParts.join('/')
+          
+          // Remove file extension
+          publicId = publicId.replace(/\.(jpg|jpeg|png|gif|webp|bmp|mp4|webm|ogg|mov)$/i, '')
+          
+          // Delete from Cloudinary
+          if (publicId) {
+            await cloudinary.uploader.destroy(publicId, {
+              resource_type: isVideo ? 'video' : 'image'
+            })
+            console.log(`Deleted ${isVideo ? 'video' : 'image'} from Cloudinary: ${publicId}`)
+          }
+        } else {
+          // Fallback: try to extract public ID using simpler method
+          const filename = urlParts[urlParts.length - 1]
+          const publicId = filename.split('.')[0]
+          if (publicId) {
+            await cloudinary.uploader.destroy(publicId, {
+              resource_type: isVideo ? 'video' : 'image'
+            })
+            console.log(`Deleted ${isVideo ? 'video' : 'image'} from Cloudinary (fallback): ${publicId}`)
+          }
+        }
+      } catch (cloudinaryError) {
+        // Log error but don't fail the message deletion
+        console.error('Error deleting file from Cloudinary:', cloudinaryError)
+        // Continue with message deletion even if Cloudinary deletion fails
+      }
     }
 
     // Delete the message

@@ -8,6 +8,7 @@ import{useNavigate} from 'react-router-dom'
 import{formatDistanceToNow} from 'date-fns'
 import { MdOutlineDeleteOutline } from "react-icons/md";
 import{UserContext} from '../context/UserContext'
+import{PostContext} from '../context/PostContext'
 
 
 
@@ -21,7 +22,7 @@ const showToast = useShowToast()
  console.log({"postby":postedBy})
 
   const{user}=useContext(UserContext)
-
+  const{followPost,setFollowPost}=useContext(PostContext)
 
   const handleDeletepost = async(e) => {
     e.preventDefault()
@@ -37,11 +38,16 @@ const showToast = useShowToast()
     const data = await res.json()
 
      if(res.ok){
+      // Remove post from the feed
+      setFollowPost(followPost.filter((p) => p._id !== post._id))
       showToast("Success","POST deleted","success")
+     } else {
+      showToast("Error", data.error || "Failed to delete post", "error")
      }
     }
     catch(error){
       console.log(error)
+      showToast("Error","Failed to delete post","error")
     }
   }
    

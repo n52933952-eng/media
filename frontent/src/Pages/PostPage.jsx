@@ -77,8 +77,6 @@ if(!post) return
 
 
   const handleDeletepost = async() => {
-   
-
     try{
     if(!window.confirm("Are you sure you want to delete this post"))return
    
@@ -90,12 +88,17 @@ if(!post) return
     const data = await res.json()
 
      if(res.ok){
+      // Remove post from context
+      setFollowPost([])
       showToast("Success","POST deleted","success")
+      navigate(`/${user.username}`)
+     } else {
+      showToast("Error", data.error || "Failed to delete post", "error")
      }
-     navigate(`/${user.username}`)
     }
     catch(error){
       console.log(error)
+      showToast("Error","Failed to delete post","error")
     }
   }
    
