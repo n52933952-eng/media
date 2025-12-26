@@ -1252,9 +1252,15 @@ const MessagesPage = () => {
   }, [])
 
   // Send message
-  const handleSendMessage = async () => {
+  const handleSendMessage = async (e) => {
+    // Prevent any default behavior
+    if (e) {
+      e.preventDefault()
+      e.stopPropagation()
+    }
+    
     // Allow sending if there's text, image, or both, but require at least one
-    if ((!newMessage.trim() && !image) || !selectedConversation) return
+    if ((!newMessage.trim() && !image && !imagePreview) || !selectedConversation || sending) return
 
     const recipientId = selectedConversation.participants[0]?._id
     if (!recipientId) return
@@ -2887,10 +2893,14 @@ const MessagesPage = () => {
                   setNewMessage(e.target.value)
                   handleTyping()
                 }}
-                onKeyPress={(e) => {
+                onKeyDown={(e) => {
                   if (e.key === 'Enter' && !e.shiftKey) {
                     e.preventDefault()
-                    handleSendMessage()
+                    e.stopPropagation()
+                    e.nativeEvent?.stopImmediatePropagation()
+                    if (!sending && (newMessage.trim() || image || imagePreview)) {
+                      handleSendMessage(e)
+                    }
                   }
                 }}
                 bg={inputBg}
@@ -2912,7 +2922,10 @@ const MessagesPage = () => {
                 onClick={(e) => {
                   e.preventDefault()
                   e.stopPropagation()
-                  handleSendMessage()
+                  e.nativeEvent?.stopImmediatePropagation()
+                  if (!sending && (newMessage.trim() || image || imagePreview)) {
+                    handleSendMessage(e)
+                  }
                 }}
                 isLoading={sending || (uploadProgress > 0 && uploadProgress < 100) || isProcessing}
                 isDisabled={sending || (uploadProgress > 0 && uploadProgress < 100) || isProcessing || (!newMessage.trim() && !image && !imagePreview)}
