@@ -646,7 +646,7 @@ const MessagesPage = () => {
       // ALWAYS update conversation list (even if message is for selected conversation)
       // This ensures conversations are sorted and updated in real-time
       setConversations(prev => {
-          let updated = prev.map(conv => {
+        let updated = prev.map(conv => {
             if (conv._id && message.conversationId && conv._id.toString() === message.conversationId.toString()) {
               // Check if message is from current user
               let messageSenderId = ''
@@ -817,14 +817,13 @@ const MessagesPage = () => {
           return sorted
         })
       }
-    }
 
     socket.on('newMessage', handleNewMessage)
 
     return () => {
       socket.off('newMessage', handleNewMessage)
     }
-  }, [socket, selectedConversation?._id, user?._id]) // Keep dependencies to ensure handler has latest values
+  }, [socket, user?._id]) // Keep dependencies to ensure handler has latest values
 
   // Mark messages as seen when viewing messages from other user
   useEffect(() => {
