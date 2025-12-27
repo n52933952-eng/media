@@ -1487,7 +1487,13 @@ const MessagesPage = () => {
               ...conv,
               lastMessage: {
                 text: data.text || '',
-                sender: data.sender?._id || user._id
+                sender: data.sender || {
+                  _id: user._id,
+                  name: user.name,
+                  username: user.username,
+                  profilePic: user.profilePic
+                },
+                createdAt: new Date().toISOString()
               },
               updatedAt: new Date().toISOString()
             }
@@ -1504,7 +1510,13 @@ const MessagesPage = () => {
             participants: selectedConversation?.participants || [],
             lastMessage: {
               text: data.text || '',
-              sender: data.sender?._id || user._id
+              sender: data.sender || {
+                _id: user._id,
+                name: user.name,
+                username: user.username,
+                profilePic: user.profilePic
+              },
+              createdAt: new Date().toISOString()
             },
             updatedAt: new Date().toISOString(),
             unreadCount: 0
@@ -1774,11 +1786,23 @@ const MessagesPage = () => {
                                                      currentUserId !== '' && 
                                                      lastMessageSenderId === currentUserId
                           
+                          // Get sender name for display
+                          let senderName = ''
+                          if (conv.lastMessage.sender) {
+                            if (typeof conv.lastMessage.sender === 'object') {
+                              senderName = conv.lastMessage.sender.name || conv.lastMessage.sender.username || ''
+                            }
+                          }
+                          
+                          const messagePreview = conv.lastMessage.text?.length > 30 
+                            ? conv.lastMessage.text.substring(0, 30) + "..." 
+                            : conv.lastMessage.text || "📷 Image"
+                          
                           return (
                             <Flex alignItems="center" gap={1} mt={0.5}>
                               {/* Show seen indicator only if current user sent the last message */}
                               {isLastMessageFromMe && (
-                                <Box color={conv.lastMessage.seen ? "blue.600" : "white"}>
+                                <Box color={conv.lastMessage.seen ? "blue.600" : "gray.400"}>
                                   <BsCheck2All size={14} />
                                 </Box>
                               )}
@@ -1789,9 +1813,11 @@ const MessagesPage = () => {
                                 flex={1}
                                 minW={0}
                               >
-                                {conv.lastMessage.text?.length > 30 
-                                  ? conv.lastMessage.text.substring(0, 30) + "..." 
-                                  : conv.lastMessage.text || "📷 Image"}
+                                {isLastMessageFromMe 
+                                  ? `You: ${messagePreview}`
+                                  : senderName 
+                                    ? `${senderName}: ${messagePreview}`
+                                    : messagePreview}
                               </Text>
                             </Flex>
                           )
@@ -3087,6 +3113,13 @@ const MessagesPage = () => {
         <VStack align="stretch" spacing={0} p={2}>
           {followedUsers
             .filter(user => onlineUser?.some(ou => (ou.userId || ou._id) === user._id))
+            .sort((a, b) => {
+              // Get onlineAt timestamps for both users
+              const aOnline = onlineUser?.find(ou => (ou.userId || ou._id) === a._id)?.onlineAt || 0
+              const bOnline = onlineUser?.find(ou => (ou.userId || ou._id) === b._id)?.onlineAt || 0
+              // Sort by most recent first (highest timestamp first)
+              return bOnline - aOnline
+            })
             .map((friend) => (
               <Flex
                 key={friend._id}

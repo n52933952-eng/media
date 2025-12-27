@@ -306,7 +306,7 @@ export const mycon = async(req,res) => {
     const hasMore = conversations.length > limit
     const conversationsToReturn = hasMore ? conversations.slice(0, limit) : conversations
 
-    // Calculate unread counts for each conversation
+    // Calculate unread counts and populate last message sender for each conversation
     const conversationsWithUnread = await Promise.all(
       conversationsToReturn.map(async (conversation) => {
         // Filter participants to get the other user
@@ -321,9 +321,35 @@ export const mycon = async(req,res) => {
           sender: { $ne: userId }
         });
 
+        // Get the actual last message to populate sender info
+        const lastMessageDoc = await Message.findOne({
+          conversationId: conversation._id
+        })
+        .populate('sender', 'username name profilePic')
+        .sort({ createdAt: -1 })
+        .limit(1);
+
         // Convert to plain object and add unreadCount
         const convObj = conversation.toObject();
         convObj.unreadCount = unreadCount;
+        
+        // Update lastMessage with populated sender if we found a message
+        if (lastMessageDoc) {
+          convObj.lastMessage = {
+            text: lastMessageDoc.text || '',
+            sender: lastMessageDoc.sender,
+            createdAt: lastMessageDoc.createdAt
+          };
+        } else if (convObj.lastMessage && convObj.lastMessage.sender) {
+          // If lastMessage exists but sender is just an ID, populate it
+          // Try to find sender in participants or fetch it
+          const senderInParticipants = conversation.participants.find(
+            p => p._id.toString() === (convObj.lastMessage.sender._id || convObj.lastMessage.sender).toString()
+          );
+          if (senderInParticipants) {
+            convObj.lastMessage.sender = senderInParticipants;
+          }
+        }
         
         return convObj;
       })
