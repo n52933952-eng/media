@@ -638,11 +638,11 @@ const MessagesPage = () => {
           return updated
         })
       } else {
-        // If message is for a different conversation, increment unread count and move to top
+        // If message is for a different conversation, update and move to top
         setConversations(prev => {
           let updated = prev.map(conv => {
             if (conv._id && message.conversationId && conv._id.toString() === message.conversationId.toString()) {
-              // Only increment if message is not from current user
+              // Check if message is from current user
               let messageSenderId = ''
               if (message.sender?._id) {
                 messageSenderId = typeof message.sender._id === 'string' ? message.sender._id : message.sender._id.toString()
@@ -655,69 +655,114 @@ const MessagesPage = () => {
                 currentUserId = typeof user._id === 'string' ? user._id : user._id.toString()
               }
               
-              if (messageSenderId !== currentUserId) {
+              const isFromCurrentUser = messageSenderId !== '' && currentUserId !== '' && messageSenderId === currentUserId
+              
+              // Update lastMessage with full sender info
+              const updatedLastMessage = {
+                text: message.text || '',
+                sender: message.sender || (isFromCurrentUser ? {
+                  _id: user._id,
+                  name: user.name,
+                  username: user.username,
+                  profilePic: user.profilePic
+                } : null),
+                createdAt: message.createdAt || new Date().toISOString()
+              }
+              
+              if (!isFromCurrentUser) {
+                // Message from other user - increment unread count and update
                 return { 
                   ...conv, 
                   unreadCount: (conv.unreadCount || 0) + 1, 
-                  lastMessage: message.lastMessage || conv.lastMessage || { text: message.text || '', sender: message.sender },
+                  lastMessage: updatedLastMessage,
                   updatedAt: new Date().toISOString() // Update timestamp to move to top
                 }
               } else {
                 // Message from current user - just update lastMessage and timestamp
                 return {
                   ...conv,
-                  lastMessage: message.lastMessage || conv.lastMessage || { text: message.text || '', sender: message.sender },
-                  updatedAt: new Date().toISOString()
+                  lastMessage: updatedLastMessage,
+                  updatedAt: new Date().toISOString() // Update timestamp to move to top
                 }
               }
             }
             return conv
           })
           
-          // Sort by updatedAt to move most recent to top
-          return updated.sort((a, b) => {
+          // Check if conversation exists - if not, we need to add it (for new conversations)
+          const conversationExists = updated.some(conv => 
+            conv._id && message.conversationId && conv._id.toString() === message.conversationId.toString()
+          )
+          
+          if (!conversationExists && message.conversationId) {
+            // New conversation - need to fetch participant info
+            // For now, create minimal conversation object
+            const newConv = {
+              _id: message.conversationId,
+              participants: [], // Will be populated by fetch
+              lastMessage: {
+                text: message.text || '',
+                sender: message.sender,
+                createdAt: message.createdAt || new Date().toISOString()
+              },
+              updatedAt: new Date().toISOString(),
+              unreadCount: message.sender?._id !== user._id ? 1 : 0
+            }
+            updated = [newConv, ...updated]
+          }
+          
+          // Sort by updatedAt to move most recent to top (always sort after update)
+          const sorted = updated.sort((a, b) => {
             const aTime = new Date(a.updatedAt || 0).getTime()
             const bTime = new Date(b.updatedAt || 0).getTime()
             return bTime - aTime // Most recent first
           })
-        })
-        
-        // Refresh conversations to update last message preview, but preserve unread counts
-        // Don't fetch immediately - let the UI update first, then fetch in background
-        // This prevents overwriting the unread count we just incremented
-        setTimeout(async () => {
-          try {
-            const url = `${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/message/conversations?limit=20`
-            const res = await fetch(url, { credentials: 'include' })
-            const updatedData = await res.json()
-            
-            if (res.ok) {
-              const updatedConversations = updatedData.conversations || updatedData || []
-              if (Array.isArray(updatedConversations)) {
-                // Merge unread counts from local state with fetched data
-                setConversations(prev => {
-                  return prev.map(localConv => {
-                    const fetchedConv = updatedConversations.find(fc => fc._id?.toString() === localConv._id?.toString())
-                    if (fetchedConv) {
-                      // If local unread count is higher (we just incremented it), keep the local one
-                      // Otherwise use the fetched one (which has accurate count from server)
-                      const maxUnreadCount = Math.max(localConv.unreadCount || 0, fetchedConv.unreadCount || 0)
-                      return {
-                        ...fetchedConv,
-                        unreadCount: maxUnreadCount,
-                        lastMessage: fetchedConv.lastMessage || localConv.lastMessage
-                      }
-                    }
-                    return localConv
-                  })
-                })
+          
+          // If conversation was not in list (new conversation), fetch full details
+          if (!conversationExists && message.conversationId) {
+            // Fetch full conversation details in background
+            setTimeout(async () => {
+              try {
+                const url = `${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/message/conversations?limit=20`
+                const res = await fetch(url, { credentials: 'include' })
+                const updatedData = await res.json()
+                
+                if (res.ok) {
+                  const updatedConversations = updatedData.conversations || []
+                  if (Array.isArray(updatedConversations) && updatedConversations.length > 0) {
+                    setConversations(prev => {
+                      // Find and update the conversation we just added
+                      return prev.map(conv => {
+                        if (conv._id?.toString() === message.conversationId.toString()) {
+                          const fetchedConv = updatedConversations.find(fc => 
+                            fc._id?.toString() === message.conversationId.toString()
+                          )
+                          if (fetchedConv) {
+                            return {
+                              ...fetchedConv,
+                              unreadCount: conv.unreadCount || fetchedConv.unreadCount || 0,
+                              lastMessage: conv.lastMessage || fetchedConv.lastMessage,
+                              updatedAt: conv.updatedAt || fetchedConv.updatedAt
+                            }
+                          }
+                        }
+                        return conv
+                      }).sort((a, b) => {
+                        const aTime = new Date(a.updatedAt || 0).getTime()
+                        const bTime = new Date(b.updatedAt || 0).getTime()
+                        return bTime - aTime
+                      })
+                    })
+                  }
+                }
+              } catch (error) {
+                console.log('Error refreshing new conversation:', error)
               }
-            }
-          } catch (error) {
-            // Silently fail - unread count update is already in place
-            console.log('Error refreshing conversations:', error)
+            }, 500)
           }
-        }, 300)
+          
+          return sorted
+        })
       }
     }
 
@@ -726,7 +771,7 @@ const MessagesPage = () => {
     return () => {
       socket.off('newMessage', handleNewMessage)
     }
-  }, [socket, selectedConversation?._id, user?._id])
+  }, [socket, selectedConversation?._id, user?._id]) // Keep dependencies to ensure handler has latest values
 
   // Mark messages as seen when viewing messages from other user
   useEffect(() => {
