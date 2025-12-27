@@ -2774,6 +2774,7 @@ const MessagesPage = () => {
                 </Flex>
               )}
               <Flex
+                as="form"
                 p={{ base: 2, md: 4 }}
                 pb={{ base: '60px', md: 4 }}
                 pt={{ base: 2, md: 4 }}
@@ -2782,6 +2783,14 @@ const MessagesPage = () => {
                 flexWrap="wrap"
                 position="relative"
                 zIndex={2}
+                onSubmit={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  if (!sending && (newMessage.trim() || image || imagePreview)) {
+                    handleSendMessage(e)
+                  }
+                  return false
+                }}
               >
               {/* G button - Opens emoji picker for sending emoji messages */}
               <Box
