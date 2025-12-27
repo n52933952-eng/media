@@ -614,16 +614,20 @@ const MessagesPage = () => {
 
   // Listen for new messages via Socket.io
   useEffect(() => {
-    if (!socket) return
+    if (!socket || !user?._id) return
 
     const handleNewMessage = (message) => {
-      if (
-        selectedConversation &&
+      // Always process new messages - even if conversation was deleted
+      if (!message || !message.conversationId) return
+      
+      // Check if this message is for the currently selected conversation
+      const isForSelectedConversation = selectedConversation &&
         message.conversationId &&
         selectedConversation._id &&
         message.conversationId.toString() === selectedConversation._id.toString()
-      ) {
-        // New message from socket - append to end
+      
+      // Update messages if this is for the selected conversation
+      if (isForSelectedConversation) {
         setMessages((prev) => {
           // Update first message ID ref if this is the first message
           if (prev.length === 0 && message._id) {
@@ -637,9 +641,11 @@ const MessagesPage = () => {
           }
           return updated
         })
-      } else {
-        // If message is for a different conversation, update and move to top
-        setConversations(prev => {
+      }
+      
+      // ALWAYS update conversation list (even if message is for selected conversation)
+      // This ensures conversations are sorted and updated in real-time
+      setConversations(prev => {
           let updated = prev.map(conv => {
             if (conv._id && message.conversationId && conv._id.toString() === message.conversationId.toString()) {
               // Check if message is from current user
@@ -695,18 +701,38 @@ const MessagesPage = () => {
           )
           
           if (!conversationExists && message.conversationId) {
-            // New conversation - need to fetch participant info
-            // For now, create minimal conversation object
+            // New conversation or conversation was deleted - recreate it
+            // Determine if message is from current user
+            let messageSenderId = ''
+            if (message.sender?._id) {
+              messageSenderId = typeof message.sender._id === 'string' ? message.sender._id : message.sender._id.toString()
+            } else if (message.sender) {
+              messageSenderId = typeof message.sender === 'string' ? message.sender : String(message.sender)
+            }
+            
+            let currentUserId = ''
+            if (user?._id) {
+              currentUserId = typeof user._id === 'string' ? user._id : user._id.toString()
+            }
+            
+            const isFromCurrentUser = messageSenderId !== '' && currentUserId !== '' && messageSenderId === currentUserId
+            
+            // Create conversation object with sender info
             const newConv = {
               _id: message.conversationId,
-              participants: [], // Will be populated by fetch
+              participants: message.sender && !isFromCurrentUser ? [message.sender] : [], // Will be populated by fetch if needed
               lastMessage: {
                 text: message.text || '',
-                sender: message.sender,
+                sender: message.sender || (isFromCurrentUser ? {
+                  _id: user._id,
+                  name: user.name,
+                  username: user.username,
+                  profilePic: user.profilePic
+                } : null),
                 createdAt: message.createdAt || new Date().toISOString()
               },
               updatedAt: new Date().toISOString(),
-              unreadCount: message.sender?._id !== user._id ? 1 : 0
+              unreadCount: !isFromCurrentUser ? 1 : 0
             }
             updated = [newConv, ...updated]
           }
@@ -731,27 +757,54 @@ const MessagesPage = () => {
                   const updatedConversations = updatedData.conversations || []
                   if (Array.isArray(updatedConversations) && updatedConversations.length > 0) {
                     setConversations(prev => {
-                      // Find and update the conversation we just added
-                      return prev.map(conv => {
-                        if (conv._id?.toString() === message.conversationId.toString()) {
-                          const fetchedConv = updatedConversations.find(fc => 
-                            fc._id?.toString() === message.conversationId.toString()
-                          )
-                          if (fetchedConv) {
-                            return {
-                              ...fetchedConv,
-                              unreadCount: conv.unreadCount || fetchedConv.unreadCount || 0,
-                              lastMessage: conv.lastMessage || fetchedConv.lastMessage,
-                              updatedAt: conv.updatedAt || fetchedConv.updatedAt
-                            }
+                      // Find the conversation in current state
+                      const currentConv = prev.find(c => 
+                        c._id?.toString() === message.conversationId.toString()
+                      )
+                      
+                      // Find the fetched conversation
+                      const fetchedConv = updatedConversations.find(fc => 
+                        fc._id?.toString() === message.conversationId.toString()
+                      )
+                      
+                      if (fetchedConv) {
+                        // Update existing or add new
+                        const existingIndex = prev.findIndex(c => 
+                          c._id?.toString() === message.conversationId.toString()
+                        )
+                        
+                        if (existingIndex >= 0) {
+                          // Update existing conversation
+                          const updated = [...prev]
+                          updated[existingIndex] = {
+                            ...fetchedConv,
+                            // Preserve local unread count if it's higher (we just incremented it)
+                            unreadCount: Math.max(currentConv?.unreadCount || 0, fetchedConv.unreadCount || 0),
+                            // Keep the last message we set from socket (more recent) or use fetched
+                            lastMessage: currentConv?.lastMessage?.updatedAt > fetchedConv.lastMessage?.updatedAt 
+                              ? currentConv.lastMessage 
+                              : fetchedConv.lastMessage || currentConv?.lastMessage,
+                            // Keep the more recent updatedAt
+                            updatedAt: currentConv?.updatedAt > fetchedConv.updatedAt 
+                              ? currentConv.updatedAt 
+                              : fetchedConv.updatedAt
                           }
+                          return updated.sort((a, b) => {
+                            const aTime = new Date(a.updatedAt || 0).getTime()
+                            const bTime = new Date(b.updatedAt || 0).getTime()
+                            return bTime - aTime
+                          })
+                        } else {
+                          // Conversation was removed from list, add it back
+                          return [fetchedConv, ...prev].sort((a, b) => {
+                            const aTime = new Date(a.updatedAt || 0).getTime()
+                            const bTime = new Date(b.updatedAt || 0).getTime()
+                            return bTime - aTime
+                          })
                         }
-                        return conv
-                      }).sort((a, b) => {
-                        const aTime = new Date(a.updatedAt || 0).getTime()
-                        const bTime = new Date(b.updatedAt || 0).getTime()
-                        return bTime - aTime
-                      })
+                      }
+                      
+                      return prev // No change if fetched conversation not found
                     })
                   }
                 }
