@@ -13,4 +13,18 @@ export default defineConfig({
   optimizeDeps: {
     include: ['buffer'],
   },
+  build: {
+    // Enable code splitting and optimization
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'react-vendor': ['react', 'react-dom', 'react-router-dom'],
+          'chakra-ui': ['@chakra-ui/react', '@emotion/react', '@emotion/styled', 'framer-motion'],
+          'socket-vendor': ['socket.io-client', 'simple-peer'],
+        },
+      },
+    },
+    // Optimize chunk size
+    chunkSizeWarningLimit: 1000,
+  },
 })

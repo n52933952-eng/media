@@ -85,6 +85,12 @@ const PostSchema = mongoose.Schema({
 
 },{timestamps:true})
 
+// CRITICAL: Add indexes for performance - essential for production
+// Index on postedBy + createdAt for fast feed queries
+PostSchema.index({ postedBy: 1, createdAt: -1 })
+// Index on createdAt for sorting
+PostSchema.index({ createdAt: -1 })
+
 const Post = mongoose.model("Post",PostSchema)
 
 export default Post

@@ -1,4 +1,4 @@
-import React,{useEffect,useState,useContext} from 'react'
+import React,{useEffect,useState,useContext, memo} from 'react'
 import{Link} from 'react-router-dom'
 import{Flex,Avatar,Box,Text,Image,Button} from '@chakra-ui/react'
 import { HiOutlineDotsHorizontal } from "react-icons/hi";
@@ -63,6 +63,7 @@ const showToast = useShowToast()
               size="md" 
               src={postedBy?.profilePic} 
               name={postedBy?.name}
+              loading="lazy"
               onClick={(e) => {
                 e.preventDefault()
                 navigate(`/${postedBy?.username}`)
@@ -147,7 +148,14 @@ const showToast = useShowToast()
           maxH="500px"
         />
       ) : (
-        <Image src={post?.img} w="full" objectFit="contain" maxH="500px" />
+        <Image 
+          src={post?.img} 
+          w="full" 
+          objectFit="contain" 
+          maxH="500px"
+          loading="lazy"
+          alt="Post image"
+        />
       )}
     </Box>
   )}
@@ -169,4 +177,5 @@ const showToast = useShowToast()
   )
 }
 
-export default Post
+// Memoize Post component to prevent unnecessary re-renders
+export default memo(Post)

@@ -301,16 +301,33 @@ export const getFeedPost = async(req,res) => {
             return res.status(400).json({error:"no user"})
         }
 
-        // Get posts from followed users
+        // Get posts from followed users with pagination
         const following = user.following 
-
-        const feedPost = await Post.find({
+        
+        // Pagination parameters
+        const limit = parseInt(req.query.limit) || 10 // Default to 10 posts per page
+        const skip = parseInt(req.query.skip) || 0 // Skip for pagination
+        
+        // Build query
+        const query = {
             postedBy: { $in: following }
-        })
+        }
+
+        const feedPost = await Post.find(query)
         .populate("postedBy", "-password")
         .sort({createdAt:-1})
+        .limit(limit)
+        .skip(skip)
+        
+        // Check if there are more posts
+        const totalCount = await Post.countDocuments(query)
+        const hasMore = (skip + limit) < totalCount
      
-     return res.status(200).json(feedPost)
+     return res.status(200).json({ 
+         posts: feedPost,
+         hasMore,
+         totalCount
+     })
     }
     catch(error){
  
@@ -337,9 +354,25 @@ export const getUserPosts = async(req,res)=>{
             return res.status(400).json({error:"no user"})
          }
 
-         const post = await Post.find({postedBy:user._id}).populate("postedBy","-password").sort({createdAt:-1})
+         // Pagination parameters
+         const limit = parseInt(req.query.limit) || 10 // Default to 10 posts per page
+         const skip = parseInt(req.query.skip) || 0 // Skip for pagination
+         
+         const posts = await Post.find({postedBy:user._id})
+            .populate("postedBy","-password")
+            .sort({createdAt:-1})
+            .limit(limit)
+            .skip(skip)
+            
+         // Check if there are more posts
+         const totalCount = await Post.countDocuments({postedBy:user._id})
+         const hasMore = (skip + limit) < totalCount
 
-         res.status(200).json(post)
+         res.status(200).json({ 
+             posts,
+             hasMore,
+             totalCount
+         })
 
     }catch(error){
         console.log(error)

@@ -65,7 +65,7 @@ const UserPage = () => {
    const data = await res.json()
 
    if(res.ok){
- setPosts(data)
+     setPosts(data.posts || data || [])
    } 
 
   }
