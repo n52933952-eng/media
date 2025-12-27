@@ -1252,13 +1252,7 @@ const MessagesPage = () => {
   }, [])
 
   // Send message
-  const handleSendMessage = async (e) => {
-    // Prevent any default behavior - CRITICAL to prevent page reload
-    if (e) {
-      e.preventDefault()
-      e.stopPropagation()
-    }
-    
+  const handleSendMessage = async () => {
     // Allow sending if there's text, image, or both, but require at least one
     if ((!newMessage.trim() && !image && !imagePreview) || !selectedConversation || sending) {
       return
@@ -2767,8 +2761,6 @@ const MessagesPage = () => {
                 </Flex>
               )}
               <Flex
-                as="form"
-                noValidate
                 p={{ base: 2, md: 4 }}
                 pb={{ base: '60px', md: 4 }}
                 pt={{ base: 2, md: 4 }}
@@ -2777,11 +2769,6 @@ const MessagesPage = () => {
                 flexWrap="wrap"
                 position="relative"
                 zIndex={2}
-                onSubmit={(e) => {
-                  e.preventDefault()
-                  e.stopPropagation()
-                  return false
-                }}
               >
               {/* G button - Opens emoji picker for sending emoji messages */}
               <Box
@@ -2964,10 +2951,8 @@ const MessagesPage = () => {
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && !e.shiftKey) {
                     e.preventDefault()
-                    e.stopPropagation()
-                    e.nativeEvent?.stopImmediatePropagation()
                     if (!sending && (newMessage.trim() || image || imagePreview)) {
-                      handleSendMessage(e)
+                      handleSendMessage()
                     }
                   }
                 }}
@@ -2987,17 +2972,9 @@ const MessagesPage = () => {
                 bg="green.500"
                 color="white"
                 _hover={{ bg: 'green.600' }}
-                onClick={(e) => {
-                  e.preventDefault()
-                  e.stopPropagation()
-                  console.log('Send button clicked', { sending, hasMessage: !!newMessage.trim(), hasImage: !!image })
+                onClick={() => {
                   if (!sending && (newMessage.trim() || image || imagePreview)) {
-                    console.log('Calling handleSendMessage')
-                    handleSendMessage(e).catch((error) => {
-                      console.error('Error in handleSendMessage:', error)
-                    })
-                  } else {
-                    console.log('Not sending - conditions not met')
+                    handleSendMessage()
                   }
                 }}
                 isLoading={sending || (uploadProgress > 0 && uploadProgress < 100) || isProcessing}
