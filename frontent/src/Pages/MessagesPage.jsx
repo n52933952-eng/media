@@ -144,6 +144,7 @@ const MessagesPage = () => {
     await fetchConversations(true, oldestConversation._id)
   }
 
+
   // Fetch conversations on component mount
   useEffect(() => {
     if (user) {
@@ -262,7 +263,15 @@ const MessagesPage = () => {
             if (data.messages && data.messages.length > 0) {
               firstMessageIdRef.current = data.messages[0]._id
             }
-            setMessages((prev) => [...data.messages, ...prev])
+            setMessages((prev) => {
+              const combined = [...data.messages, ...prev]
+              // Limit to 200 messages max to prevent memory issues
+              // Keep most recent 200 messages (trim from oldest side if needed)
+              if (combined.length > 200) {
+                return combined.slice(0, 200)
+              }
+              return combined
+            })
             // Don't update lastMessageCountRef here - pagination shouldn't trigger unread count
             return // Exit early, don't trigger unread detection
           } else {
@@ -620,31 +629,58 @@ const MessagesPage = () => {
           if (prev.length === 0 && message._id) {
             firstMessageIdRef.current = message._id
           }
-          return [...prev, message]
+          const updated = [...prev, message]
+          // Limit to 200 messages max to prevent memory issues
+          // If over limit, remove oldest messages (keep most recent 200)
+          if (updated.length > 200) {
+            return updated.slice(-200)
+          }
+          return updated
         })
       } else {
-        // If message is for a different conversation, increment unread count
-        setConversations(prev => prev.map(conv => {
-          if (conv._id && message.conversationId && conv._id.toString() === message.conversationId.toString()) {
-            // Only increment if message is not from current user
-            let messageSenderId = ''
-            if (message.sender?._id) {
-              messageSenderId = typeof message.sender._id === 'string' ? message.sender._id : message.sender._id.toString()
-            } else if (message.sender) {
-              messageSenderId = typeof message.sender === 'string' ? message.sender : String(message.sender)
+        // If message is for a different conversation, increment unread count and move to top
+        setConversations(prev => {
+          let updated = prev.map(conv => {
+            if (conv._id && message.conversationId && conv._id.toString() === message.conversationId.toString()) {
+              // Only increment if message is not from current user
+              let messageSenderId = ''
+              if (message.sender?._id) {
+                messageSenderId = typeof message.sender._id === 'string' ? message.sender._id : message.sender._id.toString()
+              } else if (message.sender) {
+                messageSenderId = typeof message.sender === 'string' ? message.sender : String(message.sender)
+              }
+              
+              let currentUserId = ''
+              if (user?._id) {
+                currentUserId = typeof user._id === 'string' ? user._id : user._id.toString()
+              }
+              
+              if (messageSenderId !== currentUserId) {
+                return { 
+                  ...conv, 
+                  unreadCount: (conv.unreadCount || 0) + 1, 
+                  lastMessage: message.lastMessage || conv.lastMessage || { text: message.text || '', sender: message.sender },
+                  updatedAt: new Date().toISOString() // Update timestamp to move to top
+                }
+              } else {
+                // Message from current user - just update lastMessage and timestamp
+                return {
+                  ...conv,
+                  lastMessage: message.lastMessage || conv.lastMessage || { text: message.text || '', sender: message.sender },
+                  updatedAt: new Date().toISOString()
+                }
+              }
             }
-            
-            let currentUserId = ''
-            if (user?._id) {
-              currentUserId = typeof user._id === 'string' ? user._id : user._id.toString()
-            }
-            
-            if (messageSenderId !== currentUserId) {
-              return { ...conv, unreadCount: (conv.unreadCount || 0) + 1, lastMessage: message.lastMessage || conv.lastMessage || { text: message.text || '', sender: message.sender } }
-            }
-          }
-          return conv
-        }))
+            return conv
+          })
+          
+          // Sort by updatedAt to move most recent to top
+          return updated.sort((a, b) => {
+            const aTime = new Date(a.updatedAt || 0).getTime()
+            const bTime = new Date(b.updatedAt || 0).getTime()
+            return bTime - aTime // Most recent first
+          })
+        })
         
         // Refresh conversations to update last message preview, but preserve unread counts
         // Don't fetch immediately - let the UI update first, then fetch in background
@@ -1252,14 +1288,27 @@ const MessagesPage = () => {
   }, [])
 
   // Send message
-  const handleSendMessage = async () => {
+  const handleSendMessage = async (e) => {
+    // CRITICAL: Prevent any navigation or reload
+    if (e) {
+      e.preventDefault()
+      e.stopPropagation()
+      if (e.nativeEvent) {
+        e.nativeEvent.stopImmediatePropagation()
+      }
+    }
+    
+    // Prevent default browser behavior
+    if (e && e.preventDefault) e.preventDefault()
+    if (e && e.stopPropagation) e.stopPropagation()
+    
     // Allow sending if there's text, image, or both, but require at least one
     if ((!newMessage.trim() && !image && !imagePreview) || !selectedConversation || sending) {
-      return
+      return false
     }
 
     const recipientId = selectedConversation.participants[0]?._id
-    if (!recipientId) return
+    if (!recipientId) return false
 
     // Stop typing indicator when sending message
     if (socket && selectedConversation?._id && user?._id) {
@@ -1291,170 +1340,104 @@ const MessagesPage = () => {
             message: newMessage || '',
             replyTo: replyingTo?._id || null
           }),
-          credentials: 'include'
+          credentials: 'include',
+          redirect: 'manual' // CRITICAL: Prevent any redirects that could cause reload
         })
         
+        // Check for redirect status codes
+        if (response.type === 'opaqueredirect' || response.status === 301 || response.status === 302) {
+          console.error('Unexpected redirect detected')
+          throw new Error('Server returned a redirect - this should not happen')
+        }
+        
         if (!response.ok) {
-          const errorData = await response.json().catch(() => ({}))
-          throw new Error(errorData.error || errorData.message || 'Failed to send message')
+          const contentType = response.headers.get('content-type')
+          if (contentType && contentType.includes('application/json')) {
+            const errorData = await response.json().catch(() => ({}))
+            throw new Error(errorData.error || errorData.message || 'Failed to send message')
+          } else {
+            throw new Error(`Server error: ${response.status} ${response.statusText}`)
+          }
+        }
+        
+        // Verify response is JSON
+        const contentType = response.headers.get('content-type')
+        if (!contentType || !contentType.includes('application/json')) {
+          console.error('Server returned non-JSON response:', contentType)
+          throw new Error('Server returned invalid response format')
         }
         
         const data = await response.json()
         handleMessageSent(data)
-        return
+        return false
       }
       
       // Upload file via Multer to Cloudinary (backend handles upload)
       const formData = new FormData()
       formData.append('recipientId', recipientId)
       formData.append('message', newMessage || '')
+      formData.append('file', image)
       
-      if (image) {
-        // Check if image is a File object (needs upload) or URL string
-        if (image instanceof File) {
-          // Upload file via Multer
-          formData.append('file', image)
-          
-          // Track upload progress
-          const xhr = new XMLHttpRequest()
-          
-          // Upload progress tracking
-          xhr.upload.addEventListener('progress', (e) => {
-            if (e.lengthComputable) {
-              // Progress: 80-100% (compression was 0-80%)
-              const progress = 80 + ((e.loaded / e.total) * 20)
-              setUploadProgress(Math.min(progress, 100))
-            }
-          })
-          
-          xhr.addEventListener('load', () => {
-            if (xhr.status === 201) {
-              setUploadProgress(100)
-            }
-          })
-          
-          xhr.open('POST', `${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/message`)
-          xhr.withCredentials = true
-          
-          // Add replyTo to formData if exists
-          if (replyingTo?._id) {
-            formData.append('replyTo', replyingTo._id)
-          }
-          
-          xhr.send(formData)
-          
-          // Handle response
-          xhr.onload = () => {
-            if (xhr.status === 201) {
-              try {
-                const data = JSON.parse(xhr.responseText)
-                handleMessageSent(data)
-              } catch (error) {
-                console.error('Error parsing response:', error)
-                showToast('Error', 'Failed to parse server response', 'error')
-                setIsProcessing(false)
-                setUploadProgress(0)
-                setSending(false)
-              }
-            } else {
-              try {
-                const errorData = JSON.parse(xhr.responseText)
-                showToast('Error', errorData.error || errorData.message || 'Failed to send message', 'error')
-              } catch (error) {
-                showToast('Error', `Failed to send message: ${xhr.statusText}`, 'error')
-              }
-              setIsProcessing(false)
-              setUploadProgress(0)
-              setSending(false)
-            }
-          }
-          
-          xhr.onerror = () => {
-            showToast('Error', 'Network error while sending message', 'error')
-            setIsProcessing(false)
-            setUploadProgress(0)
-            setSending(false)
-          }
-          
-          xhr.ontimeout = () => {
-            showToast('Error', 'Upload timeout. Please try again.', 'error')
-            setIsProcessing(false)
-            setUploadProgress(0)
-            setSending(false)
-          }
-          
-          xhr.timeout = 1200000 // 20 minutes timeout for large uploads
-          
-          return // Exit early, response handled in xhr callbacks
-        } else {
-          // Image is already a URL (shouldn't happen in this flow, but handle it)
-          formData.append('fileUrl', image)
-        }
-      }
-      
-      // If no file, use JSON instead of FormData
-      if (!image || !(image instanceof File)) {
-        const url = `${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/message`
-        
-        const response = await fetch(url, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            recipientId,
-            message: newMessage || '',
-            replyTo: replyingTo?._id || null
-          }),
-          credentials: 'include'
-        })
-        
-        if (!response.ok) {
-          const errorData = await response.json().catch(() => ({}))
-          throw new Error(errorData.error || errorData.message || 'Failed to send message')
-        }
-        
-        const data = await response.json()
-        
-        // Handle successful message send
-        handleMessageSent(data)
-        
-        return // Exit early, response handled above
-      }
-      
-      // If we have a file but it's not a File object, handle it
+      // Add replyTo to formData if exists
       if (replyingTo?._id) {
         formData.append('replyTo', replyingTo._id)
       }
       
-      // This should not be reached if image is a File (handled above) or if no image (handled in JSON block)
-      // But keeping as fallback
-      const url = `${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/message`
-      
-      const response = await fetch(url, {
-        method: 'POST',
-        body: formData,
-        credentials: 'include'
+      // Track upload progress using Promise wrapper around XHR
+      await new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest()
+        
+        // Upload progress tracking
+        xhr.upload.addEventListener('progress', (e) => {
+          if (e.lengthComputable) {
+            const progress = 80 + ((e.loaded / e.total) * 20)
+            setUploadProgress(Math.min(progress, 100))
+          }
+        })
+        
+        xhr.addEventListener('load', () => {
+          if (xhr.status === 201) {
+            setUploadProgress(100)
+            try {
+              const data = JSON.parse(xhr.responseText)
+              handleMessageSent(data)
+              resolve(data)
+            } catch (error) {
+              console.error('Error parsing response:', error)
+              reject(new Error('Failed to parse server response'))
+            }
+          } else {
+            try {
+              const errorData = JSON.parse(xhr.responseText)
+              reject(new Error(errorData.error || errorData.message || 'Failed to send message'))
+            } catch (error) {
+              reject(new Error(`Failed to send message: ${xhr.statusText}`))
+            }
+          }
+        })
+        
+        xhr.onerror = () => {
+          reject(new Error('Network error while sending message'))
+        }
+        
+        xhr.ontimeout = () => {
+          reject(new Error('Upload timeout. Please try again.'))
+        }
+        
+        xhr.open('POST', `${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/message`, true)
+        xhr.withCredentials = true
+        xhr.timeout = 1200000 // 20 minutes timeout for large uploads
+        xhr.send(formData)
       })
       
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}))
-        throw new Error(errorData.error || errorData.message || 'Failed to send message')
-      }
-      
-      const data = await response.json()
-      
-      // Handle successful message send
-      handleMessageSent(data)
-      
-      return // Exit early, response handled above
     } catch (error) {
       console.error('Error sending message:', error)
       showToast('Error', error.message || 'Failed to send message', 'error')
-      setIsProcessing(false)
       setUploadProgress(0)
       setSending(false)
     }
+    
+    return false // Always return false to prevent any default behavior
   }
   
   // Helper function to handle successful message send
@@ -1474,7 +1457,15 @@ const MessagesPage = () => {
           profilePic: user.profilePic
         }
       }
-      setMessages((prev) => [...prev, messageWithSender])
+      setMessages((prev) => {
+        const updated = [...prev, messageWithSender]
+        // Limit to 200 messages max to prevent memory issues
+        // If over limit, remove oldest messages (keep most recent 200)
+        if (updated.length > 200) {
+          return updated.slice(-200)
+        }
+        return updated
+      })
       setNewMessage('')
       // Revoke object URL to free memory
       const currentPreview = imagePreview
@@ -1488,20 +1479,59 @@ const MessagesPage = () => {
       setIsProcessing(false) // Clear processing state
       setSending(false) // Stop spinner immediately after message is added
       
-      // Refresh conversations list in background (don't wait for it)
-      fetchConversations().then(updatedConversations => {
-        // If this was a new conversation, update selectedConversation to the real one
-        if (selectedConversation && !selectedConversation._id && data.conversationId) {
-          const updatedConv = updatedConversations.find(c => 
-            c._id && c._id.toString() === data.conversationId.toString()
-          )
-          if (updatedConv) {
-            setSelectedConversation(updatedConv)
+      // Update conversation in place instead of full refresh to avoid UI flicker
+      setConversations(prev => {
+        const updated = prev.map(conv => {
+          if (conv._id && data.conversationId && conv._id.toString() === data.conversationId.toString()) {
+            return {
+              ...conv,
+              lastMessage: {
+                text: data.text || '',
+                sender: data.sender?._id || user._id
+              },
+              updatedAt: new Date().toISOString()
+            }
           }
+          return conv
+        })
+        
+        // If this is a new conversation (not in list yet), add it at the top
+        const existingConv = updated.find(c => c._id && data.conversationId && c._id.toString() === data.conversationId.toString())
+        if (!existingConv && data.conversationId) {
+          // Create a minimal conversation object for new conversations
+          const newConv = {
+            _id: data.conversationId,
+            participants: selectedConversation?.participants || [],
+            lastMessage: {
+              text: data.text || '',
+              sender: data.sender?._id || user._id
+            },
+            updatedAt: new Date().toISOString(),
+            unreadCount: 0
+          }
+          // Add to front and sort by updatedAt (most recent first)
+          return [newConv, ...updated].sort((a, b) => {
+            const aTime = new Date(a.updatedAt || 0).getTime()
+            const bTime = new Date(b.updatedAt || 0).getTime()
+            return bTime - aTime
+          })
         }
-      }).catch(err => {
-        console.log('Error refreshing conversations:', err)
+        
+        // Sort by updatedAt to keep most recent at top
+        return updated.sort((a, b) => {
+          const aTime = new Date(a.updatedAt || 0).getTime()
+          const bTime = new Date(b.updatedAt || 0).getTime()
+          return bTime - aTime
+        })
       })
+      
+      // If this was a new conversation, update selectedConversation to the real one
+      if (selectedConversation && !selectedConversation._id && data.conversationId) {
+        setSelectedConversation(prev => ({
+          ...prev,
+          _id: data.conversationId
+        }))
+      }
     }
   }
 
@@ -1851,7 +1881,7 @@ const MessagesPage = () => {
             </Flex>
 
             {/* Call - Inline in chat - Mobile optimized */}
-            {callAccepted && !callEnded && stream && myVideo && userVideo && (
+            {callAccepted && !callEnded && stream && (
               <Box
                 borderBottom="1px solid"
                 borderColor={borderColor}
@@ -1936,6 +1966,26 @@ const MessagesPage = () => {
                       gap={4}
                       py={4}
                     >
+                      {/* Hidden video elements to handle audio stream - they can play audio */}
+                      {userVideo.current && (
+                        <Box
+                          as="video"
+                          ref={userVideo}
+                          autoPlay
+                          playsInline
+                          style={{ display: 'none', width: 0, height: 0 }}
+                        />
+                      )}
+                      {myVideo.current && (
+                        <Box
+                          as="video"
+                          ref={myVideo}
+                          autoPlay
+                          muted
+                          playsInline
+                          style={{ display: 'none', width: 0, height: 0 }}
+                        />
+                      )}
                       <Avatar
                         src={selectedConversation?.participants[0]?.profilePic}
                         name={selectedConversation?.participants[0]?.username}
@@ -2760,16 +2810,16 @@ const MessagesPage = () => {
                   />
                 </Flex>
               )}
-              <Flex
-                p={{ base: 2, md: 4 }}
-                pb={{ base: '60px', md: 4 }}
-                pt={{ base: 2, md: 4 }}
-                gap={{ base: 1.5, md: 2 }}
-                alignItems="center"
-                flexWrap="wrap"
-                position="relative"
-                zIndex={2}
-              >
+                    <Flex
+                      p={{ base: 2, md: 4 }}
+                      pb={{ base: '60px', md: 4 }}
+                      pt={{ base: 2, md: 4 }}
+                      gap={{ base: 1.5, md: 2 }}
+                      alignItems="center"
+                      flexWrap="wrap"
+                      position="relative"
+                      zIndex={2}
+                    >
               {/* G button - Opens emoji picker for sending emoji messages */}
               <Box
                 position="relative"
@@ -2942,18 +2992,24 @@ const MessagesPage = () => {
               </Menu>
               <Input
                 ref={messageInputRef}
+                type="text"
                 placeholder={replyingTo ? "Type a reply..." : "Message..."}
                 value={newMessage}
                 onChange={(e) => {
                   setNewMessage(e.target.value)
                   handleTyping()
                 }}
-                onKeyDown={(e) => {
+                onKeyDown={async (e) => {
                   if (e.key === 'Enter' && !e.shiftKey) {
                     e.preventDefault()
+                    e.stopPropagation()
+                    e.nativeEvent?.stopImmediatePropagation?.()
                     if (!sending && (newMessage.trim() || image || imagePreview)) {
-                      handleSendMessage()
+                      await handleSendMessage(e).catch(err => {
+                        console.error('Error in handleSendMessage:', err)
+                      })
                     }
+                    return false
                   }
                 }}
                 bg={inputBg}
@@ -2972,10 +3028,16 @@ const MessagesPage = () => {
                 bg="green.500"
                 color="white"
                 _hover={{ bg: 'green.600' }}
-                onClick={() => {
+                onClick={async (e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  e.nativeEvent?.stopImmediatePropagation?.()
                   if (!sending && (newMessage.trim() || image || imagePreview)) {
-                    handleSendMessage()
+                    await handleSendMessage(e).catch(err => {
+                      console.error('Error in handleSendMessage:', err)
+                    })
                   }
+                  return false
                 }}
                 isLoading={sending || (uploadProgress > 0 && uploadProgress < 100) || isProcessing}
                 isDisabled={sending || (uploadProgress > 0 && uploadProgress < 100) || isProcessing || (!newMessage.trim() && !image && !imagePreview)}

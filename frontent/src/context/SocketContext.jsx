@@ -277,7 +277,22 @@ export const SocketContextProvider = ({ children }) => {
     });
 
     peer.on('stream', (currentStream) => {
-      if (userVideo.current) userVideo.current.srcObject = currentStream;
+      if (userVideo.current) {
+        userVideo.current.srcObject = currentStream;
+        // Ensure audio is enabled and playing for both video and audio calls
+        if (userVideo.current && userVideo.current.srcObject) {
+          const audioTracks = currentStream.getAudioTracks();
+          audioTracks.forEach(track => {
+            track.enabled = true;
+          });
+          // Force play for audio calls
+          if (type === 'audio') {
+            userVideo.current.play().catch(err => {
+              console.log('Audio play error (expected on some browsers):', err);
+            });
+          }
+        }
+      }
     });
 
     socket.once('callAccepted', (signal) => {
@@ -346,7 +361,22 @@ export const SocketContextProvider = ({ children }) => {
     });
 
     peer.on('stream', (currentStream) => {
-      if (userVideo.current) userVideo.current.srcObject = currentStream;
+      if (userVideo.current) {
+        userVideo.current.srcObject = currentStream;
+        // Ensure audio is enabled and playing for both video and audio calls
+        if (userVideo.current && userVideo.current.srcObject) {
+          const audioTracks = currentStream.getAudioTracks();
+          audioTracks.forEach(track => {
+            track.enabled = true;
+          });
+          // Force play for audio calls
+          if (callTypeForAnswer === 'audio') {
+            userVideo.current.play().catch(err => {
+              console.log('Audio play error (expected on some browsers):', err);
+            });
+          }
+        }
+      }
     });
 
     if (call.signal) {

@@ -256,8 +256,9 @@ export const getMessage = async(req,res) => {
    
     res.status(200).json({ 
       messages: messagesToReturn,
-      hasMore: hasMore,
-      totalCount: await Message.countDocuments({ conversationId: conversation._id })
+      hasMore: hasMore
+      // Removed totalCount - expensive query that's not needed for pagination
+      // Use hasMore flag instead
     })
    
 

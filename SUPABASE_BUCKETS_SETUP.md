@@ -53,3 +53,5 @@ For better security, you can set policies. Go to **Storage** > **Policies** > [b
 Once buckets are created and your API key is added, all file uploads will work! 🎉
 
 
+
+

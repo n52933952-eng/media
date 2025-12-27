@@ -22,6 +22,12 @@ const ConversationSchema = new mongoose.Schema({
     },
 },{timestamps:true})
 
+// CRITICAL: Add indexes for performance - essential for production
+// Index on participants for fast conversation lookups
+ConversationSchema.index({ participants: 1 })
+// Index on updatedAt for sorting conversations by most recent
+ConversationSchema.index({ updatedAt: -1 })
+
 const Conversation = mongoose.model("Conversation",ConversationSchema)
 
 export default Conversation

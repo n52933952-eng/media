@@ -50,3 +50,5 @@ bucket_id = '[bucket-name]'::text
 Since your buckets are already set to **Public**, disabling RLS is the simplest solution. Public buckets don't need RLS because they're meant to be accessible to anyone anyway.
 
 
+
+
