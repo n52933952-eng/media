@@ -1257,8 +1257,14 @@ const MessagesPage = () => {
     if (e) {
       e.preventDefault()
       e.stopPropagation()
+      e.stopImmediatePropagation()
       if (e.nativeEvent) {
         e.nativeEvent.stopImmediatePropagation()
+      }
+      // Also prevent default on the original event if it exists
+      if (e.originalEvent) {
+        e.originalEvent.preventDefault()
+        e.originalEvent.stopPropagation()
       }
     }
     
@@ -1267,6 +1273,7 @@ const MessagesPage = () => {
       if (e) {
         e.preventDefault()
         e.stopPropagation()
+        return false
       }
       return false
     }
@@ -2775,6 +2782,7 @@ const MessagesPage = () => {
               )}
               <Flex
                 as="form"
+                noValidate
                 p={{ base: 2, md: 4 }}
                 pb={{ base: '60px', md: 4 }}
                 pt={{ base: 2, md: 4 }}
@@ -2786,10 +2794,20 @@ const MessagesPage = () => {
                 onSubmit={(e) => {
                   e.preventDefault()
                   e.stopPropagation()
+                  e.stopImmediatePropagation()
+                  if (e.nativeEvent) {
+                    e.nativeEvent.stopImmediatePropagation()
+                  }
                   if (!sending && (newMessage.trim() || image || imagePreview)) {
                     handleSendMessage(e)
                   }
                   return false
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && e.target.tagName !== 'TEXTAREA') {
+                    e.preventDefault()
+                    e.stopPropagation()
+                  }
                 }}
               >
               {/* G button - Opens emoji picker for sending emoji messages */}
@@ -2999,10 +3017,27 @@ const MessagesPage = () => {
                 onClick={(e) => {
                   e.preventDefault()
                   e.stopPropagation()
-                  e.nativeEvent?.stopImmediatePropagation()
+                  e.stopImmediatePropagation()
+                  if (e.nativeEvent) {
+                    e.nativeEvent.stopImmediatePropagation()
+                    e.nativeEvent.preventDefault()
+                  }
+                  if (e.originalEvent) {
+                    e.originalEvent.preventDefault()
+                    e.originalEvent.stopPropagation()
+                  }
+                  // Prevent form submission
+                  const form = e.target.closest('form')
+                  if (form) {
+                    form.onsubmit = (ev) => {
+                      ev.preventDefault()
+                      return false
+                    }
+                  }
                   if (!sending && (newMessage.trim() || image || imagePreview)) {
                     handleSendMessage(e)
                   }
+                  return false
                 }}
                 isLoading={sending || (uploadProgress > 0 && uploadProgress < 100) || isProcessing}
                 isDisabled={sending || (uploadProgress > 0 && uploadProgress < 100) || isProcessing || (!newMessage.trim() && !image && !imagePreview)}
