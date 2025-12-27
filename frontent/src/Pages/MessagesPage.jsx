@@ -1257,25 +1257,11 @@ const MessagesPage = () => {
     if (e) {
       e.preventDefault()
       e.stopPropagation()
-      e.stopImmediatePropagation()
-      if (e.nativeEvent) {
-        e.nativeEvent.stopImmediatePropagation()
-      }
-      // Also prevent default on the original event if it exists
-      if (e.originalEvent) {
-        e.originalEvent.preventDefault()
-        e.originalEvent.stopPropagation()
-      }
     }
     
     // Allow sending if there's text, image, or both, but require at least one
     if ((!newMessage.trim() && !image && !imagePreview) || !selectedConversation || sending) {
-      if (e) {
-        e.preventDefault()
-        e.stopPropagation()
-        return false
-      }
-      return false
+      return
     }
 
     const recipientId = selectedConversation.participants[0]?._id
@@ -2794,20 +2780,7 @@ const MessagesPage = () => {
                 onSubmit={(e) => {
                   e.preventDefault()
                   e.stopPropagation()
-                  e.stopImmediatePropagation()
-                  if (e.nativeEvent) {
-                    e.nativeEvent.stopImmediatePropagation()
-                  }
-                  if (!sending && (newMessage.trim() || image || imagePreview)) {
-                    handleSendMessage(e)
-                  }
                   return false
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && e.target.tagName !== 'TEXTAREA') {
-                    e.preventDefault()
-                    e.stopPropagation()
-                  }
                 }}
               >
               {/* G button - Opens emoji picker for sending emoji messages */}
@@ -3017,27 +2990,15 @@ const MessagesPage = () => {
                 onClick={(e) => {
                   e.preventDefault()
                   e.stopPropagation()
-                  e.stopImmediatePropagation()
-                  if (e.nativeEvent) {
-                    e.nativeEvent.stopImmediatePropagation()
-                    e.nativeEvent.preventDefault()
-                  }
-                  if (e.originalEvent) {
-                    e.originalEvent.preventDefault()
-                    e.originalEvent.stopPropagation()
-                  }
-                  // Prevent form submission
-                  const form = e.target.closest('form')
-                  if (form) {
-                    form.onsubmit = (ev) => {
-                      ev.preventDefault()
-                      return false
-                    }
-                  }
+                  console.log('Send button clicked', { sending, hasMessage: !!newMessage.trim(), hasImage: !!image })
                   if (!sending && (newMessage.trim() || image || imagePreview)) {
-                    handleSendMessage(e)
+                    console.log('Calling handleSendMessage')
+                    handleSendMessage(e).catch((error) => {
+                      console.error('Error in handleSendMessage:', error)
+                    })
+                  } else {
+                    console.log('Not sending - conditions not met')
                   }
-                  return false
                 }}
                 isLoading={sending || (uploadProgress > 0 && uploadProgress < 100) || isProcessing}
                 isDisabled={sending || (uploadProgress > 0 && uploadProgress < 100) || isProcessing || (!newMessage.trim() && !image && !imagePreview)}
