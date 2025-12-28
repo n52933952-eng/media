@@ -485,9 +485,11 @@ export const SocketContextProvider = ({ children }) => {
 
   // Leave the call, stop tracks and refresh stream
   const leaveCall = () => {
-    setCallEnded(true);
-    setCallAccepted(false);
-    setIsCalling(false); // Stop ringing when leaving call
+    // Save call info before clearing state
+    const callInfo = { ...call };
+    const isReceiving = call.isReceivingCall;
+    const from = call.from;
+    const userToCall = call.userToCall;
     
     // Stop ringtone when leaving/declining call
     if (ringtoneAudio.current) {
@@ -495,16 +497,30 @@ export const SocketContextProvider = ({ children }) => {
       ringtoneAudio.current.currentTime = 0;
     }
     
+    // Emit cancelCall BEFORE clearing state
+    if (socket && (from || userToCall)) {
+      // If receiving call, we are declining - notify the caller
+      // If making call, we are canceling - notify the receiver
+      socket.emit('cancelCall', {
+        conversationId: isReceiving ? from : userToCall,
+        sender: user._id,
+      });
+    }
+    
     // Clear busy state for both users
-    if (call.from || call.userToCall) {
+    if (from || userToCall) {
       setBusyUsers(prev => {
         const newSet = new Set(prev);
-        if (call.from) newSet.delete(call.from);
-        if (call.userToCall) newSet.delete(call.userToCall);
+        if (from) newSet.delete(from);
+        if (userToCall) newSet.delete(userToCall);
         return newSet;
       });
     }
-
+    
+    // Now clear all call states
+    setCallEnded(true);
+    setCallAccepted(false);
+    setIsCalling(false);
     setCall({});
     cleanupPeer();
 
@@ -517,13 +533,6 @@ export const SocketContextProvider = ({ children }) => {
     setTimeout(() => {
       getMediaStream();
     }, 500);
-
-    if (socket && call && (call.from || call.userToCall)) {
-      socket.emit('cancelCall', {
-        conversationId: call.userToCall || call.from,
-        sender: user._id,
-      });
-    }
   };
 
   return (

@@ -1035,6 +1035,47 @@ const MessagesPage = () => {
     }
   }, [socket])
 
+  // Refresh participant data (including inCall status) when selecting a conversation
+  // This ensures User C sees updated status when clicking on conversations
+  useEffect(() => {
+    const refreshParticipantData = async () => {
+      if (!selectedConversation || !selectedConversation.participants[0]?._id) return
+      
+      try {
+        const participantId = selectedConversation.participants[0]._id
+        const res = await fetch(
+          `${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/user/getUserPro/${participantId}`,
+          { credentials: 'include' }
+        )
+        
+        if (res.ok) {
+          const userData = await res.json()
+          
+          // Update the selected conversation with fresh user data
+          setSelectedConversation(prev => ({
+            ...prev,
+            participants: [userData]
+          }))
+          
+          // Also update in conversations list
+          setConversations(prev => prev.map(conv => {
+            if (conv._id === selectedConversation._id) {
+              return {
+                ...conv,
+                participants: [userData]
+              }
+            }
+            return conv
+          }))
+        }
+      } catch (error) {
+        console.log('Error refreshing participant data:', error)
+      }
+    }
+    
+    refreshParticipantData()
+  }, [selectedConversation?._id])
+
   // Listen for typing indicator from other user
   useEffect(() => {
     if (!socket || !selectedConversation?._id) return
