@@ -415,7 +415,7 @@ const MessagesPage = () => {
       const otherUser = selectedConversation?.participants[0]
       if (!otherUser?._id) return
 
-      setLoadingMoreMessages(true)
+      setLoadingMoreMessages(true) 
 
       const url = `${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/message/${otherUser._id}?limit=12&beforeId=${oldestMessage._id}`
       const res = await fetch(url, {
@@ -823,7 +823,7 @@ const MessagesPage = () => {
     return () => {
       socket.off('newMessage', handleNewMessage)
     }
-  }, [socket, user?._id]) // Keep dependencies to ensure handler has latest values
+  }, [socket, user?._id, selectedConversation?._id]) // Keep dependencies to ensure handler has latest values
 
   // Mark messages as seen when viewing messages from other user
   useEffect(() => {
