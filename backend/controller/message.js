@@ -297,7 +297,7 @@ export const mycon = async(req,res) => {
     const conversations = await Conversation.find(query)
       .populate({
         path: "participants",
-        select: "username profilePic name",
+        select: "username profilePic name inCall",
       })
       .sort({updatedAt: -1}) // Sort by updatedAt (last message time) instead of createdAt
       .limit(limit + 1) // Fetch one extra to check if there are more

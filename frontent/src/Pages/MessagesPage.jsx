@@ -2045,8 +2045,8 @@ const MessagesPage = () => {
                     </Text>
                   </>
                 )}
-                {/* Show busy status if user is in a call */}
-                {busyUsers?.has(selectedConversation.participants[0]?._id) && (
+                {/* Show busy status if user is in a call - check both socket AND database */}
+                {(busyUsers?.has(selectedConversation.participants[0]?._id) || selectedConversation.participants[0]?.inCall) && (
                   <>
                     <Text fontSize={{ base: "2xs", md: "xs" }} color="gray.500">
                       •
@@ -3099,11 +3099,13 @@ const MessagesPage = () => {
                     callAccepted || 
                     !callUser ||
                     busyUsers?.has(selectedConversation?.participants[0]?._id) ||
-                    busyUsers?.has(user?._id)
+                    selectedConversation?.participants[0]?.inCall ||
+                    busyUsers?.has(user?._id) ||
+                    user?.inCall
                   }
                   flexShrink={0}
                   title={
-                    busyUsers?.has(selectedConversation?.participants[0]?._id) || busyUsers?.has(user?._id)
+                    busyUsers?.has(selectedConversation?.participants[0]?._id) || selectedConversation?.participants[0]?.inCall || busyUsers?.has(user?._id) || user?.inCall
                       ? "User is currently in a call"
                       : "Start call"
                   }
@@ -3122,8 +3124,8 @@ const MessagesPage = () => {
                     onClick={() => {
                       const recipientId = selectedConversation?.participants[0]?._id
                       if (recipientId && callUser) {
-                        // Check if user is busy before calling
-                        if (busyUsers?.has(recipientId) || busyUsers?.has(user?._id)) {
+                        // Check if user is busy before calling - check both socket AND database
+                        if (busyUsers?.has(recipientId) || selectedConversation?.participants[0]?.inCall || busyUsers?.has(user?._id) || user?.inCall) {
                           showToast('Error', 'User is currently in a call', 'error')
                           return
                         }
@@ -3158,8 +3160,8 @@ const MessagesPage = () => {
                     onClick={() => {
                       const recipientId = selectedConversation?.participants[0]?._id
                       if (recipientId && callUser) {
-                        // Check if user is busy before calling
-                        if (busyUsers?.has(recipientId) || busyUsers?.has(user?._id)) {
+                        // Check if user is busy before calling - check both socket AND database
+                        if (busyUsers?.has(recipientId) || selectedConversation?.participants[0]?.inCall || busyUsers?.has(user?._id) || user?.inCall) {
                           showToast('Error', 'User is currently in a call', 'error')
                           return
                         }
