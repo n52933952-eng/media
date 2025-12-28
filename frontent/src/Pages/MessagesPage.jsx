@@ -2011,6 +2011,17 @@ const MessagesPage = () => {
                     </Text>
                   </>
                 )}
+                {/* Show busy status if user is in a call */}
+                {busyUsers?.has(selectedConversation.participants[0]?._id) && (
+                  <>
+                    <Text fontSize={{ base: "2xs", md: "xs" }} color="gray.500">
+                      •
+                    </Text>
+                    <Badge colorScheme="red" fontSize={{ base: "2xs", md: "xs" }} px={2} py={0.5} borderRadius="full">
+                      In a call
+                    </Badge>
+                  </>
+                )}
               </Flex>
               {/* Delete conversation button */}
               <IconButton
@@ -2110,26 +2121,38 @@ const MessagesPage = () => {
                       gap={4}
                       py={4}
                     >
-                      {/* Hidden video elements to handle audio stream - they can play audio */}
-                      {userVideo.current && (
-                        <Box
-                          as="video"
-                          ref={userVideo}
-                          autoPlay
-                          playsInline
-                          style={{ display: 'none', width: 0, height: 0 }}
-                        />
-                      )}
-                      {myVideo.current && (
-                        <Box
-                          as="video"
-                          ref={myVideo}
-                          autoPlay
-                          muted
-                          playsInline
-                          style={{ display: 'none', width: 0, height: 0 }}
-                        />
-                      )}
+                      {/* Hidden video elements to handle audio stream - positioned off-screen for audio playback */}
+                      <Box
+                        as="video"
+                        ref={userVideo}
+                        autoPlay
+                        playsInline
+                        controls={false}
+                        style={{ 
+                          position: 'absolute',
+                          left: '-9999px',
+                          width: '1px',
+                          height: '1px',
+                          opacity: 0,
+                          pointerEvents: 'none'
+                        }}
+                      />
+                      <Box
+                        as="video"
+                        ref={myVideo}
+                        autoPlay
+                        muted
+                        playsInline
+                        controls={false}
+                        style={{ 
+                          position: 'absolute',
+                          left: '-9999px',
+                          width: '1px',
+                          height: '1px',
+                          opacity: 0,
+                          pointerEvents: 'none'
+                        }}
+                      />
                       <Avatar
                         src={selectedConversation?.participants[0]?.profilePic}
                         name={selectedConversation?.participants[0]?.username}

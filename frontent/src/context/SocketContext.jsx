@@ -2,6 +2,7 @@
 import { createContext, useEffect, useState, useContext, useRef } from 'react';
 import io from 'socket.io-client';
 import Peer from 'simple-peer';
+import { useToast } from '@chakra-ui/react';
 import { UserContext } from './UserContext';
 import ringTone from '../assets/ring.mp3'; // Import ring tone
 import messageSound from '../assets/frontend_src_assets_sounds_message.mp3'; // Import message notification sound
@@ -10,6 +11,7 @@ export const SocketContext = createContext();
 
 export const SocketContextProvider = ({ children }) => {
   const { user } = useContext(UserContext);
+  const toast = useToast();
   const [onlineUser, setOnlineUser] = useState([]);
   const [socket, setSocket] = useState(null);
   const [call, setCall] = useState({});
@@ -44,7 +46,7 @@ export const SocketContextProvider = ({ children }) => {
       });
 
       setStream(currentStream);
-      console.log("Media stream obtained", type);
+      console.log(`Media stream obtained - Type: ${type}, Audio tracks: ${currentStream.getAudioTracks().length}, Video tracks: ${currentStream.getVideoTracks().length}`);
     } catch (error) {
       console.error('Error getting media stream:', error);
     }
@@ -215,11 +217,28 @@ export const SocketContextProvider = ({ children }) => {
 
     const handleCallBusyError = ({ message, busyUserId }) => {
       console.warn(message, busyUserId);
-      // You could show a toast notification here if needed
+      
+      // Stop ringtone if playing
+      if (ringtoneAudio.current) {
+        ringtoneAudio.current.pause();
+        ringtoneAudio.current.currentTime = 0;
+      }
+      
+      // Show toast notification
+      toast({
+        title: "User is Busy",
+        description: "This user is currently in another call. Please try again later.",
+        status: "warning",
+        duration: 4000,
+        isClosable: true,
+        position: "top"
+      });
+      
       cleanupPeer();
       setCall({});
       setCallAccepted(false);
       setCallEnded(true);
+      setIsCalling(false);
     };
 
     socket.on("callBusyError", handleCallBusyError);
@@ -333,12 +352,16 @@ export const SocketContextProvider = ({ children }) => {
           audioTracks.forEach(track => {
             track.enabled = true;
           });
-          // Force play for audio calls
-          if (type === 'audio') {
-            userVideo.current.play().catch(err => {
-              console.log('Audio play error (expected on some browsers):', err);
-            });
-          }
+          // Set volume and ensure playback for audio calls
+          userVideo.current.volume = 1.0;
+          userVideo.current.muted = false;
+          
+          // Force play to ensure audio works
+          userVideo.current.play().catch(err => {
+            console.log('Audio/Video play error (browser may require user interaction):', err);
+          });
+          
+          console.log(`Receiving ${type} call - Audio tracks:`, audioTracks.length, 'Video tracks:', currentStream.getVideoTracks().length);
         }
       }
     });
@@ -423,12 +446,16 @@ export const SocketContextProvider = ({ children }) => {
           audioTracks.forEach(track => {
             track.enabled = true;
           });
-          // Force play for audio calls
-          if (callTypeForAnswer === 'audio') {
-            userVideo.current.play().catch(err => {
-              console.log('Audio play error (expected on some browsers):', err);
-            });
-          }
+          // Set volume and ensure playback
+          userVideo.current.volume = 1.0;
+          userVideo.current.muted = false;
+          
+          // Force play to ensure audio/video works
+          userVideo.current.play().catch(err => {
+            console.log('Audio/Video play error (browser may require user interaction):', err);
+          });
+          
+          console.log(`Answering ${callTypeForAnswer} call - Audio tracks:`, audioTracks.length, 'Video tracks:', currentStream.getVideoTracks().length);
         }
       }
     });

@@ -14,6 +14,7 @@ import LogOutButton from './Components/LogOutButton'
 import UpdateProfile from './Pages/UpdatProile'
 import CreatePost from './Components/CreatePost'
 import MessagesPage from './Pages/MessagesPage'
+import CallNotification from './Components/CallNotification'
 
 const AppContent = () => {
   const location = useLocation()
@@ -24,6 +25,9 @@ const AppContent = () => {
 
   return (
     <>
+      {/* Global Call Notification - shows on all pages */}
+      {user && <CallNotification />}
+      
       {/* Header always centered at 620px - same as other pages */}
       <Container maxW="620px" px={{ base: 4, md: 6 }} position="relative" zIndex={10}>
         <Header/>
