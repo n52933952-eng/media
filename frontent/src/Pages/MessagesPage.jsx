@@ -612,7 +612,15 @@ const MessagesPage = () => {
   }, [messages.length, user?._id])
 
 
-  // Listen for new messages via Socket.io
+  // Use ref to track selected conversation ID - CRITICAL for performance
+  // This prevents recreating the socket listener every time conversation changes
+  const selectedConversationIdRef = useRef(null)
+  
+  useEffect(() => {
+    selectedConversationIdRef.current = selectedConversation?._id || null
+  }, [selectedConversation?._id])
+
+  // Listen for new messages via Socket.io - OPTIMIZED
   useEffect(() => {
     if (!socket || !user?._id) return
 
@@ -621,14 +629,21 @@ const MessagesPage = () => {
       if (!message || !message.conversationId) return
       
       // Check if this message is for the currently selected conversation
-      const isForSelectedConversation = selectedConversation &&
+      // Use REF to get latest value without recreating listener (performance optimization)
+      const currentSelectedId = selectedConversationIdRef.current
+      const isForSelectedConversation = currentSelectedId &&
         message.conversationId &&
-        selectedConversation._id &&
-        message.conversationId.toString() === selectedConversation._id.toString()
+        message.conversationId.toString() === currentSelectedId.toString()
       
       // Update messages if this is for the selected conversation
       if (isForSelectedConversation) {
         setMessages((prev) => {
+          // Prevent duplicate messages (critical for real-time reliability)
+          const isDuplicate = prev.some(msg => 
+            msg._id && message._id && msg._id.toString() === message._id.toString()
+          )
+          if (isDuplicate) return prev
+          
           // Update first message ID ref if this is the first message
           if (prev.length === 0 && message._id) {
             firstMessageIdRef.current = message._id
@@ -675,8 +690,12 @@ const MessagesPage = () => {
                 createdAt: message.createdAt || new Date().toISOString()
               }
               
-              if (!isFromCurrentUser) {
-                // Message from other user - increment unread count and update
+              // OPTIMIZED: Don't increment unread if conversation is currently open
+              const isCurrentlyViewing = currentSelectedId && conv._id.toString() === currentSelectedId.toString()
+              const shouldIncrementUnread = !isFromCurrentUser && !isCurrentlyViewing
+              
+              if (shouldIncrementUnread) {
+                // Message from other user AND not currently viewing - increment unread count
                 return { 
                   ...conv, 
                   unreadCount: (conv.unreadCount || 0) + 1, 
@@ -684,7 +703,7 @@ const MessagesPage = () => {
                   updatedAt: new Date().toISOString() // Update timestamp to move to top
                 }
               } else {
-                // Message from current user - just update lastMessage and timestamp
+                // Message from current user OR currently viewing - just update lastMessage
                 return {
                   ...conv,
                   lastMessage: updatedLastMessage,
@@ -737,12 +756,14 @@ const MessagesPage = () => {
             updated = [newConv, ...updated]
           }
           
-          // Sort by updatedAt to move most recent to top (always sort after update)
+          // Sort by updatedAt to move most recent to top - OPTIMIZED sorting
           const sorted = updated.sort((a, b) => {
             const aTime = new Date(a.updatedAt || 0).getTime()
             const bTime = new Date(b.updatedAt || 0).getTime()
             return bTime - aTime // Most recent first
           })
+          
+          return sorted
           
           // If conversation was not in list (new conversation), fetch full details
           if (!conversationExists && message.conversationId) {
@@ -823,7 +844,7 @@ const MessagesPage = () => {
     return () => {
       socket.off('newMessage', handleNewMessage)
     }
-  }, [socket, user?._id, selectedConversation?._id]) // Keep dependencies to ensure handler has latest values
+  }, [socket, user?._id]) // OPTIMIZED: Don't include selectedConversation - use ref instead to prevent recreating listener
 
   // Mark messages as seen when viewing messages from other user
   useEffect(() => {
