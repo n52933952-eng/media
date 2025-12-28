@@ -149,19 +149,31 @@ export const SocketContextProvider = ({ children }) => {
     if (!socket) return;
 
     const handleCallCanceled = () => {
-      setCall({});
-      setCallAccepted(false);
-      setCallEnded(true);
-      setIsCalling(false); // Stop ringing when call is canceled
-      
       // Stop ringtone when call is canceled
       if (ringtoneAudio.current) {
         ringtoneAudio.current.pause();
         ringtoneAudio.current.currentTime = 0;
       }
       
+      // Clean up peer connections and streams
       cleanupPeer();
-      getMediaStream();
+      
+      // Stop all tracks from the current stream
+      if (stream) {
+        stream.getTracks().forEach(track => track.stop());
+      }
+      
+      // Reset call states
+      setCall({});
+      setCallAccepted(false);
+      setCallEnded(true);
+      setIsCalling(false); // Stop ringing when call is canceled
+      
+      // Refresh stream for next call
+      setTimeout(() => {
+        getMediaStream();
+        setCallEnded(false); // Reset callEnded after a delay so UI can update
+      }, 500);
     };
 
     socket.on("CallCanceled", handleCallCanceled);

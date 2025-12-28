@@ -47,6 +47,11 @@ const UserSchema = mongoose.Schema({
     bio:{
         type:String,
         default:""
+    },
+
+    inCall:{
+        type:Boolean,
+        default:false
     }
 
 },{timestamps:true})

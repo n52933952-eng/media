@@ -155,22 +155,37 @@ const MessagesPage = () => {
 
   // Attach video streams if navigating to chat during active call
   useEffect(() => {
-    if (callAccepted && !callEnded && stream) {
-      // Ensure video elements have the stream attached
-      if (myVideo?.current && stream) {
-        myVideo.current.srcObject = stream
-        myVideo.current.muted = true // Always mute own video to prevent echo
-      }
-      if (userVideo?.current && userVideo.current.srcObject) {
-        // userVideo already has remote stream from SocketContext
-        userVideo.current.volume = 1.0
-        userVideo.current.muted = false
-        userVideo.current.play().catch(err => {
-          console.log('Video play error on navigation:', err)
+    // Small delay to ensure video elements are rendered
+    const timer = setTimeout(() => {
+      if (callAccepted && !callEnded && stream && selectedConversation) {
+        console.log('Reconnecting video streams during navigation...', {
+          hasMyVideo: !!myVideo?.current,
+          hasUserVideo: !!userVideo?.current,
+          hasStream: !!stream
         })
+        
+        // Ensure my video (local) has the stream attached
+        if (myVideo?.current && stream) {
+          myVideo.current.srcObject = stream
+          myVideo.current.muted = true // Always mute own video to prevent echo
+          myVideo.current.play().catch(err => {
+            console.log('My video play error:', err)
+          })
+        }
+        
+        // Ensure user video (remote) plays
+        if (userVideo?.current) {
+          userVideo.current.volume = 1.0
+          userVideo.current.muted = false
+          userVideo.current.play().catch(err => {
+            console.log('User video play error:', err)
+          })
+        }
       }
-    }
-  }, [callAccepted, callEnded, stream, myVideo, userVideo])
+    }, 100) // Small delay to ensure DOM is ready
+    
+    return () => clearTimeout(timer)
+  }, [callAccepted, callEnded, stream, myVideo, userVideo, selectedConversation])
 
   // Fetch followed users for search
   useEffect(() => {

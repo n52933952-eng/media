@@ -3,6 +3,7 @@ import { Server } from 'socket.io'
 import http from 'http'
 import Message from '../models/message.js'
 import Conversation from '../models/conversation.js'
+import User from '../models/user.js'
 
 // This will be set from index.js
 let io = null
@@ -100,6 +101,10 @@ export const initializeSocket = (app) => {
             const callId = `${from}-${userToCall}`
             activeCalls.set(callId, { user1: from, user2: userToCall })
             
+            // Update database - mark users as in call (persistent across refreshes)
+            User.findByIdAndUpdate(from, { inCall: true }).catch(err => console.log('Error updating caller inCall status:', err))
+            User.findByIdAndUpdate(userToCall, { inCall: true }).catch(err => console.log('Error updating receiver inCall status:', err))
+            
             io.emit("callBusy", { userToCall, from })
         })
 
@@ -138,6 +143,10 @@ export const initializeSocket = (app) => {
             } else if (activeCalls.has(callId2)) {
                 activeCalls.delete(callId2)
             }
+
+            // Update database - mark users as NOT in call
+            User.findByIdAndUpdate(sender, { inCall: false }).catch(err => console.log('Error updating sender inCall status:', err))
+            User.findByIdAndUpdate(conversationId, { inCall: false }).catch(err => console.log('Error updating receiver inCall status:', err))
 
             if (receiverSocketId) {
                 io.to(receiverSocketId).emit("CallCanceled")
@@ -243,12 +252,19 @@ export const initializeSocket = (app) => {
 
             // Clean up active calls for disconnected user
             if (disconnectedUserId) {
+                // Clear inCall status in database for disconnected user
+                User.findByIdAndUpdate(disconnectedUserId, { inCall: false }).catch(err => console.log('Error clearing inCall status on disconnect:', err))
+                
                 for (const [callId, callData] of activeCalls.entries()) {
                     if (callData.user1 === disconnectedUserId || callData.user2 === disconnectedUserId) {
                         activeCalls.delete(callId)
                         // Notify the other user
                         const otherUserId = callData.user1 === disconnectedUserId ? callData.user2 : callData.user1
                         const otherUserData = userSocketMap[otherUserId]
+                        
+                        // Clear inCall status for the other user too
+                        User.findByIdAndUpdate(otherUserId, { inCall: false }).catch(err => console.log('Error clearing other user inCall status:', err))
+                        
                         if (otherUserData) {
                             io.to(otherUserData.socketId).emit("CallCanceled")
                             io.emit("cancleCall", { userToCall: otherUserId, from: disconnectedUserId })
