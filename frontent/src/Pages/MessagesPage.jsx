@@ -43,7 +43,7 @@ import { compressVideo, needsCompression } from '../utils/videoCompress'
 const MessagesPage = () => {
   const { user } = useContext(UserContext)
   const socketContext = useContext(SocketContext)
-  const { socket, onlineUser, callUser, callAccepted, callEnded, isCalling, callType, call, answerCall, leaveCall, myVideo, userVideo, stream, busyUsers } = socketContext || {}
+  const { socket, onlineUser, callUser, callAccepted, callEnded, isCalling, callType, call, answerCall, leaveCall, myVideo, userVideo, stream, remoteStream, busyUsers } = socketContext || {}
   const showToast = useShowToast()
 
   // State
@@ -153,15 +153,46 @@ const MessagesPage = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user])
 
+  // Force video elements to update when mounting MessagesPage with active call
+  useEffect(() => {
+    if (callAccepted && !callEnded) {
+      console.log('MessagesPage mounted with active call - forcing video update')
+      // Force a small delay then check video elements
+      const timer = setTimeout(() => {
+        if (myVideo?.current && stream && !myVideo.current.srcObject) {
+          console.log('Attaching local stream to myVideo on mount')
+          myVideo.current.srcObject = stream
+          myVideo.current.muted = true
+        }
+        if (userVideo?.current) {
+          if (userVideo.current.srcObject) {
+            console.log('Forcing remote video play on mount')
+            userVideo.current.volume = 1.0
+            userVideo.current.muted = false
+            userVideo.current.play().catch(e => console.log('Play error:', e))
+          } else if (remoteStream) {
+            console.log('Attaching remote stream on mount')
+            userVideo.current.srcObject = remoteStream
+            userVideo.current.volume = 1.0
+            userVideo.current.muted = false
+            userVideo.current.play().catch(e => console.log('Remote play error:', e))
+          }
+        }
+      }, 200)
+      return () => clearTimeout(timer)
+    }
+  }, []) // Only run on mount
+
   // Attach video streams if navigating to chat during active call
   useEffect(() => {
     // Small delay to ensure video elements are rendered
     const timer = setTimeout(() => {
-      if (callAccepted && !callEnded && stream && selectedConversation) {
+      if (callAccepted && !callEnded && selectedConversation) {
         console.log('Reconnecting video streams during navigation...', {
           hasMyVideo: !!myVideo?.current,
           hasUserVideo: !!userVideo?.current,
-          hasStream: !!stream
+          hasStream: !!stream,
+          userVideoHasStream: !!userVideo?.current?.srcObject
         })
         
         // Ensure my video (local) has the stream attached
@@ -173,19 +204,55 @@ const MessagesPage = () => {
           })
         }
         
-        // Ensure user video (remote) plays
+        // Ensure user video (remote) has stream and plays
         if (userVideo?.current) {
-          userVideo.current.volume = 1.0
-          userVideo.current.muted = false
-          userVideo.current.play().catch(err => {
-            console.log('User video play error:', err)
-          })
+          // Check if userVideo already has a stream (from peer connection)
+          if (userVideo.current.srcObject) {
+            console.log('User video already has stream, playing...')
+            userVideo.current.volume = 1.0
+            userVideo.current.muted = false
+            userVideo.current.play().catch(err => {
+              console.log('User video play error:', err)
+            })
+          } else if (remoteStream) {
+            // Attach remoteStream from context if userVideo doesn't have it yet
+            console.log('Attaching remote stream from context...')
+            userVideo.current.srcObject = remoteStream
+            userVideo.current.volume = 1.0
+            userVideo.current.muted = false
+            userVideo.current.play().catch(err => {
+              console.log('Remote stream play error:', err)
+            })
+          } else {
+            console.log('User video missing stream - waiting for peer connection...')
+            // Wait a bit longer for peer connection to attach stream
+            setTimeout(() => {
+              if (userVideo?.current?.srcObject) {
+                console.log('Stream now available, playing user video')
+                userVideo.current.volume = 1.0
+                userVideo.current.muted = false
+                userVideo.current.play().catch(err => {
+                  console.log('Delayed user video play error:', err)
+                })
+              } else if (remoteStream && userVideo?.current) {
+                console.log('Attaching remote stream after delay...')
+                userVideo.current.srcObject = remoteStream
+                userVideo.current.volume = 1.0
+                userVideo.current.muted = false
+                userVideo.current.play().catch(err => {
+                  console.log('Delayed remote stream play error:', err)
+                })
+              } else {
+                console.log('Still no stream on user video after delay')
+              }
+            }, 500)
+          }
         }
       }
     }, 100) // Small delay to ensure DOM is ready
     
     return () => clearTimeout(timer)
-  }, [callAccepted, callEnded, stream, myVideo, userVideo, selectedConversation])
+  }, [callAccepted, callEnded, stream, remoteStream, myVideo, userVideo, selectedConversation])
 
   // Fetch followed users for search
   useEffect(() => {

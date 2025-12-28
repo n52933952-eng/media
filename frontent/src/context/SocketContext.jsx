@@ -20,6 +20,7 @@ export const SocketContextProvider = ({ children }) => {
   const [isCalling, setIsCalling] = useState(false); // Track if current user is calling (ringing state)
   const [callType, setCallType] = useState('video'); // 'audio' or 'video'
   const [stream, setStream] = useState();
+  const [remoteStream, setRemoteStream] = useState(); // Store remote stream in state
   const [me, setMe] = useState('');
   const [busyUsers, setBusyUsers] = useState(new Set()); // Track which users are busy
   const [totalUnreadCount, setTotalUnreadCount] = useState(0); // Global unread message count
@@ -313,6 +314,8 @@ export const SocketContextProvider = ({ children }) => {
     if (userVideo.current) {
       userVideo.current.srcObject = null;
     }
+    // Clear remote stream state
+    setRemoteStream(null);
   };
 
   const callUser = async (id, recipientName = null, type = 'video') => {
@@ -356,6 +359,9 @@ export const SocketContextProvider = ({ children }) => {
     });
 
     peer.on('stream', (currentStream) => {
+      // Store remote stream in state for later use
+      setRemoteStream(currentStream);
+      
       if (userVideo.current) {
         userVideo.current.srcObject = currentStream;
         // Ensure audio is enabled and playing for both video and audio calls
@@ -450,6 +456,9 @@ export const SocketContextProvider = ({ children }) => {
     });
 
     peer.on('stream', (currentStream) => {
+      // Store remote stream in state for later use
+      setRemoteStream(currentStream);
+      
       if (userVideo.current) {
         userVideo.current.srcObject = currentStream;
         // Ensure audio is enabled and playing for both video and audio calls
@@ -547,6 +556,7 @@ export const SocketContextProvider = ({ children }) => {
         myVideo,
         userVideo,
         stream,
+        remoteStream, // Export remote stream for components
         me,
         callUser,
         answerCall,
