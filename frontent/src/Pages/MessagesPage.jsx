@@ -985,6 +985,56 @@ const MessagesPage = () => {
     }
   }, [socket, selectedConversation?._id])
 
+  // Listen for call started - update inCall status when users become busy
+  useEffect(() => {
+    if (!socket) return
+
+    const handleCallStarted = ({ userToCall, from }) => {
+      // Update conversations state to mark users as IN call
+      setConversations(prev => prev.map(conv => {
+        const updatedParticipants = conv.participants.map(participant => {
+          // Check if this participant is starting a call
+          if (participant._id === userToCall || participant._id === from) {
+            return { ...participant, inCall: true }
+          }
+          return participant
+        })
+        return { ...conv, participants: updatedParticipants }
+      }))
+    }
+
+    socket.on("callBusy", handleCallStarted)
+
+    return () => {
+      socket.off("callBusy", handleCallStarted)
+    }
+  }, [socket])
+
+  // Listen for call cancelled/ended - update inCall status for all users
+  useEffect(() => {
+    if (!socket) return
+
+    const handleCallEnded = ({ userToCall, from }) => {
+      // Update conversations state to mark users as NOT in call
+      setConversations(prev => prev.map(conv => {
+        const updatedParticipants = conv.participants.map(participant => {
+          // Check if this participant was in the call
+          if (participant._id === userToCall || participant._id === from) {
+            return { ...participant, inCall: false }
+          }
+          return participant
+        })
+        return { ...conv, participants: updatedParticipants }
+      }))
+    }
+
+    socket.on("cancleCall", handleCallEnded)
+
+    return () => {
+      socket.off("cancleCall", handleCallEnded)
+    }
+  }, [socket])
+
   // Listen for typing indicator from other user
   useEffect(() => {
     if (!socket || !selectedConversation?._id) return
