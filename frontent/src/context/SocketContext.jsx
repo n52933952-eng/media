@@ -3,6 +3,8 @@ import { createContext, useEffect, useState, useContext, useRef } from 'react';
 import io from 'socket.io-client';
 import Peer from 'simple-peer';
 import { UserContext } from './UserContext';
+import ringTone from '../assets/ring.mp3'; // Import ring tone
+import messageSound from '../assets/frontend_src_assets_sounds_message.mp3'; // Import message notification sound
 
 export const SocketContext = createContext();
 
@@ -24,6 +26,8 @@ export const SocketContextProvider = ({ children }) => {
   const userVideo = useRef();
   const connectionRef = useRef();
   const peerRef = useRef();
+  const ringtoneAudio = useRef(new Audio(ringTone)); // Audio for incoming call ringtone
+  const messageSoundAudio = useRef(new Audio(messageSound)); // Audio for new unread message notification
 
   // Get user media and unmute audio track explicitly
   const getMediaStream = async (type = 'video') => {
@@ -79,6 +83,34 @@ export const SocketContextProvider = ({ children }) => {
       setTotalUnreadCount(totalUnread || 0);
     });
 
+    // Listen for new messages globally - play sound for unread messages
+    newSocket?.on('newMessage', (message) => {
+      if (!message || !message.sender || !user?._id) return;
+      
+      // Check if message is from another user (not current user)
+      let messageSenderId = '';
+      if (message.sender?._id) {
+        messageSenderId = typeof message.sender._id === 'string' ? message.sender._id : message.sender._id.toString();
+      } else if (message.sender) {
+        messageSenderId = typeof message.sender === 'string' ? message.sender : String(message.sender);
+      }
+      
+      let currentUserId = '';
+      if (user?._id) {
+        currentUserId = typeof user._id === 'string' ? user._id : user._id.toString();
+      }
+      
+      const isFromCurrentUser = messageSenderId !== '' && currentUserId !== '' && messageSenderId === currentUserId;
+      
+      // Play sound only for unread messages from other users
+      if (!isFromCurrentUser && messageSoundAudio.current) {
+        messageSoundAudio.current.currentTime = 0; // Reset to start
+        messageSoundAudio.current.play().catch(err => {
+          console.log('Message sound play error (browser may require user interaction):', err);
+        });
+      }
+    });
+
     // Fetch initial unread count
     const fetchInitialUnreadCount = async () => {
       if (!user?._id) {
@@ -106,6 +138,7 @@ export const SocketContextProvider = ({ children }) => {
 
     return () => {
       newSocket?.off('unreadCountUpdate');
+      newSocket?.off('newMessage');
       newSocket.close();
     };
   }, [user]);
@@ -118,6 +151,13 @@ export const SocketContextProvider = ({ children }) => {
       setCallAccepted(false);
       setCallEnded(true);
       setIsCalling(false); // Stop ringing when call is canceled
+      
+      // Stop ringtone when call is canceled
+      if (ringtoneAudio.current) {
+        ringtoneAudio.current.pause();
+        ringtoneAudio.current.currentTime = 0;
+      }
+      
       cleanupPeer();
       getMediaStream();
     };
@@ -204,6 +244,14 @@ export const SocketContextProvider = ({ children }) => {
         setIsCalling(false);
         // Get appropriate media stream for incoming call
         getMediaStream(incomingCallType);
+        
+        // Play ringtone for incoming call
+        if (ringtoneAudio.current) {
+          ringtoneAudio.current.loop = true; // Loop until answered/declined
+          ringtoneAudio.current.play().catch(err => {
+            console.log('Ringtone play error (browser may require user interaction):', err);
+          });
+        }
       } 
       // If from matches current user, we're making the call (ringing state)
       // Don't update if we already set isCalling in callUser function
@@ -315,6 +363,12 @@ export const SocketContextProvider = ({ children }) => {
     setCallEnded(false);
     setIsCalling(false); // Stop ringing when answering
     
+    // Stop ringtone when answering call
+    if (ringtoneAudio.current) {
+      ringtoneAudio.current.pause();
+      ringtoneAudio.current.currentTime = 0;
+    }
+    
     // Ensure we have the right stream type
     const callTypeForAnswer = call.callType || 'video';
     setCallType(callTypeForAnswer);
@@ -395,6 +449,12 @@ export const SocketContextProvider = ({ children }) => {
     setCallEnded(true);
     setCallAccepted(false);
     setIsCalling(false); // Stop ringing when leaving call
+    
+    // Stop ringtone when leaving/declining call
+    if (ringtoneAudio.current) {
+      ringtoneAudio.current.pause();
+      ringtoneAudio.current.currentTime = 0;
+    }
     
     // Clear busy state for both users
     if (call.from || call.userToCall) {
