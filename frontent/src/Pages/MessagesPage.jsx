@@ -153,6 +153,25 @@ const MessagesPage = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user])
 
+  // Attach video streams if navigating to chat during active call
+  useEffect(() => {
+    if (callAccepted && !callEnded && stream) {
+      // Ensure video elements have the stream attached
+      if (myVideo?.current && stream) {
+        myVideo.current.srcObject = stream
+        myVideo.current.muted = true // Always mute own video to prevent echo
+      }
+      if (userVideo?.current && userVideo.current.srcObject) {
+        // userVideo already has remote stream from SocketContext
+        userVideo.current.volume = 1.0
+        userVideo.current.muted = false
+        userVideo.current.play().catch(err => {
+          console.log('Video play error on navigation:', err)
+        })
+      }
+    }
+  }, [callAccepted, callEnded, stream, myVideo, userVideo])
+
   // Fetch followed users for search
   useEffect(() => {
     const fetchFollowedUsers = async () => {
