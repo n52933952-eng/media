@@ -204,12 +204,13 @@ const HomePage = () => {
         )}
       </Box>
 
-      {/* Suggested Users Sidebar - Right Side (35%) */}
+      {/* Suggested Users Sidebar - Right Side (reduced width) */}
       <Box 
-        flex={{ base: '0 0 100%', md: '0 0 35%' }} 
+        flex={{ base: '0 0 100%', md: '0 0 30%' }} 
         display={{ base: 'none', md: 'block' }}
-        maxW={{ base: '100%', md: '35%' }}
-        pl={4}
+        maxW={{ base: '100%', md: '30%' }}
+        pl={8}
+        pt={4}
       >
         <SuggestedUsers />
       </Box>

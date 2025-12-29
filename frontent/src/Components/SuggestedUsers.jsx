@@ -101,12 +101,14 @@ const SuggestedUsers = () => {
   return (
     <Box
       position="sticky"
-      top="100px"
+      top="120px"
       bg={bgColor}
       borderRadius="md"
       p={4}
       border="1px solid"
       borderColor={borderColor}
+      maxW="280px"
+      ml="auto"
     >
       {/* Search Input */}
       <InputGroup mb={4}>
