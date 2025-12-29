@@ -86,6 +86,11 @@ const SuggestedUsers = () => {
     }
   }, [user?._id, fetchSuggestedUsers])
 
+  // Remove user from suggestions immediately when followed
+  const handleUserFollowed = (followedUserId) => {
+    setSuggestedUsers(prev => prev.filter(u => u._id !== followedUserId))
+  }
+
   // Refresh suggestions when user follows/unfollows (triggered by SuggestedUser component)
   useEffect(() => {
     if (user?._id && user?.following) {
@@ -97,6 +102,11 @@ const SuggestedUsers = () => {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.following?.length]) // Refresh when following list changes
+
+  // Filter out already followed users from suggestions
+  const filteredSuggestedUsers = suggestedUsers.filter(suggestedUser => {
+    return !user?.following?.includes(suggestedUser._id)
+  })
 
   return (
     <Box
@@ -135,9 +145,15 @@ const SuggestedUsers = () => {
             </Flex>
           ) : searchResults.length > 0 ? (
             <Flex direction="column" gap={2}>
-              {searchResults.map((searchUser) => (
-                <SuggestedUser key={searchUser._id} user={searchUser} />
-              ))}
+              {searchResults
+                .filter(searchUser => !user?.following?.includes(searchUser._id))
+                .map((searchUser) => (
+                  <SuggestedUser 
+                    key={searchUser._id} 
+                    user={searchUser}
+                    onFollowed={handleUserFollowed}
+                  />
+                ))}
             </Flex>
           ) : (
             <Text fontSize="sm" color={textColor}>
@@ -169,10 +185,14 @@ const SuggestedUsers = () => {
                 </Flex>
               ))}
             </Flex>
-          ) : suggestedUsers.length > 0 ? (
+          ) : filteredSuggestedUsers.length > 0 ? (
             <Flex direction="column" gap={1}>
-              {suggestedUsers.map((suggestedUser) => (
-                <SuggestedUser key={suggestedUser._id} user={suggestedUser} />
+              {filteredSuggestedUsers.map((suggestedUser) => (
+                <SuggestedUser 
+                  key={suggestedUser._id} 
+                  user={suggestedUser}
+                  onFollowed={handleUserFollowed}
+                />
               ))}
             </Flex>
           ) : (

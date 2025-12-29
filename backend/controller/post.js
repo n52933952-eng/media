@@ -345,10 +345,14 @@ export const getFeedPost = async(req,res) => {
         
         // OPTIMIZED: Fetch only the last 3 posts from each followed user
         // This ensures diversity in feed and keeps it lightweight
+        // Also exclude current user's own posts
         const postsPerUser = 3
         
-        // Get 3 most recent posts from each followed user
-        const postsPromises = following.map(async (followedUserId) => {
+        // Filter out current user from following list (in case they follow themselves)
+        const followedUserIds = following.filter(id => id.toString() !== userId.toString())
+        
+        // Get 3 most recent posts from each followed user (excluding current user)
+        const postsPromises = followedUserIds.map(async (followedUserId) => {
             const userPosts = await Post.find({ postedBy: followedUserId })
                 .populate("postedBy", "-password")
                 .sort({ createdAt: -1 })
@@ -374,7 +378,7 @@ export const getFeedPost = async(req,res) => {
         const paginatedPosts = allPosts.slice(skip, skip + limit)
         const hasMore = (skip + limit) < totalCount
         
-        console.log(`📊 Feed: ${following.length} users followed, ${totalCount} total posts (3 per user), returning ${paginatedPosts.length} posts (skip: ${skip}, limit: ${limit})`)
+        console.log(`📊 Feed: ${followedUserIds.length} users followed (excluding self), ${totalCount} total posts (3 per user), returning ${paginatedPosts.length} posts (skip: ${skip}, limit: ${limit})`)
      
         return res.status(200).json({ 
             posts: paginatedPosts,

@@ -4,7 +4,7 @@ import { Link } from 'react-router-dom'
 import { UserContext } from '../context/UserContext'
 import useShowToast from '../hooks/useShowToast'
 
-const SuggestedUser = ({ user }) => {
+const SuggestedUser = ({ user, onFollowed }) => {
   const toast = useToast()
   const showToast = useShowToast()
   const { user: currentUser, setUser } = useContext(UserContext)
@@ -65,6 +65,11 @@ const SuggestedUser = ({ user }) => {
             }
           }
         })
+      }
+
+      // Notify parent component to remove this user from suggestions when followed
+      if (!following && onFollowed) {
+        onFollowed(user._id)
       }
 
       showToast(
