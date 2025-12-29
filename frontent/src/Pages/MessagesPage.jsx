@@ -2420,43 +2420,6 @@ const MessagesPage = () => {
               </Box>
             )}
 
-            {/* Incoming call notification - When someone is calling you */}
-            {call && call.isReceivingCall && !callAccepted && (
-              <Box
-                borderBottom="1px solid"
-                borderColor={borderColor}
-                p={{ base: 3, md: 4 }}
-                bg={useColorModeValue('blue.600', 'blue.900')}
-              >
-                <Flex direction="column" gap={{ base: 2, md: 3 }} alignItems="center">
-                  <Text fontWeight="semibold" fontSize={{ base: "sm", md: "md" }} textAlign="center" color="white">
-                    {call?.name} is {call?.callType === 'audio' ? 'voice ' : 'video '}calling...
-                  </Text>
-                  <Flex gap={{ base: 2, md: 3 }} w="full" justifyContent="center" flexWrap="wrap">
-                    <Button
-                      colorScheme="green"
-                      leftIcon={<FaPhone />}
-                      onClick={() => answerCall?.()}
-                      size={{ base: "sm", md: "md" }}
-                      flex={{ base: 1, sm: 0 }}
-                      minW={{ base: "auto", sm: "120px" }}
-                    >
-                      Answer
-                    </Button>
-                    <Button
-                      colorScheme="red"
-                      leftIcon={<FaPhoneSlash />}
-                      onClick={() => leaveCall?.()}
-                      size={{ base: "sm", md: "md" }}
-                      flex={{ base: 1, sm: 0 }}
-                      minW={{ base: "auto", sm: "120px" }}
-                    >
-                      Decline
-                    </Button>
-                  </Flex>
-                </Flex>
-              </Box>
-            )}
 
             {/* Messages - Mobile optimized */}
             <Box
