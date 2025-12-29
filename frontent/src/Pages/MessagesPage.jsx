@@ -427,7 +427,7 @@ const MessagesPage = () => {
       setMessages([])
       setHasMoreMessages(false)
     }
-  }, [selectedConversation?._id, selectedConversation?.participants, showToast])
+  }, [selectedConversation?._id, selectedConversation?.participants[0]?._id, showToast])
 
   // Scroll to bottom when messages are initially loaded (not pagination)
   useEffect(() => {
