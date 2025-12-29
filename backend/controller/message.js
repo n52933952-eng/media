@@ -65,10 +65,11 @@ export const sendMessaeg = async(req,res) => {
                   text: message,
                   sender: senderId
                 }
+                conversation.updatedAt = new Date() // Explicitly set for immediate access
                 
                 await Promise.all([
                   newMessage.save(),
-                  conversation.save() // This automatically updates updatedAt timestamp
+                  conversation.save() // Save with updated timestamp
                 ])
                   
                 // Populate sender data and replyTo message before sending
@@ -116,7 +117,13 @@ export const sendMessaeg = async(req,res) => {
                 }
 
                 if (!res.headersSent) {
-                  res.status(201).json(newMessage)
+                  // Send message with conversation timestamp to sender for accurate sorting
+                  const responseData = {
+                    ...newMessage.toObject(),
+                    conversationUpdatedAt: conversation.updatedAt
+                  }
+                  console.log('📤 Sending message to sender with timestamp:', conversation.updatedAt)
+                  res.status(201).json(responseData)
                 }
                 resolve()
                } catch (error) {
@@ -165,10 +172,11 @@ conversation.lastMessage = {
   text: message,
   sender: senderId
 }
+conversation.updatedAt = new Date() // Explicitly set for immediate access
 
 await Promise.all([
   newMessage.save(),
-  conversation.save() // This automatically updates updatedAt timestamp
+  conversation.save() // Save with updated timestamp
 ])
   
 // Populate sender data and replyTo message before sending
@@ -216,7 +224,13 @@ if(recipentSockedId && recipientId && io){
 }
 
 
-res.status(201).json(newMessage)
+// Send message with conversation timestamp to sender for accurate sorting
+const responseData = {
+  ...newMessage.toObject(),
+  conversationUpdatedAt: conversation.updatedAt
+}
+console.log('📤 Sending message to sender with timestamp:', conversation.updatedAt)
+res.status(201).json(responseData)
   }
   catch(error){
     console.error('Error in sendMessaeg:', error)

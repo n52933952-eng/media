@@ -42,23 +42,29 @@ export const SocketContextProvider = ({ children }) => {
       ringtoneAudio.current.load();
     }
     
-    // Unlock audio on first user interaction (browser security requirement)
+    let isUnlocked = false
+    
+    // Unlock audio on user interaction (browser security requirement)
     const unlockAudio = () => {
-      if (messageSoundAudio.current) {
-        messageSoundAudio.current.play().then(() => {
-          messageSoundAudio.current.pause();
-          messageSoundAudio.current.currentTime = 0;
-          console.log('✅ Audio unlocked - notification sounds ready');
-        }).catch(() => {
-          // Still locked, will try again on next interaction
-        });
-      }
+      if (isUnlocked || !messageSoundAudio.current) return
+      
+      messageSoundAudio.current.play().then(() => {
+        messageSoundAudio.current.pause();
+        messageSoundAudio.current.currentTime = 0;
+        isUnlocked = true
+        console.log('✅ Audio unlocked - notification sounds ready');
+      }).catch(() => {
+        // Still locked, browser needs user interaction
+      });
     };
     
-    // Listen for any user interaction to unlock audio
-    const events = ['click', 'touchstart', 'keydown'];
+    // Try to unlock immediately (works if user already interacted)
+    unlockAudio()
+    
+    // Also listen for ANY user interaction to unlock audio
+    const events = ['click', 'touchstart', 'keydown', 'scroll', 'mousemove'];
     events.forEach(event => {
-      document.addEventListener(event, unlockAudio, { once: true });
+      document.addEventListener(event, unlockAudio, { once: true, passive: true });
     });
     
     return () => {
@@ -156,20 +162,27 @@ export const SocketContextProvider = ({ children }) => {
       const isFromOpenConversation = selectedConversationIdRef.current && 
                                       messageSenderId === selectedConversationIdRef.current;
       
+      const shouldPlay = !isFromCurrentUser && !isFromOpenConversation
+      
       console.log('🔔 Message notification check:', {
         sender: messageSenderId,
         openConversation: selectedConversationIdRef.current || 'none',
         isFromMe: isFromCurrentUser,
         isFromOpenChat: isFromOpenConversation,
-        willPlaySound: !isFromCurrentUser && !isFromOpenConversation
+        willPlaySound: shouldPlay
       });
       
       // Play sound only for unread messages from other users AND not from currently open conversation
-      if (!isFromCurrentUser && !isFromOpenConversation && messageSoundAudio.current) {
+      if (shouldPlay && messageSoundAudio.current) {
+        console.log('🔊 Playing notification sound...')
         messageSoundAudio.current.currentTime = 0; // Reset to start
-        messageSoundAudio.current.play().catch(err => {
-          console.log('Message sound play error (browser may require user interaction):', err);
-        });
+        messageSoundAudio.current.play()
+          .then(() => console.log('✅ Notification sound played successfully'))
+          .catch(err => {
+            console.log('❌ Message sound play error:', err.message);
+          });
+      } else {
+        console.log('🔇 Notification sound suppressed (correct behavior)')
       }
     });
 
@@ -607,6 +620,7 @@ export const SocketContextProvider = ({ children }) => {
 
   // Function to update which conversation is currently open (for notification sound control)
   const setSelectedConversationId = (userId) => {
+    console.log('🔊 Setting selectedConversationId:', userId || 'none')
     selectedConversationIdRef.current = userId;
   };
 

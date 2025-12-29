@@ -1350,6 +1350,13 @@ const MessagesPage = () => {
   // Start conversation with a user
   const startConversation = async (recipientId) => {
     setSearchQuery('')
+    
+    // IMMEDIATELY set selectedConversationId to prevent notification sounds
+    // This happens BEFORE state updates and socket events
+    if (setSelectedConversationId) {
+      setSelectedConversationId(recipientId)
+    }
+    
     // Check if conversation already exists
     const existingConv = conversations.find((conv) =>
       conv.participants.some((p) => p._id === recipientId)
@@ -1379,6 +1386,11 @@ const MessagesPage = () => {
           participants: [recipientUser],
         })
         setMessages([])
+      } else {
+        // User not found - clear selectedConversationId
+        if (setSelectedConversationId) {
+          setSelectedConversationId(null)
+        }
       }
     }
   }
@@ -1897,6 +1909,10 @@ const MessagesPage = () => {
       
       // Update conversation in place instead of full refresh to avoid UI flicker
       setConversations(prev => {
+        // Use server timestamp for accurate sorting (same as socket messages)
+        const serverTimestamp = data.conversationUpdatedAt || data.createdAt || new Date().toISOString()
+        console.log('📤 Received response from send - timestamp:', serverTimestamp)
+        
         const updated = prev.map(conv => {
           if (conv._id && data.conversationId && conv._id.toString() === data.conversationId.toString()) {
             return {
@@ -1909,9 +1925,9 @@ const MessagesPage = () => {
                   username: user.username,
                   profilePic: user.profilePic
                 },
-                createdAt: new Date().toISOString()
+                createdAt: data.createdAt || new Date().toISOString()
               },
-              updatedAt: new Date().toISOString()
+              updatedAt: serverTimestamp
             }
           }
           return conv
@@ -1921,6 +1937,7 @@ const MessagesPage = () => {
         const existingConv = updated.find(c => c._id && data.conversationId && c._id.toString() === data.conversationId.toString())
         if (!existingConv && data.conversationId) {
           // Create a minimal conversation object for new conversations
+          const serverTimestamp = data.conversationUpdatedAt || data.createdAt || new Date().toISOString()
           const newConv = {
             _id: data.conversationId,
             participants: selectedConversation?.participants || [],
@@ -1932,9 +1949,9 @@ const MessagesPage = () => {
                 username: user.username,
                 profilePic: user.profilePic
               },
-              createdAt: new Date().toISOString()
+              createdAt: data.createdAt || new Date().toISOString()
             },
-            updatedAt: new Date().toISOString(),
+            updatedAt: serverTimestamp,
             unreadCount: 0
           }
           // Add to front and sort by updatedAt (most recent first)
