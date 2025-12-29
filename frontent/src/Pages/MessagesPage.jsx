@@ -153,27 +153,33 @@ const MessagesPage = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user])
 
-  // Update SocketContext with currently open conversation when socket is ready
-  // This handles the refresh case where socket initializes after component mounts
+  // Update SocketContext with currently open conversation
+  // Runs when socket becomes ready OR when conversation changes
   useEffect(() => {
     if (!setSelectedConversationId || !socket) return
     
     const participantId = selectedConversation?.participants[0]?._id
     
     if (participantId) {
-      console.log('Socket ready - setting selected conversation ID:', participantId)
+      // User opened a conversation - set it for notification control
+      console.log('✅ Conversation opened - setting selected ID:', participantId)
       setSelectedConversationId(participantId)
-    } else {
-      console.log('Socket ready - clearing selected conversation ID')
+    } else if (selectedConversation === null) {
+      // User explicitly closed conversation (back button or deleted) - clear it
+      console.log('✅ Conversation closed - clearing selected ID')
       setSelectedConversationId(null)
     }
-  }, [socket, selectedConversation?.participants[0]?._id, setSelectedConversationId])
+    // Note: If selectedConversation is undefined (initial load), don't do anything
+    // This prevents clearing the ID during page load before data arrives
+  }, [socket, selectedConversation, selectedConversation?.participants[0]?._id, setSelectedConversationId])
   
   // Clear selected conversation when component unmounts (user leaves Messages page)
   useEffect(() => {
     return () => {
+      // Only clear if we're actually leaving the page (component unmounting for real)
+      // This ensures notification sounds work correctly when navigating away from Messages
       if (setSelectedConversationId) {
-        console.log('MessagesPage unmounting - clearing selected conversation ID')
+        console.log('✅ MessagesPage unmounting - clearing selected conversation ID')
         setSelectedConversationId(null)
       }
     }

@@ -131,12 +131,12 @@ export const SocketContextProvider = ({ children }) => {
       const isFromOpenConversation = selectedConversationIdRef.current && 
                                       messageSenderId === selectedConversationIdRef.current;
       
-      console.log('Message notification check:', {
-        isFromCurrentUser,
-        isFromOpenConversation,
-        messageSenderId,
-        selectedConversationId: selectedConversationIdRef.current,
-        shouldPlaySound: !isFromCurrentUser && !isFromOpenConversation
+      console.log('🔔 Message notification check:', {
+        sender: messageSenderId,
+        openConversation: selectedConversationIdRef.current || 'none',
+        isFromMe: isFromCurrentUser,
+        isFromOpenChat: isFromOpenConversation,
+        willPlaySound: !isFromCurrentUser && !isFromOpenConversation
       });
       
       // Play sound only for unread messages from other users AND not from currently open conversation
