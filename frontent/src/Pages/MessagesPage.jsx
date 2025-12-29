@@ -341,6 +341,9 @@ const MessagesPage = () => {
 
       const otherUser = selectedConversation.participants[0]
       if (!otherUser?._id) return
+      
+      // Store current conversation ID to detect if it changes during fetch
+      const currentConversationId = selectedConversation._id
 
       if (loadMore) {
         setLoadingMoreMessages(true)
@@ -357,6 +360,13 @@ const MessagesPage = () => {
           credentials: 'include',
         })
         const data = await res.json()
+        
+        // Check if conversation changed while fetching - if so, discard these messages
+        if (selectedConversation?._id !== currentConversationId) {
+          console.log('Conversation changed during fetch, discarding old messages')
+          return
+        }
+        
         if (res.ok) {
           if (loadMore && beforeId) {
             // Loading older messages - prepend to existing messages
@@ -419,13 +429,17 @@ const MessagesPage = () => {
       }
     }
 
+    // Clear messages immediately when switching conversations to prevent showing stale data
+    setMessages([])
+    setHasMoreMessages(false)
+    setUnreadCountInView(0)
+    lastMessageCountRef.current = 0
+    firstMessageIdRef.current = null
+    
     // Only fetch messages if conversation has _id (existing conversation)
     // New conversations (no _id) start with empty messages
     if (selectedConversation && selectedConversation._id) {
       fetchMessages(false, null) // Initial load
-    } else if (selectedConversation) {
-      setMessages([])
-      setHasMoreMessages(false)
     }
   }, [selectedConversation?._id, selectedConversation?.participants[0]?._id, showToast])
 
