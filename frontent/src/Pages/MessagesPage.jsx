@@ -160,6 +160,13 @@ const MessagesPage = () => {
     
     const participantId = selectedConversation?.participants[0]?._id
     
+    console.log('🔍 Checking conversation state:', {
+      hasSelectedConversation: !!selectedConversation,
+      isNull: selectedConversation === null,
+      isUndefined: selectedConversation === undefined,
+      participantId: participantId || 'none'
+    })
+    
     if (participantId) {
       // User opened a conversation - set it for notification control
       console.log('✅ Conversation opened - setting selected ID:', participantId)
@@ -849,8 +856,18 @@ const MessagesPage = () => {
     console.log('✅ Setting up newMessage socket listener (will persist after refresh)')
 
     const handleNewMessage = (message) => {
+      console.log('📨 Socket received newMessage:', {
+        messageId: message?._id,
+        conversationId: message?.conversationId,
+        sender: message?.sender?.username || message?.sender?._id,
+        text: message?.text?.substring(0, 30)
+      })
+      
       // Always process new messages - even if conversation was deleted
-      if (!message || !message.conversationId) return
+      if (!message || !message.conversationId) {
+        console.log('⚠️ Invalid message - missing data')
+        return
+      }
       
       // ⚠️ CRITICAL: Ignore messages from current user!
       // handleMessageSent already handles local updates for messages we send
@@ -873,6 +890,8 @@ const MessagesPage = () => {
         console.log('⚠️ Ignoring own message in socket listener (already handled by handleMessageSent)')
         return // Don't process own messages via socket
       }
+      
+      console.log('✅ Processing message from other user in handleNewMessage')
       
       // Check if this message is for the currently selected conversation
       // Use REF to get latest value without recreating listener (performance optimization)
@@ -907,6 +926,7 @@ const MessagesPage = () => {
       // ALWAYS update conversation list (we know message is from another user)
       // This ensures conversations are sorted and updated in real-time
       setConversations(prev => {
+        console.log('📋 Updating conversation list. Previous count:', prev.length)
         let updated = prev.map(conv => {
             if (conv._id && message.conversationId && conv._id.toString() === message.conversationId.toString()) {
               // Update lastMessage with full sender info (we know it's from another user)
@@ -970,9 +990,11 @@ const MessagesPage = () => {
           console.log('✅ Socket newMessage - Updated & sorted. Top 3:', sorted.slice(0, 3).map(c => ({
             participant: c.participants[0]?.username,
             lastMsg: c.lastMessage?.text?.substring(0, 20),
-            updatedAt: c.updatedAt
+            updatedAt: c.updatedAt,
+            unreadCount: c.unreadCount
           })))
           
+          console.log('📋 Returning sorted conversations, count:', sorted.length)
           return sorted
         })
       }
