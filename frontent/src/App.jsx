@@ -50,20 +50,31 @@ const AppContent = () => {
           </Routes>
         </Box>
       ) : (
-        <Container maxW="620px" px={{ base: 4, md: 6 }}>
-          <Routes>
-            <Route path="/:username" element={user ?<UserPage/> : <Navigate to="/"/>}/>
-            <Route path="/" element={!user ? <Login/>  : <Navigate to="/home" />}/>
-            <Route path="/sign" element={<SignUp/>}/>
-            <Route path="/update" element={user ? <UpdateProfile/> : <Navigate  to="/"/>}/>
-            <Route path="/home"  element={user ? <HomePage/> : <Navigate to="/" />} />
-            <Route path="/notifications" element={user ? <Box p={8} textAlign="center"><Text>Notifications coming soon!</Text></Box> : <Navigate to="/" />} />
-            <Route path="/:username/post/:id" element={<PostPage/>}/>
-          </Routes>
-
-          {user && <LogOutButton/>}
-          {user && <CreatePost/>}
-        </Container>
+        <>
+          {/* HomePage needs wider container for sidebar */}
+          {isHomePage ? (
+            <Container maxW="1200px" px={{ base: 4, md: 6 }}>
+              <Routes>
+                <Route path="/home" element={user ? <HomePage/> : <Navigate to="/" />} />
+              </Routes>
+              {user && <LogOutButton/>}
+              {user && <CreatePost/>}
+            </Container>
+          ) : (
+            <Container maxW="620px" px={{ base: 4, md: 6 }}>
+              <Routes>
+                <Route path="/:username" element={user ?<UserPage/> : <Navigate to="/"/>}/>
+                <Route path="/" element={!user ? <Login/>  : <Navigate to="/home" />}/>
+                <Route path="/sign" element={<SignUp/>}/>
+                <Route path="/update" element={user ? <UpdateProfile/> : <Navigate  to="/"/>}/>
+                <Route path="/notifications" element={user ? <Box p={8} textAlign="center"><Text>Notifications coming soon!</Text></Box> : <Navigate to="/" />} />
+                <Route path="/:username/post/:id" element={<PostPage/>}/>
+              </Routes>
+              {user && <LogOutButton/>}
+              {user && <CreatePost/>}
+            </Container>
+          )}
+        </>
       )}
     </>
   )

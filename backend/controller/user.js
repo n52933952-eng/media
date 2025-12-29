@@ -326,6 +326,108 @@ export const searchUsers = async(req, res) => {
     }
 }
 
+// SMART SUGGESTED USERS ALGORITHM
+// 1. Fetch 7 users from same country (randomized)
+// 2. For each followed user, suggest 1 random user from their followers
+// 3. Combine and randomize, return up to 7-10 users
+export const getSuggestedUsers = async(req, res) => {
+    try {
+        const userId = req.user._id
+        const currentUser = await User.findById(userId).select('country following')
+        
+        if (!currentUser) {
+            return res.status(400).json({ error: "User not found" })
+        }
+
+        const suggestedUsers = []
+        const excludeIds = new Set([userId.toString()]) // Exclude current user
+        const followingIds = currentUser.following.map(id => id.toString())
+        followingIds.forEach(id => excludeIds.add(id)) // Exclude already followed users
+
+        // STEP 1: Get 7 users from same country (if country is set)
+        if (currentUser.country && currentUser.country.trim() !== "") {
+            const countryUsers = await User.find({
+                country: currentUser.country,
+                _id: { $nin: Array.from(excludeIds) } // Not current user or already followed
+            })
+            .select('username name profilePic country followers')
+            .limit(20) // Get more to randomize from
+            
+            // Randomize and take 7
+            const shuffled = countryUsers.sort(() => 0.5 - Math.random())
+            const countrySuggestions = shuffled.slice(0, 7)
+            suggestedUsers.push(...countrySuggestions)
+            
+            // Add to exclude list
+            countrySuggestions.forEach(user => excludeIds.add(user._id.toString()))
+            
+            console.log(`📍 Found ${countrySuggestions.length} users from country: ${currentUser.country}`)
+        }
+
+        // STEP 2: For each followed user, get 1 random user from their followers
+        if (currentUser.following && currentUser.following.length > 0) {
+            const followedUsers = await User.find({
+                _id: { $in: currentUser.following }
+            })
+            .select('followers')
+            
+            for (const followedUser of followedUsers) {
+                if (followedUser.followers && followedUser.followers.length > 0) {
+                    // Filter out users we already have or are following
+                    const availableFollowers = followedUser.followers.filter(
+                        followerId => !excludeIds.has(followerId.toString())
+                    )
+                    
+                    if (availableFollowers.length > 0) {
+                        // Pick 1 random follower
+                        const randomFollowerId = availableFollowers[
+                            Math.floor(Math.random() * availableFollowers.length)
+                        ]
+                        
+                        const followerUser = await User.findById(randomFollowerId)
+                            .select('username name profilePic country followers')
+                        
+                        if (followerUser) {
+                            suggestedUsers.push(followerUser)
+                            excludeIds.add(followerUser._id.toString())
+                            console.log(`👥 Suggested 1 user from ${followedUser._id}'s followers`)
+                        }
+                    }
+                }
+            }
+        }
+
+        // STEP 3: If we still need more users, fill with random users (not from same country)
+        const maxSuggestions = 10
+        if (suggestedUsers.length < maxSuggestions) {
+            const needed = maxSuggestions - suggestedUsers.length
+            const randomUsers = await User.find({
+                _id: { $nin: Array.from(excludeIds) },
+                ...(currentUser.country ? { country: { $ne: currentUser.country } } : {})
+            })
+            .select('username name profilePic country followers')
+            .limit(20)
+            
+            // Randomize and take what we need
+            const shuffled = randomUsers.sort(() => 0.5 - Math.random())
+            const additional = shuffled.slice(0, needed)
+            suggestedUsers.push(...additional)
+        }
+
+        // Final shuffle to randomize order
+        const finalSuggestions = suggestedUsers
+            .sort(() => 0.5 - Math.random())
+            .slice(0, maxSuggestions)
+
+        console.log(`✅ Returning ${finalSuggestions.length} suggested users`)
+        res.status(200).json(finalSuggestions)
+    }
+    catch(error) {
+        console.error('Error in getSuggestedUsers:', error)
+        res.status(500).json({ error: error.message || "Failed to get suggested users" })
+    }
+}
+
 
 
 

@@ -52,6 +52,11 @@ const UserSchema = mongoose.Schema({
     inCall:{
         type:Boolean,
         default:false
+    },
+
+    country:{
+        type:String,
+        default:""
     }
 
 },{timestamps:true})

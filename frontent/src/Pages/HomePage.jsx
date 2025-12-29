@@ -4,6 +4,7 @@ import{Spinner,Flex,Box,Text,useColorModeValue} from '@chakra-ui/react'
 import Post from '../Components/Post'
 import {PostContext} from '../context/PostContext'
 import {SocketContext} from '../context/SocketContext'
+import SuggestedUsers from '../Components/SuggestedUsers'
 
 
 
@@ -145,61 +146,73 @@ const HomePage = () => {
   const textColor = useColorModeValue('gray.600', 'gray.400')
 
   return (
-    <Box>
-      {/* Error state */}
-      {error && !loading && (
-        <Box textAlign="center" p={8} bg={bgColor} borderRadius="md" mb={4}>
-          <Text color="red.500">{error}</Text>
-        </Box>
-      )}
+    <Flex gap={6} alignItems="flex-start">
+      {/* Main Feed - Left Side (70%) */}
+      <Box flex={{ base: 1, md: '0 0 65%' }} maxW={{ base: '100%', md: '65%' }}>
+        {/* Error state */}
+        {error && !loading && (
+          <Box textAlign="center" p={8} bg={bgColor} borderRadius="md" mb={4}>
+            <Text color="red.500">{error}</Text>
+          </Box>
+        )}
 
-      {/* Empty state */}
-      {!loading && followPost.length === 0 && !error && (
-        <Box textAlign="center" p={12} bg={bgColor} borderRadius="md">
-          <Text fontSize="xl" fontWeight="bold" mb={2}>
-            No posts yet
-          </Text>
-          <Text color={textColor}>
-            Follow some users to see their posts in your feed
-          </Text>
-        </Box>
-      )}
-      
-      {/* Initial loading */}
-      {loading && (
-        <Flex justifyContent="center" p={8}>
-          <Spinner size="xl" thickness="4px" speed="0.65s" />
-        </Flex>
-      )}
+        {/* Empty state */}
+        {!loading && followPost.length === 0 && !error && (
+          <Box textAlign="center" p={12} bg={bgColor} borderRadius="md">
+            <Text fontSize="xl" fontWeight="bold" mb={2}>
+              No posts yet
+            </Text>
+            <Text color={textColor}>
+              Follow some users to see their posts in your feed
+            </Text>
+          </Box>
+        )}
+        
+        {/* Initial loading */}
+        {loading && (
+          <Flex justifyContent="center" p={8}>
+            <Spinner size="xl" thickness="4px" speed="0.65s" />
+          </Flex>
+        )}
 
-      {/* Posts list */}
-      {!loading && followPost.length > 0 && (
-        <>
-          {followPost.map((post) => (
-            <Post key={post._id} post={post} postedBy={post.postedBy} />
-          ))}
-          
-          {/* Infinite scroll trigger element */}
-          <Box ref={observerTarget} h="20px" />
-          
-          {/* Loading more indicator */}
-          {loadingMore && (
-            <Flex justifyContent="center" p={4}>
-              <Spinner size="md" thickness="3px" />
-            </Flex>
-          )}
-          
-          {/* End of feed message */}
-          {!hasMore && followPost.length > 0 && (
-            <Box textAlign="center" p={8}>
-              <Text color={textColor} fontSize="sm">
-                You've reached the end of your feed
-              </Text>
-            </Box>
-          )}
-        </>
-      )}
-    </Box>
+        {/* Posts list */}
+        {!loading && followPost.length > 0 && (
+          <>
+            {followPost.map((post) => (
+              <Post key={post._id} post={post} postedBy={post.postedBy} />
+            ))}
+            
+            {/* Infinite scroll trigger element */}
+            <Box ref={observerTarget} h="20px" />
+            
+            {/* Loading more indicator */}
+            {loadingMore && (
+              <Flex justifyContent="center" p={4}>
+                <Spinner size="md" thickness="3px" />
+              </Flex>
+            )}
+            
+            {/* End of feed message */}
+            {!hasMore && followPost.length > 0 && (
+              <Box textAlign="center" p={8}>
+                <Text color={textColor} fontSize="sm">
+                  You've reached the end of your feed
+                </Text>
+              </Box>
+            )}
+          </>
+        )}
+      </Box>
+
+      {/* Suggested Users Sidebar - Right Side (30%) */}
+      <Box 
+        flex={{ base: '0 0 100%', md: '0 0 30%' }} 
+        display={{ base: 'none', md: 'block' }}
+        maxW={{ base: '100%', md: '30%' }}
+      >
+        <SuggestedUsers />
+      </Box>
+    </Flex>
   )
 }
 
