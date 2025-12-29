@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useContext, useRef , useCallback } from 'react'
+import React, { useState, useEffect, useContext, useRef } from 'react'
 import {
   Box,
   Flex,
@@ -1083,11 +1083,6 @@ const MessagesPage = () => {
         
         return { ...prev, participants: updatedParticipants }
       })
-      
-      // Refresh participant data from backend to ensure consistency
-      if (refreshParticipantData) {
-        refreshParticipantData()
-      }
     }
 
     socket.on("callBusy", handleCallStarted)
@@ -1128,11 +1123,6 @@ const MessagesPage = () => {
         
         return { ...prev, participants: updatedParticipants }
       })
-      
-      // Refresh participant data from backend to ensure consistency
-      if (refreshParticipantData) {
-        refreshParticipantData()
-      }
     }
 
     socket.on("cancleCall", handleCallEnded)
@@ -1144,45 +1134,44 @@ const MessagesPage = () => {
 
   // Refresh participant data (including inCall status) when selecting a conversation
   // This ensures User C sees updated status when clicking on conversations
-  const refreshParticipantData = useCallback(async () => {
-    if (!selectedConversation || !selectedConversation.participants[0]?._id) return
-    
-    try {
-      const participantId = selectedConversation.participants[0]._id
-      const res = await fetch(
-        `${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/user/getUserPro/${participantId}`,
-        { credentials: 'include' }
-      )
-      
-      if (res.ok) {
-        const userData = await res.json()
-        
-        // Update the selected conversation with fresh user data
-        setSelectedConversation(prev => ({
-          ...prev,
-          participants: [userData]
-        }))
-        
-        // Also update in conversations list
-        setConversations(prev => prev.map(conv => {
-          if (conv._id === selectedConversation._id) {
-            return {
-              ...conv,
-              participants: [userData]
-            }
-          }
-          return conv
-        }))
-      }
-    } catch (error) {
-      console.log('Error refreshing participant data:', error)
-    }
-  }, [selectedConversation])
-  
-  // Trigger refresh when conversation is first selected
   useEffect(() => {
+    const refreshParticipantData = async () => {
+      if (!selectedConversation || !selectedConversation.participants[0]?._id) return
+      
+      try {
+        const participantId = selectedConversation.participants[0]._id
+        const res = await fetch(
+          `${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/user/getUserPro/${participantId}`,
+          { credentials: 'include' }
+        )
+        
+        if (res.ok) {
+          const userData = await res.json()
+          
+          // Update the selected conversation with fresh user data
+          setSelectedConversation(prev => ({
+            ...prev,
+            participants: [userData]
+          }))
+          
+          // Also update in conversations list
+          setConversations(prev => prev.map(conv => {
+            if (conv._id === selectedConversation._id) {
+              return {
+                ...conv,
+                participants: [userData]
+              }
+            }
+            return conv
+          }))
+        }
+      } catch (error) {
+        console.log('Error refreshing participant data:', error)
+      }
+    }
+    
     refreshParticipantData()
-  }, [selectedConversation?._id, refreshParticipantData])
+  }, [selectedConversation?._id])
 
   // Listen for typing indicator from other user
   useEffect(() => {
