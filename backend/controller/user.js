@@ -348,21 +348,26 @@ export const getSuggestedUsers = async(req, res) => {
         }
 
         const suggestedUsers = []
-        const excludeIds = new Set([userId.toString()]) // Exclude current user
-        const followingIds = currentUser.following.map(id => id.toString())
-        followingIds.forEach(id => excludeIds.add(id)) // Exclude already followed users
+        // Convert to ObjectIds for MongoDB query
+        const excludeIds = [new mongoose.Types.ObjectId(userId)] // Exclude current user
+        if (currentUser.following && currentUser.following.length > 0) {
+            currentUser.following.forEach(id => {
+                excludeIds.push(new mongoose.Types.ObjectId(id))
+            })
+        }
 
         // STEP 1: Get 7 users from same country (if country is set)
         if (currentUser.country && currentUser.country.trim() !== "") {
             const userCountry = currentUser.country.trim()
             console.log(`🔍 Searching for users from country: "${userCountry}"`)
+            console.log(`🚫 Excluding ${excludeIds.length} users (current user + following)`)
             
             // Case-insensitive search for country - also check for empty/null countries
             const countryUsers = await User.find({
                 $and: [
                     { country: { $exists: true, $ne: null, $ne: "" } }, // Country exists and is not empty
                     { country: { $regex: new RegExp(`^${userCountry.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') } }, // Case-insensitive exact match (escaped for regex)
-                    { _id: { $nin: Array.from(excludeIds) } } // Not current user or already followed
+                    { _id: { $nin: excludeIds } } // Not current user or already followed (using ObjectIds)
                 ]
             })
             .select('username name profilePic country followers')
@@ -372,8 +377,29 @@ export const getSuggestedUsers = async(req, res) => {
             
             // Debug: Show all users with their countries (for troubleshooting)
             if (countryUsers.length === 0) {
-                const allUsers = await User.find({}).select('username country').limit(10)
-                console.log(`🔍 Debug - Sample users in database:`, allUsers.map(u => ({ username: u.username, country: u.country || 'NOT SET' })))
+                console.log(`⚠️ No users found! Checking database...`)
+                // Check if there are ANY users with this country (without exclusions)
+                const allCountryUsers = await User.find({
+                    country: { $regex: new RegExp(`^${userCountry.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') }
+                }).select('username country _id').limit(10)
+                console.log(`🔍 All users with country "${userCountry}":`, allCountryUsers.map(u => ({ 
+                    username: u.username, 
+                    country: u.country || 'NOT SET',
+                    _id: u._id.toString()
+                })))
+                
+                // Show what we're excluding
+                console.log(`🚫 Excluding IDs:`, excludeIds.map(id => id.toString()))
+                
+                // Show sample users in database
+                const allUsers = await User.find({}).select('username country _id').limit(10)
+                console.log(`🔍 Sample users in database:`, allUsers.map(u => ({ 
+                    username: u.username, 
+                    country: u.country || 'NOT SET',
+                    _id: u._id.toString()
+                })))
+            } else {
+                console.log(`✅ Found users:`, countryUsers.map(u => u.username))
             }
             
             // Randomize and take 7
@@ -381,8 +407,10 @@ export const getSuggestedUsers = async(req, res) => {
             const countrySuggestions = shuffled.slice(0, 7)
             suggestedUsers.push(...countrySuggestions)
             
-            // Add to exclude list
-            countrySuggestions.forEach(user => excludeIds.add(user._id.toString()))
+            // Add to exclude list (convert to ObjectId)
+            countrySuggestions.forEach(user => {
+                excludeIds.push(new mongoose.Types.ObjectId(user._id))
+            })
             
             console.log(`✅ Added ${countrySuggestions.length} users from country: ${userCountry}`)
             if (countrySuggestions.length > 0) {
@@ -401,9 +429,10 @@ export const getSuggestedUsers = async(req, res) => {
             
             for (const followedUser of followedUsers) {
                 if (followedUser.followers && followedUser.followers.length > 0) {
-                    // Filter out users we already have or are following
+                    // Filter out users we already have or are following (convert to ObjectIds for comparison)
+                    const excludeIdsStrings = excludeIds.map(id => id.toString())
                     const availableFollowers = followedUser.followers.filter(
-                        followerId => !excludeIds.has(followerId.toString())
+                        followerId => !excludeIdsStrings.includes(followerId.toString())
                     )
                     
                     if (availableFollowers.length > 0) {
@@ -417,7 +446,7 @@ export const getSuggestedUsers = async(req, res) => {
                         
                         if (followerUser) {
                             suggestedUsers.push(followerUser)
-                            excludeIds.add(followerUser._id.toString())
+                            excludeIds.push(new mongoose.Types.ObjectId(followerUser._id))
                             console.log(`👥 Suggested 1 user from ${followedUser._id}'s followers`)
                         }
                     }
@@ -430,7 +459,7 @@ export const getSuggestedUsers = async(req, res) => {
         if (suggestedUsers.length < maxSuggestions) {
             const needed = maxSuggestions - suggestedUsers.length
             const randomUsers = await User.find({
-                _id: { $nin: Array.from(excludeIds) },
+                _id: { $nin: excludeIds }, // Using ObjectIds array
                 ...(currentUser.country && currentUser.country.trim() !== "" 
                     ? { country: { $ne: currentUser.country } } 
                     : {})
