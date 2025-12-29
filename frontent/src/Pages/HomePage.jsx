@@ -20,6 +20,7 @@ const HomePage = () => {
   const showToast = useShowToast()
   const observerTarget = useRef(null) // For infinite scroll
   const isLoadingRef = useRef(false) // Prevent duplicate requests
+  const hasLoadedRef = useRef(false) // Track if initial load happened
 
 
 
