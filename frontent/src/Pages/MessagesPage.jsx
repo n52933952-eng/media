@@ -902,6 +902,11 @@ const MessagesPage = () => {
       }
       
       console.log('✅ Processing message from other user in handleNewMessage')
+      console.log('⏰ Message timestamp info:', {
+        messageCreatedAt: message.createdAt,
+        conversationUpdatedAt: message.conversationUpdatedAt,
+        willUse: message.conversationUpdatedAt || message.createdAt
+      })
       
       // Check if this message is for the currently selected conversation
       // Use REF to get latest value without recreating listener (performance optimization)
@@ -949,12 +954,15 @@ const MessagesPage = () => {
               // Don't increment unread if conversation is currently open
               const isCurrentlyViewing = currentSelectedId && conv._id.toString() === currentSelectedId.toString()
               
+              // Use server timestamp for accurate sorting (avoids client clock issues)
+              const serverTimestamp = message.conversationUpdatedAt || message.createdAt || new Date().toISOString()
+              
               if (isCurrentlyViewing) {
                 // Currently viewing - just update lastMessage without incrementing unread
                 return {
                   ...conv,
                   lastMessage: updatedLastMessage,
-                  updatedAt: new Date().toISOString()
+                  updatedAt: serverTimestamp
                 }
               } else {
                 // NOT viewing - increment unread count
@@ -962,7 +970,7 @@ const MessagesPage = () => {
                   ...conv, 
                   unreadCount: (conv.unreadCount || 0) + 1, 
                   lastMessage: updatedLastMessage,
-                  updatedAt: new Date().toISOString()
+                  updatedAt: serverTimestamp
                 }
               }
             }
@@ -976,6 +984,7 @@ const MessagesPage = () => {
           
           if (!conversationExists && message.conversationId) {
             // New conversation from another user - create it
+            const serverTimestamp = message.conversationUpdatedAt || message.createdAt || new Date().toISOString()
             const newConv = {
               _id: message.conversationId,
               participants: message.sender ? [message.sender] : [],
@@ -984,7 +993,7 @@ const MessagesPage = () => {
                 sender: message.sender,
                 createdAt: message.createdAt || new Date().toISOString()
               },
-              updatedAt: new Date().toISOString(),
+              updatedAt: serverTimestamp,
               unreadCount: 1 // Always 1 since it's from another user and new
             }
             updated = [newConv, ...updated]

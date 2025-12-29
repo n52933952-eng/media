@@ -88,7 +88,12 @@ export const sendMessaeg = async(req,res) => {
                 const io = getIO()
 
                 if(recipentSockedId && recipientId && io){
-                  io.to(recipentSockedId).emit("newMessage",newMessage)
+                  // Add conversation updatedAt to message for accurate sorting
+                  const messageWithTimestamp = {
+                    ...newMessage.toObject(),
+                    conversationUpdatedAt: conversation.updatedAt
+                  }
+                  io.to(recipentSockedId).emit("newMessage", messageWithTimestamp)
                   
                   // Calculate and emit unread count update for recipient
                   try {
@@ -183,7 +188,12 @@ const recipentSockedId = getRecipientSockedId(recipientId)
 const io = getIO() // Get io instance
 
 if(recipentSockedId && recipientId && io){
-  io.to(recipentSockedId).emit("newMessage",newMessage)
+  // Add conversation updatedAt to message for accurate sorting
+  const messageWithTimestamp = {
+    ...newMessage.toObject(),
+    conversationUpdatedAt: conversation.updatedAt
+  }
+  io.to(recipentSockedId).emit("newMessage", messageWithTimestamp)
   
   // Calculate and emit unread count update for recipient
   try {

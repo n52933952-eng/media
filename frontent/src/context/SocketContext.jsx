@@ -41,6 +41,31 @@ export const SocketContextProvider = ({ children }) => {
     if (ringtoneAudio.current) {
       ringtoneAudio.current.load();
     }
+    
+    // Unlock audio on first user interaction (browser security requirement)
+    const unlockAudio = () => {
+      if (messageSoundAudio.current) {
+        messageSoundAudio.current.play().then(() => {
+          messageSoundAudio.current.pause();
+          messageSoundAudio.current.currentTime = 0;
+          console.log('✅ Audio unlocked - notification sounds ready');
+        }).catch(() => {
+          // Still locked, will try again on next interaction
+        });
+      }
+    };
+    
+    // Listen for any user interaction to unlock audio
+    const events = ['click', 'touchstart', 'keydown'];
+    events.forEach(event => {
+      document.addEventListener(event, unlockAudio, { once: true });
+    });
+    
+    return () => {
+      events.forEach(event => {
+        document.removeEventListener(event, unlockAudio);
+      });
+    };
   }, [])
 
   // Get user media and unmute audio track explicitly
