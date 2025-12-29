@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useContext } from 'react'
+import React, { useState, useEffect, useContext, useCallback } from 'react'
 import { Box, Flex, Text, Input, InputGroup, InputLeftElement, Spinner, useColorModeValue } from '@chakra-ui/react'
 import { SearchIcon } from '@chakra-ui/icons'
 import SuggestedUser from './SuggestedUser'
@@ -16,9 +16,12 @@ const SuggestedUsers = () => {
   const borderColor = useColorModeValue('gray.200', '#2d2d2d')
   const textColor = useColorModeValue('gray.600', 'gray.400')
 
-  // Fetch suggested users
-  const fetchSuggestedUsers = async () => {
-    if (!user?._id) return
+  // Fetch suggested users - memoized to prevent infinite loops
+  const fetchSuggestedUsers = useCallback(async () => {
+    if (!user?._id) {
+      setLoading(false)
+      return
+    }
     
     setLoading(true)
     try {
@@ -30,16 +33,20 @@ const SuggestedUsers = () => {
       )
 
       const data = await res.json()
-      if (res.ok) {
-        setSuggestedUsers(data || [])
+      if (res.ok && Array.isArray(data)) {
+        setSuggestedUsers(data)
         console.log(`✅ Fetched ${data.length} suggested users`)
+      } else {
+        console.error('Error fetching suggested users:', data.error || 'Unknown error')
+        setSuggestedUsers([])
       }
     } catch (error) {
       console.error('Error fetching suggested users:', error)
+      setSuggestedUsers([])
     } finally {
       setLoading(false)
     }
-  }
+  }, [user?._id])
 
   // Search users
   const handleSearch = async (query) => {
@@ -71,18 +78,24 @@ const SuggestedUsers = () => {
   }
 
   useEffect(() => {
-    fetchSuggestedUsers()
-  }, [user?._id])
+    if (user?._id) {
+      fetchSuggestedUsers()
+    } else {
+      setLoading(false)
+      setSuggestedUsers([])
+    }
+  }, [user?._id, fetchSuggestedUsers])
 
   // Refresh suggestions when user follows/unfollows (triggered by SuggestedUser component)
   useEffect(() => {
-    if (user?._id) {
+    if (user?._id && user?.following) {
       // Small delay to ensure backend has updated
       const timer = setTimeout(() => {
         fetchSuggestedUsers()
-      }, 500)
+      }, 1000) // Increased delay to ensure backend has processed
       return () => clearTimeout(timer)
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.following?.length]) // Refresh when following list changes
 
   return (

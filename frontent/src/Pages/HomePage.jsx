@@ -146,9 +146,9 @@ const HomePage = () => {
   const textColor = useColorModeValue('gray.600', 'gray.400')
 
   return (
-    <Flex gap={6} alignItems="flex-start">
-      {/* Main Feed - Left Side (70%) */}
-      <Box flex={{ base: 1, md: '0 0 65%' }} maxW={{ base: '100%', md: '65%' }}>
+    <Flex gap={8} alignItems="flex-start">
+      {/* Main Feed - Left Side (65%) */}
+      <Box flex={{ base: 1, md: '0 0 60%' }} maxW={{ base: '100%', md: '60%' }}>
         {/* Error state */}
         {error && !loading && (
           <Box textAlign="center" p={8} bg={bgColor} borderRadius="md" mb={4}>
@@ -204,11 +204,12 @@ const HomePage = () => {
         )}
       </Box>
 
-      {/* Suggested Users Sidebar - Right Side (30%) */}
+      {/* Suggested Users Sidebar - Right Side (35%) */}
       <Box 
-        flex={{ base: '0 0 100%', md: '0 0 30%' }} 
+        flex={{ base: '0 0 100%', md: '0 0 35%' }} 
         display={{ base: 'none', md: 'block' }}
-        maxW={{ base: '100%', md: '30%' }}
+        maxW={{ base: '100%', md: '35%' }}
+        pl={4}
       >
         <SuggestedUsers />
       </Box>

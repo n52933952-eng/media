@@ -25,6 +25,8 @@ export const SignUp = async(req,res) => {
         const hashPassword = bcryptjs.hashSync(password,10)
 
          const newUser = await User({email,name,username,password:hashPassword,country:country || ""})
+         
+         console.log(`📝 Creating new user: ${username}, country: "${country || 'NOT SET'}"`)
 
          await newUser.save()
        
@@ -352,12 +354,27 @@ export const getSuggestedUsers = async(req, res) => {
 
         // STEP 1: Get 7 users from same country (if country is set)
         if (currentUser.country && currentUser.country.trim() !== "") {
+            const userCountry = currentUser.country.trim()
+            console.log(`🔍 Searching for users from country: "${userCountry}"`)
+            
+            // Case-insensitive search for country - also check for empty/null countries
             const countryUsers = await User.find({
-                country: currentUser.country,
-                _id: { $nin: Array.from(excludeIds) } // Not current user or already followed
+                $and: [
+                    { country: { $exists: true, $ne: null, $ne: "" } }, // Country exists and is not empty
+                    { country: { $regex: new RegExp(`^${userCountry.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') } }, // Case-insensitive exact match (escaped for regex)
+                    { _id: { $nin: Array.from(excludeIds) } } // Not current user or already followed
+                ]
             })
             .select('username name profilePic country followers')
             .limit(20) // Get more to randomize from
+            
+            console.log(`📍 Found ${countryUsers.length} total users from country "${userCountry}"`)
+            
+            // Debug: Show all users with their countries (for troubleshooting)
+            if (countryUsers.length === 0) {
+                const allUsers = await User.find({}).select('username country').limit(10)
+                console.log(`🔍 Debug - Sample users in database:`, allUsers.map(u => ({ username: u.username, country: u.country || 'NOT SET' })))
+            }
             
             // Randomize and take 7
             const shuffled = countryUsers.sort(() => 0.5 - Math.random())
@@ -367,7 +384,12 @@ export const getSuggestedUsers = async(req, res) => {
             // Add to exclude list
             countrySuggestions.forEach(user => excludeIds.add(user._id.toString()))
             
-            console.log(`📍 Found ${countrySuggestions.length} users from country: ${currentUser.country}`)
+            console.log(`✅ Added ${countrySuggestions.length} users from country: ${userCountry}`)
+            if (countrySuggestions.length > 0) {
+                console.log(`   Users: ${countrySuggestions.map(u => u.username).join(', ')}`)
+            }
+        } else {
+            console.log('⚠️ User has no country set, skipping country-based suggestions')
         }
 
         // STEP 2: For each followed user, get 1 random user from their followers
@@ -403,13 +425,15 @@ export const getSuggestedUsers = async(req, res) => {
             }
         }
 
-        // STEP 3: If we still need more users, fill with random users (not from same country)
+        // STEP 3: If we still need more users, fill with random users
         const maxSuggestions = 10
         if (suggestedUsers.length < maxSuggestions) {
             const needed = maxSuggestions - suggestedUsers.length
             const randomUsers = await User.find({
                 _id: { $nin: Array.from(excludeIds) },
-                ...(currentUser.country ? { country: { $ne: currentUser.country } } : {})
+                ...(currentUser.country && currentUser.country.trim() !== "" 
+                    ? { country: { $ne: currentUser.country } } 
+                    : {})
             })
             .select('username name profilePic country followers')
             .limit(20)
@@ -418,6 +442,20 @@ export const getSuggestedUsers = async(req, res) => {
             const shuffled = randomUsers.sort(() => 0.5 - Math.random())
             const additional = shuffled.slice(0, needed)
             suggestedUsers.push(...additional)
+            console.log(`🎲 Added ${additional.length} random users to fill suggestions`)
+        }
+        
+        // If still no suggestions (new user, no country, no follows), get any random users
+        if (suggestedUsers.length === 0) {
+            console.log('⚠️ No suggestions found, fetching random users as fallback')
+            const fallbackUsers = await User.find({
+                _id: { $ne: userId }
+            })
+            .select('username name profilePic country followers')
+            .limit(10)
+            
+            const shuffled = fallbackUsers.sort(() => 0.5 - Math.random())
+            suggestedUsers.push(...shuffled.slice(0, 7))
         }
 
         // Final shuffle to randomize order
@@ -426,6 +464,9 @@ export const getSuggestedUsers = async(req, res) => {
             .slice(0, maxSuggestions)
 
         console.log(`✅ Returning ${finalSuggestions.length} suggested users`)
+        console.log(`   Current user country: "${currentUser.country || 'NOT SET'}"`)
+        console.log(`   Current user following: ${currentUser.following?.length || 0} users`)
+        
         res.status(200).json(finalSuggestions)
     }
     catch(error) {
