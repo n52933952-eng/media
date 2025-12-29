@@ -112,12 +112,22 @@ const MessagesPage = () => {
       })
       const data = await res.json()
       if (res.ok) {
+        const fetchedConversations = data.conversations || data || []
+        
+        if (!loadMore) {
+          // Initial load - log what database returned
+          console.log('📥 Fetched conversations from database. Top 3:')
+          fetchedConversations.slice(0, 3).forEach((c, i) => {
+            console.log(`  ${i+1}. ${c.participants[0]?.username || 'Unknown'} - "${c.lastMessage?.text?.substring(0, 15) || 'No message'}" - ${new Date(c.updatedAt).toLocaleTimeString()}`)
+          })
+        }
+        
         if (loadMore && beforeId && data.conversations) {
           // Loading more conversations - append to existing
           setConversations(prev => [...prev, ...data.conversations])
         } else {
           // Initial load - replace all conversations
-          setConversations(data.conversations || data || [])
+          setConversations(fetchedConversations)
         }
         setHasMoreConversations(data.hasMore || false)
       }
@@ -987,12 +997,10 @@ const MessagesPage = () => {
             return bTime - aTime // Most recent first
           })
           
-          console.log('✅ Socket newMessage - Updated & sorted. Top 3:', sorted.slice(0, 3).map(c => ({
-            participant: c.participants[0]?.username,
-            lastMsg: c.lastMessage?.text?.substring(0, 20),
-            updatedAt: c.updatedAt,
-            unreadCount: c.unreadCount
-          })))
+          console.log('✅ Socket newMessage - Updated & sorted. Top 3:')
+          sorted.slice(0, 3).forEach((c, i) => {
+            console.log(`  ${i+1}. ${c.participants[0]?.username || 'Unknown'} - "${c.lastMessage?.text?.substring(0, 15) || 'No message'}" - ${new Date(c.updatedAt).toLocaleTimeString()}`)
+          })
           
           console.log('📋 Returning sorted conversations, count:', sorted.length)
           return sorted
@@ -1935,11 +1943,10 @@ const MessagesPage = () => {
           return bTime - aTime
         })
         
-        console.log('handleMessageSent - Sorted conversations:', sorted.slice(0, 3).map(c => ({
-          id: c._id,
-          lastMsg: c.lastMessage?.text?.substring(0, 20),
-          updatedAt: c.updatedAt
-        })))
+        console.log('📤 handleMessageSent - Updated & sorted. Top 3:')
+        sorted.slice(0, 3).forEach((c, i) => {
+          console.log(`  ${i+1}. ${c.participants[0]?.username || 'Unknown'} - "${c.lastMessage?.text?.substring(0, 15) || 'No message'}" - ${new Date(c.updatedAt).toLocaleTimeString()}`)
+        })
         
         return sorted
       })
