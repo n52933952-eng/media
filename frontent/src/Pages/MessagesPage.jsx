@@ -325,6 +325,13 @@ const MessagesPage = () => {
     const conversationId = selectedConversation?._id
     const participantId = selectedConversation?.participants[0]?._id
     
+    // ALWAYS update SocketContext with currently open conversation (for notification control)
+    if (setSelectedConversationId && participantId) {
+      setSelectedConversationId(participantId)
+    } else if (setSelectedConversationId) {
+      setSelectedConversationId(null)
+    }
+    
     // Only refetch if the IDs actually changed (not just object reference)
     const conversationIdChanged = currentConversationIdRef.current !== conversationId
     const participantIdChanged = currentParticipantIdRef.current !== participantId
@@ -462,13 +469,6 @@ const MessagesPage = () => {
           setLoadingMoreMessages(false)
         }
       }
-    }
-
-    // Update SocketContext with the currently open conversation to prevent notification sounds
-    if (setSelectedConversationId && selectedConversation?.participants[0]?._id) {
-      setSelectedConversationId(selectedConversation.participants[0]._id)
-    } else if (setSelectedConversationId) {
-      setSelectedConversationId(null)
     }
     
     // Only fetch messages if conversation has _id (existing conversation)
