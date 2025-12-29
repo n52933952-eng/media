@@ -89,6 +89,15 @@ export const SocketContextProvider = ({ children }) => {
       query: { userId: user._id },
     });
 
+    // Wait for socket to connect before setting it as ready
+    newSocket.on('connect', () => {
+      console.log('✅ Socket connected successfully! ID:', newSocket.id);
+    });
+
+    newSocket.on('disconnect', () => {
+      console.log('⚠️ Socket disconnected');
+    });
+
     setSocket(newSocket);
     setMe(user._id);
 
@@ -139,7 +148,7 @@ export const SocketContextProvider = ({ children }) => {
       }
     });
 
-    // Fetch initial unread count
+    // Fetch initial unread count - need to fetch ALL conversations to get accurate count
     const fetchInitialUnreadCount = async () => {
       if (!user?._id) {
         setTotalUnreadCount(0);
@@ -149,13 +158,16 @@ export const SocketContextProvider = ({ children }) => {
         const socketUrl = import.meta.env.PROD 
           ? window.location.origin 
           : "http://localhost:5000";
-        const res = await fetch(`${socketUrl}/api/message/conversations?limit=1`, {
+        // Fetch all conversations (or a high limit) to calculate total unread count
+        // Using limit=1000 to ensure we get all conversations for accurate count
+        const res = await fetch(`${socketUrl}/api/message/conversations?limit=1000`, {
           credentials: 'include',
         });
         const data = await res.json();
         if (res.ok) {
           const conversations = data.conversations || data || [];
           const total = conversations.reduce((sum, conv) => sum + (conv.unreadCount || 0), 0);
+          console.log('Initial unread count calculated:', total, 'from', conversations.length, 'conversations');
           setTotalUnreadCount(total);
         }
       } catch (error) {

@@ -294,11 +294,12 @@ export const mycon = async(req,res) => {
     // Build query
     let query = { participants: userId }
     
-    // If beforeId is provided, fetch conversations created before that conversation
+    // If beforeId is provided, fetch conversations updated before that conversation
+    // CRITICAL: Use updatedAt to match our sort order, not createdAt
     if (beforeId) {
       const beforeConversation = await Conversation.findById(beforeId)
       if (beforeConversation) {
-        query.createdAt = { $lt: beforeConversation.createdAt }
+        query.updatedAt = { $lt: beforeConversation.updatedAt }
       }
     }
     

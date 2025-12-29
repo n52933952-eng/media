@@ -839,6 +839,8 @@ const MessagesPage = () => {
   // Listen for new messages via Socket.io - OPTIMIZED
   useEffect(() => {
     if (!socket || !user?._id) return
+    
+    console.log('✅ Setting up newMessage socket listener (will persist after refresh)')
 
     const handleNewMessage = (message) => {
       // Always process new messages - even if conversation was deleted
