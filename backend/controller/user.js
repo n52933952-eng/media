@@ -14,7 +14,7 @@ export const SignUp = async(req,res) => {
 
     try{
   
-        const{email,name,username,password}=req.body 
+        const{email,name,username,password,country}=req.body 
 
         const user = await User.findOne({$or:[{email},{username}]})
 
@@ -24,7 +24,7 @@ export const SignUp = async(req,res) => {
        
         const hashPassword = bcryptjs.hashSync(password,10)
 
-         const newUser = await User({email,name,username,password:hashPassword})
+         const newUser = await User({email,name,username,password:hashPassword,country:country || ""})
 
          await newUser.save()
        
@@ -34,6 +34,7 @@ export const SignUp = async(req,res) => {
                 username:newUser.username,email:newUser.email,
                bio:newUser.bio,
                profilePic:newUser.profilePic,
+               country:newUser.country,
                followers:newUser.followers,
                following:newUser.following
               })
@@ -70,6 +71,7 @@ export const LoginUser = async(req,res) => {
       res.status(200).json({_id:user._id,username:user.username,name:user.name,email:user.email,
         bio:user.bio,
         profilePic:user.profilePic,
+        country:user.country,
         followers:user.followers,
                following:user.following
       })
@@ -156,7 +158,7 @@ export const UpdateUser = async(req,res) => {
 
     try{
  
-        const{name,email,password,bio,username}= req.body
+        const{name,email,password,bio,username,country}= req.body
         const userId = req.user._id 
 
         let user = await User.findById(userId)
@@ -207,6 +209,7 @@ export const UpdateUser = async(req,res) => {
                 user.email = email || user.email 
                 user.profilePic = profilePic || user.profilePic 
                 user.bio = bio || user.bio
+                user.country = country !== undefined ? country : user.country
 
                 user = await user.save()
 
@@ -218,7 +221,8 @@ export const UpdateUser = async(req,res) => {
                     username: user.username,
                     email: user.email,
                     bio: user.bio,
-                    profilePic: user.profilePic
+                    profilePic: user.profilePic,
+                    country: user.country
                   })
                 }
                 resolve()
@@ -247,6 +251,7 @@ export const UpdateUser = async(req,res) => {
       user.email = email || user.email 
       user.profilePic = profilePic || user.profilePic 
       user.bio = bio || user.bio
+      user.country = country !== undefined ? country : user.country
 
       user = await user.save()
 
@@ -257,7 +262,8 @@ export const UpdateUser = async(req,res) => {
         username: user.username,
         email: user.email,
         bio: user.bio,
-        profilePic: user.profilePic
+        profilePic: user.profilePic,
+        country: user.country
       })
     }
     catch(error){

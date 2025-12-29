@@ -12,7 +12,8 @@ import {
 	useColorModeValue,
 	Avatar,
 	Center,
-    useToast
+    useToast,
+	Select
   
 } from "@chakra-ui/react";
 import{UserContext} from '../context/UserContext'
@@ -36,6 +37,7 @@ const[inputs,setInputs]=useState({
     username:user.username,
     email:user.email,
     bio:user.bio,
+    country:user.country || "",
     password:""
 
    })
@@ -333,6 +335,75 @@ return (
                     />
                 </FormControl>
                
+                <FormControl>
+                    <FormLabel>Country</FormLabel>
+                    <Select 
+                        placeholder="Select country"
+                        value={inputs.country}
+                        onChange={(e) => setInputs({...inputs,country:e.target.value})}
+                    >
+                        <option value="United States">United States</option>
+                        <option value="United Kingdom">United Kingdom</option>
+                        <option value="Canada">Canada</option>
+                        <option value="Australia">Australia</option>
+                        <option value="Germany">Germany</option>
+                        <option value="France">France</option>
+                        <option value="Italy">Italy</option>
+                        <option value="Spain">Spain</option>
+                        <option value="Netherlands">Netherlands</option>
+                        <option value="Belgium">Belgium</option>
+                        <option value="Switzerland">Switzerland</option>
+                        <option value="Austria">Austria</option>
+                        <option value="Sweden">Sweden</option>
+                        <option value="Norway">Norway</option>
+                        <option value="Denmark">Denmark</option>
+                        <option value="Finland">Finland</option>
+                        <option value="Poland">Poland</option>
+                        <option value="Portugal">Portugal</option>
+                        <option value="Greece">Greece</option>
+                        <option value="Turkey">Turkey</option>
+                        <option value="Russia">Russia</option>
+                        <option value="Japan">Japan</option>
+                        <option value="China">China</option>
+                        <option value="India">India</option>
+                        <option value="South Korea">South Korea</option>
+                        <option value="Singapore">Singapore</option>
+                        <option value="Malaysia">Malaysia</option>
+                        <option value="Thailand">Thailand</option>
+                        <option value="Indonesia">Indonesia</option>
+                        <option value="Philippines">Philippines</option>
+                        <option value="Vietnam">Vietnam</option>
+                        <option value="Saudi Arabia">Saudi Arabia</option>
+                        <option value="United Arab Emirates">United Arab Emirates</option>
+                        <option value="Egypt">Egypt</option>
+                        <option value="Morocco">Morocco</option>
+                        <option value="Tunisia">Tunisia</option>
+                        <option value="Algeria">Algeria</option>
+                        <option value="Lebanon">Lebanon</option>
+                        <option value="Jordan">Jordan</option>
+                        <option value="Iraq">Iraq</option>
+                        <option value="Kuwait">Kuwait</option>
+                        <option value="Qatar">Qatar</option>
+                        <option value="Bahrain">Bahrain</option>
+                        <option value="Oman">Oman</option>
+                        <option value="Yemen">Yemen</option>
+                        <option value="Syria">Syria</option>
+                        <option value="Palestine">Palestine</option>
+                        <option value="Brazil">Brazil</option>
+                        <option value="Argentina">Argentina</option>
+                        <option value="Mexico">Mexico</option>
+                        <option value="Chile">Chile</option>
+                        <option value="Colombia">Colombia</option>
+                        <option value="Peru">Peru</option>
+                        <option value="Venezuela">Venezuela</option>
+                        <option value="South Africa">South Africa</option>
+                        <option value="Nigeria">Nigeria</option>
+                        <option value="Kenya">Kenya</option>
+                        <option value="Ghana">Ghana</option>
+                        <option value="Ethiopia">Ethiopia</option>
+                        <option value="Other">Other</option>
+                    </Select>
+                </FormControl>
                
                 <FormControl>
                     <FormLabel>Password</FormLabel>
