@@ -852,6 +852,28 @@ const MessagesPage = () => {
       // Always process new messages - even if conversation was deleted
       if (!message || !message.conversationId) return
       
+      // ⚠️ CRITICAL: Ignore messages from current user!
+      // handleMessageSent already handles local updates for messages we send
+      // This prevents double-processing and sorting issues
+      let messageSenderId = ''
+      if (message.sender?._id) {
+        messageSenderId = typeof message.sender._id === 'string' ? message.sender._id : message.sender._id.toString()
+      } else if (message.sender) {
+        messageSenderId = typeof message.sender === 'string' ? message.sender : String(message.sender)
+      }
+      
+      let currentUserId = ''
+      if (user?._id) {
+        currentUserId = typeof user._id === 'string' ? user._id : user._id.toString()
+      }
+      
+      const isFromCurrentUser = messageSenderId !== '' && currentUserId !== '' && messageSenderId === currentUserId
+      
+      if (isFromCurrentUser) {
+        console.log('⚠️ Ignoring own message in socket listener (already handled by handleMessageSent)')
+        return // Don't process own messages via socket
+      }
+      
       // Check if this message is for the currently selected conversation
       // Use REF to get latest value without recreating listener (performance optimization)
       const currentSelectedId = selectedConversationIdRef.current
@@ -882,100 +904,58 @@ const MessagesPage = () => {
         })
       }
       
-      // ALWAYS update conversation list (even if message is for selected conversation)
+      // ALWAYS update conversation list (we know message is from another user)
       // This ensures conversations are sorted and updated in real-time
       setConversations(prev => {
         let updated = prev.map(conv => {
             if (conv._id && message.conversationId && conv._id.toString() === message.conversationId.toString()) {
-              // Check if message is from current user
-              let messageSenderId = ''
-              if (message.sender?._id) {
-                messageSenderId = typeof message.sender._id === 'string' ? message.sender._id : message.sender._id.toString()
-              } else if (message.sender) {
-                messageSenderId = typeof message.sender === 'string' ? message.sender : String(message.sender)
-              }
-              
-              let currentUserId = ''
-              if (user?._id) {
-                currentUserId = typeof user._id === 'string' ? user._id : user._id.toString()
-              }
-              
-              const isFromCurrentUser = messageSenderId !== '' && currentUserId !== '' && messageSenderId === currentUserId
-              
-              // Update lastMessage with full sender info
+              // Update lastMessage with full sender info (we know it's from another user)
               const updatedLastMessage = {
                 text: message.text || '',
-                sender: message.sender || (isFromCurrentUser ? {
-                  _id: user._id,
-                  name: user.name,
-                  username: user.username,
-                  profilePic: user.profilePic
-                } : null),
+                sender: message.sender,
                 createdAt: message.createdAt || new Date().toISOString()
               }
               
-              // OPTIMIZED: Don't increment unread if conversation is currently open
+              // Don't increment unread if conversation is currently open
               const isCurrentlyViewing = currentSelectedId && conv._id.toString() === currentSelectedId.toString()
-              const shouldIncrementUnread = !isFromCurrentUser && !isCurrentlyViewing
               
-              if (shouldIncrementUnread) {
-                // Message from other user AND not currently viewing - increment unread count
+              if (isCurrentlyViewing) {
+                // Currently viewing - just update lastMessage without incrementing unread
+                return {
+                  ...conv,
+                  lastMessage: updatedLastMessage,
+                  updatedAt: new Date().toISOString()
+                }
+              } else {
+                // NOT viewing - increment unread count
                 return { 
                   ...conv, 
                   unreadCount: (conv.unreadCount || 0) + 1, 
                   lastMessage: updatedLastMessage,
-                  updatedAt: new Date().toISOString() // Update timestamp to move to top
-                }
-              } else {
-                // Message from current user OR currently viewing - just update lastMessage
-                return {
-                  ...conv,
-                  lastMessage: updatedLastMessage,
-                  updatedAt: new Date().toISOString() // Update timestamp to move to top
+                  updatedAt: new Date().toISOString()
                 }
               }
             }
             return conv
           })
           
-          // Check if conversation exists - if not, we need to add it (for new conversations)
+          // Check if conversation exists - if not, create it (new conversation from another user)
           const conversationExists = updated.some(conv => 
             conv._id && message.conversationId && conv._id.toString() === message.conversationId.toString()
           )
           
           if (!conversationExists && message.conversationId) {
-            // New conversation or conversation was deleted - recreate it
-            // Determine if message is from current user
-            let messageSenderId = ''
-            if (message.sender?._id) {
-              messageSenderId = typeof message.sender._id === 'string' ? message.sender._id : message.sender._id.toString()
-            } else if (message.sender) {
-              messageSenderId = typeof message.sender === 'string' ? message.sender : String(message.sender)
-            }
-            
-            let currentUserId = ''
-            if (user?._id) {
-              currentUserId = typeof user._id === 'string' ? user._id : user._id.toString()
-            }
-            
-            const isFromCurrentUser = messageSenderId !== '' && currentUserId !== '' && messageSenderId === currentUserId
-            
-            // Create conversation object with sender info
+            // New conversation from another user - create it
             const newConv = {
               _id: message.conversationId,
-              participants: message.sender && !isFromCurrentUser ? [message.sender] : [], // Will be populated by fetch if needed
+              participants: message.sender ? [message.sender] : [],
               lastMessage: {
                 text: message.text || '',
-                sender: message.sender || (isFromCurrentUser ? {
-                  _id: user._id,
-                  name: user.name,
-                  username: user.username,
-                  profilePic: user.profilePic
-                } : null),
+                sender: message.sender,
                 createdAt: message.createdAt || new Date().toISOString()
               },
               updatedAt: new Date().toISOString(),
-              unreadCount: !isFromCurrentUser ? 1 : 0
+              unreadCount: 1 // Always 1 since it's from another user and new
             }
             updated = [newConv, ...updated]
           }
