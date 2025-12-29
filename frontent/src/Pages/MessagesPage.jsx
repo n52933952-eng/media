@@ -317,11 +317,16 @@ const MessagesPage = () => {
 
   // Fetch messages for selected conversation
   useEffect(() => {
+    // IMMEDIATELY clear messages to prevent showing stale data
+    setMessages([])
+    
     // Reset typing indicator and scroll state when conversation changes
     setIsTyping(false)
     setUnreadCountInView(0)
+    setHasMoreMessages(false)
     setIsAtBottom(true)
     lastMessageCountRef.current = 0
+    firstMessageIdRef.current = null
     isUserScrollingRef.current = false
     if (typingTimeoutRef.current) {
       clearTimeout(typingTimeoutRef.current)
@@ -438,13 +443,6 @@ const MessagesPage = () => {
       }
     }
 
-    // Clear messages immediately when switching conversations to prevent showing stale data
-    setMessages([])
-    setHasMoreMessages(false)
-    setUnreadCountInView(0)
-    lastMessageCountRef.current = 0
-    firstMessageIdRef.current = null
-    
     // Update SocketContext with the currently open conversation to prevent notification sounds
     if (setSelectedConversationId && selectedConversation?.participants[0]?._id) {
       setSelectedConversationId(selectedConversation.participants[0]._id)
@@ -644,9 +642,13 @@ const MessagesPage = () => {
   // Track new messages and handle auto-scroll/unread indicator
   // This should ONLY trigger when NEW messages arrive (appended to end), NOT when loading older messages (prepended)
   useEffect(() => {
+    // Always update the ref when messages change (but after checking for new messages)
+    // This ensures we don't double-count
+    const previousCount = lastMessageCountRef.current
+    
     // Skip if this is the initial load (lastMessageCountRef is 0 and we're setting messages for first time)
     // This prevents counting initial messages as "new"
-    if (messages.length > lastMessageCountRef.current && user?._id && lastMessageCountRef.current > 0) {
+    if (messages.length > previousCount && user?._id && previousCount > 0) {
       const container = messagesContainerRef.current
       if (!container) {
         lastMessageCountRef.current = messages.length
@@ -737,7 +739,13 @@ const MessagesPage = () => {
 
       lastMessageCountRef.current = messages.length
       return () => clearTimeout(timeoutId)
+    } else if (messages.length === 0) {
+      // If messages are cleared (conversation switch), reset everything
+      lastMessageCountRef.current = 0
+      firstMessageIdRef.current = null
+      setUnreadCountInView(0)
     } else {
+      // Just update the ref for any other case
       lastMessageCountRef.current = messages.length
     }
   }, [messages.length, user?._id])
