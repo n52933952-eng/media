@@ -31,6 +31,7 @@ export const SocketContextProvider = ({ children }) => {
   const peerRef = useRef();
   const ringtoneAudio = useRef(new Audio(ringTone)); // Audio for incoming call ringtone
   const messageSoundAudio = useRef(new Audio(messageSound)); // Audio for new unread message notification
+  const selectedConversationIdRef = useRef(null); // Track which conversation is currently open
 
   // Get user media and unmute audio track explicitly
   const getMediaStream = async (type = 'video') => {
@@ -107,8 +108,12 @@ export const SocketContextProvider = ({ children }) => {
       
       const isFromCurrentUser = messageSenderId !== '' && currentUserId !== '' && messageSenderId === currentUserId;
       
-      // Play sound only for unread messages from other users
-      if (!isFromCurrentUser && messageSoundAudio.current) {
+      // Check if message is from the currently open conversation
+      const isFromOpenConversation = selectedConversationIdRef.current && 
+                                      messageSenderId === selectedConversationIdRef.current;
+      
+      // Play sound only for unread messages from other users AND not from currently open conversation
+      if (!isFromCurrentUser && !isFromOpenConversation && messageSoundAudio.current) {
         messageSoundAudio.current.currentTime = 0; // Reset to start
         messageSoundAudio.current.play().catch(err => {
           console.log('Message sound play error (browser may require user interaction):', err);
@@ -548,6 +553,11 @@ export const SocketContextProvider = ({ children }) => {
     // This prevents unnecessary re-renders and message reloading
   };
 
+  // Function to update which conversation is currently open (for notification sound control)
+  const setSelectedConversationId = (userId) => {
+    selectedConversationIdRef.current = userId;
+  };
+
   return (
     <SocketContext.Provider
       value={{
@@ -568,6 +578,7 @@ export const SocketContextProvider = ({ children }) => {
         onlineUser,
         busyUsers, // Export busyUsers so components can check if a user is busy
         totalUnreadCount, // Export total unread message count
+        setSelectedConversationId, // Function to update selected conversation for notification control
       }}
     >
       {children}

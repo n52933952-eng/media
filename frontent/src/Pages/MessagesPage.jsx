@@ -43,7 +43,7 @@ import { compressVideo, needsCompression } from '../utils/videoCompress'
 const MessagesPage = () => {
   const { user } = useContext(UserContext)
   const socketContext = useContext(SocketContext)
-  const { socket, onlineUser, callUser, callAccepted, callEnded, isCalling, callType, call, answerCall, leaveCall, myVideo, userVideo, stream, remoteStream, busyUsers } = socketContext || {}
+  const { socket, onlineUser, callUser, callAccepted, callEnded, isCalling, callType, call, answerCall, leaveCall, myVideo, userVideo, stream, remoteStream, busyUsers, setSelectedConversationId } = socketContext || {}
   const showToast = useShowToast()
 
   // State
@@ -152,6 +152,15 @@ const MessagesPage = () => {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user])
+
+  // Clear selected conversation when component unmounts (user leaves Messages page)
+  useEffect(() => {
+    return () => {
+      if (setSelectedConversationId) {
+        setSelectedConversationId(null)
+      }
+    }
+  }, [setSelectedConversationId])
 
   // Force video elements to update when mounting MessagesPage with active call
   useEffect(() => {
@@ -436,12 +445,19 @@ const MessagesPage = () => {
     lastMessageCountRef.current = 0
     firstMessageIdRef.current = null
     
+    // Update SocketContext with the currently open conversation to prevent notification sounds
+    if (setSelectedConversationId && selectedConversation?.participants[0]?._id) {
+      setSelectedConversationId(selectedConversation.participants[0]._id)
+    } else if (setSelectedConversationId) {
+      setSelectedConversationId(null)
+    }
+    
     // Only fetch messages if conversation has _id (existing conversation)
     // New conversations (no _id) start with empty messages
     if (selectedConversation && selectedConversation._id) {
       fetchMessages(false, null) // Initial load
     }
-  }, [selectedConversation?._id, selectedConversation?.participants[0]?._id, showToast])
+  }, [selectedConversation?._id, selectedConversation?.participants[0]?._id, showToast, setSelectedConversationId])
 
   // Scroll to bottom when messages are initially loaded (not pagination)
   useEffect(() => {
