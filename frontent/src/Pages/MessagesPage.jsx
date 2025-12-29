@@ -315,8 +315,29 @@ const MessagesPage = () => {
     fetchFollowedUsers()
   }, [user?._id])
 
+  // Track the actual conversation ID to prevent unnecessary refetches
+  const currentConversationIdRef = useRef(null)
+  const currentParticipantIdRef = useRef(null)
+
   // Fetch messages for selected conversation
   useEffect(() => {
+    // Get current IDs
+    const conversationId = selectedConversation?._id
+    const participantId = selectedConversation?.participants[0]?._id
+    
+    // Only refetch if the IDs actually changed (not just object reference)
+    const conversationIdChanged = currentConversationIdRef.current !== conversationId
+    const participantIdChanged = currentParticipantIdRef.current !== participantId
+    
+    if (!conversationIdChanged && !participantIdChanged) {
+      // IDs haven't changed, don't refetch - this prevents reload when conversations array updates
+      return
+    }
+    
+    // Update refs with new IDs
+    currentConversationIdRef.current = conversationId
+    currentParticipantIdRef.current = participantId
+    
     // IMMEDIATELY clear messages to prevent showing stale data
     setMessages([])
     
@@ -454,6 +475,10 @@ const MessagesPage = () => {
     // New conversations (no _id) start with empty messages
     if (selectedConversation && selectedConversation._id) {
       fetchMessages(false, null) // Initial load
+    } else if (!selectedConversation) {
+      // Clear refs when conversation is cleared
+      currentConversationIdRef.current = null
+      currentParticipantIdRef.current = null
     }
   }, [selectedConversation?._id, selectedConversation?.participants[0]?._id, showToast, setSelectedConversationId])
 
