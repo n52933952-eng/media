@@ -3,6 +3,7 @@ import User from '../models/user.js'
 import Post from '../models/post.js'
 import { v2 as cloudinary } from 'cloudinary'
 import { Readable } from 'stream'
+import { getIO } from '../socket/socket.js'
 
 
 export const createPost = async(req,res) => {
@@ -62,6 +63,17 @@ export const createPost = async(req,res) => {
                try {
                  const newPost = new Post({postedBy,text,img})
                  await newPost.save()
+                 
+                 // Populate postedBy for socket emission
+                 await newPost.populate("postedBy", "username profilePic name")
+                 
+                 // Emit new post to all followers via Socket.IO
+                 const io = getIO()
+                 if (io) {
+                   io.emit("newPost", newPost)
+                   console.log('📤 Emitted newPost via socket:', newPost._id)
+                 }
+                 
                  if (!res.headersSent) {
                    res.status(200).json({message:"post created sufully", post: newPost})
                  }
@@ -88,6 +100,17 @@ export const createPost = async(req,res) => {
        // No file - create post immediately
        const newPost = new Post({postedBy,text,img})
        await newPost.save()
+       
+       // Populate postedBy for socket emission
+       await newPost.populate("postedBy", "username profilePic name")
+       
+       // Emit new post to all followers via Socket.IO
+       const io = getIO()
+       if (io) {
+         io.emit("newPost", newPost)
+         console.log('📤 Emitted newPost via socket:', newPost._id)
+       }
+       
        res.status(200).json({message:"post created sufully", post: newPost})
 
     }
@@ -195,6 +218,13 @@ export const deletePost = async(req,res) => {
 
       // Delete the post from MongoDB
       await Post.findByIdAndDelete(req.params.id)
+
+      // Emit post deleted event via Socket.IO
+      const io = getIO()
+      if (io) {
+        io.emit("postDeleted", { postId: req.params.id })
+        console.log('🗑️ Emitted postDeleted via socket:', req.params.id)
+      }
 
       res.status(200).json({message:"post has deleted sucsfully"})
     }
