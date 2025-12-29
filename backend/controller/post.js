@@ -320,10 +320,7 @@ export const ReplyPost = async(req,res) => {
 
 
 export const getFeedPost = async(req,res) => {
-
-
     try{
- 
         const userId = req.user._id 
         const user = await User.findById(userId)
 
@@ -331,37 +328,63 @@ export const getFeedPost = async(req,res) => {
             return res.status(400).json({error:"no user"})
         }
 
-        // Get posts from followed users with pagination
         const following = user.following 
+        
+        // If user follows no one, return empty feed
+        if (!following || following.length === 0) {
+            return res.status(200).json({ 
+                posts: [],
+                hasMore: false,
+                totalCount: 0
+            })
+        }
         
         // Pagination parameters
         const limit = parseInt(req.query.limit) || 10 // Default to 10 posts per page
         const skip = parseInt(req.query.skip) || 0 // Skip for pagination
         
-        // Build query
-        const query = {
-            postedBy: { $in: following }
-        }
-
-        const feedPost = await Post.find(query)
-        .populate("postedBy", "-password")
-        .sort({createdAt:-1})
-        .limit(limit)
-        .skip(skip)
+        // OPTIMIZED: Fetch only the last 3 posts from each followed user
+        // This ensures diversity in feed and keeps it lightweight
+        const postsPerUser = 3
         
-        // Check if there are more posts
-        const totalCount = await Post.countDocuments(query)
+        // Get 3 most recent posts from each followed user
+        const postsPromises = following.map(async (followedUserId) => {
+            const userPosts = await Post.find({ postedBy: followedUserId })
+                .populate("postedBy", "-password")
+                .sort({ createdAt: -1 })
+                .limit(postsPerUser) // Only get 3 most recent from each user
+            return userPosts
+        })
+        
+        // Wait for all posts to be fetched
+        const allPostsArrays = await Promise.all(postsPromises)
+        
+        // Flatten array of arrays into single array
+        let allPosts = allPostsArrays.flat()
+        
+        // Sort all posts by createdAt (newest first)
+        allPosts.sort((a, b) => {
+            const dateA = new Date(a.createdAt).getTime()
+            const dateB = new Date(b.createdAt).getTime()
+            return dateB - dateA // Newest first
+        })
+        
+        // Paginate the combined results
+        const totalCount = allPosts.length
+        const paginatedPosts = allPosts.slice(skip, skip + limit)
         const hasMore = (skip + limit) < totalCount
+        
+        console.log(`📊 Feed: ${following.length} users followed, ${totalCount} total posts (3 per user), returning ${paginatedPosts.length} posts (skip: ${skip}, limit: ${limit})`)
      
-     return res.status(200).json({ 
-         posts: feedPost,
-         hasMore,
-         totalCount
-     })
+        return res.status(200).json({ 
+            posts: paginatedPosts,
+            hasMore,
+            totalCount
+        })
     }
     catch(error){
- 
-        res.status(500).json(error)
+        console.error('Error in getFeedPost:', error)
+        res.status(500).json({error: error.message || "Failed to fetch feed posts"})
     }
 }
 

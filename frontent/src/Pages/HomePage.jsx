@@ -48,6 +48,8 @@ const HomePage = () => {
       }
 
       if(res.ok){
+        console.log(`📥 Feed loaded: ${loadMore ? 'More' : 'Initial'} - ${data.posts?.length || 0} posts, hasMore: ${data.hasMore}, total: ${data.totalCount || 0}`)
+        
         if (loadMore) {
           setFollowPost(prev => [...prev, ...(data.posts || [])])
         } else {
