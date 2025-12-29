@@ -359,8 +359,10 @@ const MessagesPage = () => {
     
     // ALWAYS update SocketContext with currently open conversation (for notification control)
     if (setSelectedConversationId && participantId) {
+      console.log('Setting selected conversation ID:', participantId)
       setSelectedConversationId(participantId)
-    } else if (setSelectedConversationId) {
+    } else if (setSelectedConversationId && !participantId) {
+      console.log('Clearing selected conversation ID')
       setSelectedConversationId(null)
     }
     
@@ -968,6 +970,12 @@ const MessagesPage = () => {
             const bTime = new Date(b.updatedAt || 0).getTime()
             return bTime - aTime // Most recent first
           })
+          
+          console.log('Socket newMessage - Sorted conversations:', sorted.slice(0, 3).map(c => ({
+            id: c._id,
+            lastMsg: c.lastMessage?.text?.substring(0, 20),
+            updatedAt: c.updatedAt
+          })))
           
           return sorted
           
@@ -1975,11 +1983,19 @@ const MessagesPage = () => {
         }
         
         // Sort by updatedAt to keep most recent at top
-        return updated.sort((a, b) => {
+        const sorted = updated.sort((a, b) => {
           const aTime = new Date(a.updatedAt || 0).getTime()
           const bTime = new Date(b.updatedAt || 0).getTime()
           return bTime - aTime
         })
+        
+        console.log('handleMessageSent - Sorted conversations:', sorted.slice(0, 3).map(c => ({
+          id: c._id,
+          lastMsg: c.lastMessage?.text?.substring(0, 20),
+          updatedAt: c.updatedAt
+        })))
+        
+        return sorted
       })
       
       // If this was a new conversation, update selectedConversation to the real one
