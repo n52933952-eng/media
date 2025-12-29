@@ -315,6 +315,38 @@ const MessagesPage = () => {
     fetchFollowedUsers()
   }, [user?._id])
 
+  // Update followed users list when conversations change (add users you're chatting with)
+  useEffect(() => {
+    if (!conversations || conversations.length === 0) return
+    
+    // Get unique participant IDs from conversations
+    const conversationParticipantIds = new Set()
+    conversations.forEach(conv => {
+      if (conv.participants && conv.participants.length > 0) {
+        conv.participants.forEach(p => {
+          if (p._id && p._id !== user?._id) {
+            conversationParticipantIds.add(p._id)
+          }
+        })
+      }
+    })
+    
+    // Merge conversation participants with followed users (avoid duplicates)
+    setFollowedUsers(prev => {
+      const existingIds = new Set(prev.map(u => u._id))
+      const newUsers = conversations.flatMap(conv => 
+        (conv.participants || []).filter(p => 
+          p._id && 
+          p._id !== user?._id && 
+          !existingIds.has(p._id)
+        )
+      )
+      
+      // Return combined list without duplicates
+      return [...prev, ...newUsers]
+    })
+  }, [conversations, user?._id])
+
   // Track the actual conversation ID to prevent unnecessary refetches
   const currentConversationIdRef = useRef(null)
   const currentParticipantIdRef = useRef(null)

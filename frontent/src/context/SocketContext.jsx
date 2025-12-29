@@ -32,6 +32,16 @@ export const SocketContextProvider = ({ children }) => {
   const ringtoneAudio = useRef(new Audio(ringTone)); // Audio for incoming call ringtone
   const messageSoundAudio = useRef(new Audio(messageSound)); // Audio for new unread message notification
   const selectedConversationIdRef = useRef(null); // Track which conversation is currently open
+  
+  // Ensure audio is ready to play (browser autoplay policy)
+  useEffect(() => {
+    if (messageSoundAudio.current) {
+      messageSoundAudio.current.load();
+    }
+    if (ringtoneAudio.current) {
+      ringtoneAudio.current.load();
+    }
+  }, [])
 
   // Get user media and unmute audio track explicitly
   const getMediaStream = async (type = 'video') => {
@@ -111,6 +121,14 @@ export const SocketContextProvider = ({ children }) => {
       // Check if message is from the currently open conversation
       const isFromOpenConversation = selectedConversationIdRef.current && 
                                       messageSenderId === selectedConversationIdRef.current;
+      
+      console.log('Message notification check:', {
+        isFromCurrentUser,
+        isFromOpenConversation,
+        messageSenderId,
+        selectedConversationId: selectedConversationIdRef.current,
+        shouldPlaySound: !isFromCurrentUser && !isFromOpenConversation
+      });
       
       // Play sound only for unread messages from other users AND not from currently open conversation
       if (!isFromCurrentUser && !isFromOpenConversation && messageSoundAudio.current) {
