@@ -153,10 +153,27 @@ const MessagesPage = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user])
 
+  // Update SocketContext with currently open conversation when socket is ready
+  // This handles the refresh case where socket initializes after component mounts
+  useEffect(() => {
+    if (!setSelectedConversationId || !socket) return
+    
+    const participantId = selectedConversation?.participants[0]?._id
+    
+    if (participantId) {
+      console.log('Socket ready - setting selected conversation ID:', participantId)
+      setSelectedConversationId(participantId)
+    } else {
+      console.log('Socket ready - clearing selected conversation ID')
+      setSelectedConversationId(null)
+    }
+  }, [socket, selectedConversation?.participants[0]?._id, setSelectedConversationId])
+  
   // Clear selected conversation when component unmounts (user leaves Messages page)
   useEffect(() => {
     return () => {
       if (setSelectedConversationId) {
+        console.log('MessagesPage unmounting - clearing selected conversation ID')
         setSelectedConversationId(null)
       }
     }
@@ -357,16 +374,6 @@ const MessagesPage = () => {
     const conversationId = selectedConversation?._id
     const participantId = selectedConversation?.participants[0]?._id
     
-    // ALWAYS update SocketContext with currently open conversation (for notification control)
-    // Check socket is ready to ensure proper timing after refresh
-    if (setSelectedConversationId && socket && participantId) {
-      console.log('Setting selected conversation ID:', participantId)
-      setSelectedConversationId(participantId)
-    } else if (setSelectedConversationId && socket && !participantId) {
-      console.log('Clearing selected conversation ID')
-      setSelectedConversationId(null)
-    }
-    
     // Only refetch if the IDs actually changed (not just object reference)
     const conversationIdChanged = currentConversationIdRef.current !== conversationId
     const participantIdChanged = currentParticipantIdRef.current !== participantId
@@ -515,7 +522,7 @@ const MessagesPage = () => {
       currentConversationIdRef.current = null
       currentParticipantIdRef.current = null
     }
-  }, [selectedConversation?._id, selectedConversation?.participants[0]?._id, showToast, setSelectedConversationId, socket])
+  }, [selectedConversation?._id, selectedConversation?.participants[0]?._id, showToast])
 
   // Scroll to bottom when messages are initially loaded (not pagination)
   useEffect(() => {
