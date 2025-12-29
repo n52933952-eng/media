@@ -358,10 +358,11 @@ const MessagesPage = () => {
     const participantId = selectedConversation?.participants[0]?._id
     
     // ALWAYS update SocketContext with currently open conversation (for notification control)
-    if (setSelectedConversationId && participantId) {
+    // Check socket is ready to ensure proper timing after refresh
+    if (setSelectedConversationId && socket && participantId) {
       console.log('Setting selected conversation ID:', participantId)
       setSelectedConversationId(participantId)
-    } else if (setSelectedConversationId && !participantId) {
+    } else if (setSelectedConversationId && socket && !participantId) {
       console.log('Clearing selected conversation ID')
       setSelectedConversationId(null)
     }
@@ -514,7 +515,7 @@ const MessagesPage = () => {
       currentConversationIdRef.current = null
       currentParticipantIdRef.current = null
     }
-  }, [selectedConversation?._id, selectedConversation?.participants[0]?._id, showToast, setSelectedConversationId])
+  }, [selectedConversation?._id, selectedConversation?.participants[0]?._id, showToast, setSelectedConversationId, socket])
 
   // Scroll to bottom when messages are initially loaded (not pagination)
   useEffect(() => {

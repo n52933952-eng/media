@@ -60,7 +60,13 @@ export const sendMessaeg = async(req,res) => {
                   replyTo: replyTo || null
                 })
 
-                await Promise.all([newMessage.save(),conversation.updateOne({lastMessage:{text:message,sender:senderId}})])
+                await Promise.all([
+                  newMessage.save(),
+                  conversation.updateOne({
+                    lastMessage: {text: message, sender: senderId},
+                    updatedAt: new Date() // Explicitly update timestamp for sorting
+                  })
+                ])
                   
                 // Populate sender data and replyTo message before sending
                 await newMessage.populate("sender", "username profilePic name")
@@ -146,7 +152,13 @@ const newMessage = new Message({
   replyTo: replyTo || null
 })
 
-await Promise.all([newMessage.save(),conversation.updateOne({lastMessage:{text:message,sender:senderId}})])
+await Promise.all([
+  newMessage.save(),
+  conversation.updateOne({
+    lastMessage: {text: message, sender: senderId},
+    updatedAt: new Date() // Explicitly update timestamp for sorting
+  })
+])
   
 // Populate sender data and replyTo message before sending
 await newMessage.populate("sender", "username profilePic name")
