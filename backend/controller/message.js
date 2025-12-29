@@ -60,12 +60,15 @@ export const sendMessaeg = async(req,res) => {
                   replyTo: replyTo || null
                 })
 
+                // Update conversation lastMessage and timestamp
+                conversation.lastMessage = {
+                  text: message,
+                  sender: senderId
+                }
+                
                 await Promise.all([
                   newMessage.save(),
-                  conversation.updateOne({
-                    lastMessage: {text: message, sender: senderId},
-                    updatedAt: new Date() // Explicitly update timestamp for sorting
-                  })
+                  conversation.save() // This automatically updates updatedAt timestamp
                 ])
                   
                 // Populate sender data and replyTo message before sending
@@ -152,12 +155,15 @@ const newMessage = new Message({
   replyTo: replyTo || null
 })
 
+// Update conversation lastMessage and timestamp
+conversation.lastMessage = {
+  text: message,
+  sender: senderId
+}
+
 await Promise.all([
   newMessage.save(),
-  conversation.updateOne({
-    lastMessage: {text: message, sender: senderId},
-    updatedAt: new Date() // Explicitly update timestamp for sorting
-  })
+  conversation.save() // This automatically updates updatedAt timestamp
 ])
   
 // Populate sender data and replyTo message before sending
@@ -378,6 +384,32 @@ res.status(200).json({
 	}
 }
 
+
+// Get total unread message count - OPTIMIZED endpoint
+export const getTotalUnreadCount = async (req, res) => {
+  try {
+    const userId = req.user._id
+    
+    // Get all conversations for this user
+    const conversations = await Conversation.find({ participants: userId })
+    
+    // Count unread messages across all conversations
+    let totalUnread = 0
+    for (const conversation of conversations) {
+      const unreadCount = await Message.countDocuments({
+        conversationId: conversation._id,
+        seen: false,
+        sender: { $ne: userId }
+      })
+      totalUnread += unreadCount
+    }
+    
+    res.status(200).json({ totalUnread })
+  } catch (error) {
+    console.log('Error getting total unread count:', error)
+    res.status(500).json({ error: error.message })
+  }
+}
 
 export const deletconversation =async (req,res) => {
  

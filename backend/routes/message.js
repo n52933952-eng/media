@@ -1,6 +1,6 @@
 import express from 'express'
 
-import{sendMessaeg,getMessage,mycon,deletconversation,toggleReaction,deleteMessage} from '../controller/message.js'
+import{sendMessaeg,getMessage,mycon,deletconversation,toggleReaction,deleteMessage,getTotalUnreadCount} from '../controller/message.js'
 
 import protectRoute from '../middlware/protectRoute.js'
 import upload from '../middlware/upload.js'
@@ -13,6 +13,9 @@ router.post("/",protectRoute,upload.single('file'),sendMessaeg)
 
 // Put more specific routes before parameterized routes to avoid conflicts
 router.get("/conversations",protectRoute,mycon)
+
+// Get total unread count - specific route before parameterized routes
+router.get("/unread/count",protectRoute,getTotalUnreadCount)
 
 router.get("/:otherUserId",protectRoute,getMessage)
 

@@ -981,83 +981,11 @@ const MessagesPage = () => {
             return bTime - aTime // Most recent first
           })
           
-          console.log('Socket newMessage - Sorted conversations:', sorted.slice(0, 3).map(c => ({
-            id: c._id,
+          console.log('✅ Socket newMessage - Updated & sorted. Top 3:', sorted.slice(0, 3).map(c => ({
+            participant: c.participants[0]?.username,
             lastMsg: c.lastMessage?.text?.substring(0, 20),
             updatedAt: c.updatedAt
           })))
-          
-          return sorted
-          
-          // If conversation was not in list (new conversation), fetch full details
-          if (!conversationExists && message.conversationId) {
-            // Fetch full conversation details in background
-            setTimeout(async () => {
-              try {
-                const url = `${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/message/conversations?limit=20`
-                const res = await fetch(url, { credentials: 'include' })
-                const updatedData = await res.json()
-                
-                if (res.ok) {
-                  const updatedConversations = updatedData.conversations || []
-                  if (Array.isArray(updatedConversations) && updatedConversations.length > 0) {
-                    setConversations(prev => {
-                      // Find the conversation in current state
-                      const currentConv = prev.find(c => 
-                        c._id?.toString() === message.conversationId.toString()
-                      )
-                      
-                      // Find the fetched conversation
-                      const fetchedConv = updatedConversations.find(fc => 
-                        fc._id?.toString() === message.conversationId.toString()
-                      )
-                      
-                      if (fetchedConv) {
-                        // Update existing or add new
-                        const existingIndex = prev.findIndex(c => 
-                          c._id?.toString() === message.conversationId.toString()
-                        )
-                        
-                        if (existingIndex >= 0) {
-                          // Update existing conversation
-                          const updated = [...prev]
-                          updated[existingIndex] = {
-                            ...fetchedConv,
-                            // Preserve local unread count if it's higher (we just incremented it)
-                            unreadCount: Math.max(currentConv?.unreadCount || 0, fetchedConv.unreadCount || 0),
-                            // Keep the last message we set from socket (more recent) or use fetched
-                            lastMessage: currentConv?.lastMessage?.updatedAt > fetchedConv.lastMessage?.updatedAt 
-                              ? currentConv.lastMessage 
-                              : fetchedConv.lastMessage || currentConv?.lastMessage,
-                            // Keep the more recent updatedAt
-                            updatedAt: currentConv?.updatedAt > fetchedConv.updatedAt 
-                              ? currentConv.updatedAt 
-                              : fetchedConv.updatedAt
-                          }
-                          return updated.sort((a, b) => {
-                            const aTime = new Date(a.updatedAt || 0).getTime()
-                            const bTime = new Date(b.updatedAt || 0).getTime()
-                            return bTime - aTime
-                          })
-                        } else {
-                          // Conversation was removed from list, add it back
-                          return [fetchedConv, ...prev].sort((a, b) => {
-                            const aTime = new Date(a.updatedAt || 0).getTime()
-                            const bTime = new Date(b.updatedAt || 0).getTime()
-                            return bTime - aTime
-                          })
-                        }
-                      }
-                      
-                      return prev // No change if fetched conversation not found
-                    })
-                  }
-                }
-              } catch (error) {
-                console.log('Error refreshing new conversation:', error)
-              }
-            }, 500)
-          }
           
           return sorted
         })
