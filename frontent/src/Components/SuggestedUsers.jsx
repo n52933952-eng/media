@@ -93,19 +93,26 @@ const SuggestedUsers = () => {
 
   // Refresh suggestions when user follows/unfollows (triggered by SuggestedUser component)
   useEffect(() => {
-    if (user?._id && user?.following) {
+    if (user?._id) {
       // Small delay to ensure backend has updated
       const timer = setTimeout(() => {
         fetchSuggestedUsers()
-      }, 1000) // Increased delay to ensure backend has processed
+      }, 500) // Reduced delay - backend should be fast
       return () => clearTimeout(timer)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.following?.length]) // Refresh when following list changes
 
   // Filter out already followed users from suggestions
+  // Check both string and ObjectId comparison
   const filteredSuggestedUsers = suggestedUsers.filter(suggestedUser => {
-    return !user?.following?.includes(suggestedUser._id)
+    if (!user?.following || user.following.length === 0) return true
+    // Convert both to strings for reliable comparison
+    const suggestedUserId = suggestedUser._id?.toString()
+    return !user.following.some(followedId => {
+      const followedIdStr = followedId?.toString()
+      return followedIdStr === suggestedUserId
+    })
   })
 
   return (
@@ -172,7 +179,7 @@ const SuggestedUsers = () => {
 
           {loading ? (
             <Flex direction="column" gap={3}>
-              {[0, 1, 2, 3].map((idx) => (
+              {[0].map((idx) => (
                 <Flex key={idx} gap={2} alignItems="center">
                   <Box>
                     <Spinner size="sm" />

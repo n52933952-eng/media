@@ -69,10 +69,14 @@ const HomePage = () => {
       setLoadingMore(false)
       isLoadingRef.current = false
     }
-  }, [followPost.length, showToast, setFollowPost])
-  // Initial load
+  }, [showToast, setFollowPost]) // Removed followPost.length to prevent unnecessary re-renders
+  
+  // Initial load - use ref to track if already loaded
   useEffect(() => {
-    getFeedPost()
+    if (!hasLoadedRef.current) {
+      hasLoadedRef.current = true
+      getFeedPost()
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []) // Only run once on mount
 

@@ -346,6 +346,13 @@ export const getSuggestedUsers = async(req, res) => {
         if (!currentUser) {
             return res.status(400).json({ error: "User not found" })
         }
+        
+        // Ensure following is an array
+        if (!currentUser.following) {
+            currentUser.following = []
+        }
+        
+        console.log(`👤 Current user: ${currentUser._id}, following: ${currentUser.following.length} users`)
 
         const suggestedUsers = []
         // Convert to ObjectIds for MongoDB query
