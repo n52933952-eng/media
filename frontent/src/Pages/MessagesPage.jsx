@@ -662,6 +662,13 @@ const MessagesPage = () => {
                            currentFirstMessageId !== null &&
                            currentFirstMessageId !== firstMessageIdRef.current
       
+      // Also check if loadingMoreMessages is true (another way to detect pagination)
+      if (loadingMoreMessages) {
+        firstMessageIdRef.current = currentFirstMessageId
+        lastMessageCountRef.current = messages.length
+        return // Don't show unread indicator for pagination
+      }
+      
       // If this is pagination (loading older messages), update refs and return
       if (wasPagination) {
         firstMessageIdRef.current = currentFirstMessageId
@@ -729,7 +736,10 @@ const MessagesPage = () => {
         } else if (distanceFromBottomAfter > 10) {
           // User is scrolled up but no new messages from others (or it's their own message)
           setIsAtBottom(false)
-          // Don't clear unread count here - let it stay if there are previous unread messages
+          // IMPORTANT: Clear unread count if no new messages arrived - user just scrolled up
+          if (!hasUnreadFromOthers) {
+            setUnreadCountInView(0)
+          }
         } else {
           // User is at bottom
           setIsAtBottom(true)
