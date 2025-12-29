@@ -53,9 +53,11 @@ export const SocketContextProvider = ({ children }) => {
     }
   };
 
-  useEffect(() => {
-    getMediaStream('video'); // Default to video call
-  }, []);
+  // Don't request media stream on mount - only get it when actually starting a call
+  // This makes the app lighter and prevents unnecessary camera/mic permissions on page load
+  // useEffect(() => {
+  //   getMediaStream('video'); // Default to video call
+  // }, []);
 
   useEffect(() => {
     if (myVideo.current && stream) {
@@ -164,15 +166,17 @@ export const SocketContextProvider = ({ children }) => {
         stream.getTracks().forEach(track => track.stop());
       }
       
+      // Clear stream state
+      setStream(null);
+      
       // Reset call states
       setCall({});
       setCallAccepted(false);
       setCallEnded(true);
       setIsCalling(false); // Stop ringing when call is canceled
       
-      // Refresh stream for next call
+      // Don't request new stream immediately - prevents unnecessary re-renders
       setTimeout(() => {
-        getMediaStream();
         setCallEnded(false); // Reset callEnded after a delay so UI can update
       }, 500);
     };
@@ -274,8 +278,7 @@ export const SocketContextProvider = ({ children }) => {
         setCallType(incomingCallType);
         setCall({ isReceivingCall: true, from, name: callerName, signal, userToCall, callType: incomingCallType });
         setIsCalling(false);
-        // Get appropriate media stream for incoming call
-        getMediaStream(incomingCallType);
+        // Don't get media stream until user answers - saves resources if they decline
         
         // Play ringtone for incoming call
         if (ringtoneAudio.current) {
@@ -537,11 +540,12 @@ export const SocketContextProvider = ({ children }) => {
     if (stream) {
       stream.getTracks().forEach(track => track.stop());
     }
-
-    // Re-request fresh stream with unmuted audio
-    setTimeout(() => {
-      getMediaStream();
-    }, 500);
+    
+    // Clear stream state to avoid memory leaks
+    setStream(null);
+    
+    // Don't request new stream immediately - we'll get it when starting next call
+    // This prevents unnecessary re-renders and message reloading
   };
 
   return (
