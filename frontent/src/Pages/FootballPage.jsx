@@ -320,11 +320,11 @@ const FootballPage = () => {
                     ) : (
                         <HStack spacing={2}>
                             <Text fontSize="2xl" fontWeight="bold" color={textColor}>
-                                {match.goals?.home ?? '-'}
+                                {match.goals?.home ?? 0}
                             </Text>
                             <Text fontSize="lg" color={secondaryTextColor}>-</Text>
                             <Text fontSize="2xl" fontWeight="bold" color={textColor}>
-                                {match.goals?.away ?? '-'}
+                                {match.goals?.away ?? 0}
                             </Text>
                         </HStack>
                     )}

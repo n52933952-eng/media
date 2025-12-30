@@ -37,12 +37,6 @@ const showToast = useShowToast()
   if (isFootballPost) {
     try {
       matchesData = JSON.parse(post.footballData)
-      console.log('📊 Football post data:', matchesData)
-      matchesData.forEach((m, i) => {
-        console.log(`  Match ${i+1}: ${m.homeTeam?.name} vs ${m.awayTeam?.name}`)
-        console.log(`    Score: ${m.score?.home} - ${m.score?.away}`)
-        console.log(`    Events:`, m.events)
-      })
     } catch (e) {
       console.error('Failed to parse football data:', e)
     }
@@ -224,13 +218,13 @@ const showToast = useShowToast()
                 {hasScore ? (
                   <Flex align="center" gap={2}>
                     <Text fontSize="xl" fontWeight="bold" color={textColor}>
-                      {match.score.home}
+                      {match.score.home ?? 0}
                     </Text>
                     <Text fontSize="lg" fontWeight="bold" color={secondaryTextColor}>
                       -
                     </Text>
                     <Text fontSize="xl" fontWeight="bold" color={textColor}>
-                      {match.score.away}
+                      {match.score.away ?? 0}
                     </Text>
                   </Flex>
                 ) : (
@@ -261,7 +255,7 @@ const showToast = useShowToast()
                       .filter(e => e.team === match.homeTeam?.name)
                       .map((event, idx) => (
                         <Text key={idx} color={textColor} mb={1}>
-                          {event.player} {event.time}'{event.detail?.includes('Penalty') ? ' (P)' : ''}
+                          {event.player} {event.time !== '?' && event.time ? `${event.time}'` : ''}{event.detail?.includes('Penalty') || event.detail?.includes('PENALTY') ? ' (P)' : ''}
                         </Text>
                       ))}
                   </GridItem>
@@ -277,7 +271,7 @@ const showToast = useShowToast()
                       .filter(e => e.team === match.awayTeam?.name)
                       .map((event, idx) => (
                         <Text key={idx} color={textColor} mb={1}>
-                          {event.player} {event.time}'{event.detail?.includes('Penalty') ? ' (P)' : ''}
+                          {event.player} {event.time !== '?' && event.time ? `${event.time}'` : ''}{event.detail?.includes('Penalty') || event.detail?.includes('PENALTY') ? ' (P)' : ''}
                         </Text>
                       ))}
                   </GridItem>

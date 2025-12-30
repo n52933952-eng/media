@@ -43,36 +43,56 @@ const fetchMatchDetails = async (matchId) => {
         
         if (!response.ok) {
             console.error(`  ❌ Failed to fetch match ${matchId}:`, response.status, response.statusText)
+            const errorText = await response.text()
+            console.error(`  ❌ Error response:`, errorText)
             return []
         }
         
         const data = await response.json()
-        console.log(`  📦 Match data keys:`, Object.keys(data))
+        console.log(`  📦 Full response structure:`, JSON.stringify(data, null, 2).substring(0, 500))
         
         // Extract scorers and convert to our events format
         const events = []
         
-        // Football-Data.org structure: data.goals array contains scorers
-        if (data.goals && Array.isArray(data.goals)) {
-            console.log(`  ⚽ Found ${data.goals.length} goals in response`)
-            data.goals.forEach(goal => {
+        // Try multiple possible structures
+        // 1. Check if data has a 'match' property with 'goals' or 'score'
+        const matchData = data.match || data
+        
+        // 2. Try accessing goals/scorers in different ways
+        let goalsData = null
+        
+        if (matchData.goals && Array.isArray(matchData.goals)) {
+            goalsData = matchData.goals
+            console.log(`  ⚽ Found goals array with ${goalsData.length} items`)
+        } else if (matchData.scorers && Array.isArray(matchData.scorers)) {
+            goalsData = matchData.scorers
+            console.log(`  ⚽ Found scorers array with ${goalsData.length} items`)
+        } else if (matchData.events && Array.isArray(matchData.events)) {
+            goalsData = matchData.events.filter(e => e.type === 'Goal' || e.detail === 'Goal')
+            console.log(`  ⚽ Found events array, filtered to ${goalsData.length} goals`)
+        } else {
+            console.log(`  ⚠️ No goals/scorers found. Available match data keys:`, Object.keys(matchData))
+            console.log(`  📋 Match data sample:`, JSON.stringify(matchData).substring(0, 300))
+        }
+        
+        if (goalsData && goalsData.length > 0) {
+            goalsData.forEach(goal => {
                 const event = {
-                    time: goal.minute || goal.elapsed || 0,
+                    time: goal.minute || goal.time?.elapsed || goal.elapsed || 0,
                     type: 'Goal',
-                    detail: goal.type || 'Normal Goal', // 'PENALTY', 'OWN_GOAL', etc.
-                    player: goal.scorer?.name || goal.player?.name || 'Unknown',
-                    team: goal.team?.name || 'Unknown Team'
+                    detail: goal.type || goal.detail || 'Normal Goal',
+                    player: goal.scorer?.name || goal.player?.name || goal.scorer || goal.player || 'Unknown',
+                    team: goal.team?.name || goal.team || 'Unknown Team'
                 }
                 events.push(event)
-                console.log(`    - ${event.player} (${event.team}) ${event.time}'`)
+                console.log(`    ✅ ${event.player} (${event.team}) ${event.time}'`)
             })
-        } else {
-            console.log(`  ⚠️ No goals array in response. Available keys:`, Object.keys(data))
         }
         
         return events
     } catch (error) {
         console.error(`  ❌ Error fetching match ${matchId}:`, error.message)
+        console.error(`  ❌ Stack:`, error.stack)
         return []
     }
 }
@@ -804,7 +824,8 @@ export const manualPostTodayMatches = async (req, res) => {
                         { events: freshEvents, lastUpdated: new Date() }
                     )
                 } else {
-                    console.log(`     ⚠️ No events returned from API`)
+                    console.log(`     ⚠️ No events returned from API (free tier limitation - player names not available)`)
+                    // Don't create fake data - just leave events empty
                 }
                 
                 // Small delay between API calls (300ms)
@@ -890,17 +911,13 @@ export const manualPostTodayMatches = async (req, res) => {
             },
             events: (match.events || [])
                 .filter(e => e.type === 'Goal' || e.detail?.includes('Card'))
-                .map(e => {
-                    const eventData = {
-                        time: e.time?.elapsed || e.time,
-                        type: e.type, // 'Goal' or 'Card'
-                        detail: e.detail, // 'Normal Goal', 'Yellow Card', etc.
-                        player: e.player?.name || e.player,
-                        team: e.team?.name || e.team
-                    }
-                    console.log('      Formatted event:', JSON.stringify(eventData))
-                    return eventData
-                }),
+                .map(e => ({
+                    time: e.time?.elapsed || e.time,
+                    type: e.type, // 'Goal' or 'Card'
+                    detail: e.detail, // 'Normal Goal', 'Yellow Card', etc.
+                    player: e.player?.name || e.player,
+                    team: e.team?.name || e.team
+                })),
             league: {
                 name: match.league.name,
                 logo: match.league.logo
