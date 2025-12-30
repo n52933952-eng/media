@@ -222,16 +222,21 @@ export const getMatches = async (req, res) => {
     try {
         const { status, date, leagueId } = req.query
         
+        console.log('⚽ [getMatches] Request received:', { status, date, leagueId })
+        
         const query = {}
         
         // Filter by status (live, finished, not started)
         if (status) {
             if (status === 'live') {
                 query['fixture.status.short'] = { $in: ['1H', '2H', 'HT', 'ET', 'P'] }
+                console.log('⚽ [getMatches] Filtering for LIVE matches')
             } else if (status === 'finished') {
                 query['fixture.status.short'] = 'FT'
+                console.log('⚽ [getMatches] Filtering for FINISHED matches')
             } else if (status === 'upcoming') {
                 query['fixture.status.short'] = 'NS'
+                console.log('⚽ [getMatches] Filtering for UPCOMING matches')
             }
         }
         
@@ -245,21 +250,51 @@ export const getMatches = async (req, res) => {
                 $gte: startDate,
                 $lt: endDate
             }
+            console.log('⚽ [getMatches] Filtering by date:', { date, startDate, endDate })
         }
         
         // Filter by league
         if (leagueId) {
             query['league.id'] = parseInt(leagueId)
+            console.log('⚽ [getMatches] Filtering by league:', leagueId)
         }
+        
+        console.log('⚽ [getMatches] MongoDB query:', JSON.stringify(query, null, 2))
+        
+        // Check total matches in database first
+        const totalMatches = await Match.countDocuments({})
+        console.log('⚽ [getMatches] Total matches in database:', totalMatches)
         
         const matches = await Match.find(query)
             .sort({ 'fixture.date': -1 })
             .limit(50)
         
+        console.log('⚽ [getMatches] Found matches:', matches.length)
+        if (matches.length > 0) {
+            console.log('⚽ [getMatches] Sample match:', {
+                fixtureId: matches[0].fixtureId,
+                teams: `${matches[0].teams?.home?.name} vs ${matches[0].teams?.away?.name}`,
+                status: matches[0].fixture?.status?.short,
+                date: matches[0].fixture?.date
+            })
+        } else {
+            console.log('⚽ [getMatches] No matches found with query. Checking if database has any matches at all...')
+            const anyMatch = await Match.findOne({})
+            if (anyMatch) {
+                console.log('⚽ [getMatches] Database has matches, but query returned none. Sample match in DB:', {
+                    fixtureId: anyMatch.fixtureId,
+                    status: anyMatch.fixture?.status?.short,
+                    date: anyMatch.fixture?.date
+                })
+            } else {
+                console.log('⚽ [getMatches] Database is empty - no matches have been fetched yet!')
+            }
+        }
+        
         res.status(200).json({ matches })
         
     } catch (error) {
-        console.error('Error getting matches:', error)
+        console.error('⚽ [getMatches] Error getting matches:', error)
         res.status(500).json({ error: error.message })
     }
 }

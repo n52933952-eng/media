@@ -14,7 +14,11 @@ const SUPPORTED_LEAGUES = [39, 140, 2, 135, 78, 61] // Premier, La Liga, Champio
 // Helper: Fetch from API-FOOTBALL
 const fetchFromAPI = async (endpoint) => {
     try {
-        const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+        const fullUrl = `${API_BASE_URL}${endpoint}`
+        console.log('⚽ [fetchFromAPI] Fetching:', fullUrl)
+        console.log('⚽ [fetchFromAPI] API Key present:', API_KEY ? 'Yes (length: ' + API_KEY.length + ')' : 'NO!')
+        
+        const response = await fetch(fullUrl, {
             method: 'GET',
             headers: {
                 'x-rapidapi-key': API_KEY,
@@ -22,16 +26,22 @@ const fetchFromAPI = async (endpoint) => {
             }
         })
         
+        console.log('⚽ [fetchFromAPI] Response status:', response.status, response.statusText)
+        
         const data = await response.json()
+        console.log('⚽ [fetchFromAPI] Response data keys:', Object.keys(data))
         
         if (response.ok && data.response) {
+            console.log('⚽ [fetchFromAPI] Success! Found', data.response.length, 'items')
             return { success: true, data: data.response }
         } else {
-            console.error('⚽ API-FOOTBALL Error:', data.errors || 'Unknown error')
-            return { success: false, error: data.errors || 'Failed to fetch from API' }
+            console.error('⚽ [fetchFromAPI] API-FOOTBALL Error:', data.errors || data.message || 'Unknown error')
+            console.error('⚽ [fetchFromAPI] Full error response:', JSON.stringify(data, null, 2))
+            return { success: false, error: data.errors || data.message || 'Failed to fetch from API' }
         }
     } catch (error) {
-        console.error('⚽ API-FOOTBALL Fetch Error:', error)
+        console.error('⚽ [fetchFromAPI] Fetch Error:', error.message)
+        console.error('⚽ [fetchFromAPI] Error stack:', error.stack)
         return { success: false, error: error.message }
     }
 }
@@ -221,13 +231,23 @@ const fetchAndUpdateLiveMatches = async () => {
 // 2. Fetch today's fixtures (runs once daily)
 const fetchTodayFixtures = async () => {
     try {
-        console.log('📅 Fetching today\'s fixtures...')
+        console.log('📅 [fetchTodayFixtures] Starting to fetch today\'s fixtures...')
         
         const today = new Date().toISOString().split('T')[0] // YYYY-MM-DD
+        console.log('📅 [fetchTodayFixtures] Today\'s date:', today)
+        console.log('📅 [fetchTodayFixtures] Supported leagues:', SUPPORTED_LEAGUES)
+        
         let totalFetched = 0
         
         for (const leagueId of SUPPORTED_LEAGUES) {
+            console.log(`📅 [fetchTodayFixtures] Fetching fixtures for league ${leagueId}...`)
             const result = await fetchFromAPI(`/fixtures?league=${leagueId}&date=${today}&season=2024`)
+            
+            console.log(`📅 [fetchTodayFixtures] League ${leagueId} result:`, {
+                success: result.success,
+                matchesFound: result.data?.length || 0,
+                error: result.error
+            })
             
             if (result.success && result.data.length > 0) {
                 for (const matchData of result.data) {
@@ -309,8 +329,15 @@ export const initializeFootballCron = () => {
         await getFootballAccount()
     }, 3000)
     
+    // Job 4: Fetch fixtures immediately on startup (for testing/development)
+    setTimeout(async () => {
+        console.log('⚽ [STARTUP] Fetching today\'s fixtures immediately...')
+        await fetchTodayFixtures()
+    }, 5000)
+    
     console.log('✅ Football Cron Jobs initialized')
     console.log('   - Live matches: Every 2 minutes (12pm-11pm UTC)')
     console.log('   - Daily fixtures: 6 AM UTC')
+    console.log('   - Startup fetch: Running in 5 seconds...')
 }
 

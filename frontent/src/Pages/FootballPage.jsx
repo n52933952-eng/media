@@ -70,39 +70,66 @@ const FootballPage = () => {
     useEffect(() => {
         const fetchMatches = async () => {
             try {
+                console.log('⚽ [FootballPage] Starting to fetch matches...')
                 setLoading(true)
                 
+                const baseUrl = import.meta.env.PROD ? window.location.origin : "http://localhost:5000"
+                
                 // Fetch live matches
+                console.log('⚽ [FootballPage] Fetching live matches...')
                 const liveRes = await fetch(
-                    `${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/football/matches?status=live`,
+                    `${baseUrl}/api/football/matches?status=live`,
                     { credentials: 'include' }
                 )
                 const liveData = await liveRes.json()
+                console.log('⚽ [FootballPage] Live matches response:', { status: liveRes.status, ok: liveRes.ok, data: liveData })
                 
                 // Fetch upcoming matches (today)
                 const today = new Date().toISOString().split('T')[0]
+                console.log('⚽ [FootballPage] Fetching upcoming matches for date:', today)
                 const upcomingRes = await fetch(
-                    `${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/football/matches?status=upcoming&date=${today}`,
+                    `${baseUrl}/api/football/matches?status=upcoming&date=${today}`,
                     { credentials: 'include' }
                 )
                 const upcomingData = await upcomingRes.json()
+                console.log('⚽ [FootballPage] Upcoming matches response:', { status: upcomingRes.status, ok: upcomingRes.ok, data: upcomingData })
                 
                 // Fetch finished matches (today)
+                console.log('⚽ [FootballPage] Fetching finished matches for date:', today)
                 const finishedRes = await fetch(
-                    `${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/football/matches?status=finished&date=${today}`,
+                    `${baseUrl}/api/football/matches?status=finished&date=${today}`,
                     { credentials: 'include' }
                 )
                 const finishedData = await finishedRes.json()
+                console.log('⚽ [FootballPage] Finished matches response:', { status: finishedRes.status, ok: finishedRes.ok, data: finishedData })
                 
-                if (liveRes.ok) setLiveMatches(liveData.matches || [])
-                if (upcomingRes.ok) setUpcomingMatches(upcomingData.matches || [])
-                if (finishedRes.ok) setFinishedMatches(finishedData.matches || [])
+                if (liveRes.ok) {
+                    console.log('⚽ [FootballPage] Setting live matches:', liveData.matches?.length || 0)
+                    setLiveMatches(liveData.matches || [])
+                } else {
+                    console.error('⚽ [FootballPage] Live matches request failed:', liveData)
+                }
+                
+                if (upcomingRes.ok) {
+                    console.log('⚽ [FootballPage] Setting upcoming matches:', upcomingData.matches?.length || 0)
+                    setUpcomingMatches(upcomingData.matches || [])
+                } else {
+                    console.error('⚽ [FootballPage] Upcoming matches request failed:', upcomingData)
+                }
+                
+                if (finishedRes.ok) {
+                    console.log('⚽ [FootballPage] Setting finished matches:', finishedData.matches?.length || 0)
+                    setFinishedMatches(finishedData.matches || [])
+                } else {
+                    console.error('⚽ [FootballPage] Finished matches request failed:', finishedData)
+                }
                 
             } catch (error) {
-                console.error('Error fetching matches:', error)
+                console.error('⚽ [FootballPage] Error fetching matches:', error)
                 showToast('Error', 'Failed to load matches', 'error')
             } finally {
                 setLoading(false)
+                console.log('⚽ [FootballPage] Finished fetching matches')
             }
         }
         
