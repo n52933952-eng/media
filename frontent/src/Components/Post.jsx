@@ -37,6 +37,12 @@ const showToast = useShowToast()
   if (isFootballPost) {
     try {
       matchesData = JSON.parse(post.footballData)
+      console.log('📊 Football post data:', matchesData)
+      matchesData.forEach((m, i) => {
+        console.log(`  Match ${i+1}: ${m.homeTeam?.name} vs ${m.awayTeam?.name}`)
+        console.log(`    Score: ${m.score?.home} - ${m.score?.away}`)
+        console.log(`    Events:`, m.events)
+      })
     } catch (e) {
       console.error('Failed to parse football data:', e)
     }

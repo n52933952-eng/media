@@ -717,6 +717,13 @@ export const manualPostTodayMatches = async (req, res) => {
         // Log match details for debugging
         matches.forEach((match, i) => {
             console.log(`  ${i+1}. ${match.teams?.home?.name} vs ${match.teams?.away?.name} - Status: ${match.fixture?.status?.short}`)
+            console.log(`      Score: ${match.goals?.home} - ${match.goals?.away}`)
+            console.log(`      Events count: ${match.events?.length || 0}`)
+            if (match.events && match.events.length > 0) {
+                match.events.slice(0, 3).forEach(e => {
+                    console.log(`        - ${e.type}: ${e.player?.name || e.player} at ${e.time?.elapsed || e.time}'`)
+                })
+            }
         })
         
         if (matches.length === 0) {
@@ -795,13 +802,17 @@ export const manualPostTodayMatches = async (req, res) => {
             },
             events: (match.events || [])
                 .filter(e => e.type === 'Goal' || e.detail?.includes('Card'))
-                .map(e => ({
-                    time: e.time?.elapsed || e.time,
-                    type: e.type, // 'Goal' or 'Card'
-                    detail: e.detail, // 'Normal Goal', 'Yellow Card', etc.
-                    player: e.player?.name || e.player,
-                    team: e.team?.name || e.team
-                })),
+                .map(e => {
+                    const eventData = {
+                        time: e.time?.elapsed || e.time,
+                        type: e.type, // 'Goal' or 'Card'
+                        detail: e.detail, // 'Normal Goal', 'Yellow Card', etc.
+                        player: e.player?.name || e.player,
+                        team: e.team?.name || e.team
+                    }
+                    console.log('      Formatted event:', JSON.stringify(eventData))
+                    return eventData
+                }),
             league: {
                 name: match.league.name,
                 logo: match.league.logo

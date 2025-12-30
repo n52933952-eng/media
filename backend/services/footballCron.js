@@ -255,21 +255,22 @@ const fetchAndUpdateLiveMatches = async () => {
                 { upsert: true, new: true }
             )
             
-            // Auto-post updates
+            // Auto-post updates - DISABLED
+            // User prefers single "Today's Top Matches" post instead of individual updates
             // 1. Match just started
-            if (!previousMatch && matchData.status === 'IN_PLAY') {
-                await autoPostMatchUpdate(updatedMatch, 'start')
-            }
+            // if (!previousMatch && matchData.status === 'IN_PLAY') {
+            //     await autoPostMatchUpdate(updatedMatch, 'start')
+            // }
             
             // 2. Goal scored
-            if ((currentGoalsHome > previousGoalsHome) || (currentGoalsAway > previousGoalsAway)) {
-                await autoPostMatchUpdate(updatedMatch, 'goal')
-            }
+            // if ((currentGoalsHome > previousGoalsHome) || (currentGoalsAway > previousGoalsAway)) {
+            //     await autoPostMatchUpdate(updatedMatch, 'goal')
+            // }
             
             // 3. Match finished
-            if (matchData.status === 'FINISHED' && previousMatch?.fixture?.status?.short !== 'FT') {
-                await autoPostMatchUpdate(updatedMatch, 'finish')
-            }
+            // if (matchData.status === 'FINISHED' && previousMatch?.fixture?.status?.short !== 'FT') {
+            //     await autoPostMatchUpdate(updatedMatch, 'finish')
+            // }
         }
         
     } catch (error) {
