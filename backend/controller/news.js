@@ -123,6 +123,11 @@ export const getNews = async (req, res) => {
     }
 }
 
+// Test endpoint to check if news controller works
+export const testNews = async (req, res) => {
+    res.json({ message: 'News API is working!', timestamp: new Date() })
+}
+
 // 3. Manual trigger to fetch news (for testing - No Auth Required)
 export const manualFetchNews = async (req, res) => {
     try {
