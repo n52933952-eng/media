@@ -175,12 +175,15 @@ const autoPostMatchUpdate = async (match, updateType) => {
         }
         
         // Emit to followers
+        // Fetch fresh account data to get updated followers list
+        const freshFootballAccount = await User.findById(footballAccount._id).select('followers')
         const io = getIO()
-        if (io && footballAccount.followers && footballAccount.followers.length > 0) {
+        
+        if (io && freshFootballAccount && freshFootballAccount.followers && freshFootballAccount.followers.length > 0) {
             const userSocketMap = getUserSocketMap()
             const onlineFollowers = []
             
-            footballAccount.followers.forEach(followerId => {
+            freshFootballAccount.followers.forEach(followerId => {
                 const followerIdStr = followerId.toString()
                 if (userSocketMap[followerIdStr]) {
                     onlineFollowers.push(userSocketMap[followerIdStr].socketId)
@@ -189,6 +192,7 @@ const autoPostMatchUpdate = async (match, updateType) => {
             
             if (onlineFollowers.length > 0) {
                 io.to(onlineFollowers).emit("newPost", newPost)
+                console.log(`✅ Emitted match update to ${onlineFollowers.length} online followers`)
             }
         }
         

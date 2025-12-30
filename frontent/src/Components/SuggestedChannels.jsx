@@ -77,12 +77,14 @@ const SuggestedChannels = ({ onUserFollowed }) => {
                 
                 // If following (not unfollowing), auto-post today's matches
                 if (!isFollowing) {
-                    // Trigger auto-post of today's matches (the socket will handle showing it in feed)
-                    const baseUrl = import.meta.env.PROD ? window.location.origin : "http://localhost:5000"
-                    fetch(`${baseUrl}/api/football/post/manual`, {
-                        method: 'POST',
-                        credentials: 'include'
-                    }).catch(err => console.log('Auto-post error:', err))
+                    // Small delay to ensure follow is fully processed in database before posting
+                    setTimeout(() => {
+                        const baseUrl = import.meta.env.PROD ? window.location.origin : "http://localhost:5000"
+                        fetch(`${baseUrl}/api/football/post/manual`, {
+                            method: 'POST',
+                            credentials: 'include'
+                        }).catch(err => console.log('Auto-post error:', err))
+                    }, 500) // 500ms delay to ensure follow is saved
                 }
                 
                 showToast(

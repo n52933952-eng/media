@@ -679,6 +679,29 @@ export const manualPostTodayMatches = async (req, res) => {
             return res.status(404).json({ error: 'Football account not found' })
         }
         
+        // PREVENT DUPLICATES: Check if we already posted "Today's Top Matches" today
+        const today = new Date()
+        today.setHours(0, 0, 0, 0) // Start of today
+        const tomorrow = new Date(today)
+        tomorrow.setDate(tomorrow.getDate() + 1) // Start of tomorrow
+        
+        const existingPost = await Post.findOne({
+            postedBy: footballAccount._id,
+            text: { $regex: /Today's Top Matches/i },
+            footballData: { $exists: true, $ne: null, $ne: "" }, // Only check new format posts
+            createdAt: { $gte: today, $lt: tomorrow }
+        })
+        
+        if (existingPost) {
+            console.log('⚽ [manualPostTodayMatches] Post already exists for today, skipping...')
+            return res.status(200).json({ 
+                message: 'Post already exists for today',
+                postId: existingPost._id,
+                posted: false,
+                alreadyExists: true
+            })
+        }
+        
         // Get today's upcoming matches (next 8 hours)
         const now = new Date()
         const later = new Date(now.getTime() + (8 * 60 * 60 * 1000)) // 8 hours from now
@@ -730,12 +753,15 @@ export const manualPostTodayMatches = async (req, res) => {
         await newPost.populate("postedBy", "username profilePic name")
         
         // Emit to followers (only online ones)
+        // IMPORTANT: Fetch fresh account data to get updated followers list
+        const freshFootballAccount = await User.findById(footballAccount._id).select('followers')
         const io = getIO()
-        if (io && footballAccount.followers && footballAccount.followers.length > 0) {
+        
+        if (io && freshFootballAccount && freshFootballAccount.followers && freshFootballAccount.followers.length > 0) {
             const userSocketMap = getUserSocketMap()
             const onlineFollowers = []
             
-            footballAccount.followers.forEach(followerId => {
+            freshFootballAccount.followers.forEach(followerId => {
                 const followerIdStr = followerId.toString()
                 if (userSocketMap[followerIdStr]) {
                     onlineFollowers.push(userSocketMap[followerIdStr].socketId)
