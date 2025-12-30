@@ -35,9 +35,7 @@ const SuggestedUsers = () => {
       const data = await res.json()
       if (res.ok && Array.isArray(data)) {
         setSuggestedUsers(data)
-        console.log(`✅ Fetched ${data.length} suggested users`)
       } else {
-        console.error('Error fetching suggested users:', data.error || 'Unknown error')
         setSuggestedUsers([])
       }
     } catch (error) {
@@ -94,11 +92,10 @@ const SuggestedUsers = () => {
   // Refresh suggestions when user follows/unfollows (triggered by SuggestedUser component)
   useEffect(() => {
     if (user?._id && user?.following !== undefined) {
-      // Longer delay to ensure backend database has been updated
+      // Delay to ensure backend database has been updated
       const timer = setTimeout(() => {
-        console.log(`🔄 Refreshing suggestions after follow change. Current following count: ${user.following?.length || 0}`)
         fetchSuggestedUsers()
-      }, 1500) // Increased delay to ensure database has processed the follow
+      }, 1000) // Reduced delay - backend is fast
       return () => clearTimeout(timer)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
