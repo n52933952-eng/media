@@ -8,6 +8,7 @@ const SuggestedUsers = ({ onUserFollowed }) => {
   const { user } = useContext(UserContext)
   const [loading, setLoading] = useState(true)
   const [suggestedUsers, setSuggestedUsers] = useState([])
+  const [footballAccount, setFootballAccount] = useState(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [searchResults, setSearchResults] = useState([])
   const [searchLoading, setSearchLoading] = useState(false)
@@ -15,6 +16,25 @@ const SuggestedUsers = ({ onUserFollowed }) => {
   const bgColor = useColorModeValue('white', '#1a1a1a')
   const borderColor = useColorModeValue('gray.200', '#2d2d2d')
   const textColor = useColorModeValue('gray.600', 'gray.400')
+
+  // Fetch Football channel account
+  const fetchFootballAccount = useCallback(async () => {
+    try {
+      const res = await fetch(
+        `${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/user/profile/Football`,
+        {
+          credentials: 'include',
+        }
+      )
+
+      const data = await res.json()
+      if (res.ok && data.user) {
+        setFootballAccount(data.user)
+      }
+    } catch (error) {
+      console.error('Error fetching Football account:', error)
+    }
+  }, [])
 
   // Fetch suggested users - memoized to prevent infinite loops
   const fetchSuggestedUsers = useCallback(async () => {
@@ -78,11 +98,12 @@ const SuggestedUsers = ({ onUserFollowed }) => {
   useEffect(() => {
     if (user?._id) {
       fetchSuggestedUsers()
+      fetchFootballAccount()
     } else {
       setLoading(false)
       setSuggestedUsers([])
     }
-  }, [user?._id, fetchSuggestedUsers])
+  }, [user?._id, fetchSuggestedUsers, fetchFootballAccount])
 
   // Remove user from suggestions immediately when followed
   const handleUserFollowed = (followedUserId) => {
@@ -172,6 +193,21 @@ const SuggestedUsers = ({ onUserFollowed }) => {
       {/* Suggested Users (only show when not searching) */}
       {searchQuery.trim().length === 0 && (
         <Box>
+          {/* Football Channel (if not already following) */}
+          {footballAccount && !user?.following?.includes(footballAccount._id) && (
+            <Box mb={4}>
+              <Text fontSize="sm" fontWeight="bold" mb={2} color={textColor}>
+                ⚽ Follow for Live Football
+              </Text>
+              <SuggestedUser 
+                user={footballAccount}
+                onFollowed={handleUserFollowed}
+                onUserFollowed={onUserFollowed}
+              />
+              <Box height="1px" bg={borderColor} my={3} />
+            </Box>
+          )}
+          
           <Text fontSize="sm" fontWeight="bold" mb={3} color={textColor}>
             Suggested for you
           </Text>

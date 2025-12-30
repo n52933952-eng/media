@@ -7,7 +7,9 @@ import UserRoute from './routes/user.js'
 import PostRoute from './routes/post.js'
 import{v2 as cloudinary} from 'cloudinary'
 import MessageRoute from './routes/message.js'
+import FootballRoute from './routes/football.js'
 import { initializeSocket } from './socket/socket.js'
+import { initializeFootballCron } from './services/footballCron.js'
 import path from 'path'
 import { fileURLToPath } from 'url'
 
@@ -54,6 +56,7 @@ mongoose.connect(process.env.MONGO)
 app.use("/api/user",UserRoute)
 app.use("/api/post",PostRoute)
 app.use("/api/message",MessageRoute)
+app.use("/api/football",FootballRoute)
 
 // Serve static files from React app (for production)
 app.use(express.static(path.join(__dirname, '../frontent/dist')))
@@ -69,4 +72,7 @@ app.get('*', (req, res) => {
 // Start server using the HTTP server from Socket.IO
 server.listen(process.env.PORT, () => {
     console.log("Server is running on port", process.env.PORT)
+    
+    // Initialize Football Cron Jobs after server starts
+    initializeFootballCron()
 })

@@ -14,6 +14,7 @@ import LogOutButton from './Components/LogOutButton'
 import UpdateProfile from './Pages/UpdatProile'
 import CreatePost from './Components/CreatePost'
 import MessagesPage from './Pages/MessagesPage'
+import FootballPage from './Pages/FootballPage'
 import CallNotification from './Components/CallNotification'
 
 const AppContent = () => {
@@ -67,6 +68,7 @@ const AppContent = () => {
                 <Route path="/" element={!user ? <Login/>  : <Navigate to="/home" />}/>
                 <Route path="/sign" element={<SignUp/>}/>
                 <Route path="/update" element={user ? <UpdateProfile/> : <Navigate  to="/"/>}/>
+                <Route path="/football" element={<FootballPage/>} />
                 <Route path="/notifications" element={user ? <Box p={8} textAlign="center"><Text>Notifications coming soon!</Text></Box> : <Navigate to="/" />} />
                 <Route path="/:username/post/:id" element={<PostPage/>}/>
               </Routes>
