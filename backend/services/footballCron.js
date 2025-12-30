@@ -3,6 +3,7 @@ import { Match } from '../models/football.js'
 import User from '../models/user.js'
 import Post from '../models/post.js'
 import { getIO, getUserSocketMap } from '../socket/socket.js'
+import mongoose from 'mongoose'
 
 // Football-Data.org API configuration
 const API_KEY = process.env.FOOTBALL_API_KEY || '5449eacc047c4b529267d309d166d09b'
@@ -255,22 +256,87 @@ const fetchAndUpdateLiveMatches = async () => {
                 { upsert: true, new: true }
             )
             
-            // Auto-post updates - DISABLED
-            // User prefers single "Today's Top Matches" post instead of individual updates
-            // 1. Match just started
-            // if (!previousMatch && matchData.status === 'IN_PLAY') {
-            //     await autoPostMatchUpdate(updatedMatch, 'start')
-            // }
+            // Emit real-time update to frontend if score or status changed
+            const scoreChanged = (currentGoalsHome !== previousGoalsHome) || (currentGoalsAway !== previousGoalsAway)
+            const statusChanged = previousMatch?.fixture?.status?.short !== updatedMatch.fixture?.status?.short
             
-            // 2. Goal scored
-            // if ((currentGoalsHome > previousGoalsHome) || (currentGoalsAway > previousGoalsAway)) {
-            //     await autoPostMatchUpdate(updatedMatch, 'goal')
-            // }
-            
-            // 3. Match finished
-            // if (matchData.status === 'FINISHED' && previousMatch?.fixture?.status?.short !== 'FT') {
-            //     await autoPostMatchUpdate(updatedMatch, 'finish')
-            // }
+            if (scoreChanged || statusChanged) {
+                console.log(`  🔔 Match updated: ${updatedMatch.teams?.home?.name} vs ${updatedMatch.teams?.away?.name}`)
+                console.log(`     Score: ${previousGoalsHome}-${previousGoalsAway} → ${currentGoalsHome}-${currentGoalsAway}`)
+                
+                // Find the "Today's Top Matches" post for this match
+                const footballAccount = await getFootballAccount()
+                if (footballAccount) {
+                    const todayPost = await Post.findOne({
+                        postedBy: footballAccount._id,
+                        footballData: { $exists: true, $ne: null },
+                        createdAt: { 
+                            $gte: new Date(new Date().setHours(0, 0, 0, 0)),
+                            $lte: new Date(new Date().setHours(23, 59, 59, 999))
+                        }
+                    }).sort({ createdAt: -1 })
+                    
+                    if (todayPost) {
+                        // Parse existing match data
+                        let matchData = []
+                        try {
+                            matchData = JSON.parse(todayPost.footballData)
+                        } catch (e) {
+                            console.error('Failed to parse football data:', e)
+                        }
+                        
+                        // Update the match in the post data
+                        const matchIndex = matchData.findIndex(m => 
+                            m.homeTeam?.name === updatedMatch.teams?.home?.name &&
+                            m.awayTeam?.name === updatedMatch.teams?.away?.name
+                        )
+                        
+                        if (matchIndex !== -1) {
+                            matchData[matchIndex] = {
+                                ...matchData[matchIndex],
+                                score: {
+                                    home: updatedMatch.goals?.home ?? 0,
+                                    away: updatedMatch.goals?.away ?? 0
+                                },
+                                status: {
+                                    short: updatedMatch.fixture?.status?.short,
+                                    long: updatedMatch.fixture?.status?.long,
+                                    elapsed: updatedMatch.fixture?.status?.elapsed
+                                }
+                            }
+                            
+                            // Update post in database
+                            todayPost.footballData = JSON.stringify(matchData)
+                            await todayPost.save()
+                            
+                            // Emit socket event to update frontend
+                            const io = getIO()
+                            if (io) {
+                                // Get all followers of Football account
+                                const freshFootballAccount = await User.findById(footballAccount._id).select('followers')
+                                const followerIds = freshFootballAccount?.followers?.map(f => f.toString()) || []
+                                
+                                // Emit to all online followers
+                                const socketMap = getUserSocketMap()
+                                let onlineCount = 0
+                                
+                                followerIds.forEach(followerId => {
+                                    const socketId = socketMap.get(followerId)
+                                    if (socketId) {
+                                        io.to(socketId).emit('footballMatchUpdate', {
+                                            postId: todayPost._id.toString(),
+                                            matchData: matchData
+                                        })
+                                        onlineCount++
+                                    }
+                                })
+                                
+                                console.log(`  ✅ Emitted match update to ${onlineCount} online followers`)
+                            }
+                        }
+                    }
+                }
+            }
         }
         
     } catch (error) {
@@ -326,8 +392,8 @@ const fetchTodayFixtures = async () => {
 export const initializeFootballCron = () => {
     console.log('⚽ Initializing Football Cron Jobs...')
     
-    // Job 1: Fetch live matches every 2 minutes (during match hours: 12pm - 11pm UTC)
-    cron.schedule('*/2 12-23 * * *', async () => {
+    // Job 1: Fetch live matches every 2 minutes (24/7)
+    cron.schedule('*/2 * * * *', async () => {
         console.log('⚽ [CRON] Running live match update...')
         await fetchAndUpdateLiveMatches()
     })

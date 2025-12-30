@@ -168,14 +168,35 @@ const HomePage = () => {
       )
     }
 
+    // Handle real-time football match updates
+    const handleFootballMatchUpdate = useCallback((data) => {
+      const { postId, matchData } = data
+      console.log('⚽ Real-time match update received:', postId)
+      
+      setFollowPost(prev => 
+        prev.map(post => {
+          if (post._id === postId) {
+            // Update the footballData with new match scores
+            return {
+              ...post,
+              footballData: JSON.stringify(matchData)
+            }
+          }
+          return post
+        })
+      )
+    }, [])
+
     socket.on('newPost', handleNewPost)
     socket.on('postDeleted', handlePostDeleted)
     socket.on('postUpdated', handlePostUpdated)
+    socket.on('footballMatchUpdate', handleFootballMatchUpdate)
 
     return () => {
       socket.off('newPost', handleNewPost)
       socket.off('postDeleted', handlePostDeleted)
       socket.off('postUpdated', handlePostUpdated)
+      socket.off('footballMatchUpdate', handleFootballMatchUpdate)
     }
   }, [socket, setFollowPost])
  
