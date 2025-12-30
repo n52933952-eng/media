@@ -27,6 +27,56 @@ const SUPPORTED_LEAGUES = [
     { code: 'COPA', name: 'Copa America', country: 'South America' } // Bonus: Copa America
 ]
 
+// Helper: Fetch match details with events (scorers)
+const fetchMatchDetails = async (matchId) => {
+    try {
+        const headers = {}
+        if (API_KEY) {
+            headers['X-Auth-Token'] = API_KEY
+        }
+        
+        console.log(`  🔍 Fetching match details for ID: ${matchId}`)
+        const response = await fetch(`${API_BASE_URL}/matches/${matchId}`, {
+            method: 'GET',
+            headers: headers
+        })
+        
+        if (!response.ok) {
+            console.error(`  ❌ Failed to fetch match ${matchId}:`, response.status, response.statusText)
+            return []
+        }
+        
+        const data = await response.json()
+        console.log(`  📦 Match data keys:`, Object.keys(data))
+        
+        // Extract scorers and convert to our events format
+        const events = []
+        
+        // Football-Data.org structure: data.goals array contains scorers
+        if (data.goals && Array.isArray(data.goals)) {
+            console.log(`  ⚽ Found ${data.goals.length} goals in response`)
+            data.goals.forEach(goal => {
+                const event = {
+                    time: goal.minute || goal.elapsed || 0,
+                    type: 'Goal',
+                    detail: goal.type || 'Normal Goal', // 'PENALTY', 'OWN_GOAL', etc.
+                    player: goal.scorer?.name || goal.player?.name || 'Unknown',
+                    team: goal.team?.name || 'Unknown Team'
+                }
+                events.push(event)
+                console.log(`    - ${event.player} (${event.team}) ${event.time}'`)
+            })
+        } else {
+            console.log(`  ⚠️ No goals array in response. Available keys:`, Object.keys(data))
+        }
+        
+        return events
+    } catch (error) {
+        console.error(`  ❌ Error fetching match ${matchId}:`, error.message)
+        return []
+    }
+}
+
 // Helper: Fetch from Football-Data.org API
 const fetchFromAPI = async (endpoint) => {
     try {
@@ -157,6 +207,16 @@ export const fetchLiveMatches = async (req, res) => {
         
         const liveMatches = result.data
         let updatedCount = 0
+        
+        console.log(`⚽ [fetchLiveMatches] Fetched ${liveMatches.length} live matches`)
+        if (liveMatches.length > 0) {
+            console.log('⚽ [fetchLiveMatches] Sample match structure:')
+            console.log('  Keys:', Object.keys(liveMatches[0]))
+            console.log('  Has events?', liveMatches[0].events ? 'YES' : 'NO')
+            if (liveMatches[0].events) {
+                console.log('  Events count:', liveMatches[0].events.length)
+            }
+        }
         
         // Store/update each match in database
         for (const match of liveMatches) {
@@ -715,16 +775,44 @@ export const manualPostTodayMatches = async (req, res) => {
         console.log('⚽ [manualPostTodayMatches] Found matches:', matches.length)
         
         // Log match details for debugging
-        matches.forEach((match, i) => {
+        console.log('⚽ [manualPostTodayMatches] Fetching detailed events for each match...')
+        
+        // Helper to delay between API calls (avoid rate limits)
+        const delay = ms => new Promise(resolve => setTimeout(resolve, ms))
+        
+        // Fetch detailed events for live/recent matches (limit to first 5 to avoid rate limits)
+        for (let i = 0; i < Math.min(matches.length, 5); i++) {
+            const match = matches[i]
             console.log(`  ${i+1}. ${match.teams?.home?.name} vs ${match.teams?.away?.name} - Status: ${match.fixture?.status?.short}`)
-            console.log(`      Score: ${match.goals?.home} - ${match.goals?.away}`)
-            console.log(`      Events count: ${match.events?.length || 0}`)
-            if (match.events && match.events.length > 0) {
-                match.events.slice(0, 3).forEach(e => {
-                    console.log(`        - ${e.type}: ${e.player?.name || e.player} at ${e.time?.elapsed || e.time}'`)
-                })
+            console.log(`     Score: ${match.goals?.home} - ${match.goals?.away}`)
+            console.log(`     Events in DB: ${match.events?.length || 0}`)
+            
+            // If match is live or recently finished, fetch fresh events from API
+            const isLiveOrRecent = ['1H', '2H', 'HT', 'BT', 'ET', 'P', 'LIVE', 'FT'].includes(match.fixture?.status?.short)
+            
+            if (isLiveOrRecent && match.fixtureId) {
+                console.log(`     🔄 Fetching fresh events for match ID: ${match.fixtureId}`)
+                const freshEvents = await fetchMatchDetails(match.fixtureId)
+                
+                if (freshEvents && freshEvents.length > 0) {
+                    match.events = freshEvents
+                    console.log(`     ✅ Got ${freshEvents.length} events from API`)
+                    
+                    // Update database with fresh events
+                    await Match.findOneAndUpdate(
+                        { fixtureId: match.fixtureId },
+                        { events: freshEvents, lastUpdated: new Date() }
+                    )
+                } else {
+                    console.log(`     ⚠️ No events returned from API`)
+                }
+                
+                // Small delay between API calls (300ms)
+                if (i < matches.length - 1) {
+                    await delay(300)
+                }
             }
-        })
+        }
         
         if (matches.length === 0) {
             // No matches found - create a post saying so
