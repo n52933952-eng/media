@@ -223,6 +223,7 @@ const FootballPage = () => {
     const handlePostTodayMatches = async () => {
         try {
             setPostingMatches(true)
+            const baseUrl = import.meta.env.PROD ? window.location.origin : "http://localhost:5000"
             const res = await fetch(`${baseUrl}/api/football/post/manual`, {
                 method: 'POST',
                 credentials: 'include'
