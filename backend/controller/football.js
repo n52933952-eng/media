@@ -3,9 +3,9 @@ import User from '../models/user.js'
 import Post from '../models/post.js'
 import { getIO, getUserSocketMap } from '../socket/socket.js'
 
-// Football-Data.org API configuration (FREE - no key needed for basic access)
+// Football-Data.org API configuration
 // Get free key at: https://www.football-data.org/client/register
-const API_KEY = process.env.FOOTBALL_API_KEY || '' // Optional: Get free key for more requests
+const API_KEY = process.env.FOOTBALL_API_KEY || '5449eacc047c4b529267d309d166d09b'
 const API_BASE_URL = 'https://api.football-data.org/v4'
 
 // Supported leagues (football-data.org uses codes)

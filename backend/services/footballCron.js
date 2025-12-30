@@ -4,26 +4,86 @@ import User from '../models/user.js'
 import Post from '../models/post.js'
 import { getIO, getUserSocketMap } from '../socket/socket.js'
 
-// API-FOOTBALL configuration
-const API_KEY = process.env.FOOTBALL_API_KEY || 'f3ebe896455cab31fc80e859716411df'
-const API_BASE_URL = 'https://v3.football.api-sports.io'
+// Football-Data.org API configuration
+const API_KEY = process.env.FOOTBALL_API_KEY || '5449eacc047c4b529267d309d166d09b'
+const API_BASE_URL = 'https://api.football-data.org/v4'
 
-// Supported leagues
-const SUPPORTED_LEAGUES = [39, 140, 2, 135, 78, 61] // Premier, La Liga, Champions, Serie A, Bundesliga, Ligue 1
+// Supported leagues (football-data.org uses codes)
+const SUPPORTED_LEAGUES = [
+    { code: 'PL', name: 'Premier League' },
+    { code: 'PD', name: 'La Liga' },
+    { code: 'CL', name: 'UEFA Champions League' },
+    { code: 'SA', name: 'Serie A' },
+    { code: 'BL1', name: 'Bundesliga' },
+    { code: 'FL1', name: 'Ligue 1' }
+]
 
-// Helper: Fetch from API-FOOTBALL
+// Helper: Convert football-data.org match format to our database format
+const convertMatchFormat = (matchData, leagueInfo) => {
+    const statusMap = {
+        'SCHEDULED': { long: 'Not Started', short: 'NS', elapsed: null },
+        'TIMED': { long: 'Scheduled', short: 'NS', elapsed: null },
+        'IN_PLAY': { long: 'Live', short: '1H', elapsed: 45 },
+        'PAUSED': { long: 'Half Time', short: 'HT', elapsed: 45 },
+        'FINISHED': { long: 'Match Finished', short: 'FT', elapsed: 90 },
+        'POSTPONED': { long: 'Postponed', short: 'POSTP', elapsed: null },
+        'CANCELLED': { long: 'Cancelled', short: 'CANC', elapsed: null },
+        'SUSPENDED': { long: 'Suspended', short: 'SUSP', elapsed: null }
+    }
+    
+    const status = statusMap[matchData.status] || statusMap['SCHEDULED']
+    
+    return {
+        fixtureId: matchData.id,
+        league: {
+            id: matchData.competition?.id || leagueInfo?.code || 'UNKNOWN',
+            name: matchData.competition?.name || leagueInfo?.name || 'Unknown League',
+            country: matchData.area?.name || 'Unknown',
+            logo: matchData.competition?.emblem || '',
+            flag: matchData.area?.flag || '',
+            season: matchData.season?.startDate ? new Date(matchData.season.startDate).getFullYear() : 2024
+        },
+        teams: {
+            home: {
+                id: matchData.homeTeam?.id || 0,
+                name: matchData.homeTeam?.name || 'Unknown',
+                logo: matchData.homeTeam?.crest || ''
+            },
+            away: {
+                id: matchData.awayTeam?.id || 0,
+                name: matchData.awayTeam?.name || 'Unknown',
+                logo: matchData.awayTeam?.crest || ''
+            }
+        },
+        fixture: {
+            date: new Date(matchData.utcDate),
+            venue: matchData.venue || '',
+            city: '',
+            status: status
+        },
+        goals: {
+            home: matchData.score?.fullTime?.home || matchData.score?.halfTime?.home || null,
+            away: matchData.score?.fullTime?.away || matchData.score?.halfTime?.away || null
+        },
+        lastUpdated: new Date()
+    }
+}
+
+// Helper: Fetch from Football-Data.org API
 const fetchFromAPI = async (endpoint) => {
     try {
+        const headers = {}
+        if (API_KEY) {
+            headers['X-Auth-Token'] = API_KEY
+        }
+        
         const fullUrl = `${API_BASE_URL}${endpoint}`
         console.log('⚽ [fetchFromAPI] Fetching:', fullUrl)
-        console.log('⚽ [fetchFromAPI] API Key present:', API_KEY ? 'Yes (length: ' + API_KEY.length + ')' : 'NO!')
+        console.log('⚽ [fetchFromAPI] API Key present:', API_KEY ? 'Yes' : 'NO!')
         
         const response = await fetch(fullUrl, {
             method: 'GET',
-            headers: {
-                'x-rapidapi-key': API_KEY,
-                'x-rapidapi-host': 'v3.football.api-sports.io'
-            }
+            headers: headers
         })
         
         console.log('⚽ [fetchFromAPI] Response status:', response.status, response.statusText)
@@ -31,13 +91,13 @@ const fetchFromAPI = async (endpoint) => {
         const data = await response.json()
         console.log('⚽ [fetchFromAPI] Response data keys:', Object.keys(data))
         
-        if (response.ok && data.response) {
-            console.log('⚽ [fetchFromAPI] Success! Found', data.response.length, 'items')
-            return { success: true, data: data.response }
+        if (response.ok && data.matches) {
+            console.log('⚽ [fetchFromAPI] Success! Found', data.matches.length, 'matches')
+            return { success: true, data: data.matches }
         } else {
-            console.error('⚽ [fetchFromAPI] API-FOOTBALL Error:', data.errors || data.message || 'Unknown error')
+            console.error('⚽ [fetchFromAPI] Error:', data.message || data.error || 'Unknown error')
             console.error('⚽ [fetchFromAPI] Full error response:', JSON.stringify(data, null, 2))
-            return { success: false, error: data.errors || data.message || 'Failed to fetch from API' }
+            return { success: false, error: data.message || data.error || 'Failed to fetch from API' }
         }
     } catch (error) {
         console.error('⚽ [fetchFromAPI] Fetch Error:', error.message)
@@ -135,80 +195,58 @@ const autoPostMatchUpdate = async (match, updateType) => {
 // 1. Fetch live matches and update database
 const fetchAndUpdateLiveMatches = async () => {
     try {
-        console.log('⚽ Fetching live matches...')
+        console.log('⚽ [fetchAndUpdateLiveMatches] Fetching live matches...')
         
-        const result = await fetchFromAPI('/fixtures?live=all')
+        const today = new Date().toISOString().split('T')[0]
+        let allLiveMatches = []
         
-        if (!result.success) {
-            console.error('❌ Failed to fetch live matches')
+        // Fetch matches from all leagues and filter for live ones
+        for (const league of SUPPORTED_LEAGUES) {
+            const result = await fetchFromAPI(`/competitions/${league.code}/matches?dateFrom=${today}&dateTo=${today}`)
+            
+            if (result.success && result.data) {
+                // Filter for live matches (IN_PLAY, PAUSED)
+                const liveMatches = result.data.filter(m => m.status === 'IN_PLAY' || m.status === 'PAUSED')
+                if (liveMatches.length > 0) {
+                    console.log(`⚽ [fetchAndUpdateLiveMatches] Found ${liveMatches.length} live matches in ${league.name}`)
+                    allLiveMatches.push(...liveMatches.map(m => ({ ...m, leagueInfo: league })))
+                }
+            }
+            
+            // Small delay to avoid rate limiting
+            await new Promise(resolve => setTimeout(resolve, 1000))
+        }
+        
+        if (allLiveMatches.length === 0) {
+            console.log('📭 [fetchAndUpdateLiveMatches] No live matches at the moment')
             return
         }
         
-        const liveMatches = result.data
+        console.log(`📊 [fetchAndUpdateLiveMatches] Found ${allLiveMatches.length} total live matches`)
         
-        if (liveMatches.length === 0) {
-            console.log('📭 No live matches at the moment')
-            return
-        }
-        
-        console.log(`📊 Found ${liveMatches.length} live matches`)
-        
-        for (const matchData of liveMatches) {
+        for (const matchData of allLiveMatches) {
             // Get previous state
-            const previousMatch = await Match.findOne({ fixtureId: matchData.fixture.id })
+            const previousMatch = await Match.findOne({ fixtureId: matchData.id })
             
             const previousGoalsHome = previousMatch?.goals?.home || 0
             const previousGoalsAway = previousMatch?.goals?.away || 0
-            const currentGoalsHome = matchData.goals.home || 0
-            const currentGoalsAway = matchData.goals.away || 0
+            const currentGoalsHome = matchData.score?.fullTime?.home || matchData.score?.halfTime?.home || 0
+            const currentGoalsAway = matchData.score?.fullTime?.away || matchData.score?.halfTime?.away || 0
             
-            // Update match in database
+            // Convert and update match in database
+            const convertedMatch = convertMatchFormat(matchData, matchData.leagueInfo)
+            convertedMatch.goals.home = currentGoalsHome
+            convertedMatch.goals.away = currentGoalsAway
+            
             const updatedMatch = await Match.findOneAndUpdate(
-                { fixtureId: matchData.fixture.id },
-                {
-                    fixtureId: matchData.fixture.id,
-                    league: {
-                        id: matchData.league.id,
-                        name: matchData.league.name,
-                        country: matchData.league.country,
-                        logo: matchData.league.logo,
-                        flag: matchData.league.flag,
-                        season: matchData.league.season
-                    },
-                    teams: {
-                        home: {
-                            id: matchData.teams.home.id,
-                            name: matchData.teams.home.name,
-                            logo: matchData.teams.home.logo
-                        },
-                        away: {
-                            id: matchData.teams.away.id,
-                            name: matchData.teams.away.name,
-                            logo: matchData.teams.away.logo
-                        }
-                    },
-                    fixture: {
-                        date: new Date(matchData.fixture.date),
-                        venue: matchData.fixture.venue?.name,
-                        city: matchData.fixture.venue?.city,
-                        status: {
-                            long: matchData.fixture.status.long,
-                            short: matchData.fixture.status.short,
-                            elapsed: matchData.fixture.status.elapsed
-                        }
-                    },
-                    goals: {
-                        home: currentGoalsHome,
-                        away: currentGoalsAway
-                    },
-                    lastUpdated: new Date()
-                },
+                { fixtureId: convertedMatch.fixtureId },
+                convertedMatch,
                 { upsert: true, new: true }
             )
             
             // Auto-post updates
-            // 1. Match just started (1st minute)
-            if (!previousMatch && matchData.fixture.status.elapsed <= 2) {
+            // 1. Match just started
+            if (!previousMatch && matchData.status === 'IN_PLAY') {
                 await autoPostMatchUpdate(updatedMatch, 'start')
             }
             
@@ -218,7 +256,7 @@ const fetchAndUpdateLiveMatches = async () => {
             }
             
             // 3. Match finished
-            if (matchData.fixture.status.short === 'FT' && previousMatch?.fixture?.status?.short !== 'FT') {
+            if (matchData.status === 'FINISHED' && previousMatch?.fixture?.status?.short !== 'FT') {
                 await autoPostMatchUpdate(updatedMatch, 'finish')
             }
         }
@@ -239,66 +277,30 @@ const fetchTodayFixtures = async () => {
         
         let totalFetched = 0
         
-        for (const leagueId of SUPPORTED_LEAGUES) {
-            console.log(`📅 [fetchTodayFixtures] Fetching fixtures for league ${leagueId}...`)
-            const result = await fetchFromAPI(`/fixtures?league=${leagueId}&date=${today}&season=2024`)
+        for (const league of SUPPORTED_LEAGUES) {
+            console.log(`📅 [fetchTodayFixtures] Fetching fixtures for ${league.name} (${league.code})...`)
+            const result = await fetchFromAPI(`/competitions/${league.code}/matches?dateFrom=${today}&dateTo=${today}`)
             
-            console.log(`📅 [fetchTodayFixtures] League ${leagueId} result:`, {
+            console.log(`📅 [fetchTodayFixtures] League ${league.name} result:`, {
                 success: result.success,
                 matchesFound: result.data?.length || 0,
                 error: result.error
             })
             
-            if (result.success && result.data.length > 0) {
+            if (result.success && result.data && result.data.length > 0) {
                 for (const matchData of result.data) {
+                    const convertedMatch = convertMatchFormat(matchData, league)
                     await Match.findOneAndUpdate(
-                        { fixtureId: matchData.fixture.id },
-                        {
-                            fixtureId: matchData.fixture.id,
-                            league: {
-                                id: matchData.league.id,
-                                name: matchData.league.name,
-                                country: matchData.league.country,
-                                logo: matchData.league.logo,
-                                flag: matchData.league.flag,
-                                season: matchData.league.season
-                            },
-                            teams: {
-                                home: {
-                                    id: matchData.teams.home.id,
-                                    name: matchData.teams.home.name,
-                                    logo: matchData.teams.home.logo
-                                },
-                                away: {
-                                    id: matchData.teams.away.id,
-                                    name: matchData.teams.away.name,
-                                    logo: matchData.teams.away.logo
-                                }
-                            },
-                            fixture: {
-                                date: new Date(matchData.fixture.date),
-                                venue: matchData.fixture.venue?.name,
-                                city: matchData.fixture.venue?.city,
-                                status: {
-                                    long: matchData.fixture.status.long,
-                                    short: matchData.fixture.status.short,
-                                    elapsed: matchData.fixture.status.elapsed
-                                }
-                            },
-                            goals: {
-                                home: matchData.goals.home,
-                                away: matchData.goals.away
-                            },
-                            lastUpdated: new Date()
-                        },
+                        { fixtureId: convertedMatch.fixtureId },
+                        convertedMatch,
                         { upsert: true, new: true }
                     )
                     totalFetched++
                 }
             }
             
-            // Small delay to avoid rate limiting
-            await new Promise(resolve => setTimeout(resolve, 500))
+            // Small delay to avoid rate limiting (free tier: 10 requests/minute)
+            await new Promise(resolve => setTimeout(resolve, 7000)) // 7 seconds between requests
         }
         
         console.log(`✅ Fetched ${totalFetched} fixtures for today`)
