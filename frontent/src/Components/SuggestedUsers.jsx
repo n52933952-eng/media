@@ -21,15 +21,15 @@ const SuggestedUsers = ({ onUserFollowed }) => {
   const fetchFootballAccount = useCallback(async () => {
     try {
       const res = await fetch(
-        `${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/user/profile/Football`,
+        `${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/user/getUserPro/Football`,
         {
           credentials: 'include',
         }
       )
 
       const data = await res.json()
-      if (res.ok && data.user) {
-        setFootballAccount(data.user)
+      if (res.ok && data._id) {
+        setFootballAccount(data)
       }
     } catch (error) {
       console.error('Error fetching Football account:', error)

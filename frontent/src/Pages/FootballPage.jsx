@@ -32,6 +32,7 @@ const FootballPage = () => {
     const [loading, setLoading] = useState(true)
     const [isFollowing, setIsFollowing] = useState(false)
     const [followLoading, setFollowLoading] = useState(false)
+    const [footballAccountId, setFootballAccountId] = useState(null)
     
     const showToast = useShowToast()
     
@@ -46,13 +47,14 @@ const FootballPage = () => {
         const checkFollowStatus = async () => {
             try {
                 const res = await fetch(
-                    `${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/user/profile/Football`,
+                    `${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/user/getUserPro/Football`,
                     { credentials: 'include' }
                 )
                 const data = await res.json()
                 
-                if (res.ok && user) {
-                    setIsFollowing(user.following?.includes(data.user._id))
+                if (res.ok && user && data._id) {
+                    setFootballAccountId(data._id)
+                    setIsFollowing(user.following?.includes(data._id))
                 }
             } catch (error) {
                 console.error('Error checking follow status:', error)
@@ -113,11 +115,16 @@ const FootballPage = () => {
     
     // Follow/Unfollow Football account
     const handleFollowToggle = async () => {
+        if (!footballAccountId) {
+            showToast('Error', 'Football account not found', 'error')
+            return
+        }
+        
         try {
             setFollowLoading(true)
             
             const res = await fetch(
-                `${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/user/follow/Football`,
+                `${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/user/follow/${footballAccountId}`,
                 {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
