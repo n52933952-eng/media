@@ -702,9 +702,9 @@ export const manualPostTodayMatches = async (req, res) => {
             })
         }
         
-        // Get today's upcoming matches (next 8 hours)
+        // Get today's upcoming matches (next 24 hours)
         const now = new Date()
-        const later = new Date(now.getTime() + (8 * 60 * 60 * 1000)) // 8 hours from now
+        const later = new Date(now.getTime() + (24 * 60 * 60 * 1000)) // 24 hours from now
         
         const matches = await Match.find({
             'fixture.date': { $gte: now, $lte: later },
@@ -714,9 +714,40 @@ export const manualPostTodayMatches = async (req, res) => {
         .limit(5)
         
         if (matches.length === 0) {
+            // No matches found - create a post saying so
+            const noMatchesPost = new Post({
+                postedBy: footballAccount._id,
+                text: `⚽ Football Live\n\nNo upcoming matches in the next 24 hours.\n\n📅 Check back later for live updates!`
+            })
+            
+            await noMatchesPost.save()
+            await noMatchesPost.populate("postedBy", "username profilePic name")
+            
+            // Emit to followers
+            const freshFootballAccount = await User.findById(footballAccount._id).select('followers')
+            const io = getIO()
+            
+            if (io && freshFootballAccount && freshFootballAccount.followers && freshFootballAccount.followers.length > 0) {
+                const userSocketMap = getUserSocketMap()
+                const onlineFollowers = []
+                
+                freshFootballAccount.followers.forEach(followerId => {
+                    const followerIdStr = followerId.toString()
+                    if (userSocketMap[followerIdStr]) {
+                        onlineFollowers.push(userSocketMap[followerIdStr].socketId)
+                    }
+                })
+                
+                if (onlineFollowers.length > 0) {
+                    io.to(onlineFollowers).emit("newPost", noMatchesPost)
+                }
+            }
+            
             return res.status(200).json({ 
-                message: 'No upcoming matches in the next 8 hours',
-                posted: false
+                message: 'No upcoming matches in the next 24 hours',
+                postId: noMatchesPost._id,
+                posted: true,
+                noMatches: true
             })
         }
         
