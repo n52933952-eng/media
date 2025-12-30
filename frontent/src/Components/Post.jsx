@@ -291,7 +291,32 @@ const showToast = useShowToast()
   
   {post?.img && !isFootballPost && (
     <Box borderRadius={4} overflow="hidden" border="0.5px solid" borderColor="gray.light" my={2}>
-      {post.img.match(/\.(mp4|webm|ogg|mov)$/i) || post.img.includes('/video/upload/') ? (
+      {/* Al Jazeera Live Stream Embed */}
+      {post.img.includes('aljazeera.com/live') ? (
+        <Box>
+          <Box position="relative" paddingBottom="56.25%" height="0">
+            <iframe
+              src="https://www.aljazeera.com/live/"
+              title="Al Jazeera Live Stream"
+              style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                width: '100%',
+                height: '100%',
+                border: 'none'
+              }}
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+              allowFullScreen
+            />
+          </Box>
+          <Box p={3} bg={useColorModeValue('gray.50', 'gray.700')}>
+            <Text fontSize="sm" fontWeight="bold">
+              🔴 Live Stream - Click to watch
+            </Text>
+          </Box>
+        </Box>
+      ) : post.img.match(/\.(mp4|webm|ogg|mov)$/i) || post.img.includes('/video/upload/') ? (
         <Box
           as="video"
           src={post.img}

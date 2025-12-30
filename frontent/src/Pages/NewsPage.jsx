@@ -75,43 +75,6 @@ const NewsPage = () => {
                 </Flex>
             </Flex>
             
-            {/* Live Stream Embed */}
-            <Box 
-                mb={8} 
-                borderRadius="lg" 
-                overflow="hidden" 
-                border="1px solid"
-                borderColor={borderColor}
-                bg={cardBg}
-            >
-                <Box position="relative" paddingBottom="56.25%" height="0">
-                    <iframe
-                        src="https://www.youtube.com/embed/gCNeDWCI0vo?autoplay=1&mute=0"
-                        title="Al Jazeera English Live"
-                        style={{
-                            position: 'absolute',
-                            top: 0,
-                            left: 0,
-                            width: '100%',
-                            height: '100%',
-                            border: 'none'
-                        }}
-                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                        allowFullScreen
-                    />
-                </Box>
-                <Box p={3} borderTop="1px solid" borderColor={borderColor}>
-                    <Text fontSize="sm" fontWeight="bold" color={textColor}>
-                        🔴 Al Jazeera English - Live Stream
-                    </Text>
-                    <Text fontSize="xs" color={secondaryTextColor}>
-                        24/7 news coverage from around the world
-                    </Text>
-                </Box>
-            </Box>
-            
-            {/* Latest Articles Heading */}
-            <Heading size="md" mb={4}>Latest Articles</Heading>
             
             {/* Loading */}
             {loading ? (

@@ -208,7 +208,12 @@ const SuggestedChannels = ({ onUserFollowed }) => {
                         </Text>
                     )}
                     
-                    {/* Al Jazeera News Channel */}
+                </VStack>
+            ) : null}
+            
+            {/* Al Jazeera News Channel */}
+            {!loading && (
+                <VStack spacing={3} align="stretch" mt={4}>
                     <Flex
                         align="center"
                         justify="space-between"
@@ -218,7 +223,6 @@ const SuggestedChannels = ({ onUserFollowed }) => {
                         borderColor={borderColor}
                         _hover={{ bg: hoverBg }}
                         transition="all 0.2s"
-                        mt={3}
                     >
                         <RouterLink to="/news" style={{ flexGrow: 1 }}>
                             <Flex align="center" gap={3}>
@@ -236,13 +240,44 @@ const SuggestedChannels = ({ onUserFollowed }) => {
                                         <Text fontSize="lg">📰</Text>
                                     </Flex>
                                     <Text fontSize="xs" color={secondaryTextColor} noOfLines={1}>
-                                        Latest news & updates
+                                        🔴 Live news 24/7
                                     </Text>
                                 </VStack>
                             </Flex>
                         </RouterLink>
                     </Flex>
+                    
+                    {/* Follow Button for Live Stream */}
+                    <Button
+                        onClick={async () => {
+                            try {
+                                const baseUrl = import.meta.env.PROD ? window.location.origin : "http://localhost:5000"
+                                const res = await fetch(`${baseUrl}/api/news/post/livestream`, {
+                                    method: 'POST',
+                                    credentials: 'include'
+                                })
+                                const data = await res.json()
+                                if (res.ok) {
+                                    showToast('Success', '🔴 Live stream added to your feed!', 'success')
+                                } else {
+                                    showToast('Info', data.message || 'Already in feed', 'info')
+                                }
+                            } catch (error) {
+                                showToast('Error', 'Failed to add live stream', 'error')
+                            }
+                        }}
+                        colorScheme="red"
+                        size="sm"
+                        w="full"
+                    >
+                        🔴 Watch Live
+                    </Button>
+                    
+                    <Text fontSize="xs" color={secondaryTextColor} textAlign="center">
+                        Click to add live stream to your feed
+                    </Text>
                 </VStack>
+            )}
             ) : (
                 <Text fontSize="sm" color={secondaryTextColor} textAlign="center">
                     No channels available

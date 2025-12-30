@@ -181,3 +181,69 @@ export const manualFetchNews = async (req, res) => {
     }
 }
 
+// 4. Create live stream post for Al Jazeera (like Football does)
+export const createLiveStreamPost = async (req, res) => {
+    try {
+        console.log('📰 [createLiveStreamPost] Creating Al Jazeera live stream post...')
+        
+        // Import Post and User models
+        const User = (await import('../models/user.js')).default
+        const Post = (await import('../models/post.js')).default
+        
+        // Find or create Al Jazeera account
+        let alJazeeraAccount = await User.findOne({ username: 'AlJazeera' })
+        
+        if (!alJazeeraAccount) {
+            alJazeeraAccount = new User({
+                name: 'Al Jazeera English',
+                username: 'AlJazeera',
+                email: 'aljazeera@system.com',
+                password: 'system_account',
+                profilePic: 'https://upload.wikimedia.org/wikipedia/en/thumb/f/f1/Al_Jazeera_English_logo.svg/1200px-Al_Jazeera_English_logo.svg.png',
+                bio: '🔴 Live news stream 24/7'
+            })
+            await alJazeeraAccount.save()
+        }
+        
+        // Check if post already exists today
+        const todayStart = new Date()
+        todayStart.setHours(0, 0, 0, 0)
+        
+        const existingPost = await Post.findOne({
+            postedBy: alJazeeraAccount._id,
+            text: { $regex: /Live Stream/ },
+            createdAt: { $gte: todayStart }
+        })
+        
+        if (existingPost) {
+            return res.status(200).json({
+                message: 'Live stream post already exists',
+                postId: existingPost._id,
+                posted: false
+            })
+        }
+        
+        // Create live stream post
+        const liveStreamPost = new Post({
+            postedBy: alJazeeraAccount._id,
+            text: '🔴 Al Jazeera English - Live Stream\n\nWatch live news coverage 24/7',
+            img: 'https://www.aljazeera.com/live/' // Store URL in img field
+        })
+        
+        await liveStreamPost.save()
+        await liveStreamPost.populate("postedBy", "username profilePic name")
+        
+        console.log('✅ [createLiveStreamPost] Created live stream post:', liveStreamPost._id)
+        
+        res.status(200).json({
+            message: 'Live stream post created successfully',
+            postId: liveStreamPost._id,
+            posted: true
+        })
+        
+    } catch (error) {
+        console.error('📰 [createLiveStreamPost] Error:', error)
+        res.status(500).json({ error: error.message })
+    }
+}
+

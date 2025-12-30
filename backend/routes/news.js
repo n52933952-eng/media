@@ -3,7 +3,8 @@ import {
     fetchAlJazeeraNews,
     getNews,
     manualFetchNews,
-    testNews
+    testNews,
+    createLiveStreamPost
 } from '../controller/news.js'
 import protectRoute from '../middlware/protectRoute.js'
 
@@ -20,6 +21,9 @@ router.get('/articles', getNews)
 
 // Manual trigger to fetch news (for testing)
 router.post('/fetch/manual', manualFetchNews)
+
+// Create live stream post (when user follows Al Jazeera)
+router.post('/post/livestream', createLiveStreamPost)
 
 export default router
 
