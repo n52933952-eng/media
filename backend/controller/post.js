@@ -3,7 +3,7 @@ import User from '../models/user.js'
 import Post from '../models/post.js'
 import { v2 as cloudinary } from 'cloudinary'
 import { Readable } from 'stream'
-import { getIO } from '../socket/socket.js'
+import { getIO, getUserSocketMap } from '../socket/socket.js'
 
 
 export const createPost = async(req,res) => {
@@ -67,11 +67,28 @@ export const createPost = async(req,res) => {
                  // Populate postedBy for socket emission
                  await newPost.populate("postedBy", "username profilePic name")
                  
-                 // Emit new post to all followers via Socket.IO
+                 // OPTIMIZED: Emit new post only to online followers (not all users)
                  const io = getIO()
                  if (io) {
-                   io.emit("newPost", newPost)
-                   console.log('📤 Emitted newPost via socket:', newPost._id)
+                   // Get poster's followers
+                   const poster = await User.findById(postedBy).select('followers')
+                   if (poster && poster.followers && poster.followers.length > 0) {
+                     const userSocketMap = getUserSocketMap()
+                     const onlineFollowers = []
+                     
+                     // Find which followers are online
+                     poster.followers.forEach(followerId => {
+                       const followerIdStr = followerId.toString()
+                       if (userSocketMap[followerIdStr]) {
+                         onlineFollowers.push(userSocketMap[followerIdStr].socketId)
+                       }
+                     })
+                     
+                     // Only emit to online followers (not all users)
+                     if (onlineFollowers.length > 0) {
+                       io.to(onlineFollowers).emit("newPost", newPost)
+                     }
+                   }
                  }
                  
                  if (!res.headersSent) {
@@ -104,11 +121,28 @@ export const createPost = async(req,res) => {
        // Populate postedBy for socket emission
        await newPost.populate("postedBy", "username profilePic name")
        
-       // Emit new post to all followers via Socket.IO
+       // OPTIMIZED: Emit new post only to online followers (not all users)
        const io = getIO()
        if (io) {
-         io.emit("newPost", newPost)
-         console.log('📤 Emitted newPost via socket:', newPost._id)
+         // Get poster's followers
+         const poster = await User.findById(postedBy).select('followers')
+         if (poster && poster.followers && poster.followers.length > 0) {
+           const userSocketMap = getUserSocketMap()
+           const onlineFollowers = []
+           
+           // Find which followers are online
+           poster.followers.forEach(followerId => {
+             const followerIdStr = followerId.toString()
+             if (userSocketMap[followerIdStr]) {
+               onlineFollowers.push(userSocketMap[followerIdStr].socketId)
+             }
+           })
+           
+           // Only emit to online followers (not all users)
+           if (onlineFollowers.length > 0) {
+             io.to(onlineFollowers).emit("newPost", newPost)
+           }
+         }
        }
        
        res.status(200).json({message:"post created sufully", post: newPost})
@@ -216,14 +250,29 @@ export const deletePost = async(req,res) => {
         }
       }
 
+      // OPTIMIZED: Get followers before deleting post
+      const postAuthorId = post.postedBy.toString()
+      const author = await User.findById(postAuthorId).select('followers')
+      
       // Delete the post from MongoDB
       await Post.findByIdAndDelete(req.params.id)
 
-      // Emit post deleted event via Socket.IO
+      // OPTIMIZED: Emit post deleted only to online followers
       const io = getIO()
-      if (io) {
-        io.emit("postDeleted", { postId: req.params.id })
-        console.log('🗑️ Emitted postDeleted via socket:', req.params.id)
+      if (io && author && author.followers && author.followers.length > 0) {
+        const userSocketMap = getUserSocketMap()
+        const onlineFollowers = []
+        
+        author.followers.forEach(followerId => {
+          const followerIdStr = followerId.toString()
+          if (userSocketMap[followerIdStr]) {
+            onlineFollowers.push(userSocketMap[followerIdStr].socketId)
+          }
+        })
+        
+        if (onlineFollowers.length > 0) {
+          io.to(onlineFollowers).emit("postDeleted", { postId: req.params.id })
+        }
       }
 
       res.status(200).json({message:"post has deleted sucsfully"})
