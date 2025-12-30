@@ -358,6 +358,12 @@ export const getSuggestedUsers = async(req, res) => {
         const excludeIds = [new mongoose.Types.ObjectId(userId)] // Exclude current user
         const followingIdsStrings = new Set() // For fast lookup
         
+        // Exclude Football system account from suggestions
+        const footballAccount = await User.findOne({ username: 'Football' }).select('_id')
+        if (footballAccount) {
+            excludeIds.push(new mongoose.Types.ObjectId(footballAccount._id))
+        }
+        
         if (currentUser.following && currentUser.following.length > 0) {
             currentUser.following.forEach(id => {
                 try {

@@ -666,3 +666,89 @@ export const manualFetchFixtures = async (req, res) => {
     }
 }
 
+// 9. Manual trigger to post today's matches (for testing)
+export const manualPostTodayMatches = async (req, res) => {
+    try {
+        console.log('⚽ [manualPostTodayMatches] Manual post trigger received')
+        
+        // Get Football system account
+        const footballAccount = await getFootballAccount()
+        if (!footballAccount) {
+            return res.status(404).json({ error: 'Football account not found' })
+        }
+        
+        // Get today's upcoming matches (next 8 hours)
+        const now = new Date()
+        const later = new Date(now.getTime() + (8 * 60 * 60 * 1000)) // 8 hours from now
+        
+        const matches = await Match.find({
+            'fixture.date': { $gte: now, $lte: later },
+            'fixture.status.short': { $in: ['NS', 'SCHEDULED', 'TIMED'] }
+        })
+        .sort({ 'fixture.date': 1 })
+        .limit(5)
+        
+        if (matches.length === 0) {
+            return res.status(200).json({ 
+                message: 'No upcoming matches in the next 8 hours',
+                posted: false
+            })
+        }
+        
+        // Create post text with top 5 matches
+        let postText = `⚽ Today's Top Matches ⚽\n\n`
+        
+        matches.forEach((match, index) => {
+            const matchTime = new Date(match.fixture.date).toLocaleTimeString('en-US', { 
+                hour: '2-digit', 
+                minute: '2-digit' 
+            })
+            postText += `${index + 1}. ${match.teams.home.name} vs ${match.teams.away.name}\n`
+            postText += `   📺 ${match.league.name} | ⏰ ${matchTime}\n\n`
+        })
+        
+        postText += `🔗 Check Football page for more updates!`
+        
+        // Create the post
+        const newPost = new Post({
+            postedBy: footballAccount._id,
+            text: postText
+        })
+        
+        await newPost.save()
+        await newPost.populate("postedBy", "username profilePic name")
+        
+        // Emit to followers (only online ones)
+        const io = getIO()
+        if (io && footballAccount.followers && footballAccount.followers.length > 0) {
+            const userSocketMap = getUserSocketMap()
+            const onlineFollowers = []
+            
+            footballAccount.followers.forEach(followerId => {
+                const followerIdStr = followerId.toString()
+                if (userSocketMap[followerIdStr]) {
+                    onlineFollowers.push(userSocketMap[followerIdStr].socketId)
+                }
+            })
+            
+            if (onlineFollowers.length > 0) {
+                io.to(onlineFollowers).emit("newPost", newPost)
+                console.log(`⚽ [manualPostTodayMatches] Emitted to ${onlineFollowers.length} online followers`)
+            }
+        }
+        
+        console.log(`✅ [manualPostTodayMatches] Posted ${matches.length} matches to feed`)
+        
+        res.status(200).json({
+            message: `Posted ${matches.length} matches to feed`,
+            postId: newPost._id,
+            matchesPosted: matches.length,
+            posted: true
+        })
+        
+    } catch (error) {
+        console.error('❌ [manualPostTodayMatches] Error:', error)
+        res.status(500).json({ error: error.message })
+    }
+}
+
