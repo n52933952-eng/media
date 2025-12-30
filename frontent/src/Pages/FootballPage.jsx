@@ -200,11 +200,13 @@ const FootballPage = () => {
             if (res.ok) {
                 showToast(
                     'Success',
-                    `Fetched ${data.totalFetched} matches from ${data.leaguesFetched} leagues!`,
+                    `Fetched ${data.totalFetched} matches from ${data.leaguesFetched} leagues! Refreshing...`,
                     'success'
                 )
-                // Reload matches
-                window.location.reload()
+                // Refresh matches without page reload
+                setTimeout(() => {
+                    window.location.reload()
+                }, 1000)
             } else {
                 showToast('Error', data.error || 'Failed to fetch matches', 'error')
             }

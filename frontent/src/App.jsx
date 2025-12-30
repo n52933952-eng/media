@@ -52,9 +52,9 @@ const AppContent = () => {
         </Box>
       ) : (
         <>
-          {/* HomePage needs wider container for sidebar */}
+          {/* HomePage needs wider container for 3-column layout (Football | Feed | Suggested Users) */}
           {isHomePage ? (
-            <Container maxW="1200px" px={{ base: 4, md: 6 }}>
+            <Container maxW="1400px" px={{ base: 4, md: 6, lg: 8 }}>
               <Routes>
                 <Route path="/home" element={user ? <HomePage/> : <Navigate to="/" />} />
               </Routes>

@@ -5,6 +5,7 @@ import Post from '../Components/Post'
 import {PostContext} from '../context/PostContext'
 import {SocketContext} from '../context/SocketContext'
 import SuggestedUsers from '../Components/SuggestedUsers'
+import FootballWidget from '../Components/FootballWidget'
 
 
 
@@ -187,9 +188,22 @@ const HomePage = () => {
   const textColor = useColorModeValue('gray.600', 'gray.400')
 
   return (
-    <Flex gap={8} alignItems="flex-start">
-      {/* Main Feed - Left Side (65%) */}
-      <Box flex={{ base: 1, md: '0 0 60%' }} maxW={{ base: '100%', md: '60%' }}>
+    <Flex gap={6} alignItems="flex-start">
+      {/* Football Widget - Left Side */}
+      <Box 
+        flex={{ base: '0', lg: '0 0 22%' }} 
+        display={{ base: 'none', lg: 'block' }}
+        maxW={{ base: '0', lg: '22%' }}
+        minW={{ lg: '220px' }}
+      >
+        <FootballWidget />
+      </Box>
+
+      {/* Main Feed - Center */}
+      <Box 
+        flex={{ base: 1, lg: '0 0 50%' }} 
+        maxW={{ base: '100%', lg: '50%' }}
+      >
         {/* Error state */}
         {error && !loading && (
           <Box textAlign="center" p={8} bg={bgColor} borderRadius="md" mb={4}>
@@ -245,16 +259,16 @@ const HomePage = () => {
         )}
       </Box>
 
-      {/* Suggested Users Sidebar - Right Side (reduced width) */}
-            <Box 
-              flex={{ base: '0 0 100%', md: '0 0 30%' }} 
-              display={{ base: 'none', md: 'block' }}
-              maxW={{ base: '100%', md: '30%' }}
-              pl={8}
-              pt={4}
-            >
-              <SuggestedUsers onUserFollowed={fetchUserPosts} />
-            </Box>
+      {/* Suggested Users Sidebar - Right Side */}
+      <Box 
+        flex={{ base: '0 0 100%', md: '0 0 35%', lg: '0 0 25%' }} 
+        display={{ base: 'none', md: 'block' }}
+        maxW={{ base: '100%', md: '35%', lg: '25%' }}
+        pl={{ md: 6, lg: 4 }}
+        pt={4}
+      >
+        <SuggestedUsers onUserFollowed={fetchUserPosts} />
+      </Box>
     </Flex>
   )
 }
