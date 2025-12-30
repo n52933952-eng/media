@@ -8,14 +8,21 @@ import { getIO, getUserSocketMap } from '../socket/socket.js'
 const API_KEY = process.env.FOOTBALL_API_KEY || '5449eacc047c4b529267d309d166d09b'
 const API_BASE_URL = 'https://api.football-data.org/v4'
 
-// Supported leagues (football-data.org uses codes)
+// Supported leagues and competitions (football-data.org uses codes)
 const SUPPORTED_LEAGUES = [
+    // Top Leagues
     { code: 'PL', name: 'Premier League' },
     { code: 'PD', name: 'La Liga' },
-    { code: 'CL', name: 'UEFA Champions League' },
     { code: 'SA', name: 'Serie A' },
     { code: 'BL1', name: 'Bundesliga' },
-    { code: 'FL1', name: 'Ligue 1' }
+    { code: 'FL1', name: 'Ligue 1' },
+    
+    // European Competitions
+    { code: 'CL', name: 'UEFA Champions League' },
+    { code: 'EC', name: 'UEFA European Championship' },
+    
+    // International
+    { code: 'WC', name: 'FIFA World Cup' }
 ]
 
 // Helper: Convert football-data.org match format to our database format
