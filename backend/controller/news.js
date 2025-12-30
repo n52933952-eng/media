@@ -258,7 +258,7 @@ export const createLiveStreamPost = async (req, res) => {
         const liveStreamPost = new Post({
             postedBy: alJazeeraAccount._id,
             text: '🔴 Al Jazeera English - Live Stream\n\nWatch live news coverage 24/7',
-            img: 'https://www.aljazeera.com/live/'
+            img: 'https://www.youtube.com/embed/gCNeDWCI0vo' // YouTube embed URL (allowed!)
         })
         
         await liveStreamPost.save()
