@@ -33,6 +33,7 @@ const FootballPage = () => {
     const [isFollowing, setIsFollowing] = useState(false)
     const [followLoading, setFollowLoading] = useState(false)
     const [footballAccountId, setFootballAccountId] = useState(null)
+    const [fetchingMatches, setFetchingMatches] = useState(false)
     
     const showToast = useShowToast()
     
@@ -179,6 +180,41 @@ const FootballPage = () => {
         }
     }
     
+    // Fetch all matches from all leagues (manual trigger)
+    const handleFetchAllMatches = async () => {
+        try {
+            setFetchingMatches(true)
+            showToast('Info', 'Fetching matches from all leagues... This will take ~40 seconds', 'info')
+            
+            const res = await fetch(
+                `${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/football/fetch/manual`,
+                {
+                    method: 'POST',
+                    credentials: 'include'
+                }
+            )
+            
+            const data = await res.json()
+            
+            if (res.ok) {
+                showToast(
+                    'Success',
+                    `Fetched ${data.totalFetched} matches from ${data.leaguesFetched} leagues!`,
+                    'success'
+                )
+                // Reload matches
+                window.location.reload()
+            } else {
+                showToast('Error', data.error || 'Failed to fetch matches', 'error')
+            }
+        } catch (error) {
+            console.error('Error fetching matches:', error)
+            showToast('Error', 'Failed to fetch matches', 'error')
+        } finally {
+            setFetchingMatches(false)
+        }
+    }
+    
     // Format time
     const formatTime = (date) => {
         const matchDate = new Date(date)
@@ -294,16 +330,26 @@ const FootballPage = () => {
                     </VStack>
                 </HStack>
                 
-                {user && (
+                <HStack spacing={2}>
                     <Button
-                        onClick={handleFollowToggle}
-                        isLoading={followLoading}
-                        colorScheme={isFollowing ? 'gray' : 'blue'}
+                        onClick={handleFetchAllMatches}
+                        isLoading={fetchingMatches}
+                        colorScheme="green"
                         size="sm"
                     >
-                        {isFollowing ? 'Following' : 'Follow'}
+                        ⚽ Load All Leagues
                     </Button>
-                )}
+                    {user && (
+                        <Button
+                            onClick={handleFollowToggle}
+                            isLoading={followLoading}
+                            colorScheme={isFollowing ? 'gray' : 'blue'}
+                            size="sm"
+                        >
+                            {isFollowing ? 'Following' : 'Follow'}
+                        </Button>
+                    )}
+                </HStack>
             </Flex>
             
             {!user && (
