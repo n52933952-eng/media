@@ -75,51 +75,43 @@ const SuggestedChannels = ({ onUserFollowed }) => {
                     localStorage.setItem('userInfo', JSON.stringify(data.current))
                 }
                 
-                // If following (not unfollowing), fetch matches and auto-post
+                // If following (not unfollowing), auto-post and fetch matches
                 if (!isFollowing) {
                     const baseUrl = import.meta.env.PROD ? window.location.origin : "http://localhost:5000"
                     
-                    // Step 1: Fetch today's matches first (ensures database has matches)
-                    showToast('Info', 'Loading today\'s matches...', 'info')
-                    
-                    fetch(`${baseUrl}/api/football/fetch/manual`, {
-                        method: 'POST',
-                        credentials: 'include'
-                    })
-                    .then(res => res.json())
-                    .then(data => {
-                        console.log('✅ Matches fetched:', data.totalFetched || 0)
-                        
-                        // Step 2: Wait a bit for follow to be saved + matches to be in DB
-                        setTimeout(() => {
-                            // Step 3: Create the post with matches
-                            fetch(`${baseUrl}/api/football/post/manual`, {
-                                method: 'POST',
-                                credentials: 'include'
-                            })
-                            .then(res => res.json())
-                            .then(postData => {
-                                if (postData.posted) {
-                                    console.log('✅ Today\'s matches posted to feed')
-                                } else if (postData.alreadyExists) {
-                                    showToast('Info', 'Today\'s matches already posted', 'info')
+                    // Step 1: Post immediately with whatever matches are available
+                    setTimeout(() => {
+                        fetch(`${baseUrl}/api/football/post/manual`, {
+                            method: 'POST',
+                            credentials: 'include'
+                        })
+                        .then(res => res.json())
+                        .then(postData => {
+                            console.log('📬 Post result:', postData)
+                            if (postData.posted) {
+                                if (postData.noMatches) {
+                                    // No matches available, start fetching in background
+                                    console.log('⚽ No matches found, fetching from API...')
+                                    showToast('Info', 'Fetching latest matches...', 'info')
+                                    
+                                    fetch(`${baseUrl}/api/football/fetch/manual`, {
+                                        method: 'POST',
+                                        credentials: 'include'
+                                    })
+                                    .then(() => {
+                                        showToast('Success', 'Matches loaded! Check Football page', 'success')
+                                    })
+                                    .catch(err => console.log('Background fetch error:', err))
                                 }
-                            })
-                            .catch(err => console.log('Post error:', err))
-                        }, 1000) // 1 second delay
-                    })
-                    .catch(err => {
-                        console.log('Fetch error:', err)
-                        showToast('Warning', 'Could not fetch matches. Posting what\'s available...', 'warning')
-                        
-                        // Try to post anyway (might have matches from before)
-                        setTimeout(() => {
-                            fetch(`${baseUrl}/api/football/post/manual`, {
-                                method: 'POST',
-                                credentials: 'include'
-                            }).catch(err => console.log('Post error:', err))
-                        }, 500)
-                    })
+                            } else if (postData.alreadyExists) {
+                                console.log('ℹ️ Post already exists for today')
+                            }
+                        })
+                        .catch(err => {
+                            console.error('Post error:', err)
+                            showToast('Error', 'Could not create post', 'error')
+                        })
+                    }, 500) // 500ms delay to ensure follow is saved
                 }
                 
                 showToast(

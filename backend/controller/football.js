@@ -672,79 +672,100 @@ export const manualFetchFixtures = async (req, res) => {
 export const manualPostTodayMatches = async (req, res) => {
     try {
         console.log('⚽ [manualPostTodayMatches] Manual post trigger received')
+        console.log('⚽ [manualPostTodayMatches] User:', req.user ? req.user.username : 'Not authenticated')
         
         // Get Football system account
         const footballAccount = await getFootballAccount()
         if (!footballAccount) {
+            console.error('❌ [manualPostTodayMatches] Football account not found!')
             return res.status(404).json({ error: 'Football account not found' })
         }
         
-        // PREVENT DUPLICATES: Check if we already posted "Today's Top Matches" today
-        const today = new Date()
-        today.setHours(0, 0, 0, 0) // Start of today
-        const tomorrow = new Date(today)
-        tomorrow.setDate(tomorrow.getDate() + 1) // Start of tomorrow
+        console.log('✅ [manualPostTodayMatches] Football account found:', footballAccount._id)
+        console.log('✅ [manualPostTodayMatches] Followers count:', footballAccount.followers?.length || 0)
         
-        const existingPost = await Post.findOne({
-            postedBy: footballAccount._id,
-            text: { $regex: /Today's Top Matches/i },
-            footballData: { $exists: true, $ne: null, $ne: "" }, // Only check new format posts
-            createdAt: { $gte: today, $lt: tomorrow }
-        })
+        // TODO: Add back duplicate prevention after testing
+        // For now, allow creating posts to debug the issue
+        console.log('✅ [manualPostTodayMatches] Creating post...')
         
-        if (existingPost) {
-            console.log('⚽ [manualPostTodayMatches] Post already exists for today, skipping...')
-            return res.status(200).json({ 
-                message: 'Post already exists for today',
-                postId: existingPost._id,
-                posted: false,
-                alreadyExists: true
-            })
-        }
+        // Get today's matches: LIVE + Upcoming (from start of today to +24 hours)
+        const todayStart = new Date()
+        todayStart.setHours(0, 0, 0, 0) // Start of today
         
-        // Get today's upcoming matches (next 24 hours)
         const now = new Date()
         const later = new Date(now.getTime() + (24 * 60 * 60 * 1000)) // 24 hours from now
         
+        console.log('⚽ [manualPostTodayMatches] Searching for matches from:', todayStart, 'to:', later)
+        
+        // Search for BOTH live and upcoming matches
         const matches = await Match.find({
-            'fixture.date': { $gte: now, $lte: later },
-            'fixture.status.short': { $in: ['NS', 'SCHEDULED', 'TIMED'] }
+            'fixture.date': { $gte: todayStart, $lte: later }, // From start of today
+            'fixture.status.short': { 
+                $in: [
+                    'NS', 'SCHEDULED', 'TIMED',  // Upcoming
+                    '1H', '2H', 'HT', 'LIVE', 'ET', 'P', 'BT'  // Live (BT = Break Time)
+                ] 
+            }
         })
-        .sort({ 'fixture.date': 1 })
+        .sort({ 'fixture.status.short': -1, 'fixture.date': 1 }) // Live first, then by date
         .limit(5)
+        
+        console.log('⚽ [manualPostTodayMatches] Found matches:', matches.length)
+        
+        // Log match details for debugging
+        matches.forEach((match, i) => {
+            console.log(`  ${i+1}. ${match.teams?.home?.name} vs ${match.teams?.away?.name} - Status: ${match.fixture?.status?.short}`)
+        })
         
         if (matches.length === 0) {
             // No matches found - create a post saying so
             const noMatchesPost = new Post({
                 postedBy: footballAccount._id,
-                text: `⚽ Football Live\n\nNo upcoming matches in the next 24 hours.\n\n📅 Check back later for live updates!`
+                text: `⚽ Football Live\n\nNo live or upcoming matches in the next 24 hours.\n\n📅 Check back later for live updates!`
             })
             
             await noMatchesPost.save()
             await noMatchesPost.populate("postedBy", "username profilePic name")
             
-            // Emit to followers
-            const freshFootballAccount = await User.findById(footballAccount._id).select('followers')
-            const io = getIO()
+            console.log('✅ [manualPostTodayMatches] Created "no matches" post:', noMatchesPost._id)
             
-            if (io && freshFootballAccount && freshFootballAccount.followers && freshFootballAccount.followers.length > 0) {
-                const userSocketMap = getUserSocketMap()
-                const onlineFollowers = []
+            // Emit to followers
+            try {
+                const freshFootballAccount = await User.findById(footballAccount._id).select('followers')
+                const io = getIO()
                 
-                freshFootballAccount.followers.forEach(followerId => {
-                    const followerIdStr = followerId.toString()
-                    if (userSocketMap[followerIdStr]) {
-                        onlineFollowers.push(userSocketMap[followerIdStr].socketId)
+                console.log('⚽ [manualPostTodayMatches] Socket IO available:', !!io)
+                console.log('⚽ [manualPostTodayMatches] Fresh followers count:', freshFootballAccount?.followers?.length || 0)
+                
+                if (io && freshFootballAccount && freshFootballAccount.followers && freshFootballAccount.followers.length > 0) {
+                    const userSocketMap = getUserSocketMap()
+                    const onlineFollowers = []
+                    
+                    freshFootballAccount.followers.forEach(followerId => {
+                        const followerIdStr = followerId.toString()
+                        if (userSocketMap[followerIdStr]) {
+                            onlineFollowers.push(userSocketMap[followerIdStr].socketId)
+                        }
+                    })
+                    
+                    console.log('⚽ [manualPostTodayMatches] Online followers:', onlineFollowers.length)
+                    
+                    if (onlineFollowers.length > 0) {
+                        io.to(onlineFollowers).emit("newPost", noMatchesPost)
+                        console.log('✅ [manualPostTodayMatches] Emitted to followers')
+                    } else {
+                        console.log('⚠️ [manualPostTodayMatches] No online followers to emit to')
                     }
-                })
-                
-                if (onlineFollowers.length > 0) {
-                    io.to(onlineFollowers).emit("newPost", noMatchesPost)
+                } else {
+                    console.log('⚠️ [manualPostTodayMatches] Socket IO or followers not available')
                 }
+            } catch (emitError) {
+                console.error('❌ [manualPostTodayMatches] Socket emit error:', emitError)
+                // Continue anyway - post was created
             }
             
             return res.status(200).json({ 
-                message: 'No upcoming matches in the next 24 hours',
+                message: 'No live or upcoming matches in the next 24 hours',
                 postId: noMatchesPost._id,
                 posted: true,
                 noMatches: true
@@ -783,26 +804,42 @@ export const manualPostTodayMatches = async (req, res) => {
         await newPost.save()
         await newPost.populate("postedBy", "username profilePic name")
         
+        console.log('✅ [manualPostTodayMatches] Created post with matches:', newPost._id)
+        
         // Emit to followers (only online ones)
         // IMPORTANT: Fetch fresh account data to get updated followers list
-        const freshFootballAccount = await User.findById(footballAccount._id).select('followers')
-        const io = getIO()
-        
-        if (io && freshFootballAccount && freshFootballAccount.followers && freshFootballAccount.followers.length > 0) {
-            const userSocketMap = getUserSocketMap()
-            const onlineFollowers = []
+        try {
+            const freshFootballAccount = await User.findById(footballAccount._id).select('followers')
+            const io = getIO()
             
-            freshFootballAccount.followers.forEach(followerId => {
-                const followerIdStr = followerId.toString()
-                if (userSocketMap[followerIdStr]) {
-                    onlineFollowers.push(userSocketMap[followerIdStr].socketId)
+            console.log('⚽ [manualPostTodayMatches] Socket IO available:', !!io)
+            console.log('⚽ [manualPostTodayMatches] Fresh followers count:', freshFootballAccount?.followers?.length || 0)
+            
+            if (io && freshFootballAccount && freshFootballAccount.followers && freshFootballAccount.followers.length > 0) {
+                const userSocketMap = getUserSocketMap()
+                const onlineFollowers = []
+                
+                freshFootballAccount.followers.forEach(followerId => {
+                    const followerIdStr = followerId.toString()
+                    if (userSocketMap[followerIdStr]) {
+                        onlineFollowers.push(userSocketMap[followerIdStr].socketId)
+                    }
+                })
+                
+                console.log('⚽ [manualPostTodayMatches] Online followers:', onlineFollowers.length)
+                
+                if (onlineFollowers.length > 0) {
+                    io.to(onlineFollowers).emit("newPost", newPost)
+                    console.log(`✅ [manualPostTodayMatches] Emitted to ${onlineFollowers.length} online followers`)
+                } else {
+                    console.log('⚠️ [manualPostTodayMatches] No online followers to emit to')
                 }
-            })
-            
-            if (onlineFollowers.length > 0) {
-                io.to(onlineFollowers).emit("newPost", newPost)
-                console.log(`⚽ [manualPostTodayMatches] Emitted to ${onlineFollowers.length} online followers`)
+            } else {
+                console.log('⚠️ [manualPostTodayMatches] Socket IO or followers not available')
             }
+        } catch (emitError) {
+            console.error('❌ [manualPostTodayMatches] Socket emit error:', emitError)
+            // Continue anyway - post was created
         }
         
         console.log(`✅ [manualPostTodayMatches] Posted ${matches.length} matches to feed`)
