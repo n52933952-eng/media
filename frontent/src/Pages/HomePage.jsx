@@ -196,7 +196,7 @@ const HomePage = () => {
         maxW={{ base: '0', lg: '22%' }}
         minW={{ lg: '220px' }}
       >
-        <SuggestedChannels />
+        <SuggestedChannels onUserFollowed={fetchUserPosts} />
       </Box>
 
       {/* Main Feed - Center */}

@@ -4,7 +4,7 @@ import { Link as RouterLink } from 'react-router-dom'
 import { UserContext } from '../context/UserContext'
 import useShowToast from '../hooks/useShowToast'
 
-const SuggestedChannels = () => {
+const SuggestedChannels = ({ onUserFollowed }) => {
     const { user, setUser } = useContext(UserContext)
     const [footballAccount, setFootballAccount] = useState(null)
     const [loading, setLoading] = useState(true)
@@ -72,7 +72,12 @@ const SuggestedChannels = () => {
                 // Update user context with new following list
                 if (data.current) {
                     setUser(data.current)
-                    localStorage.setItem('user-threads', JSON.stringify(data.current))
+                    localStorage.setItem('userInfo', JSON.stringify(data.current))
+                }
+                
+                // If following (not unfollowing), fetch Football channel's posts immediately
+                if (!isFollowing && onUserFollowed && footballAccount?._id) {
+                    onUserFollowed(footballAccount._id)
                 }
                 
                 showToast(
