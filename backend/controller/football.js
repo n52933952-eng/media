@@ -21,8 +21,10 @@ const SUPPORTED_LEAGUES = [
     { code: 'CL', name: 'UEFA Champions League', country: 'Europe' },
     { code: 'EC', name: 'UEFA European Championship', country: 'Europe' },
     
-    // International
-    { code: 'WC', name: 'FIFA World Cup', country: 'World' }
+    // International Tournaments
+    { code: 'WC', name: 'FIFA World Cup', country: 'World' },
+    { code: 'AFCON', name: 'Africa Cup of Nations', country: 'Africa' }, // Added Africa Cup
+    { code: 'COPA', name: 'Copa America', country: 'South America' } // Bonus: Copa America
 ]
 
 // Helper: Fetch from Football-Data.org API
