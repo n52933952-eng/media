@@ -93,11 +93,12 @@ const SuggestedUsers = () => {
 
   // Refresh suggestions when user follows/unfollows (triggered by SuggestedUser component)
   useEffect(() => {
-    if (user?._id) {
-      // Small delay to ensure backend has updated
+    if (user?._id && user?.following !== undefined) {
+      // Longer delay to ensure backend database has been updated
       const timer = setTimeout(() => {
+        console.log(`🔄 Refreshing suggestions after follow change. Current following count: ${user.following?.length || 0}`)
         fetchSuggestedUsers()
-      }, 500) // Reduced delay - backend should be fast
+      }, 1500) // Increased delay to ensure database has processed the follow
       return () => clearTimeout(timer)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

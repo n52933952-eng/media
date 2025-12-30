@@ -48,22 +48,25 @@ const SuggestedUser = ({ user, onFollowed }) => {
       // Update local state
       setFollowing(!following)
       
-      // Update current user's following list
-      if (setUser) {
+      // Update current user's following list and localStorage
+      // Backend returns { action: "follow"/"unfollow", current: updatedUser, target: targetUser }
+      if (setUser && data.current) {
+        // Use the updated user from backend response (most reliable)
+        console.log('✅ Updating user context from backend response')
+        setUser(data.current)
+        localStorage.setItem("userInfo", JSON.stringify(data.current))
+      } else if (setUser) {
+        // Fallback: update manually if backend didn't return updated user
+        console.log('⚠️ Backend didn\'t return updated user, updating manually')
         setUser(prev => {
-          if (following) {
-            // Unfollow: remove from following
-            return {
-              ...prev,
-              following: prev.following.filter(id => id !== user._id)
-            }
-          } else {
-            // Follow: add to following
-            return {
-              ...prev,
-              following: [...prev.following, user._id]
-            }
+          const updated = {
+            ...prev,
+            following: following 
+              ? prev.following.filter(id => id.toString() !== user._id.toString())
+              : [...prev.following, user._id]
           }
+          localStorage.setItem("userInfo", JSON.stringify(updated))
+          return updated
         })
       }
 

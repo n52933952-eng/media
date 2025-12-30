@@ -353,15 +353,28 @@ export const getSuggestedUsers = async(req, res) => {
         }
         
         console.log(`👤 Current user: ${currentUser._id}, following: ${currentUser.following.length} users`)
+        if (currentUser.following.length > 0) {
+            console.log(`   Following IDs:`, currentUser.following.map(id => id.toString()))
+        }
 
         const suggestedUsers = []
         // Convert to ObjectIds for MongoDB query
         const excludeIds = [new mongoose.Types.ObjectId(userId)] // Exclude current user
         if (currentUser.following && currentUser.following.length > 0) {
             currentUser.following.forEach(id => {
-                excludeIds.push(new mongoose.Types.ObjectId(id))
+                try {
+                    // Handle both string and ObjectId formats
+                    const objectId = id instanceof mongoose.Types.ObjectId 
+                        ? id 
+                        : new mongoose.Types.ObjectId(id.toString())
+                    excludeIds.push(objectId)
+                } catch (error) {
+                    console.error(`⚠️ Error converting ID to ObjectId: ${id}`, error)
+                }
             })
         }
+        
+        console.log(`🚫 Total exclude IDs: ${excludeIds.length}`, excludeIds.map(id => id.toString()))
 
         // STEP 1: Get 7 users from same country (if country is set)
         if (currentUser.country && currentUser.country.trim() !== "") {
@@ -370,6 +383,7 @@ export const getSuggestedUsers = async(req, res) => {
             console.log(`🚫 Excluding ${excludeIds.length} users (current user + following)`)
             
             // Case-insensitive search for country - also check for empty/null countries
+            // Use both ObjectId and string comparison to handle any ID format issues
             const countryUsers = await User.find({
                 $and: [
                     { country: { $exists: true, $ne: null, $ne: "" } }, // Country exists and is not empty
@@ -379,6 +393,17 @@ export const getSuggestedUsers = async(req, res) => {
             })
             .select('username name profilePic country followers')
             .limit(20) // Get more to randomize from
+            
+            // Additional safety filter: Remove any users that are in the following list (handles edge cases)
+            const followingIdsStrings = currentUser.following.map(id => id.toString())
+            const filteredCountryUsers = countryUsers.filter(user => {
+                const userIdStr = user._id.toString()
+                return !followingIdsStrings.includes(userIdStr)
+            })
+            
+            if (filteredCountryUsers.length !== countryUsers.length) {
+                console.log(`⚠️ Filtered out ${countryUsers.length - filteredCountryUsers.length} followed users that slipped through query`)
+            }
             
             console.log(`📍 Found ${countryUsers.length} total users from country "${userCountry}"`)
             
@@ -409,8 +434,8 @@ export const getSuggestedUsers = async(req, res) => {
                 console.log(`✅ Found users:`, countryUsers.map(u => u.username))
             }
             
-            // Randomize and take 7
-            const shuffled = countryUsers.sort(() => 0.5 - Math.random())
+            // Randomize and take 7 (use filtered list)
+            const shuffled = filteredCountryUsers.sort(() => 0.5 - Math.random())
             const countrySuggestions = shuffled.slice(0, 7)
             suggestedUsers.push(...countrySuggestions)
             
@@ -434,13 +459,19 @@ export const getSuggestedUsers = async(req, res) => {
             })
             .select('followers')
             
+            const followingIdsStrings = currentUser.following.map(id => id.toString())
+            
             for (const followedUser of followedUsers) {
                 if (followedUser.followers && followedUser.followers.length > 0) {
                     // Filter out users we already have or are following (convert to ObjectIds for comparison)
                     const excludeIdsStrings = excludeIds.map(id => id.toString())
-                    const availableFollowers = followedUser.followers.filter(
-                        followerId => !excludeIdsStrings.includes(followerId.toString())
-                    )
+                    const availableFollowers = followedUser.followers.filter(followerId => {
+                        const followerIdStr = followerId.toString()
+                        // Exclude if already in suggestions, already following, or is current user
+                        return !excludeIdsStrings.includes(followerIdStr) && 
+                               !followingIdsStrings.includes(followerIdStr) &&
+                               followerIdStr !== userId.toString()
+                    })
                     
                     if (availableFollowers.length > 0) {
                         // Pick 1 random follower
@@ -452,9 +483,13 @@ export const getSuggestedUsers = async(req, res) => {
                             .select('username name profilePic country followers')
                         
                         if (followerUser) {
-                            suggestedUsers.push(followerUser)
-                            excludeIds.push(new mongoose.Types.ObjectId(followerUser._id))
-                            console.log(`👥 Suggested 1 user from ${followedUser._id}'s followers`)
+                            // Double-check: ensure not in following list
+                            const followerUserIdStr = followerUser._id.toString()
+                            if (!followingIdsStrings.includes(followerUserIdStr)) {
+                                suggestedUsers.push(followerUser)
+                                excludeIds.push(new mongoose.Types.ObjectId(followerUser._id))
+                                console.log(`👥 Suggested 1 user from ${followedUser._id}'s followers`)
+                            }
                         }
                     }
                 }
