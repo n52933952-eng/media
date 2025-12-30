@@ -81,9 +81,9 @@ const SuggestedChannels = ({ onUserFollowed }) => {
                     
                     // Step 1: Post immediately with whatever matches are available
                     setTimeout(() => {
-                        fetch(`${baseUrl}/api/football/post/manual`, {
-                            method: 'POST',
-                            credentials: 'include'
+                    fetch(`${baseUrl}/api/football/post/manual`, {
+                        method: 'POST',
+                        credentials: 'include'
                         })
                         .then(res => res.json())
                         .then(postData => {
@@ -207,6 +207,41 @@ const SuggestedChannels = ({ onUserFollowed }) => {
                             Follow to see live match updates in your feed
                         </Text>
                     )}
+                    
+                    {/* Al Jazeera News Channel */}
+                    <Flex
+                        align="center"
+                        justify="space-between"
+                        p={3}
+                        borderRadius="md"
+                        border="1px solid"
+                        borderColor={borderColor}
+                        _hover={{ bg: hoverBg }}
+                        transition="all 0.2s"
+                        mt={3}
+                    >
+                        <RouterLink to="/news" style={{ flexGrow: 1 }}>
+                            <Flex align="center" gap={3}>
+                                <Avatar 
+                                    src="https://upload.wikimedia.org/wikipedia/en/thumb/f/f1/Al_Jazeera_English_logo.svg/1200px-Al_Jazeera_English_logo.svg.png"
+                                    size="md"
+                                    bg="white"
+                                    p={1}
+                                />
+                                <VStack align="start" spacing={0} flex={1}>
+                                    <Flex align="center" gap={1}>
+                                        <Text fontSize="sm" fontWeight="semibold" color={textColor}>
+                                            Al Jazeera
+                                        </Text>
+                                        <Text fontSize="lg">📰</Text>
+                                    </Flex>
+                                    <Text fontSize="xs" color={secondaryTextColor} noOfLines={1}>
+                                        Latest news & updates
+                                    </Text>
+                                </VStack>
+                            </Flex>
+                        </RouterLink>
+                    </Flex>
                 </VStack>
             ) : (
                 <Text fontSize="sm" color={secondaryTextColor} textAlign="center">
