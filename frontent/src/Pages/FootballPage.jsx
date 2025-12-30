@@ -350,30 +350,38 @@ const FootballPage = () => {
                 </Text>
             )}
             
-            {/* Goal Events */}
-            {match.events && match.events.length > 0 && (
-                <VStack spacing={1.5} mt={3} pt={3} borderTop="1px solid" borderColor={borderColor} align="stretch">
-                    <Text fontSize="xs" fontWeight="bold" color={secondaryTextColor} mb={1}>
-                        ⚽ Goals
-                    </Text>
-                    {match.events
-                        .filter(event => event.type === 'Goal')
-                        .map((event, idx) => (
-                            <Flex key={idx} align="center" justify="space-between" fontSize="sm">
-                                <HStack spacing={2}>
-                                    <Text fontWeight="bold" color="green.400" minW="30px">
-                                        {event.time?.elapsed || event.time}'
+            {/* Goal Events - Styled like Google */}
+            {match.events && match.events.filter(e => e.type === 'Goal').length > 0 && (
+                <Box mt={3} pt={3} borderTop="1px solid" borderColor={borderColor}>
+                    <Grid templateColumns="1fr auto 1fr" gap={3} fontSize="sm">
+                        {/* Home Team Goals */}
+                        <GridItem textAlign="right">
+                            {match.events
+                                .filter(event => event.type === 'Goal' && (event.team?.name || event.team) === match.teams?.home?.name)
+                                .map((event, idx) => (
+                                    <Text key={idx} color={textColor} mb={1.5}>
+                                        {event.player?.name || event.player} {event.time?.elapsed || event.time}'{event.detail?.includes('Penalty') ? ' (P)' : ''}
                                     </Text>
-                                    <Text color={textColor}>
-                                        {event.player?.name || event.player}
+                                ))}
+                        </GridItem>
+                        
+                        {/* Goal Icon Center */}
+                        <GridItem display="flex" alignItems="flex-start" justifyContent="center" pt={0.5}>
+                            <Text color={secondaryTextColor} fontSize="lg">⚽</Text>
+                        </GridItem>
+                        
+                        {/* Away Team Goals */}
+                        <GridItem textAlign="left">
+                            {match.events
+                                .filter(event => event.type === 'Goal' && (event.team?.name || event.team) === match.teams?.away?.name)
+                                .map((event, idx) => (
+                                    <Text key={idx} color={textColor} mb={1.5}>
+                                        {event.player?.name || event.player} {event.time?.elapsed || event.time}'{event.detail?.includes('Penalty') ? ' (P)' : ''}
                                     </Text>
-                                </HStack>
-                                <Text fontSize="xs" color={secondaryTextColor}>
-                                    {event.team?.name || event.team}
-                                </Text>
-                            </Flex>
-                        ))}
-                </VStack>
+                                ))}
+                        </GridItem>
+                    </Grid>
+                </Box>
             )}
         </Box>
     )

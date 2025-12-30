@@ -1,6 +1,6 @@
 import React,{useEffect,useState,useContext, memo} from 'react'
 import{Link} from 'react-router-dom'
-import{Flex,Avatar,Box,Text,Image,Button, VStack, HStack, useColorModeValue} from '@chakra-ui/react'
+import{Flex,Avatar,Box,Text,Image,Button, VStack, HStack, Grid, GridItem, useColorModeValue} from '@chakra-ui/react'
 import { HiOutlineDotsHorizontal } from "react-icons/hi";
 import Actions from '../Components/Actions'
 import useShowToast from '../hooks/useShowToast.js'
@@ -245,20 +245,38 @@ const showToast = useShowToast()
               </Flex>
             </Flex>
             
-            {/* Goal Events */}
+            {/* Goal Events - Grouped by Team */}
             {goalEvents.length > 0 && (
-              <VStack spacing={1} mt={2} pt={2} borderTop="1px solid" borderColor={borderColor} align="stretch">
-                {goalEvents.map((event, idx) => (
-                  <Flex key={idx} align="center" fontSize="xs" color={secondaryTextColor}>
-                    <Text fontWeight="bold" minW="30px">
-                      ⚽ {event.time}'
-                    </Text>
-                    <Text ml={2} noOfLines={1}>
-                      {event.player} ({event.team})
-                    </Text>
-                  </Flex>
-                ))}
-              </VStack>
+              <Box mt={3} pt={3} borderTop="1px solid" borderColor={borderColor}>
+                <Grid templateColumns="1fr auto 1fr" gap={2} fontSize="xs">
+                  {/* Home Team Goals */}
+                  <GridItem textAlign="right">
+                    {goalEvents
+                      .filter(e => e.team === match.homeTeam?.name)
+                      .map((event, idx) => (
+                        <Text key={idx} color={textColor} mb={1}>
+                          {event.player} {event.time}'{event.detail?.includes('Penalty') ? ' (P)' : ''}
+                        </Text>
+                      ))}
+                  </GridItem>
+                  
+                  {/* Goal Icon Center */}
+                  <GridItem display="flex" alignItems="flex-start" justifyContent="center">
+                    <Text color={secondaryTextColor}>⚽</Text>
+                  </GridItem>
+                  
+                  {/* Away Team Goals */}
+                  <GridItem textAlign="left">
+                    {goalEvents
+                      .filter(e => e.team === match.awayTeam?.name)
+                      .map((event, idx) => (
+                        <Text key={idx} color={textColor} mb={1}>
+                          {event.player} {event.time}'{event.detail?.includes('Penalty') ? ' (P)' : ''}
+                        </Text>
+                      ))}
+                  </GridItem>
+                </Grid>
+              </Box>
             )}
           </Box>
         )
