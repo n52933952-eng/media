@@ -5,7 +5,7 @@ import Post from '../Components/Post'
 import {PostContext} from '../context/PostContext'
 import {SocketContext} from '../context/SocketContext'
 import SuggestedUsers from '../Components/SuggestedUsers'
-import FootballWidget from '../Components/FootballWidget'
+import SuggestedChannels from '../Components/SuggestedChannels'
 
 
 
@@ -189,14 +189,14 @@ const HomePage = () => {
 
   return (
     <Flex gap={6} alignItems="flex-start">
-      {/* Football Widget - Left Side */}
+      {/* Suggested Channels - Left Side */}
       <Box 
         flex={{ base: '0', lg: '0 0 22%' }} 
         display={{ base: 'none', lg: 'block' }}
         maxW={{ base: '0', lg: '22%' }}
         minW={{ lg: '220px' }}
       >
-        <FootballWidget />
+        <SuggestedChannels />
       </Box>
 
       {/* Main Feed - Center */}
