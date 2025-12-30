@@ -75,17 +75,17 @@ const FootballPage = () => {
                 
                 const baseUrl = import.meta.env.PROD ? window.location.origin : "http://localhost:5000"
                 
-                // Fetch live matches
-                console.log('⚽ [FootballPage] Fetching live matches...')
+                // Fetch live matches (today - includes IN_PLAY, PAUSED status)
+                console.log('⚽ [FootballPage] Fetching live matches (today)...')
+                const today = new Date().toISOString().split('T')[0]
                 const liveRes = await fetch(
-                    `${baseUrl}/api/football/matches?status=live`,
+                    `${baseUrl}/api/football/matches?status=live&date=${today}`,
                     { credentials: 'include' }
                 )
                 const liveData = await liveRes.json()
                 console.log('⚽ [FootballPage] Live matches response:', { status: liveRes.status, ok: liveRes.ok, data: liveData })
                 
                 // Fetch upcoming matches (today)
-                const today = new Date().toISOString().split('T')[0]
                 console.log('⚽ [FootballPage] Fetching upcoming matches for date:', today)
                 const upcomingRes = await fetch(
                     `${baseUrl}/api/football/matches?status=upcoming&date=${today}`,
@@ -94,10 +94,10 @@ const FootballPage = () => {
                 const upcomingData = await upcomingRes.json()
                 console.log('⚽ [FootballPage] Upcoming matches response:', { status: upcomingRes.status, ok: upcomingRes.ok, data: upcomingData })
                 
-                // Fetch finished matches (today)
-                console.log('⚽ [FootballPage] Fetching finished matches for date:', today)
+                // Fetch finished matches (last 3 days - no date filter, backend handles it)
+                console.log('⚽ [FootballPage] Fetching finished matches (last 3 days)')
                 const finishedRes = await fetch(
-                    `${baseUrl}/api/football/matches?status=finished&date=${today}`,
+                    `${baseUrl}/api/football/matches?status=finished`,
                     { credentials: 'include' }
                 )
                 const finishedData = await finishedRes.json()

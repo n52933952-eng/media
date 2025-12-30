@@ -312,14 +312,32 @@ export const getMatches = async (req, res) => {
         // Filter by date
         if (date) {
             const startDate = new Date(date)
-            const endDate = new Date(date)
-            endDate.setDate(endDate.getDate() + 1)
+            let endDate = new Date(date)
+            
+            // For finished matches, look at past 3 days too
+            if (status === 'finished') {
+                startDate.setDate(startDate.getDate() - 3)
+                endDate.setDate(endDate.getDate() + 1)
+            } else {
+                endDate.setDate(endDate.getDate() + 1)
+            }
             
             query['fixture.date'] = {
                 $gte: startDate,
                 $lt: endDate
             }
-            console.log('⚽ [getMatches] Filtering by date:', { date, startDate, endDate })
+            console.log('⚽ [getMatches] Filtering by date:', { date, startDate, endDate, status })
+        } else if (status === 'finished') {
+            // If no date specified but looking for finished, get last 3 days
+            const endDate = new Date()
+            const startDate = new Date()
+            startDate.setDate(startDate.getDate() - 3)
+            
+            query['fixture.date'] = {
+                $gte: startDate,
+                $lt: endDate
+            }
+            console.log('⚽ [getMatches] No date specified, fetching finished matches from last 3 days')
         }
         
         // Filter by league
@@ -542,12 +560,20 @@ export const manualFetchFixtures = async (req, res) => {
         const today = new Date()
         const todayStr = today.toISOString().split('T')[0]
         
-        // Fetch for next 7 days to get more matches
+        // Fetch for past 3 days (for finished matches) and next 7 days (for upcoming)
+        const startDate = new Date(today)
+        startDate.setDate(startDate.getDate() - 3) // 3 days ago
+        const startDateStr = startDate.toISOString().split('T')[0]
+        
         const endDate = new Date(today)
-        endDate.setDate(endDate.getDate() + 7)
+        endDate.setDate(endDate.getDate() + 7) // 7 days ahead
         const endDateStr = endDate.toISOString().split('T')[0]
         
-        console.log('⚽ [manualFetchFixtures] Fetching fixtures from', todayStr, 'to', endDateStr)
+        console.log('⚽ [manualFetchFixtures] Fetching fixtures from', startDateStr, 'to', endDateStr)
+        console.log('⚽ [manualFetchFixtures] This will include:')
+        console.log('   - Past 3 days (finished matches)')
+        console.log('   - Today (live/upcoming/finished)')
+        console.log('   - Next 7 days (upcoming matches)')
         console.log('⚽ [manualFetchFixtures] Total leagues to fetch:', SUPPORTED_LEAGUES.length)
         
         let totalFetched = 0
@@ -559,8 +585,8 @@ export const manualFetchFixtures = async (req, res) => {
             leagueIndex++
             console.log(`⚽ [manualFetchFixtures] [${leagueIndex}/${SUPPORTED_LEAGUES.length}] Fetching ${league.name} (${league.code})...`)
             
-            // Football-Data.org endpoint: fetch matches for next 7 days
-            const endpoint = `/competitions/${league.code}/matches?dateFrom=${todayStr}&dateTo=${endDateStr}`
+            // Football-Data.org endpoint: fetch matches for date range (past 3 days + next 7 days)
+            const endpoint = `/competitions/${league.code}/matches?dateFrom=${startDateStr}&dateTo=${endDateStr}`
             const result = await fetchFromAPI(endpoint)
             
             if (result.success && result.data && result.data.length > 0) {
