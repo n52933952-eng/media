@@ -22,8 +22,8 @@ router.get('/articles', getNews)
 // Manual trigger to fetch news (for testing)
 router.post('/fetch/manual', manualFetchNews)
 
-// Create live stream post (when user follows Al Jazeera)
-router.post('/post/livestream', createLiveStreamPost)
+// Create live stream post (when user follows Al Jazeera) - requires auth
+router.post('/post/livestream', protectRoute, createLiveStreamPost)
 
 export default router
 

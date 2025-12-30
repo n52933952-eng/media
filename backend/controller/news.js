@@ -1,39 +1,50 @@
 import NewsArticle from '../models/news.js'
-import Parser from 'rss-parser'
 
-// RSS Feed URLs (100% Free, No API Key Required!)
-const RSS_FEEDS = {
-    aljazeera: 'https://www.aljazeera.com/xml/rss/all.xml',
-    aljazeeraWorld: 'https://www.aljazeera.com/xml/rss/world.xml',
-    aljazeeraSports: 'https://www.aljazeera.com/xml/rss/sports.xml'
-}
+// RSS Feed URL (100% Free, No API Key Required!)
+const RSS_FEED_URL = 'https://www.aljazeera.com/xml/rss/all.xml'
 
-const rssParser = new Parser()
-
-// Helper: Fetch from RSS Feed
+// Helper: Fetch and parse RSS manually (no extra packages needed)
 const fetchFromRSS = async (feedUrl) => {
     try {
         console.log('📰 [fetchFromRSS] Fetching:', feedUrl)
         
-        const feed = await rssParser.parseURL(feedUrl)
+        const response = await fetch(feedUrl)
+        const xmlText = await response.text()
         
-        console.log('📰 [fetchFromRSS] Success! Found', feed.items?.length || 0, 'articles')
+        console.log('📰 [fetchFromRSS] Got XML response, length:', xmlText.length)
         
-        // Convert RSS items to our article format
-        const articles = feed.items.map(item => ({
-            title: item.title,
-            description: item.contentSnippet || item.description,
-            url: item.link,
-            urlToImage: item.enclosure?.url || item['media:thumbnail']?.url || null,
-            publishedAt: item.pubDate || item.isoDate,
-            content: item.content,
-            source: {
-                id: 'al-jazeera',
-                name: 'Al Jazeera'
-            },
-            author: item.creator || 'Al Jazeera'
-        }))
+        // Simple XML parsing (no packages needed!)
+        const articles = []
+        const itemMatches = xmlText.match(/<item>[\s\S]*?<\/item>/g) || []
         
+        console.log('📰 [fetchFromRSS] Found', itemMatches.length, 'items')
+        
+        for (const item of itemMatches.slice(0, 20)) {
+            const title = item.match(/<title><!\[CDATA\[(.*?)\]\]><\/title>/)?.[1] || 
+                         item.match(/<title>(.*?)<\/title>/)?.[1] || ''
+            const link = item.match(/<link>(.*?)<\/link>/)?.[1] || ''
+            const description = item.match(/<description><!\[CDATA\[(.*?)\]\]><\/description>/)?.[1] ||
+                              item.match(/<description>(.*?)<\/description>/)?.[1] || ''
+            const pubDate = item.match(/<pubDate>(.*?)<\/pubDate>/)?.[1] || new Date().toISOString()
+            
+            if (title && link) {
+                articles.push({
+                    title: title.trim(),
+                    description: description.trim(),
+                    url: link.trim(),
+                    urlToImage: null, // Al Jazeera RSS doesn't include images
+                    publishedAt: pubDate,
+                    content: description.trim(),
+                    source: {
+                        id: 'al-jazeera',
+                        name: 'Al Jazeera'
+                    },
+                    author: 'Al Jazeera'
+                })
+            }
+        }
+        
+        console.log('📰 [fetchFromRSS] Parsed', articles.length, 'articles')
         return { success: true, data: articles }
         
     } catch (error) {
@@ -48,7 +59,7 @@ export const fetchAlJazeeraNews = async (req, res) => {
         console.log('📰 [fetchAlJazeeraNews] Fetching latest news from RSS...')
         
         // Fetch from Al Jazeera RSS Feed (100% Free!)
-        const result = await fetchFromRSS(RSS_FEEDS.aljazeera)
+        const result = await fetchFromRSS(RSS_FEED_URL)
         
         if (!result.success) {
             return res.status(500).json({ error: result.error })
@@ -134,7 +145,7 @@ export const manualFetchNews = async (req, res) => {
         console.log('📰 [manualFetchNews] Manual fetch triggered')
         
         // Fetch from RSS Feed (100% Free, No API Key!)
-        const result = await fetchFromRSS(RSS_FEEDS.aljazeera)
+        const result = await fetchFromRSS(RSS_FEED_URL)
         
         if (!result.success) {
             return res.status(500).json({ error: result.error })
@@ -186,14 +197,16 @@ export const createLiveStreamPost = async (req, res) => {
     try {
         console.log('📰 [createLiveStreamPost] Creating Al Jazeera live stream post...')
         
-        // Import Post and User models
+        // Import models
         const User = (await import('../models/user.js')).default
         const Post = (await import('../models/post.js')).default
+        const { getIO, getUserSocketMap } = await import('../socket/socket.js')
         
         // Find or create Al Jazeera account
         let alJazeeraAccount = await User.findOne({ username: 'AlJazeera' })
         
         if (!alJazeeraAccount) {
+            console.log('📰 Creating Al Jazeera account...')
             alJazeeraAccount = new User({
                 name: 'Al Jazeera English',
                 username: 'AlJazeera',
@@ -203,6 +216,7 @@ export const createLiveStreamPost = async (req, res) => {
                 bio: '🔴 Live news stream 24/7'
             })
             await alJazeeraAccount.save()
+            console.log('✅ Al Jazeera account created')
         }
         
         // Check if post already exists today
@@ -216,24 +230,53 @@ export const createLiveStreamPost = async (req, res) => {
         })
         
         if (existingPost) {
+            console.log('ℹ️ Live stream post already exists today')
+            
+            // Still emit to current user's socket
+            await existingPost.populate("postedBy", "username profilePic name")
+            
+            const io = getIO()
+            if (io && req.user) {
+                const socketMap = getUserSocketMap()
+                const userSocketId = socketMap[req.user._id.toString()]?.socketId
+                
+                if (userSocketId) {
+                    io.to(userSocketId).emit("newPost", existingPost)
+                    console.log('✅ Emitted existing post to user')
+                }
+            }
+            
             return res.status(200).json({
-                message: 'Live stream post already exists',
+                message: 'Live stream post already in feed',
                 postId: existingPost._id,
                 posted: false
             })
         }
         
         // Create live stream post
+        console.log('📰 Creating new live stream post...')
         const liveStreamPost = new Post({
             postedBy: alJazeeraAccount._id,
             text: '🔴 Al Jazeera English - Live Stream\n\nWatch live news coverage 24/7',
-            img: 'https://www.aljazeera.com/live/' // Store URL in img field
+            img: 'https://www.aljazeera.com/live/'
         })
         
         await liveStreamPost.save()
         await liveStreamPost.populate("postedBy", "username profilePic name")
         
-        console.log('✅ [createLiveStreamPost] Created live stream post:', liveStreamPost._id)
+        console.log('✅ Created live stream post:', liveStreamPost._id)
+        
+        // Emit to current user via socket
+        const io = getIO()
+        if (io && req.user) {
+            const socketMap = getUserSocketMap()
+            const userSocketId = socketMap[req.user._id.toString()]?.socketId
+            
+            if (userSocketId) {
+                io.to(userSocketId).emit("newPost", liveStreamPost)
+                console.log('✅ Emitted new post to user')
+            }
+        }
         
         res.status(200).json({
             message: 'Live stream post created successfully',
