@@ -157,63 +157,116 @@ const showToast = useShowToast()
   
   {/* Football Match Cards - Visual Table */}
   {isFootballPost && matchesData.length > 0 && (
-    <VStack spacing={2} mt={3} mb={2} align="stretch">
-      {matchesData.map((match, index) => (
-        <Box
-          key={index}
-          bg={cardBg}
-          borderRadius="lg"
-          border="1px solid"
-          borderColor={borderColor}
-          p={3}
-          _hover={{ shadow: 'sm' }}
-          transition="all 0.2s"
-        >
-          {/* League Header */}
-          <Flex align="center" mb={2} pb={2} borderBottom="1px solid" borderColor={borderColor}>
-            {match.league?.logo && (
-              <Image src={match.league.logo} boxSize="16px" mr={2} alt={match.league.name} />
+    <VStack spacing={3} mt={3} mb={2} align="stretch">
+      {matchesData.map((match, index) => {
+        const isLive = ['1H', '2H', 'HT', 'BT', 'ET', 'P', 'LIVE'].includes(match.status?.short)
+        const isFinished = ['FT', 'AET', 'PEN'].includes(match.status?.short)
+        const hasScore = match.score?.home !== null && match.score?.home !== undefined
+        const goalEvents = (match.events || []).filter(e => e.type === 'Goal')
+        
+        return (
+          <Box
+            key={index}
+            bg={cardBg}
+            borderRadius="lg"
+            border="1px solid"
+            borderColor={borderColor}
+            p={3}
+            _hover={{ shadow: 'md' }}
+            transition="all 0.2s"
+          >
+            {/* League Header */}
+            <Flex align="center" mb={3} pb={2} borderBottom="1px solid" borderColor={borderColor}>
+              {match.league?.logo && (
+                <Image src={match.league.logo} boxSize="16px" mr={2} alt={match.league.name} />
+              )}
+              <Text fontSize="xs" fontWeight="semibold" color={secondaryTextColor}>
+                {match.league?.name || 'Premier League'}
+              </Text>
+              
+              {/* Live/Status Badge */}
+              {isLive && (
+                <Flex ml="auto" align="center" bg="red.500" px={2} py={0.5} borderRadius="md">
+                  <Box w="6px" h="6px" bg="white" borderRadius="full" mr={1} />
+                  <Text fontSize="xs" fontWeight="bold" color="white">
+                    {match.status?.short === 'HT' ? 'HALF TIME' : `LIVE ${match.status?.elapsed || ''}'`}
+                  </Text>
+                </Flex>
+              )}
+              
+              {isFinished && (
+                <Text ml="auto" fontSize="xs" fontWeight="bold" color="gray.500">
+                  FT
+                </Text>
+              )}
+            </Flex>
+            
+            {/* Match Details */}
+            <Flex align="center" justify="space-between" mb={2}>
+              {/* Home Team */}
+              <Flex align="center" flex={1} mr={2}>
+                {match.homeTeam?.logo && (
+                  <Image src={match.homeTeam.logo} boxSize="28px" mr={2} alt={match.homeTeam.name} />
+                )}
+                <Text fontSize="sm" fontWeight="bold" color={textColor} noOfLines={1}>
+                  {match.homeTeam?.name || 'Home'}
+                </Text>
+              </Flex>
+              
+              {/* Score or Time */}
+              <Flex align="center" justify="center" minW="80px" direction="column">
+                {hasScore ? (
+                  <Flex align="center" gap={2}>
+                    <Text fontSize="xl" fontWeight="bold" color={textColor}>
+                      {match.score.home}
+                    </Text>
+                    <Text fontSize="lg" fontWeight="bold" color={secondaryTextColor}>
+                      -
+                    </Text>
+                    <Text fontSize="xl" fontWeight="bold" color={textColor}>
+                      {match.score.away}
+                    </Text>
+                  </Flex>
+                ) : (
+                  <Text fontSize="xs" fontWeight="bold" color={secondaryTextColor}>
+                    ⏰ {match.time}
+                  </Text>
+                )}
+              </Flex>
+              
+              {/* Away Team */}
+              <Flex align="center" flex={1} ml={2} justify="flex-end">
+                <Text fontSize="sm" fontWeight="bold" color={textColor} noOfLines={1} textAlign="right">
+                  {match.awayTeam?.name || 'Away'}
+                </Text>
+                {match.awayTeam?.logo && (
+                  <Image src={match.awayTeam.logo} boxSize="28px" ml={2} alt={match.awayTeam.name} />
+                )}
+              </Flex>
+            </Flex>
+            
+            {/* Goal Events */}
+            {goalEvents.length > 0 && (
+              <VStack spacing={1} mt={2} pt={2} borderTop="1px solid" borderColor={borderColor} align="stretch">
+                {goalEvents.map((event, idx) => (
+                  <Flex key={idx} align="center" fontSize="xs" color={secondaryTextColor}>
+                    <Text fontWeight="bold" minW="30px">
+                      ⚽ {event.time}'
+                    </Text>
+                    <Text ml={2} noOfLines={1}>
+                      {event.player} ({event.team})
+                    </Text>
+                  </Flex>
+                ))}
+              </VStack>
             )}
-            <Text fontSize="xs" fontWeight="semibold" color={secondaryTextColor}>
-              {match.league?.name || 'Premier League'}
-            </Text>
-          </Flex>
-          
-          {/* Match Details */}
-          <Flex align="center" justify="space-between">
-            {/* Home Team */}
-            <Flex align="center" flex={1} mr={2}>
-              {match.homeTeam?.logo && (
-                <Image src={match.homeTeam.logo} boxSize="24px" mr={2} alt={match.homeTeam.name} />
-              )}
-              <Text fontSize="sm" fontWeight="semibold" color={textColor} noOfLines={1}>
-                {match.homeTeam?.name || 'Home'}
-              </Text>
-            </Flex>
-            
-            {/* Time */}
-            <Flex align="center" justify="center" minW="70px">
-              <Text fontSize="xs" fontWeight="bold" color={secondaryTextColor}>
-                ⏰ {match.time}
-              </Text>
-            </Flex>
-            
-            {/* Away Team */}
-            <Flex align="center" flex={1} ml={2} justify="flex-end">
-              <Text fontSize="sm" fontWeight="semibold" color={textColor} noOfLines={1} textAlign="right">
-                {match.awayTeam?.name || 'Away'}
-              </Text>
-              {match.awayTeam?.logo && (
-                <Image src={match.awayTeam.logo} boxSize="24px" ml={2} alt={match.awayTeam.name} />
-              )}
-            </Flex>
-          </Flex>
-        </Box>
-      ))}
+          </Box>
+        )
+      })}
       
       {/* Footer Link */}
       <Text fontSize="xs" color={secondaryTextColor} textAlign="center" mt={1}>
-        🔗 Check Football page for more updates!
+        🔗 Check Football page for live updates!
       </Text>
     </VStack>
   )}

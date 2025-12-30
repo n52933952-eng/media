@@ -198,6 +198,7 @@ export const fetchLiveMatches = async (req, res) => {
                         home: match.goals.home,
                         away: match.goals.away
                     },
+                    events: match.events || [], // Store match events (goals, cards, etc.)
                     lastUpdated: new Date()
                 },
                 { upsert: true, new: true }
@@ -277,6 +278,7 @@ export const fetchFixtures = async (req, res) => {
                         home: match.goals.home,
                         away: match.goals.away
                     },
+                    events: match.events || [], // Store match events (goals, cards, etc.)
                     lastUpdated: new Date()
                 },
                 { upsert: true, new: true }
@@ -782,6 +784,24 @@ export const manualPostTodayMatches = async (req, res) => {
                 name: match.teams.away.name,
                 logo: match.teams.away.logo
             },
+            score: {
+                home: match.goals?.home,
+                away: match.goals?.away
+            },
+            status: {
+                short: match.fixture?.status?.short, // '1H', '2H', 'HT', 'FT', 'NS'
+                long: match.fixture?.status?.long,
+                elapsed: match.fixture?.status?.elapsed // Current minute
+            },
+            events: (match.events || [])
+                .filter(e => e.type === 'Goal' || e.detail?.includes('Card'))
+                .map(e => ({
+                    time: e.time?.elapsed || e.time,
+                    type: e.type, // 'Goal' or 'Card'
+                    detail: e.detail, // 'Normal Goal', 'Yellow Card', etc.
+                    player: e.player?.name || e.player,
+                    team: e.team?.name || e.team
+                })),
             league: {
                 name: match.league.name,
                 logo: match.league.logo

@@ -349,6 +349,32 @@ const FootballPage = () => {
                     Full Time
                 </Text>
             )}
+            
+            {/* Goal Events */}
+            {match.events && match.events.length > 0 && (
+                <VStack spacing={1.5} mt={3} pt={3} borderTop="1px solid" borderColor={borderColor} align="stretch">
+                    <Text fontSize="xs" fontWeight="bold" color={secondaryTextColor} mb={1}>
+                        ⚽ Goals
+                    </Text>
+                    {match.events
+                        .filter(event => event.type === 'Goal')
+                        .map((event, idx) => (
+                            <Flex key={idx} align="center" justify="space-between" fontSize="sm">
+                                <HStack spacing={2}>
+                                    <Text fontWeight="bold" color="green.400" minW="30px">
+                                        {event.time?.elapsed || event.time}'
+                                    </Text>
+                                    <Text color={textColor}>
+                                        {event.player?.name || event.player}
+                                    </Text>
+                                </HStack>
+                                <Text fontSize="xs" color={secondaryTextColor}>
+                                    {event.team?.name || event.team}
+                                </Text>
+                            </Flex>
+                        ))}
+                </VStack>
+            )}
         </Box>
     )
     
