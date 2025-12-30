@@ -34,6 +34,7 @@ const FootballPage = () => {
     const [followLoading, setFollowLoading] = useState(false)
     const [footballAccountId, setFootballAccountId] = useState(null)
     const [fetchingMatches, setFetchingMatches] = useState(false)
+    const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]) // Today by default
     
     const showToast = useShowToast()
     
@@ -221,6 +222,42 @@ const FootballPage = () => {
         return matchDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
     }
     
+    // Generate next 7 days for date selector
+    const getNext7Days = () => {
+        const days = []
+        const today = new Date()
+        
+        for (let i = 0; i < 7; i++) {
+            const date = new Date(today)
+            date.setDate(today.getDate() + i)
+            
+            const dayName = date.toLocaleDateString('en-US', { weekday: 'short' })
+            const dayNumber = date.getDate()
+            const monthName = date.toLocaleDateString('en-US', { month: 'short' })
+            const dateString = date.toISOString().split('T')[0]
+            
+            days.push({
+                dayName,
+                dayNumber,
+                monthName,
+                dateString,
+                isToday: i === 0
+            })
+        }
+        
+        return days
+    }
+    
+    // Filter matches by selected date
+    const filterMatchesByDate = (matches) => {
+        if (!selectedDate) return matches
+        
+        return matches.filter(match => {
+            const matchDate = new Date(match.fixture?.date).toISOString().split('T')[0]
+            return matchDate === selectedDate
+        })
+    }
+    
     // Render match card
     const MatchCard = ({ match, showStatus = true }) => (
         <Box
@@ -403,17 +440,81 @@ const FootballPage = () => {
                         
                         {/* Upcoming matches */}
                         <TabPanel px={0}>
-                            {upcomingMatches.length > 0 ? (
-                                upcomingMatches.map(match => (
-                                    <MatchCard key={match._id} match={match} showStatus={false} />
-                                ))
-                            ) : (
-                                <Box textAlign="center" py={10}>
-                                    <Text fontSize="lg" color={secondaryTextColor}>
-                                        📭 No upcoming matches today
-                                    </Text>
-                                </Box>
-                            )}
+                            {/* Date selector */}
+                            <Flex 
+                                overflowX="auto" 
+                                mb={4} 
+                                pb={2}
+                                gap={2}
+                                css={{
+                                    '&::-webkit-scrollbar': { height: '6px' },
+                                    '&::-webkit-scrollbar-thumb': { background: '#888', borderRadius: '3px' }
+                                }}
+                            >
+                                {getNext7Days().map(day => (
+                                    <Box
+                                        key={day.dateString}
+                                        onClick={() => setSelectedDate(day.dateString)}
+                                        cursor="pointer"
+                                        minW="80px"
+                                        textAlign="center"
+                                        py={3}
+                                        px={4}
+                                        borderRadius="lg"
+                                        bg={selectedDate === day.dateString ? 'blue.500' : bgColor}
+                                        color={selectedDate === day.dateString ? 'white' : textColor}
+                                        border="1px solid"
+                                        borderColor={selectedDate === day.dateString ? 'blue.500' : borderColor}
+                                        transition="all 0.2s"
+                                        _hover={{
+                                            bg: selectedDate === day.dateString ? 'blue.600' : useColorModeValue('gray.50', 'gray.700'),
+                                            transform: 'translateY(-2px)',
+                                            shadow: 'md'
+                                        }}
+                                    >
+                                        <Text fontSize="xs" fontWeight="medium" mb={1}>
+                                            {day.dayName}
+                                        </Text>
+                                        <Text fontSize="2xl" fontWeight="bold">
+                                            {day.dayNumber}
+                                        </Text>
+                                        <Text fontSize="xs" mt={1}>
+                                            {day.monthName}
+                                        </Text>
+                                        {day.isToday && (
+                                            <Badge 
+                                                mt={1} 
+                                                size="sm" 
+                                                colorScheme={selectedDate === day.dateString ? 'whiteAlpha' : 'blue'}
+                                                fontSize="9px"
+                                            >
+                                                Today
+                                            </Badge>
+                                        )}
+                                    </Box>
+                                ))}
+                            </Flex>
+                            
+                            {/* Filtered matches */}
+                            {(() => {
+                                const filteredMatches = filterMatchesByDate(upcomingMatches)
+                                return filteredMatches.length > 0 ? (
+                                    <>
+                                        <Text fontSize="sm" color={secondaryTextColor} mb={3}>
+                                            {filteredMatches.length} match{filteredMatches.length !== 1 ? 'es' : ''} on {new Date(selectedDate).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
+                                        </Text>
+                                        {filteredMatches.map(match => (
+                                            <MatchCard key={match._id} match={match} showStatus={false} />
+                                        ))}
+                                    </>
+                                ) : (
+                                    <Box textAlign="center" py={10}>
+                                        <Text fontSize="lg" color={secondaryTextColor}>
+                                            📭 No upcoming matches on this day
+                                        </Text>
+                                    </Box>
+                                )
+                            })()}
                         </TabPanel>
                         
                         {/* Finished matches */}
