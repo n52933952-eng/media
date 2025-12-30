@@ -4,7 +4,7 @@ import { SearchIcon } from '@chakra-ui/icons'
 import SuggestedUser from './SuggestedUser'
 import { UserContext } from '../context/UserContext'
 
-const SuggestedUsers = () => {
+const SuggestedUsers = ({ onUserFollowed }) => {
   const { user } = useContext(UserContext)
   const [loading, setLoading] = useState(true)
   const [suggestedUsers, setSuggestedUsers] = useState([])
@@ -157,6 +157,7 @@ const SuggestedUsers = () => {
                     key={searchUser._id} 
                     user={searchUser}
                     onFollowed={handleUserFollowed}
+                    onUserFollowed={onUserFollowed}
                   />
                 ))}
             </Flex>
@@ -197,6 +198,7 @@ const SuggestedUsers = () => {
                   key={suggestedUser._id} 
                   user={suggestedUser}
                   onFollowed={handleUserFollowed}
+                  onUserFollowed={onUserFollowed}
                 />
               ))}
             </Flex>

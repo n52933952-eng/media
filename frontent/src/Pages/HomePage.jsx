@@ -24,6 +24,44 @@ const HomePage = () => {
 
 
 
+  // Fetch last 3 posts from a specific user (when they're followed)
+  const fetchUserPosts = useCallback(async (userId) => {
+    try {
+      const res = await fetch(
+        `${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/post/user/id/${userId}?limit=3`,
+        {
+          credentials: "include",
+        }
+      )
+
+      const data = await res.json()
+
+      if (res.ok && data.posts && data.posts.length > 0) {
+        // Add posts to feed and sort by date (newest first)
+        setFollowPost(prev => {
+          // Combine existing posts with new posts
+          const combined = [...prev, ...data.posts]
+          
+          // Remove duplicates (in case post already exists)
+          const unique = combined.filter((post, index, self) => 
+            index === self.findIndex(p => p._id === post._id)
+          )
+          
+          // Sort by createdAt (newest first) - same logic as feed
+          unique.sort((a, b) => {
+            const dateA = new Date(a.createdAt).getTime()
+            const dateB = new Date(b.createdAt).getTime()
+            return dateB - dateA
+          })
+          
+          return unique
+        })
+      }
+    } catch (error) {
+      // Silently fail - don't show error for background fetch
+    }
+  }, [setFollowPost])
+
   const getFeedPost = useCallback(async(loadMore = false) => {
     // Prevent duplicate requests
     if (isLoadingRef.current) return
@@ -50,8 +88,6 @@ const HomePage = () => {
       }
 
       if(res.ok){
-        console.log(`📥 Feed loaded: ${loadMore ? 'More' : 'Initial'} - ${data.posts?.length || 0} posts, hasMore: ${data.hasMore}, total: ${data.totalCount || 0}`)
-        
         if (loadMore) {
           setFollowPost(prev => [...prev, ...(data.posts || [])])
         } else {
@@ -210,15 +246,15 @@ const HomePage = () => {
       </Box>
 
       {/* Suggested Users Sidebar - Right Side (reduced width) */}
-      <Box 
-        flex={{ base: '0 0 100%', md: '0 0 30%' }} 
-        display={{ base: 'none', md: 'block' }}
-        maxW={{ base: '100%', md: '30%' }}
-        pl={8}
-        pt={4}
-      >
-        <SuggestedUsers />
-      </Box>
+            <Box 
+              flex={{ base: '0 0 100%', md: '0 0 30%' }} 
+              display={{ base: 'none', md: 'block' }}
+              maxW={{ base: '100%', md: '30%' }}
+              pl={8}
+              pt={4}
+            >
+              <SuggestedUsers onUserFollowed={fetchUserPosts} />
+            </Box>
     </Flex>
   )
 }

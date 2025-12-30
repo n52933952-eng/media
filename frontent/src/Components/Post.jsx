@@ -138,21 +138,21 @@ const showToast = useShowToast()
      <Text>{post.text}</Text>
   
   {post?.img && (
-    <Box borderRadius={6} overflow="hidden" border="1px solid" borderColor="gray.light" my={2}>
+    <Box borderRadius={4} overflow="hidden" border="0.5px solid" borderColor="gray.light" my={2}>
       {post.img.match(/\.(mp4|webm|ogg|mov)$/i) || post.img.includes('/video/upload/') ? (
         <Box
           as="video"
           src={post.img}
           controls
           w="full"
-          maxH="500px"
+          maxH="400px"
         />
       ) : (
         <Image 
           src={post?.img} 
           w="full" 
           objectFit="contain" 
-          maxH="500px"
+          maxH="400px"
           loading="lazy"
           alt="Post image"
         />

@@ -377,8 +377,6 @@ export const getFeedPost = async(req,res) => {
         const totalCount = allPosts.length
         const paginatedPosts = allPosts.slice(skip, skip + limit)
         const hasMore = (skip + limit) < totalCount
-        
-        console.log(`📊 Feed: ${followedUserIds.length} users followed (excluding self), ${totalCount} total posts (3 per user), returning ${paginatedPosts.length} posts (skip: ${skip}, limit: ${limit})`)
      
         return res.status(200).json({ 
             posts: paginatedPosts,
@@ -398,6 +396,36 @@ export const getFeedPost = async(req,res) => {
 
 
 
+
+// Get posts by user ID (for fetching newly followed user's posts)
+export const getUserPostsById = async(req,res)=>{
+    try{
+        const{userId}= req.params 
+
+        if(!userId){
+            return res.status(400).json({error:"userId is required"})
+        }
+
+        // Pagination parameters
+        const limit = parseInt(req.query.limit) || 3 // Default to 3 posts (for feed)
+        const skip = parseInt(req.query.skip) || 0
+        
+        const posts = await Post.find({postedBy:userId})
+            .populate("postedBy","-password")
+            .sort({createdAt:-1})
+            .limit(limit)
+            .skip(skip)
+            
+        res.status(200).json({ 
+            posts: posts || [],
+            hasMore: false, // Not needed for feed integration
+            totalCount: posts.length
+        })
+    }
+    catch(error){
+        res.status(500).json({error: error.message || "Failed to fetch user posts"})
+    }
+}
 
 export const getUserPosts = async(req,res)=>{
 
