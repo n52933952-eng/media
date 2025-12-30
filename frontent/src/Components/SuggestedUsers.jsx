@@ -54,7 +54,9 @@ const SuggestedUsers = ({ onUserFollowed }) => {
 
       const data = await res.json()
       if (res.ok && Array.isArray(data)) {
-        setSuggestedUsers(data)
+        // Filter out Football system account from suggestions (it's in Suggested Channels)
+        const filteredUsers = data.filter(u => u.username !== 'Football')
+        setSuggestedUsers(filteredUsers)
       } else {
         setSuggestedUsers([])
       }
@@ -193,21 +195,6 @@ const SuggestedUsers = ({ onUserFollowed }) => {
       {/* Suggested Users (only show when not searching) */}
       {searchQuery.trim().length === 0 && (
         <Box>
-          {/* Football Channel (if not already following) */}
-          {footballAccount && !user?.following?.includes(footballAccount._id) && (
-            <Box mb={4}>
-              <Text fontSize="sm" fontWeight="bold" mb={2} color={textColor}>
-                ⚽ Follow for Live Football
-              </Text>
-              <SuggestedUser 
-                user={footballAccount}
-                onFollowed={handleUserFollowed}
-                onUserFollowed={onUserFollowed}
-              />
-              <Box height="1px" bg={borderColor} my={3} />
-            </Box>
-          )}
-          
           <Text fontSize="sm" fontWeight="bold" mb={3} color={textColor}>
             Suggested for you
           </Text>
