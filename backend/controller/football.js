@@ -3,42 +3,111 @@ import User from '../models/user.js'
 import Post from '../models/post.js'
 import { getIO, getUserSocketMap } from '../socket/socket.js'
 
-// API-FOOTBALL configuration (add your key to .env)
-const API_KEY = process.env.FOOTBALL_API_KEY || 'f3ebe896455cab31fc80e859716411df'
-const API_BASE_URL = 'https://v3.football.api-sports.io'
+// Football-Data.org API configuration (FREE - no key needed for basic access)
+// Get free key at: https://www.football-data.org/client/register
+const API_KEY = process.env.FOOTBALL_API_KEY || '' // Optional: Get free key for more requests
+const API_BASE_URL = 'https://api.football-data.org/v4'
 
-// Supported leagues (you can add more)
+// Supported leagues (football-data.org uses codes)
 const SUPPORTED_LEAGUES = [
-    { id: 39, name: 'Premier League', country: 'England' },
-    { id: 140, name: 'La Liga', country: 'Spain' },
-    { id: 2, name: 'UEFA Champions League', country: 'World' },
-    { id: 135, name: 'Serie A', country: 'Italy' },
-    { id: 78, name: 'Bundesliga', country: 'Germany' },
-    { id: 61, name: 'Ligue 1', country: 'France' }
+    { code: 'PL', name: 'Premier League', country: 'England' },
+    { code: 'PD', name: 'La Liga', country: 'Spain' },
+    { code: 'CL', name: 'UEFA Champions League', country: 'World' },
+    { code: 'SA', name: 'Serie A', country: 'Italy' },
+    { code: 'BL1', name: 'Bundesliga', country: 'Germany' },
+    { code: 'FL1', name: 'Ligue 1', country: 'France' }
 ]
 
-// Helper: Fetch from API-FOOTBALL
+// Helper: Fetch from Football-Data.org API
 const fetchFromAPI = async (endpoint) => {
     try {
+        const headers = {}
+        
+        if (API_KEY) {
+            headers['X-Auth-Token'] = API_KEY
+        }
+        
+        console.log('⚽ [fetchFromAPI] Fetching:', `${API_BASE_URL}${endpoint}`)
+        console.log('⚽ [fetchFromAPI] Using API key:', API_KEY ? 'Yes' : 'No (free tier - limited requests)')
+        
         const response = await fetch(`${API_BASE_URL}${endpoint}`, {
             method: 'GET',
-            headers: {
-                'x-rapidapi-key': API_KEY,
-                'x-rapidapi-host': 'v3.football.api-sports.io'
-            }
+            headers: headers
         })
         
-        const data = await response.json()
+        console.log('⚽ [fetchFromAPI] Response status:', response.status, response.statusText)
         
-        if (response.ok && data.response) {
-            return { success: true, data: data.response }
+        const data = await response.json()
+        console.log('⚽ [fetchFromAPI] Response keys:', Object.keys(data))
+        
+        if (response.ok && data.matches) {
+            console.log('⚽ [fetchFromAPI] Success! Found', data.matches.length, 'matches')
+            return { success: true, data: data.matches }
+        } else if (response.ok && data.matches === undefined) {
+            // Some endpoints return data directly
+            console.log('⚽ [fetchFromAPI] Success! Data:', data)
+            return { success: true, data: Array.isArray(data) ? data : [data] }
         } else {
-            console.error('API-FOOTBALL Error:', data.errors || 'Unknown error')
-            return { success: false, error: data.errors || 'Failed to fetch from API' }
+            console.error('⚽ [fetchFromAPI] Error:', data.message || data.error || 'Unknown error')
+            console.error('⚽ [fetchFromAPI] Full response:', JSON.stringify(data, null, 2))
+            return { success: false, error: data.message || data.error || 'Failed to fetch from API' }
         }
     } catch (error) {
-        console.error('API-FOOTBALL Fetch Error:', error)
+        console.error('⚽ [fetchFromAPI] Fetch Error:', error.message)
+        console.error('⚽ [fetchFromAPI] Error stack:', error.stack)
         return { success: false, error: error.message }
+    }
+}
+
+// Helper: Convert football-data.org match format to our database format
+const convertMatchFormat = (matchData, leagueInfo) => {
+    // Map status from football-data.org to our format
+    const statusMap = {
+        'SCHEDULED': { long: 'Not Started', short: 'NS', elapsed: null },
+        'TIMED': { long: 'Scheduled', short: 'NS', elapsed: null },
+        'IN_PLAY': { long: 'Live', short: '1H', elapsed: 45 }, // Approximate
+        'PAUSED': { long: 'Half Time', short: 'HT', elapsed: 45 },
+        'FINISHED': { long: 'Match Finished', short: 'FT', elapsed: 90 },
+        'POSTPONED': { long: 'Postponed', short: 'POSTP', elapsed: null },
+        'CANCELLED': { long: 'Cancelled', short: 'CANC', elapsed: null },
+        'SUSPENDED': { long: 'Suspended', short: 'SUSP', elapsed: null }
+    }
+    
+    const status = statusMap[matchData.status] || statusMap['SCHEDULED']
+    
+    return {
+        fixtureId: matchData.id,
+        league: {
+            id: matchData.competition?.id || leagueInfo?.code || 'UNKNOWN',
+            name: matchData.competition?.name || leagueInfo?.name || 'Unknown League',
+            country: matchData.area?.name || leagueInfo?.country || 'Unknown',
+            logo: matchData.competition?.emblem || '',
+            flag: matchData.area?.flag || '',
+            season: matchData.season?.startDate ? new Date(matchData.season.startDate).getFullYear() : 2024
+        },
+        teams: {
+            home: {
+                id: matchData.homeTeam?.id || 0,
+                name: matchData.homeTeam?.name || 'Unknown',
+                logo: matchData.homeTeam?.crest || ''
+            },
+            away: {
+                id: matchData.awayTeam?.id || 0,
+                name: matchData.awayTeam?.name || 'Unknown',
+                logo: matchData.awayTeam?.crest || ''
+            }
+        },
+        fixture: {
+            date: new Date(matchData.utcDate),
+            venue: matchData.venue || '',
+            city: '',
+            status: status
+        },
+        goals: {
+            home: matchData.score?.fullTime?.home || matchData.score?.halfTime?.home || null,
+            away: matchData.score?.fullTime?.away || matchData.score?.halfTime?.away || null
+        },
+        lastUpdated: new Date()
     }
 }
 
@@ -453,6 +522,76 @@ export const getSupportedLeagues = async (req, res) => {
     try {
         res.status(200).json({ leagues: SUPPORTED_LEAGUES })
     } catch (error) {
+        res.status(500).json({ error: error.message })
+    }
+}
+
+// 8. Manual trigger to fetch fixtures (for testing)
+export const manualFetchFixtures = async (req, res) => {
+    try {
+        console.log('⚽ [manualFetchFixtures] Manual trigger received')
+        
+        const today = new Date().toISOString().split('T')[0]
+        const tomorrow = new Date()
+        tomorrow.setDate(tomorrow.getDate() + 1)
+        const tomorrowStr = tomorrow.toISOString().split('T')[0]
+        
+        console.log('⚽ [manualFetchFixtures] Fetching fixtures for:', today, 'and', tomorrowStr)
+        
+        let totalFetched = 0
+        const results = []
+        
+        // Fetch for today and tomorrow
+        for (const date of [today, tomorrowStr]) {
+            for (const league of SUPPORTED_LEAGUES) {
+                console.log(`⚽ [manualFetchFixtures] Fetching ${league.name} (${league.code}) for ${date}...`)
+                
+                // Football-Data.org endpoint format: /competitions/{code}/matches?dateFrom={date}&dateTo={date}
+                const endpoint = `/competitions/${league.code}/matches?dateFrom=${date}&dateTo=${date}`
+                const result = await fetchFromAPI(endpoint)
+                
+                if (result.success && result.data && result.data.length > 0) {
+                    console.log(`⚽ [manualFetchFixtures] Found ${result.data.length} matches for ${league.name} on ${date}`)
+                    
+                    for (const matchData of result.data) {
+                        // Convert to our format
+                        const convertedMatch = convertMatchFormat(matchData, league)
+                        
+                        await Match.findOneAndUpdate(
+                            { fixtureId: convertedMatch.fixtureId },
+                            convertedMatch,
+                            { upsert: true, new: true }
+                        )
+                        totalFetched++
+                    }
+                    
+                    results.push({
+                        league: league.name,
+                        date: date,
+                        matches: result.data.length
+                    })
+                } else {
+                    console.log(`⚽ [manualFetchFixtures] No matches found for ${league.name} on ${date}`)
+                    if (result.error) {
+                        console.error(`⚽ [manualFetchFixtures] Error:`, result.error)
+                    }
+                }
+                
+                // Small delay to avoid rate limiting (free tier: 10 requests/minute)
+                await new Promise(resolve => setTimeout(resolve, 7000)) // 7 seconds between requests
+            }
+        }
+        
+        console.log(`⚽ [manualFetchFixtures] Total matches fetched: ${totalFetched}`)
+        
+        res.status(200).json({ 
+            message: `Fetched ${totalFetched} matches`,
+            totalFetched,
+            results
+        })
+        
+    } catch (error) {
+        console.error('⚽ [manualFetchFixtures] Error:', error)
         res.status(500).json({ error: error.message })
     }
 }

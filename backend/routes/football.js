@@ -6,7 +6,8 @@ import {
     fetchStandings,
     getStandings,
     postMatchUpdate,
-    getSupportedLeagues
+    getSupportedLeagues,
+    manualFetchFixtures
 } from '../controller/football.js'
 import protectRoute from '../middlware/protectRoute.js'
 
@@ -26,6 +27,9 @@ router.post('/fetch/standings/:leagueId', protectRoute, fetchStandings)
 
 // Get cached matches (for users)
 router.get('/matches', getMatches)
+
+// Manual trigger to fetch fixtures (for testing - no auth needed)
+router.post('/fetch/manual', manualFetchFixtures)
 
 // Get cached standings (for users)
 router.get('/standings/:leagueId', getStandings)
