@@ -8,6 +8,7 @@ import PostRoute from './routes/post.js'
 import{v2 as cloudinary} from 'cloudinary'
 import MessageRoute from './routes/message.js'
 import FootballRoute from './routes/football.js'
+import NewsRoute from './routes/news.js'
 import { initializeSocket } from './socket/socket.js'
 import { initializeFootballCron } from './services/footballCron.js'
 import path from 'path'
@@ -57,6 +58,7 @@ app.use("/api/user",UserRoute)
 app.use("/api/post",PostRoute)
 app.use("/api/message",MessageRoute)
 app.use("/api/football",FootballRoute)
+app.use("/api/news",NewsRoute)
 
 // Serve static files from React app (for production)
 app.use(express.static(path.join(__dirname, '../frontent/dist')))

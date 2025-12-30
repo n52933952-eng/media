@@ -6,6 +6,7 @@ import {PostContext} from '../context/PostContext'
 import {SocketContext} from '../context/SocketContext'
 import SuggestedUsers from '../Components/SuggestedUsers'
 import SuggestedChannels from '../Components/SuggestedChannels'
+import AlJazeeraNews from '../Components/AlJazeeraNews'
 
 
 
@@ -210,7 +211,7 @@ const HomePage = () => {
 
   return (
     <Flex gap={6} alignItems="flex-start">
-      {/* Suggested Channels - Left Side */}
+      {/* Suggested Channels & News - Left Side */}
       <Box 
         flex={{ base: '0', lg: '0 0 22%' }} 
         display={{ base: 'none', lg: 'block' }}
@@ -218,6 +219,7 @@ const HomePage = () => {
         minW={{ lg: '220px' }}
       >
         <SuggestedChannels onUserFollowed={fetchUserPosts} />
+        <AlJazeeraNews />
       </Box>
 
       {/* Main Feed - Center */}
