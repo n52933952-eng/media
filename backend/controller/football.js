@@ -695,27 +695,33 @@ export const manualPostTodayMatches = async (req, res) => {
             })
         }
         
-        // Create compact table-style post (Instagram-like format)
-        let postText = `⚽ Today's Top Matches ⚽\n\n`
-        
-        matches.forEach((match, index) => {
-            const matchTime = new Date(match.fixture.date).toLocaleTimeString('en-US', { 
+        // Store matches as JSON structure for visual rendering
+        const matchData = matches.map(match => ({
+            homeTeam: {
+                name: match.teams.home.name,
+                logo: match.teams.home.logo
+            },
+            awayTeam: {
+                name: match.teams.away.name,
+                logo: match.teams.away.logo
+            },
+            league: {
+                name: match.league.name,
+                logo: match.league.logo
+            },
+            time: new Date(match.fixture.date).toLocaleTimeString('en-US', { 
                 hour: '2-digit', 
                 minute: '2-digit',
                 hour12: true
-            })
-            
-            // Compact table format
-            postText += `${index + 1}. ${match.teams.home.name} vs ${match.teams.away.name}\n`
-            postText += `   📺 ${match.league.name} | ⏰ ${matchTime}\n\n`
-        })
+            }),
+            date: match.fixture.date
+        }))
         
-        postText += `🔗 Check Football page for more updates!`
-        
-        // Create the post
+        // Create the post with JSON data
         const newPost = new Post({
             postedBy: footballAccount._id,
-            text: postText
+            text: `⚽ Today's Top Matches ⚽`,
+            footballData: JSON.stringify(matchData) // Store as JSON string
         })
         
         await newPost.save()

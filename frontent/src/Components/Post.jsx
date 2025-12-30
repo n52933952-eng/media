@@ -1,6 +1,6 @@
 import React,{useEffect,useState,useContext, memo} from 'react'
 import{Link} from 'react-router-dom'
-import{Flex,Avatar,Box,Text,Image,Button} from '@chakra-ui/react'
+import{Flex,Avatar,Box,Text,Image,Button, VStack, HStack, useColorModeValue} from '@chakra-ui/react'
 import { HiOutlineDotsHorizontal } from "react-icons/hi";
 import Actions from '../Components/Actions'
 import useShowToast from '../hooks/useShowToast.js'
@@ -23,6 +23,24 @@ const showToast = useShowToast()
 
   const{user}=useContext(UserContext)
   const{followPost,setFollowPost}=useContext(PostContext)
+  
+  // Color modes
+  const bgColor = useColorModeValue('#f7f9fc', '#1a1d2e')
+  const cardBg = useColorModeValue('white', '#252b3b')
+  const borderColor = useColorModeValue('#e1e4ea', '#2d3548')
+  const textColor = useColorModeValue('gray.800', 'white')
+  const secondaryTextColor = useColorModeValue('gray.600', 'gray.400')
+  
+  // Check if this is a Football post with match data
+  const isFootballPost = postedBy?.username === 'Football' && post?.footballData
+  let matchesData = []
+  if (isFootballPost) {
+    try {
+      matchesData = JSON.parse(post.footballData)
+    } catch (e) {
+      console.error('Failed to parse football data:', e)
+    }
+  }
 
   const handleDeletepost = async(e) => {
     e.preventDefault()
@@ -137,7 +155,70 @@ const showToast = useShowToast()
     </Flex>
      <Text>{post.text}</Text>
   
-  {post?.img && (
+  {/* Football Match Cards - Visual Table */}
+  {isFootballPost && matchesData.length > 0 && (
+    <VStack spacing={2} mt={3} mb={2} align="stretch">
+      {matchesData.map((match, index) => (
+        <Box
+          key={index}
+          bg={cardBg}
+          borderRadius="lg"
+          border="1px solid"
+          borderColor={borderColor}
+          p={3}
+          _hover={{ shadow: 'sm' }}
+          transition="all 0.2s"
+        >
+          {/* League Header */}
+          <Flex align="center" mb={2} pb={2} borderBottom="1px solid" borderColor={borderColor}>
+            {match.league?.logo && (
+              <Image src={match.league.logo} boxSize="16px" mr={2} alt={match.league.name} />
+            )}
+            <Text fontSize="xs" fontWeight="semibold" color={secondaryTextColor}>
+              {match.league?.name || 'Premier League'}
+            </Text>
+          </Flex>
+          
+          {/* Match Details */}
+          <Flex align="center" justify="space-between">
+            {/* Home Team */}
+            <Flex align="center" flex={1} mr={2}>
+              {match.homeTeam?.logo && (
+                <Image src={match.homeTeam.logo} boxSize="24px" mr={2} alt={match.homeTeam.name} />
+              )}
+              <Text fontSize="sm" fontWeight="semibold" color={textColor} noOfLines={1}>
+                {match.homeTeam?.name || 'Home'}
+              </Text>
+            </Flex>
+            
+            {/* Time */}
+            <Flex align="center" justify="center" minW="70px">
+              <Text fontSize="xs" fontWeight="bold" color={secondaryTextColor}>
+                ⏰ {match.time}
+              </Text>
+            </Flex>
+            
+            {/* Away Team */}
+            <Flex align="center" flex={1} ml={2} justify="flex-end">
+              <Text fontSize="sm" fontWeight="semibold" color={textColor} noOfLines={1} textAlign="right">
+                {match.awayTeam?.name || 'Away'}
+              </Text>
+              {match.awayTeam?.logo && (
+                <Image src={match.awayTeam.logo} boxSize="24px" ml={2} alt={match.awayTeam.name} />
+              )}
+            </Flex>
+          </Flex>
+        </Box>
+      ))}
+      
+      {/* Footer Link */}
+      <Text fontSize="xs" color={secondaryTextColor} textAlign="center" mt={1}>
+        🔗 Check Football page for more updates!
+      </Text>
+    </VStack>
+  )}
+  
+  {post?.img && !isFootballPost && (
     <Box borderRadius={4} overflow="hidden" border="0.5px solid" borderColor="gray.light" my={2}>
       {post.img.match(/\.(mp4|webm|ogg|mov)$/i) || post.img.includes('/video/upload/') ? (
         <Box

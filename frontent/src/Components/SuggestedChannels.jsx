@@ -75,21 +75,14 @@ const SuggestedChannels = ({ onUserFollowed }) => {
                     localStorage.setItem('userInfo', JSON.stringify(data.current))
                 }
                 
-                // If following (not unfollowing), auto-post today's matches and fetch posts
+                // If following (not unfollowing), auto-post today's matches
                 if (!isFollowing) {
-                    // Trigger auto-post of today's matches
+                    // Trigger auto-post of today's matches (the socket will handle showing it in feed)
                     const baseUrl = import.meta.env.PROD ? window.location.origin : "http://localhost:5000"
                     fetch(`${baseUrl}/api/football/post/manual`, {
                         method: 'POST',
                         credentials: 'include'
                     }).catch(err => console.log('Auto-post error:', err))
-                    
-                    // Fetch Football channel's posts immediately
-                    if (onUserFollowed && footballAccount?._id) {
-                        setTimeout(() => {
-                            onUserFollowed(footballAccount._id)
-                        }, 1000) // Small delay to ensure post is created
-                    }
                 }
                 
                 showToast(
