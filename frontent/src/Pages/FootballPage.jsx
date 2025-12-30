@@ -86,10 +86,10 @@ const FootballPage = () => {
                 const liveData = await liveRes.json()
                 console.log('⚽ [FootballPage] Live matches response:', { status: liveRes.status, ok: liveRes.ok, data: liveData })
                 
-                // Fetch upcoming matches (today)
-                console.log('⚽ [FootballPage] Fetching upcoming matches for date:', today)
+                // Fetch upcoming matches (next 7 days - no date filter, backend handles it)
+                console.log('⚽ [FootballPage] Fetching upcoming matches (next 7 days)')
                 const upcomingRes = await fetch(
-                    `${baseUrl}/api/football/matches?status=upcoming&date=${today}`,
+                    `${baseUrl}/api/football/matches?status=upcoming`,
                     { credentials: 'include' }
                 )
                 const upcomingData = await upcomingRes.json()

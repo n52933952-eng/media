@@ -338,6 +338,17 @@ export const getMatches = async (req, res) => {
                 $lt: endDate
             }
             console.log('⚽ [getMatches] No date specified, fetching finished matches from last 3 days')
+        } else if (status === 'upcoming') {
+            // If no date specified but looking for upcoming, get next 7 days from now
+            const startDate = new Date()
+            const endDate = new Date()
+            endDate.setDate(endDate.getDate() + 7)
+            
+            query['fixture.date'] = {
+                $gte: startDate,
+                $lt: endDate
+            }
+            console.log('⚽ [getMatches] No date specified, fetching upcoming matches for next 7 days')
         }
         
         // Filter by league
@@ -352,8 +363,11 @@ export const getMatches = async (req, res) => {
         const totalMatches = await Match.countDocuments({})
         console.log('⚽ [getMatches] Total matches in database:', totalMatches)
         
+        // Sort: upcoming matches ascending (closest first), finished/live matches descending (most recent first)
+        const sortOrder = status === 'upcoming' ? 1 : -1
+        
         const matches = await Match.find(query)
-            .sort({ 'fixture.date': -1 })
+            .sort({ 'fixture.date': sortOrder })
             .limit(50)
         
         console.log('⚽ [getMatches] Found matches:', matches.length)
