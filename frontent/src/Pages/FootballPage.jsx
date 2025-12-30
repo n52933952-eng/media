@@ -218,31 +218,6 @@ const FootballPage = () => {
         }
     }
     
-    // Manual post today's matches to feed
-    const [postingMatches, setPostingMatches] = useState(false)
-    const handlePostTodayMatches = async () => {
-        try {
-            setPostingMatches(true)
-            const baseUrl = import.meta.env.PROD ? window.location.origin : "http://localhost:5000"
-            const res = await fetch(`${baseUrl}/api/football/post/manual`, {
-                method: 'POST',
-                credentials: 'include'
-            })
-            const data = await res.json()
-            
-            if (res.ok && data.posted) {
-                showToast('Success', `Posted ${data.matchesPosted} matches to your feed! Check your home page 🎉`, 'success')
-            } else {
-                showToast('Info', data.message || 'No matches to post', 'info')
-            }
-        } catch (error) {
-            console.error('Error posting matches:', error)
-            showToast('Error', 'Failed to post matches', 'error')
-        } finally {
-            setPostingMatches(false)
-        }
-    }
-    
     // Format time
     const formatTime = (date) => {
         const matchDate = new Date(date)
@@ -404,26 +379,14 @@ const FootballPage = () => {
                         ⚽ Load All Leagues
                     </Button>
                     {user && (
-                        <>
-                            <Button
-                                onClick={handleFollowToggle}
-                                isLoading={followLoading}
-                                colorScheme={isFollowing ? 'gray' : 'blue'}
-                                size="sm"
-                            >
-                                {isFollowing ? 'Following' : 'Follow'}
-                            </Button>
-                            {isFollowing && (
-                                <Button
-                                    onClick={handlePostTodayMatches}
-                                    isLoading={postingMatches}
-                                    colorScheme="purple"
-                                    size="sm"
-                                >
-                                    📢 Post Today's Matches
-                                </Button>
-                            )}
-                        </>
+                        <Button
+                            onClick={handleFollowToggle}
+                            isLoading={followLoading}
+                            colorScheme={isFollowing ? 'gray' : 'blue'}
+                            size="sm"
+                        >
+                            {isFollowing ? 'Following' : 'Follow'}
+                        </Button>
                     )}
                 </HStack>
             </Flex>

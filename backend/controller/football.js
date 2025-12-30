@@ -695,14 +695,17 @@ export const manualPostTodayMatches = async (req, res) => {
             })
         }
         
-        // Create post text with top 5 matches
+        // Create compact table-style post (Instagram-like format)
         let postText = `⚽ Today's Top Matches ⚽\n\n`
         
         matches.forEach((match, index) => {
             const matchTime = new Date(match.fixture.date).toLocaleTimeString('en-US', { 
                 hour: '2-digit', 
-                minute: '2-digit' 
+                minute: '2-digit',
+                hour12: true
             })
+            
+            // Compact table format
             postText += `${index + 1}. ${match.teams.home.name} vs ${match.teams.away.name}\n`
             postText += `   📺 ${match.league.name} | ⏰ ${matchTime}\n\n`
         })
