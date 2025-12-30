@@ -169,7 +169,7 @@ const HomePage = () => {
     }
 
     // Handle real-time football match updates
-    const handleFootballMatchUpdate = useCallback((data) => {
+    const handleFootballMatchUpdate = (data) => {
       const { postId, matchData } = data
       console.log('⚽ Real-time match update received:', postId)
       
@@ -185,7 +185,7 @@ const HomePage = () => {
           return post
         })
       )
-    }, [])
+    }
 
     socket.on('newPost', handleNewPost)
     socket.on('postDeleted', handlePostDeleted)
