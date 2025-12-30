@@ -353,7 +353,7 @@ export const getSuggestedUsers = async(req, res) => {
         }
 
         const suggestedUsers = []
-        const maxSuggestions = 10 // Maximum suggestions to return
+        const maxSuggestions = 5 // Maximum suggestions to return (optimized)
         // Convert to ObjectIds for MongoDB query - build exclude list once
         const excludeIds = [new mongoose.Types.ObjectId(userId)] // Exclude current user
         const followingIdsStrings = new Set() // For fast lookup
@@ -372,7 +372,7 @@ export const getSuggestedUsers = async(req, res) => {
             })
         }
 
-        // STEP 1: Get 7 users from same country (if country is set)
+        // STEP 1: Get users from same country (if country is set) - PRIORITY
         if (currentUser.country && currentUser.country.trim() !== "") {
             const userCountry = currentUser.country.trim()
             
@@ -385,16 +385,16 @@ export const getSuggestedUsers = async(req, res) => {
                 ]
             })
             .select('username name profilePic country followers')
-            .limit(20)
+            .limit(maxSuggestions * 2) // Get more to randomize from
             
             // Fast filter using Set lookup (O(1) instead of O(n))
             const filteredCountryUsers = countryUsers.filter(user => {
                 return !followingIdsStrings.has(user._id.toString())
             })
             
-            // Randomize and take 7
+            // Randomize and take up to maxSuggestions (5)
             const shuffled = filteredCountryUsers.sort(() => 0.5 - Math.random())
-            const countrySuggestions = shuffled.slice(0, 7)
+            const countrySuggestions = shuffled.slice(0, maxSuggestions)
             suggestedUsers.push(...countrySuggestions)
             
             // Add to exclude list for next steps
@@ -403,94 +403,20 @@ export const getSuggestedUsers = async(req, res) => {
             })
         }
 
-        // STEP 2: For each followed user, get 1 random user from their followers
-        if (currentUser.following && currentUser.following.length > 0 && suggestedUsers.length < maxSuggestions) {
-            const followedUsers = await User.find({
-                _id: { $in: currentUser.following }
-            })
-            .select('followers')
-            .limit(10) // Limit to first 10 followed users to avoid too many queries
-            
-            const excludeIdsSet = new Set(excludeIds.map(id => id.toString()))
-            const followerCandidates = []
-            
-            // Collect all potential followers first (single pass)
-            for (const followedUser of followedUsers) {
-                if (followedUser.followers && followedUser.followers.length > 0) {
-                    const available = followedUser.followers.filter(followerId => {
-                        const followerIdStr = followerId.toString()
-                        return !excludeIdsSet.has(followerIdStr) && 
-                               !followingIdsStrings.has(followerIdStr) &&
-                               followerIdStr !== userId.toString()
-                    })
-                    if (available.length > 0) {
-                        followerCandidates.push(available[Math.floor(Math.random() * available.length)])
-                    }
-                }
-            }
-            
-            // Batch fetch all candidate followers in one query
-            if (followerCandidates.length > 0) {
-                const needed = Math.min(maxSuggestions - suggestedUsers.length, followerCandidates.length)
-                const randomCandidates = followerCandidates
-                    .sort(() => 0.5 - Math.random())
-                    .slice(0, needed)
-                
-                const followerUsers = await User.find({
-                    _id: { $in: randomCandidates }
-                })
-                .select('username name profilePic country followers')
-                
-                // Final filter and add
-                followerUsers.forEach(followerUser => {
-                    if (!followingIdsStrings.has(followerUser._id.toString())) {
-                        suggestedUsers.push(followerUser)
-                        excludeIds.push(new mongoose.Types.ObjectId(followerUser._id))
-                        excludeIdsSet.add(followerUser._id.toString())
-                    }
-                })
-            }
-        }
-
-        // STEP 3: If we still need more users, try to get more from same country first
-        if (suggestedUsers.length < maxSuggestions && currentUser.country && currentUser.country.trim() !== "") {
-            const needed = maxSuggestions - suggestedUsers.length
-            const userCountry = currentUser.country.trim()
-            
-            // Try to get more users from same country first
-            const moreCountryUsers = await User.find({
-                $and: [
-                    { country: { $exists: true, $ne: null, $ne: "" } },
-                    { country: { $regex: new RegExp(`^${userCountry.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') } },
-                    { _id: { $nin: excludeIds } }
-                ]
-            })
-            .select('username name profilePic country followers')
-            .limit(needed * 2)
-            
-            const filteredMoreCountry = moreCountryUsers.filter(user => {
-                return !followingIdsStrings.has(user._id.toString())
-            })
-            
-            if (filteredMoreCountry.length > 0) {
-                const shuffled = filteredMoreCountry.sort(() => 0.5 - Math.random())
-                suggestedUsers.push(...shuffled.slice(0, needed))
-                
-                // Update exclude list
-                shuffled.slice(0, needed).forEach(user => {
-                    excludeIds.push(new mongoose.Types.ObjectId(user._id))
-                })
-            }
-        }
-        
-        // STEP 4: If still need more, get random users from ANY country (last resort)
+        // STEP 2: If not enough from same country, get random users from OTHER countries
         if (suggestedUsers.length < maxSuggestions) {
             const needed = maxSuggestions - suggestedUsers.length
+            
+            // Get random users from ANY country (excluding same country if we already have some)
             const randomUsers = await User.find({
-                _id: { $nin: excludeIds }
+                _id: { $nin: excludeIds },
+                // If we have some from same country, exclude same country for variety
+                ...(suggestedUsers.length > 0 && currentUser.country && currentUser.country.trim() !== ""
+                    ? { country: { $ne: currentUser.country } }
+                    : {})
             })
             .select('username name profilePic country followers')
-            .limit(needed * 2)
+            .limit(needed * 3) // Get more to randomize from
             
             const filteredRandomUsers = randomUsers.filter(user => {
                 return !followingIdsStrings.has(user._id.toString())
@@ -500,19 +426,19 @@ export const getSuggestedUsers = async(req, res) => {
             suggestedUsers.push(...shuffled.slice(0, needed))
         }
         
-        // If still no suggestions, get any random users (fallback - should rarely happen)
+        // Fallback: If still no suggestions (should rarely happen)
         if (suggestedUsers.length === 0) {
             const fallbackUsers = await User.find({
                 _id: { $nin: excludeIds }
             })
             .select('username name profilePic country followers')
-            .limit(7)
+            .limit(maxSuggestions)
             
             const filteredFallback = fallbackUsers.filter(user => {
                 return !followingIdsStrings.has(user._id.toString())
             })
             
-            suggestedUsers.push(...filteredFallback.slice(0, 7))
+            suggestedUsers.push(...filteredFallback.slice(0, maxSuggestions))
         }
 
         // FINAL SAFETY FILTER: Single pass filter using Set (O(n) instead of O(n*m))
