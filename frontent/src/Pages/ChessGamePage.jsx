@@ -29,6 +29,9 @@ const ChessGamePage = () => {
     const [capturedWhite, setCapturedWhite] = useState([])
     const [capturedBlack, setCapturedBlack] = useState([])
 
+    // Refs to avoid circular dependencies
+    const handleGameEndRef = useRef(null)
+
     const bgColor = useColorModeValue('gray.50', '#101010')
     const cardBg = useColorModeValue('white', '#1a1a1a')
     const textColor = useColorModeValue('gray.800', 'white')
@@ -84,74 +87,7 @@ const ChessGamePage = () => {
         }
     }, [opponentId])
 
-    // Socket: Accept chess challenge
-    useEffect(() => {
-        if (!socket) return
-
-        // Connection status
-        socket.on('connect', () => {
-            console.log('✅ Chess socket connected')
-            showToast('Connected', 'Chess connection restored', 'success')
-        })
-
-        socket.on('disconnect', () => {
-            console.log('⚠️ Chess socket disconnected')
-            showToast('Connection Lost', 'Reconnecting...', 'warning')
-        })
-
-        socket.on('acceptChessChallenge', (data) => {
-            console.log('♟️ Challenge accepted, starting game:', data)
-            setRoomId(data.roomId)
-            setOrientation(data.yourColor || 'white')
-            setGameLive(true)
-            playSound('gameStart')
-            showToast('Game Started! ♟️', 'Good luck!', 'success')
-        })
-
-        socket.on('opponentMove', (data) => {
-            console.log('♟️ Opponent move received:', data)
-            // The move object from madechess has from, to, color, piece, etc.
-            // chess.move() can accept this full move object
-            if (data && data.move) {
-                try {
-                    const moveResult = makeAMove(data.move)
-                    if (!moveResult) {
-                        console.error('❌ Failed to apply opponent move:', data.move)
-                        showToast('Error', 'Failed to apply opponent move', 'error')
-                    } else {
-                        console.log('✅ Opponent move applied successfully:', moveResult)
-                    }
-                } catch (error) {
-                    console.error('❌ Error applying opponent move:', error)
-                    showToast('Error', 'Error applying move', 'error')
-                }
-            } else {
-                console.error('❌ Invalid move data received:', data)
-            }
-        })
-
-        socket.on('opponentResigned', () => {
-            showToast('Victory! 🏆', 'Your opponent resigned', 'success')
-            setOver('Your opponent resigned. You win!')
-            setShowGameOverBox(true)
-            setTimeout(handleGameEnd, 5000)
-        })
-
-        socket.on('chessGameCanceled', () => {
-            showToast('Game Canceled', 'The game has been canceled', 'info')
-            navigate('/home')
-        })
-
-        return () => {
-            socket.off('connect')
-            socket.off('disconnect')
-            socket.off('acceptChessChallenge')
-            socket.off('opponentMove')
-            socket.off('opponentResigned')
-            socket.off('chessGameCanceled')
-        }
-    }, [socket, navigate, showToast, makeAMove])
-
+    // Define makeAMove BEFORE socket useEffect to avoid initialization error
     const makeAMove = useCallback((move) => {
         try {
             // chess.move() can accept:
@@ -203,7 +139,11 @@ const ChessGamePage = () => {
                         setOver('Game Over')
                     }
                     setShowGameOverBox(true)
-                    setTimeout(handleGameEnd, 10000)
+                    setTimeout(() => {
+                        if (handleGameEndRef.current) {
+                            handleGameEndRef.current()
+                        }
+                    }, 10000)
                 }
             }
             return result
@@ -211,6 +151,78 @@ const ChessGamePage = () => {
             return null
         }
     }, [chess])
+
+    // Socket: Accept chess challenge
+    useEffect(() => {
+        if (!socket) return
+
+        // Connection status
+        socket.on('connect', () => {
+            console.log('✅ Chess socket connected')
+            showToast('Connected', 'Chess connection restored', 'success')
+        })
+
+        socket.on('disconnect', () => {
+            console.log('⚠️ Chess socket disconnected')
+            showToast('Connection Lost', 'Reconnecting...', 'warning')
+        })
+
+        socket.on('acceptChessChallenge', (data) => {
+            console.log('♟️ Challenge accepted, starting game:', data)
+            setRoomId(data.roomId)
+            setOrientation(data.yourColor || 'white')
+            setGameLive(true)
+            playSound('gameStart')
+            showToast('Game Started! ♟️', 'Good luck!', 'success')
+        })
+
+        socket.on('opponentMove', (data) => {
+            console.log('♟️ Opponent move received:', data)
+            // The move object from madechess has from, to, color, piece, etc.
+            // chess.move() can accept this full move object
+            if (data && data.move) {
+                try {
+                    const moveResult = makeAMove(data.move)
+                    if (!moveResult) {
+                        console.error('❌ Failed to apply opponent move:', data.move)
+                        showToast('Error', 'Failed to apply opponent move', 'error')
+                    } else {
+                        console.log('✅ Opponent move applied successfully:', moveResult)
+                    }
+                } catch (error) {
+                    console.error('❌ Error applying opponent move:', error)
+                    showToast('Error', 'Error applying move', 'error')
+                }
+            } else {
+                console.error('❌ Invalid move data received:', data)
+            }
+        })
+
+        socket.on('opponentResigned', () => {
+            showToast('Victory! 🏆', 'Your opponent resigned', 'success')
+            setOver('Your opponent resigned. You win!')
+            setShowGameOverBox(true)
+            setTimeout(() => {
+                if (handleGameEndRef.current) {
+                    handleGameEndRef.current()
+                }
+            }, 5000)
+        })
+
+        socket.on('chessGameCanceled', () => {
+            showToast('Game Canceled', 'The game has been canceled', 'info')
+            navigate('/home')
+        })
+
+        return () => {
+            socket.off('connect')
+            socket.off('disconnect')
+            socket.off('acceptChessChallenge')
+            socket.off('opponentMove')
+            socket.off('opponentResigned')
+            socket.off('chessGameCanceled')
+        }
+    }, [socket, navigate, showToast, makeAMove])
 
     function onDrop(sourceSquare, targetSquare) {
         // Only allow moves for current player
@@ -265,7 +277,7 @@ const ChessGamePage = () => {
         handleGameEnd()
     }
 
-    const handleGameEnd = () => {
+    const handleGameEnd = useCallback(() => {
         chess.reset()
         setFen(chess.fen())
         setOver('')
@@ -274,7 +286,12 @@ const ChessGamePage = () => {
         setCapturedBlack([])
         setGameLive(false)
         navigate('/home')
-    }
+    }, [chess, navigate])
+
+    // Store handleGameEnd in ref
+    useEffect(() => {
+        handleGameEndRef.current = handleGameEnd
+    }, [handleGameEnd])
 
     const getPieceUnicode = (type, color) => {
         const unicodeMap = {
