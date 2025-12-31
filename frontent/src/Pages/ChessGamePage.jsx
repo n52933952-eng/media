@@ -25,8 +25,18 @@ const ChessGamePage = () => {
     // Initialize orientation from localStorage if available
     const [orientation, setOrientation] = useState(() => {
         const saved = localStorage.getItem('chessOrientation')
+        console.log('♟️ Initializing orientation from localStorage:', saved)
         return saved || 'white'
     })
+    
+    // Sync orientation from localStorage on mount (in case it was set before navigation)
+    useEffect(() => {
+        const saved = localStorage.getItem('chessOrientation')
+        if (saved && saved !== orientation) {
+            console.log('♟️ Syncing orientation from localStorage:', saved)
+            setOrientation(saved)
+        }
+    }, [])
     const [gameLive, setGameLive] = useState(false)
     const [showGameOverBox, setShowGameOverBox] = useState(false)
     const [over, setOver] = useState('')
@@ -183,10 +193,14 @@ const ChessGamePage = () => {
             console.log('♟️ Received data.yourColor:', data.yourColor)
             console.log('♟️ Opponent ID:', data.opponentId)
             
-            // Set board orientation: 'white' = white pieces at bottom, 'black' = black pieces at bottom
-            const yourColor = data.yourColor || 'white'
+            // Get orientation from localStorage first (set before navigation)
+            // Then override with backend data if provided
+            const savedOrientation = localStorage.getItem('chessOrientation')
+            const yourColor = data.yourColor || savedOrientation || 'white'
+            
             console.log('♟️ Setting orientation to:', yourColor)
             console.log('♟️ Orientation first char:', yourColor[0])
+            console.log('♟️ Saved orientation from localStorage:', savedOrientation)
             
             // Force update orientation immediately
             setOrientation(yourColor)

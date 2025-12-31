@@ -134,6 +134,11 @@ const ChessChallenge = () => {
         }
 
         try {
+            // Set orientation to WHITE immediately (challenger is always white)
+            // This matches madechess pattern - challenger sets orientation before starting
+            localStorage.setItem('chessOrientation', 'white')
+            console.log('♟️ Challenger setting orientation to WHITE before challenging')
+
             // Send challenge via socket
             console.log('♟️ SENDING CHESS CHALLENGE:', {
                 from: user._id,
