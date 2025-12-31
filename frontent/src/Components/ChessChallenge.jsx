@@ -18,6 +18,7 @@ import {
     Badge,
     Spinner
 } from '@chakra-ui/react'
+import { useNavigate } from 'react-router-dom'
 import { UserContext } from '../context/UserContext'
 import { SocketContext } from '../context/SocketContext'
 import useShowToast from '../hooks/useShowToast'
@@ -29,6 +30,7 @@ const ChessChallenge = () => {
     const [availableUsers, setAvailableUsers] = useState([])
     const [loading, setLoading] = useState(false)
     const [busyUsers, setBusyUsers] = useState([])
+    const navigate = useNavigate()
     const showToast = useShowToast()
 
     const bgColor = useColorModeValue('white', '#1a1a1a')
@@ -105,11 +107,20 @@ const ChessChallenge = () => {
             setBusyUsers(prev => prev.filter(id => id !== userId))
         })
 
+        // Listen for challenge acceptance (sender side)
+        socket.on('acceptChessChallenge', (data) => {
+            console.log('♟️ Challenge accepted! Navigating to game...', data)
+            showToast('Challenge Accepted! ♟️', 'Starting game...', 'success')
+            // Navigate to chess game with opponent ID
+            navigate(`/chess/${data.opponentId}`)
+        })
+
         return () => {
             socket.off('userBusyChess')
             socket.off('userAvailableChess')
+            socket.off('acceptChessChallenge')
         }
-    }, [socket])
+    }, [socket, navigate, showToast])
 
     const handleOpenModal = () => {
         fetchAvailableUsers()

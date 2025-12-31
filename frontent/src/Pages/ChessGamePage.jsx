@@ -226,71 +226,18 @@ const ChessGamePage = () => {
 
     return (
         <Box bg={bgColor} minH="100vh" py={8}>
-            <Flex justify="center" align="start" gap={6} px={4} flexWrap="wrap">
-                {/* Captured Pieces Panel */}
-                {gameLive && (
+            <Flex justify="center" align="center" px={4}>
+                <Flex gap={4} align="stretch">
+                    {/* Chess Board */}
                     <Box
                         bg={cardBg}
-                        p={4}
-                        borderRadius="md"
-                        boxShadow="md"
-                        w="150px"
-                        minH="500px"
+                        p={6}
+                        borderRadius="xl"
+                        boxShadow="dark-lg"
+                        border="6px solid"
+                        borderColor="#a67c52"
+                        position="relative"
                     >
-                        <VStack spacing={6}>
-                            <Box>
-                                <Flex justify="center" mb={2}>
-                                    <Avatar
-                                        src={orientation === 'white' ? opponent?.profilePic : user?.profilePic}
-                                        name={orientation === 'white' ? opponent?.name : user?.name}
-                                        size="sm"
-                                    />
-                                </Flex>
-                                <Text fontSize="xs" textAlign="center" color={textColor} mb={2}>
-                                    {orientation === 'white' ? opponent?.username : user?.username}
-                                </Text>
-                                <HStack wrap="wrap" justify="center">
-                                    {(orientation === 'white' ? capturedBlack : capturedWhite).map((p, i) => (
-                                        <Text key={i} fontSize="2xl">
-                                            {getPieceUnicode(p, orientation === 'white' ? 'black' : 'white')}
-                                        </Text>
-                                    ))}
-                                </HStack>
-                            </Box>
-
-                            <Box>
-                                <Flex justify="center" mb={2}>
-                                    <Avatar
-                                        src={orientation === 'white' ? user?.profilePic : opponent?.profilePic}
-                                        name={orientation === 'white' ? user?.name : opponent?.name}
-                                        size="sm"
-                                    />
-                                </Flex>
-                                <Text fontSize="xs" textAlign="center" color={textColor} mb={2}>
-                                    {orientation === 'white' ? user?.username : opponent?.username}
-                                </Text>
-                                <HStack wrap="wrap" justify="center">
-                                    {(orientation === 'white' ? capturedWhite : capturedBlack).map((p, i) => (
-                                        <Text key={i} fontSize="2xl">
-                                            {getPieceUnicode(p, orientation === 'white' ? 'white' : 'black')}
-                                        </Text>
-                                    ))}
-                                </HStack>
-                            </Box>
-                        </VStack>
-                    </Box>
-                )}
-
-                {/* Chess Board */}
-                <Box
-                    bg={cardBg}
-                    p={6}
-                    borderRadius="xl"
-                    boxShadow="dark-lg"
-                    border="6px solid"
-                    borderColor="#a67c52"
-                    position="relative"
-                >
                     <Heading size="lg" mb={4} color="#5a3e2b" textAlign="center">
                         ♟️ Chess Match
                     </Heading>
@@ -343,6 +290,78 @@ const ChessGamePage = () => {
                         </Flex>
                     )}
                 </Box>
+
+                {/* Captured Pieces Panel - Right Side */}
+                {gameLive && (
+                    <Box
+                        bg={cardBg}
+                        p={4}
+                        borderRadius="md"
+                        boxShadow="md"
+                        w="150px"
+                        h="622px"
+                        display="flex"
+                        flexDirection="column"
+                        justifyContent="space-between"
+                    >
+                        {/* Top: Opponent */}
+                        <Box>
+                            <Flex justify="center" mb={2}>
+                                <Avatar
+                                    src={orientation === 'white' ? opponent?.profilePic : user?.profilePic}
+                                    name={orientation === 'white' ? opponent?.name : user?.name}
+                                    size="sm"
+                                />
+                            </Flex>
+                            <Text fontSize="xs" textAlign="center" color={textColor} mb={2} fontWeight="bold">
+                                {orientation === 'white' ? opponent?.username : user?.username}
+                            </Text>
+                            <Text fontSize="xs" textAlign="center" color="gray.500" mb={2}>
+                                {orientation === 'white' ? 'Black ⚫' : 'White ⚪'}
+                            </Text>
+                            <Flex wrap="wrap" justify="center" gap={1}>
+                                {(orientation === 'white' ? capturedBlack : capturedWhite).length > 0 ? (
+                                    (orientation === 'white' ? capturedBlack : capturedWhite).map((p, i) => (
+                                        <Text key={i} fontSize="2xl">
+                                            {getPieceUnicode(p, orientation === 'white' ? 'black' : 'white')}
+                                        </Text>
+                                    ))
+                                ) : (
+                                    <Text fontSize="xs" color="gray.500">No pieces</Text>
+                                )}
+                            </Flex>
+                        </Box>
+
+                        {/* Bottom: You */}
+                        <Box>
+                            <Flex justify="center" mb={2}>
+                                <Avatar
+                                    src={orientation === 'white' ? user?.profilePic : opponent?.profilePic}
+                                    name={orientation === 'white' ? user?.name : opponent?.name}
+                                    size="sm"
+                                />
+                            </Flex>
+                            <Text fontSize="xs" textAlign="center" color={textColor} mb={2} fontWeight="bold">
+                                {orientation === 'white' ? user?.username : opponent?.username} (You)
+                            </Text>
+                            <Text fontSize="xs" textAlign="center" color="gray.500" mb={2}>
+                                {orientation === 'white' ? 'White ⚪' : 'Black ⚫'}
+                            </Text>
+                            <Flex wrap="wrap" justify="center" gap={1}>
+                                {(orientation === 'white' ? capturedWhite : capturedBlack).length > 0 ? (
+                                    (orientation === 'white' ? capturedWhite : capturedBlack).map((p, i) => (
+                                        <Text key={i} fontSize="2xl">
+                                            {getPieceUnicode(p, orientation === 'white' ? 'white' : 'black')}
+                                        </Text>
+                                    ))
+                                ) : (
+                                    <Text fontSize="xs" color="gray.500">No pieces</Text>
+                                )}
+                            </Flex>
+                        </Box>
+                    </Box>
+                )}
+                </Flex>
             </Flex>
         </Box>
     )
