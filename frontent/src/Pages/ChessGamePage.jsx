@@ -228,8 +228,10 @@ const ChessGamePage = () => {
             
             // Start game
             setGameLive(true)
+            localStorage.setItem('gameLive', 'true') // Save to localStorage like madechess
             playSound('gameStart')
             showToast('Game Started! ♟️', `You are playing as ${storedOrientation === 'white' ? 'White ⚪' : 'Black ⚫'}`, 'success')
+            console.log('✅ Game started! gameLive set to true')
         }
 
         socket.on('acceptChessChallenge', handleAcceptChallenge)
@@ -287,17 +289,31 @@ const ChessGamePage = () => {
         // Line 157 in madechess: const safeOrientation = orientation || localStorage.getItem("chessOrientation") || "white";
         const safeOrientation = orientation || localStorage.getItem("chessOrientation") || "white"
         
+        console.log('🎮 onDrop called:', {
+            sourceSquare,
+            targetSquare,
+            chessTurn: chess.turn(),
+            safeOrientation,
+            safeOrientationFirstChar: safeOrientation[0],
+            canMove: chess.turn() === safeOrientation[0],
+            gameLive,
+            socket: !!socket
+        })
+        
         // Only allow moves for current player (check if chess turn matches orientation)
         // Same pattern as madechess line 160
         if (chess.turn() !== safeOrientation[0]) {
+            console.log('❌ Not your turn! Turn:', chess.turn(), 'Your color:', safeOrientation[0])
             return false // only current player moves (like madechess)
         }
         
         if (!gameLive) {
+            console.log('❌ Game not live yet!')
             return false
         }
         
         if (!socket) {
+            console.log('❌ Socket not connected!')
             return false
         }
 
