@@ -93,11 +93,9 @@ const ChessNotification = () => {
             return
         }
 
-        // CRITICAL: Set orientation to BLACK and save to localStorage FIRST (accepter is always black)
-        // This must happen BEFORE navigation so the component reads it correctly on mount
-        localStorage.setItem('chessOrientation', 'black')
-        console.log('♟️ Accepter (Saif) setting orientation to BLACK in localStorage')
-        console.log('♟️ localStorage now has:', localStorage.getItem('chessOrientation'))
+        // Don't set localStorage here - let the socket event set it
+        // This avoids race conditions where both players navigate simultaneously
+        console.log('♟️ Accepter (Saif) accepting challenge - orientation will be set by socket event')
 
         // Emit accept event
         socket.emit('acceptChessChallenge', {
@@ -109,12 +107,8 @@ const ChessNotification = () => {
         // Remove challenge from list
         setChallenges(prev => prev.filter(c => c.from !== challenge.from))
 
-        // Small delay to ensure localStorage is persisted before navigation
-        // Then navigate to chess game
-        setTimeout(() => {
-            console.log('♟️ Navigating to chess page, localStorage should be:', localStorage.getItem('chessOrientation'))
-            navigate(`/chess/${challenge.from}`)
-        }, 100)
+        // Navigate immediately - orientation will be set by socket event
+        navigate(`/chess/${challenge.from}`)
     }
 
     const handleDecline = (challenge) => {

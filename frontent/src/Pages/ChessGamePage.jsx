@@ -22,51 +22,31 @@ const ChessGamePage = () => {
 
     const [opponent, setOpponent] = useState(null)
     const [roomId, setRoomId] = useState(null)
-    // Initialize orientation from localStorage if available
-    const [orientation, setOrientation] = useState(() => {
-        const saved = localStorage.getItem('chessOrientation')
-        console.log('♟️ Initializing orientation from localStorage:', saved)
-        return saved || 'white'
-    })
+    // Initialize orientation as null - will be set by socket event
+    // This avoids race conditions with localStorage
+    const [orientation, setOrientation] = useState(null)
     // Force remount counter - increments when orientation changes
     const [boardKey, setBoardKey] = useState(0)
     // Force remount flag - toggles to force complete unmount/remount
     const [boardReady, setBoardReady] = useState(false)
     
-    // Computed orientation - always reads from localStorage first (like madechess)
-    // This ensures we always have the latest value, even if state hasn't updated yet
-    // Compute it as a const that's recalculated on each render
-    const storedOrientation = (() => {
-        const saved = localStorage.getItem('chessOrientation')
-        return saved || orientation
-    })()
+    // Computed orientation - use state value, fallback to localStorage only if state is null
+    const storedOrientation = orientation || localStorage.getItem('chessOrientation') || null
     
     // Initialize board ready state after orientation is set
-    // Only render board when we have a valid orientation
+    // Only render board when we have a valid orientation from socket event
     useEffect(() => {
-        const currentOrientation = localStorage.getItem('chessOrientation') || orientation
-        if (currentOrientation && (currentOrientation === 'white' || currentOrientation === 'black')) {
+        if (orientation && (orientation === 'white' || orientation === 'black')) {
             // Small delay to ensure orientation is set before rendering board
             const timer = setTimeout(() => {
                 setBoardReady(true)
-                console.log('✅ Board ready with orientation:', currentOrientation)
+                console.log('✅ Board ready with orientation:', orientation)
             }, 100)
             return () => clearTimeout(timer)
         } else {
             setBoardReady(false)
         }
     }, [orientation])
-    
-    // Sync orientation from localStorage on mount (in case it was set before navigation)
-    // This is critical - when accepter navigates, localStorage should already have 'black'
-    useEffect(() => {
-        const saved = localStorage.getItem('chessOrientation')
-        console.log('♟️ Component mounted - checking localStorage:', saved)
-        if (saved) {
-            console.log('♟️ Setting orientation from localStorage on mount:', saved)
-            setOrientation(saved)
-        }
-    }, [])
     const [gameLive, setGameLive] = useState(false)
     const [showGameOverBox, setShowGameOverBox] = useState(false)
     const [over, setOver] = useState('')
@@ -255,22 +235,20 @@ const ChessGamePage = () => {
             console.log('♟️ Opponent ID:', data.opponentId)
             console.log('♟️ Current user ID:', user._id)
             console.log('♟️ Current orientation state:', orientation)
-            console.log('♟️ Current localStorage:', localStorage.getItem('chessOrientation'))
             
-            // Use yourColor from backend (this is the source of truth)
+            // Use yourColor from backend (this is the SINGLE source of truth)
             // Backend assigns: challenger = white, accepter = black
-            // But also check localStorage as fallback (for accepter who set it before navigating)
-            const savedOrientation = localStorage.getItem('chessOrientation')
-            const yourColor = data.yourColor || savedOrientation || 'white'
+            const yourColor = data.yourColor || 'white'
             
             console.log('♟️ Final orientation to set:', yourColor)
             console.log('♟️ Orientation first char:', yourColor[0])
             console.log('♟️ Expected: challenger=white, accepter=black')
             
-            // CRITICAL: Set orientation FIRST, then wait a tick before starting game
-            // This ensures the board re-renders with correct orientation before gameLive is set
+            // CRITICAL: Set orientation state FIRST (this is the source of truth)
             setOrientation(yourColor)
+            // Also save to localStorage for persistence
             localStorage.setItem('chessOrientation', yourColor)
+            console.log('♟️ Orientation set to:', yourColor, 'and saved to localStorage')
             
             // Reset chess board to starting position
             chess.reset()
@@ -286,13 +264,13 @@ const ChessGamePage = () => {
                 
                 // Log for debugging after state updates
                 setTimeout(() => {
-                    const currentOrientation = localStorage.getItem('chessOrientation') || yourColor
-                    console.log('♟️ After 1 second - localStorage:', currentOrientation)
+                    console.log('♟️ After 1 second - Orientation state:', orientation)
+                    console.log('♟️ After 1 second - localStorage:', localStorage.getItem('chessOrientation'))
                     console.log('♟️ After 1 second - Chess turn:', chess.turn())
-                    console.log('♟️ After 1 second - Can move?', chess.turn() === currentOrientation[0])
-                    console.log('♟️ Board should show:', currentOrientation === 'white' ? 'White at bottom' : 'Black at bottom')
+                    console.log('♟️ After 1 second - Can move?', chess.turn() === yourColor[0])
+                    console.log('♟️ Board should show:', yourColor === 'white' ? 'White at bottom' : 'Black at bottom')
                 }, 1000)
-            }, 50) // Small delay to ensure orientation state is updated
+            }, 100) // Small delay to ensure orientation state is updated
         })
 
         socket.on('opponentMove', (data) => {
