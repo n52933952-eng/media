@@ -288,9 +288,11 @@ export const initializeSocket = (app) => {
 
         socket.on("chessMove", ({ roomId, move, to }) => {
             console.log(`♟️ Chess move received from ${socket.handshake.query.userId} to ${to}`)
+            console.log(`♟️ Move data:`, move)
             const recipientSocketId = userSocketMap[to]?.socketId
             if (recipientSocketId) {
                 console.log(`♟️ Forwarding move to ${to} (socket: ${recipientSocketId})`)
+                // Send move in same format as madechess: { move: moveObject }
                 io.to(recipientSocketId).emit("opponentMove", { move })
             } else {
                 console.log(`⚠️ Recipient ${to} not found in socket map`)

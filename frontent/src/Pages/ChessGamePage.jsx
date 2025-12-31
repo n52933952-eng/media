@@ -110,13 +110,23 @@ const ChessGamePage = () => {
 
         socket.on('opponentMove', (data) => {
             console.log('♟️ Opponent move received:', data)
-            // The move object should have 'from' and 'to' properties
-            if (data.move) {
-                // makeAMove expects { from, to, promotion } format
-                const moveResult = makeAMove(data.move)
-                if (!moveResult) {
-                    console.error('❌ Failed to apply opponent move:', data.move)
+            // The move object from madechess has from, to, color, piece, etc.
+            // chess.move() can accept this full move object
+            if (data && data.move) {
+                try {
+                    const moveResult = makeAMove(data.move)
+                    if (!moveResult) {
+                        console.error('❌ Failed to apply opponent move:', data.move)
+                        showToast('Error', 'Failed to apply opponent move', 'error')
+                    } else {
+                        console.log('✅ Opponent move applied successfully:', moveResult)
+                    }
+                } catch (error) {
+                    console.error('❌ Error applying opponent move:', error)
+                    showToast('Error', 'Error applying move', 'error')
                 }
+            } else {
+                console.error('❌ Invalid move data received:', data)
             }
         })
 
@@ -140,11 +150,26 @@ const ChessGamePage = () => {
             socket.off('opponentResigned')
             socket.off('chessGameCanceled')
         }
-    }, [socket, navigate, showToast])
+    }, [socket, navigate, showToast, makeAMove])
 
     const makeAMove = useCallback((move) => {
         try {
-            const result = chess.move(move)
+            // chess.move() can accept:
+            // 1. String: "e2e4"
+            // 2. Object: { from: "e2", to: "e4", promotion: "q" }
+            // 3. Full move object with from/to properties
+            let moveToApply = move
+            
+            // If it's a full move object, extract just from/to/promotion
+            if (move && typeof move === 'object' && move.from && move.to) {
+                moveToApply = {
+                    from: move.from,
+                    to: move.to,
+                    promotion: move.promotion || 'q'
+                }
+            }
+            
+            const result = chess.move(moveToApply)
             if (result) {
                 const newFen = chess.fen()
                 setFen(newFen)
@@ -216,12 +241,12 @@ const ChessGamePage = () => {
             return false
         }
 
-        console.log('✅ Move made! Sending to opponent...', moveData)
+        console.log('✅ Move made! Sending to opponent...', move)
 
-        // Send moveData (input format) to opponent - they will apply it with makeAMove
+        // Send the FULL move object (result from makeAMove) - like madechess does
         socket.emit('chessMove', {
             roomId,
-            move: moveData, // Send moveData format: { from, to, promotion }
+            move: move, // Send full move object with from, to, color, piece, etc.
             to: opponentId
         })
 
