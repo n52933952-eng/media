@@ -22,31 +22,13 @@ const ChessGamePage = () => {
 
     const [opponent, setOpponent] = useState(null)
     const [roomId, setRoomId] = useState(null)
-    // Force remount counter - increments when orientation changes
-    const [boardKey, setBoardKey] = useState(0)
-    // Force remount flag - toggles to force complete unmount/remount
-    const [boardReady, setBoardReady] = useState(false)
     
     // Read orientation same way ChessTable does in madechess: localStorage first, then state
+    // Line 201 in madechess: const storedOrientation = localStorage.getItem("chessOrientation") || orientation;
     const storedOrientation = localStorage.getItem("chessOrientation") || orientation
     
-    // Initialize board ready state - check storedOrientation (like madechess)
-    useEffect(() => {
-        if (storedOrientation && (storedOrientation === 'white' || storedOrientation === 'black')) {
-            // Unmount board first to ensure clean remount
-            setBoardReady(false)
-            // Increment board key to force complete remount
-            setBoardKey(prev => prev + 1)
-            // Wait a bit to ensure state is fully updated before remounting
-            const timer = setTimeout(() => {
-                setBoardReady(true)
-                console.log('✅ Board ready with orientation:', storedOrientation)
-            }, 200)
-            return () => clearTimeout(timer)
-        } else {
-            setBoardReady(false)
-        }
-    }, [storedOrientation])
+    // Debug: Log storedOrientation on every render
+    console.log('🎯 ChessGamePage render - storedOrientation:', storedOrientation, '| orientation state:', orientation, '| localStorage:', localStorage.getItem("chessOrientation"))
     const [gameLive, setGameLive] = useState(false)
     const [showGameOverBox, setShowGameOverBox] = useState(false)
     const [over, setOver] = useState('')
@@ -68,13 +50,14 @@ const ChessGamePage = () => {
     // This ensures board is ready even if socket event is delayed
     useEffect(() => {
         const savedOrientation = localStorage.getItem("chessOrientation")
+        console.log('♟️ ChessGamePage mounted - checking localStorage:', savedOrientation)
+        console.log('♟️ Current orientation state:', orientation)
         if (savedOrientation && (savedOrientation === 'white' || savedOrientation === 'black')) {
-            if (!orientation) {
-                setOrientation(savedOrientation)
-                console.log('♟️ Initialized orientation from localStorage on mount:', savedOrientation)
-            }
+            // Always sync with localStorage on mount (like madechess)
+            setOrientation(savedOrientation)
+            console.log('♟️ Set orientation from localStorage on mount:', savedOrientation)
         }
-    }, []) // Only run on mount
+    }, []) // Only run on mount - don't depend on orientation to avoid loops
     
     // Debug: Log orientation changes
     useEffect(() => {
@@ -404,35 +387,23 @@ const ChessGamePage = () => {
                     )}
 
                     <Box w="400px" h="400px">
-                        {/* Conditionally render to force remount when orientation changes */}
-                        {boardReady && storedOrientation && (storedOrientation === 'white' || storedOrientation === 'black') ? (
-                            <Chessboard
-                                key={`chess-${storedOrientation}-${boardKey}`}
-                                position={fen}
-                                onPieceDrop={onDrop}
-                                boardOrientation={storedOrientation}
-                                boardWidth={400}
-                                animationDuration={250}
-                                customDarkSquareStyle={{
-                                    backgroundColor: '#b58863'
-                                }}
-                                customLightSquareStyle={{
-                                    backgroundColor: '#f0d9b5'
-                                }}
-                            />
-                        ) : (
-                            <Box 
-                                w="400px" 
-                                h="400px" 
-                                display="flex" 
-                                alignItems="center" 
-                                justifyContent="center"
-                                bg="gray.100"
-                                borderRadius="md"
-                            >
-                                <Text color="gray.600">Setting up board...</Text>
-                            </Box>
-                        )}
+                        {/* Render board directly like madechess - no conditional rendering */}
+                        {/* Madechess line 323-339: Just renders Chessboard with boardOrientation={storedOrientation} */}
+                        {/* Key includes orientation to force remount when it changes */}
+                        <Chessboard
+                            key={`chess-board-${storedOrientation || 'default'}`}
+                            position={fen}
+                            onPieceDrop={onDrop}
+                            boardOrientation={storedOrientation || "white"}
+                            boardWidth={400}
+                            animationDuration={250}
+                            customDarkSquareStyle={{
+                                backgroundColor: '#b58863'
+                            }}
+                            customLightSquareStyle={{
+                                backgroundColor: '#f0d9b5'
+                            }}
+                        />
                     </Box>
 
                     {showGameOverBox && (
