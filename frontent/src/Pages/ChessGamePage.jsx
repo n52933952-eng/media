@@ -30,10 +30,12 @@ const ChessGamePage = () => {
     })
     
     // Sync orientation from localStorage on mount (in case it was set before navigation)
+    // This is critical - when accepter navigates, localStorage should already have 'black'
     useEffect(() => {
         const saved = localStorage.getItem('chessOrientation')
-        if (saved && saved !== orientation) {
-            console.log('♟️ Syncing orientation from localStorage:', saved)
+        console.log('♟️ Component mounted - checking localStorage:', saved)
+        if (saved) {
+            console.log('♟️ Setting orientation from localStorage on mount:', saved)
             setOrientation(saved)
         }
     }, [])
@@ -59,7 +61,14 @@ const ChessGamePage = () => {
         console.log('🎨 Orientation changed to:', orientation)
         console.log('🎨 Chess turn:', chess.turn())
         console.log('🎨 Can move?', chess.turn() === orientation[0])
+        console.log('🎨 Board orientation should be:', orientation === 'white' ? 'White at bottom' : 'Black at bottom')
     }, [orientation, chess])
+    
+    // Force board re-render when orientation changes
+    useEffect(() => {
+        console.log('🔄 Orientation state updated, forcing board re-render')
+        // The key prop on Chessboard will force re-render
+    }, [orientation])
 
     // Sound effects
     const sounds = useRef({})
@@ -192,15 +201,21 @@ const ChessGamePage = () => {
             console.log('♟️ Challenge accepted, starting game:', data)
             console.log('♟️ Received data.yourColor:', data.yourColor)
             console.log('♟️ Opponent ID:', data.opponentId)
+            console.log('♟️ Current user ID:', user._id)
+            console.log('♟️ Current orientation state:', orientation)
+            console.log('♟️ Current localStorage:', localStorage.getItem('chessOrientation'))
             
             // Use yourColor from backend (this is the source of truth)
             // Backend assigns: challenger = white, accepter = black
-            const yourColor = data.yourColor || localStorage.getItem('chessOrientation') || 'white'
+            // But also check localStorage as fallback (for accepter who set it before navigating)
+            const savedOrientation = localStorage.getItem('chessOrientation')
+            const yourColor = data.yourColor || savedOrientation || 'white'
             
-            console.log('♟️ Setting orientation to:', yourColor)
+            console.log('♟️ Final orientation to set:', yourColor)
             console.log('♟️ Orientation first char:', yourColor[0])
+            console.log('♟️ Expected: challenger=white, accepter=black')
             
-            // Force update orientation immediately - this will trigger re-render
+            // CRITICAL: Force update orientation immediately - this will trigger re-render
             setOrientation(yourColor)
             // Also save to localStorage for persistence
             localStorage.setItem('chessOrientation', yourColor)
@@ -217,9 +232,12 @@ const ChessGamePage = () => {
             // Log for debugging after state updates
             setTimeout(() => {
                 const currentOrientation = localStorage.getItem('chessOrientation') || yourColor
-                console.log('♟️ After 1 second - Orientation:', currentOrientation)
+                const currentState = orientation
+                console.log('♟️ After 1 second - localStorage:', currentOrientation)
+                console.log('♟️ After 1 second - State:', currentState)
                 console.log('♟️ After 1 second - Chess turn:', chess.turn())
                 console.log('♟️ After 1 second - Can move?', chess.turn() === currentOrientation[0])
+                console.log('♟️ Board should show:', currentOrientation === 'white' ? 'White at bottom' : 'Black at bottom')
             }, 1000)
         })
 

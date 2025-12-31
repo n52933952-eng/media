@@ -110,13 +110,18 @@ const ChessChallenge = () => {
         // Listen for challenge acceptance (sender side)
         socket.on('acceptChessChallenge', (data) => {
             console.log('♟️ Challenge accepted! Navigating to game...', data)
+            console.log('♟️ Received yourColor from backend:', data.yourColor)
             // Set orientation to WHITE for challenger (sender)
             // This matches madechess pattern - challenger gets white when game starts
             localStorage.setItem('chessOrientation', 'white')
-            console.log('♟️ Challenger setting orientation to WHITE on acceptance')
+            console.log('♟️ Challenger (Neyma) setting orientation to WHITE in localStorage')
+            console.log('♟️ localStorage now has:', localStorage.getItem('chessOrientation'))
             showToast('Challenge Accepted! ♟️', 'Starting game...', 'success')
-            // Navigate to chess game with opponent ID
-            navigate(`/chess/${data.opponentId}`)
+            // Small delay to ensure localStorage is persisted before navigation
+            setTimeout(() => {
+                console.log('♟️ Navigating to chess page, localStorage should be:', localStorage.getItem('chessOrientation'))
+                navigate(`/chess/${data.opponentId}`)
+            }, 100)
         })
 
         return () => {
