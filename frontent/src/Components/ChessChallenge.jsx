@@ -110,6 +110,10 @@ const ChessChallenge = () => {
         // Listen for challenge acceptance (sender side)
         socket.on('acceptChessChallenge', (data) => {
             console.log('♟️ Challenge accepted! Navigating to game...', data)
+            // Set orientation to WHITE for challenger (sender)
+            // This matches madechess pattern - challenger gets white when game starts
+            localStorage.setItem('chessOrientation', 'white')
+            console.log('♟️ Challenger setting orientation to WHITE on acceptance')
             showToast('Challenge Accepted! ♟️', 'Starting game...', 'success')
             // Navigate to chess game with opponent ID
             navigate(`/chess/${data.opponentId}`)
@@ -134,12 +138,8 @@ const ChessChallenge = () => {
         }
 
         try {
-            // Set orientation to WHITE immediately (challenger is always white)
-            // This matches madechess pattern - challenger sets orientation before starting
-            localStorage.setItem('chessOrientation', 'white')
-            console.log('♟️ Challenger setting orientation to WHITE before challenging')
-
-            // Send challenge via socket
+            // Don't save orientation to localStorage yet - wait for game to start
+            // This matches madechess pattern - orientation is set when game actually starts
             console.log('♟️ SENDING CHESS CHALLENGE:', {
                 from: user._id,
                 to: opponent._id,

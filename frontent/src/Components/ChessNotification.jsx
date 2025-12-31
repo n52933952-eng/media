@@ -93,8 +93,8 @@ const ChessNotification = () => {
             return
         }
 
-        // Set orientation to BLACK immediately (accepter is always black)
-        // This matches madechess pattern - accepter sets orientation before joining
+        // Set orientation to BLACK and save to localStorage (accepter is always black)
+        // This matches madechess pattern - accepter sets orientation when joining
         localStorage.setItem('chessOrientation', 'black')
         console.log('♟️ Accepter setting orientation to BLACK before accepting')
 

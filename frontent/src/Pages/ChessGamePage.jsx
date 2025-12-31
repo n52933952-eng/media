@@ -193,16 +193,14 @@ const ChessGamePage = () => {
             console.log('♟️ Received data.yourColor:', data.yourColor)
             console.log('♟️ Opponent ID:', data.opponentId)
             
-            // Get orientation from localStorage first (set before navigation)
-            // Then override with backend data if provided
-            const savedOrientation = localStorage.getItem('chessOrientation')
-            const yourColor = data.yourColor || savedOrientation || 'white'
+            // Use yourColor from backend (this is the source of truth)
+            // Backend assigns: challenger = white, accepter = black
+            const yourColor = data.yourColor || localStorage.getItem('chessOrientation') || 'white'
             
             console.log('♟️ Setting orientation to:', yourColor)
             console.log('♟️ Orientation first char:', yourColor[0])
-            console.log('♟️ Saved orientation from localStorage:', savedOrientation)
             
-            // Force update orientation immediately
+            // Force update orientation immediately - this will trigger re-render
             setOrientation(yourColor)
             // Also save to localStorage for persistence
             localStorage.setItem('chessOrientation', yourColor)
