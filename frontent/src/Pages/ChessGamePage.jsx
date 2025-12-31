@@ -61,19 +61,19 @@ const ChessGamePage = () => {
     const chess = useMemo(() => new Chess(), [])
     const [fen, setFen] = useState(chess.fen())
 
-    // Initialize from localStorage on mount
+    // Initialize orientation and gameLive from localStorage on mount
     useEffect(() => {
         const savedOrientation = localStorage.getItem("chessOrientation")
         const savedGameLive = localStorage.getItem("gameLive") === "true"
         
-        if (savedOrientation === 'white' || savedOrientation === 'black') {
+        if (savedOrientation && (savedOrientation === 'white' || savedOrientation === 'black')) {
             setOrientation(savedOrientation)
         }
         
         if (savedGameLive) {
             setGameLive(true)
         }
-    }, []) // Only run once on mount
+    }, [])
     
     // Debug: Log orientation changes (only in development)
     useEffect(() => {
@@ -230,14 +230,14 @@ const ChessGamePage = () => {
         })
 
         const handleAcceptChallenge = (data) => {
-            // Read orientation from localStorage (set before navigation)
+            // Read orientation from localStorage (already set before navigation)
             const currentLocalStorageOrientation = localStorage.getItem("chessOrientation")
             
-            // Sync orientation state with localStorage (don't overwrite localStorage)
+            // Don't overwrite localStorage - it's already correct
             if (currentLocalStorageOrientation) {
                 setOrientation(currentLocalStorageOrientation)
             } else {
-                // Backup: use socket data if localStorage is empty
+                // Backup only if localStorage is empty
                 const yourColor = data.yourColor || 'white'
                 setOrientation(yourColor)
                 localStorage.setItem('chessOrientation', yourColor)
@@ -247,10 +247,10 @@ const ChessGamePage = () => {
             chess.reset()
             setFen(chess.fen())
             
-            // Set roomId - CRITICAL for making moves
+            // Set roomId - required for making moves
             setRoomId(data.roomId)
             
-            // Ensure gameLive is true
+            // Start game
             setGameLive(true)
             localStorage.setItem('gameLive', 'true')
             playSound('gameStart')
@@ -386,28 +386,14 @@ const ChessGamePage = () => {
         }
         
         if (!gameLive) {
-            // Check localStorage as backup
-            const localGameLive = localStorage.getItem("gameLive") === "true"
-            if (localGameLive) {
-                setGameLive(true)
-            } else {
-                if (import.meta.env.DEV) {
-                    console.log('❌ Game not live yet!')
-                }
-                return false
-            }
+            return false
         }
         
         if (!socket) {
-            showToast('Error', 'Connection lost. Please refresh.', 'error')
             return false
         }
         
         if (!roomId || !opponentId) {
-            if (import.meta.env.DEV) {
-                console.error('❌ Missing roomId or opponentId - roomId:', roomId, 'opponentId:', opponentId)
-            }
-            showToast('Error', 'Waiting for game to start...', 'warning')
             return false
         }
 
