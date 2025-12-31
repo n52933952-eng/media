@@ -223,17 +223,27 @@ const ChessGamePage = () => {
             console.log('♟️ Opponent ID:', data.opponentId)
             console.log('♟️ Current user ID:', user._id)
             
-            // Orientation should already be set locally (like madechess)
-            // But use socket data as backup/confirmation
-            const yourColor = data.yourColor || storedOrientation || 'white'
+            // Read orientation directly from localStorage (don't use storedOrientation - it might be stale)
+            const currentLocalStorageOrientation = localStorage.getItem("chessOrientation")
+            console.log('♟️ Current localStorage orientation:', currentLocalStorageOrientation)
+            console.log('♟️ Current orientation state:', orientation)
             
-            // Only update if different (backup/confirmation)
-            if (yourColor && yourColor !== storedOrientation) {
+            // Orientation should already be set locally BEFORE navigation (like madechess)
+            // Socket data is just confirmation - don't overwrite if already set
+            const yourColor = currentLocalStorageOrientation || data.yourColor || orientation || 'white'
+            
+            // Only update if localStorage doesn't have it (shouldn't happen, but safety check)
+            if (!currentLocalStorageOrientation && yourColor) {
                 setOrientation(yourColor)
                 localStorage.setItem('chessOrientation', yourColor)
-                console.log('♟️ Orientation updated from socket (backup):', yourColor)
+                console.log('♟️ Orientation set from socket (backup):', yourColor)
             } else {
-                console.log('♟️ Orientation already set locally:', storedOrientation)
+                console.log('♟️ Orientation already set locally:', currentLocalStorageOrientation, '- keeping it!')
+                // Ensure state matches localStorage
+                if (orientation !== currentLocalStorageOrientation) {
+                    setOrientation(currentLocalStorageOrientation)
+                    console.log('♟️ Synced orientation state with localStorage:', currentLocalStorageOrientation)
+                }
             }
             
             // Reset chess board to starting position
@@ -246,8 +256,9 @@ const ChessGamePage = () => {
             setGameLive(true)
             localStorage.setItem('gameLive', 'true') // Save to localStorage like madechess
             playSound('gameStart')
-            showToast('Game Started! ♟️', `You are playing as ${storedOrientation === 'white' ? 'White ⚪' : 'Black ⚫'}`, 'success')
-            console.log('✅ Game started! gameLive set to true')
+            const finalOrientation = currentLocalStorageOrientation || yourColor
+            showToast('Game Started! ♟️', `You are playing as ${finalOrientation === 'white' ? 'White ⚪' : 'Black ⚫'}`, 'success')
+            console.log('✅ Game started! gameLive set to true, orientation:', finalOrientation)
         }
 
         socket.on('acceptChessChallenge', handleAcceptChallenge)
