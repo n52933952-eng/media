@@ -25,10 +25,22 @@ const ChessGamePage = () => {
     
     // Read orientation same way ChessTable does in madechess: localStorage first, then state
     // Line 201 in madechess: const storedOrientation = localStorage.getItem("chessOrientation") || orientation;
-    // OPTIMIZED: Use useMemo to avoid reading localStorage on every render
+    // CRITICAL: Always read from localStorage FIRST (like madechess), then fallback to state
+    // This ensures we get the correct value that was set before navigation
+    // Saif (accepter) should have "black", Neyma (challenger) should have "white"
     const storedOrientation = useMemo(() => {
-        return localStorage.getItem("chessOrientation") || orientation || "white"
-    }, [orientation]) // Only recompute when orientation changes
+        const fromStorage = localStorage.getItem("chessOrientation")
+        const result = fromStorage || orientation || "white"
+        if (import.meta.env.DEV) {
+            console.log('🎯 storedOrientation computed:', { 
+                fromStorage, 
+                orientationState: orientation, 
+                result,
+                userId: user?._id 
+            })
+        }
+        return result
+    }, [orientation, user?._id]) // Only recompute when orientation or user changes
     // Initialize gameLive from localStorage (like madechess)
     const [gameLive, setGameLive] = useState(() => {
         return localStorage.getItem("gameLive") === "true"
@@ -62,12 +74,11 @@ const ChessGamePage = () => {
         console.log('♟️ Current gameLive state:', gameLive)
         
         if (savedOrientation && (savedOrientation === 'white' || savedOrientation === 'black')) {
-            // Always sync with localStorage on mount (like madechess)
-            if (orientation !== savedOrientation) {
-                setOrientation(savedOrientation)
-                if (import.meta.env.DEV) {
-                    console.log('♟️ Set orientation from localStorage on mount:', savedOrientation)
-                }
+            // CRITICAL: Always sync with localStorage on mount (like madechess)
+            // Don't check if different - just set it to ensure it's correct
+            setOrientation(savedOrientation)
+            if (import.meta.env.DEV) {
+                console.log('♟️ Set orientation from localStorage on mount:', savedOrientation)
             }
         }
         
@@ -232,37 +243,37 @@ const ChessGamePage = () => {
         })
 
         const handleAcceptChallenge = (data) => {
-            console.log('♟️ Challenge accepted, starting game:', data)
-            console.log('♟️ Received data.yourColor:', data.yourColor)
-            console.log('♟️ Opponent ID:', data.opponentId)
-            console.log('♟️ Current user ID:', user._id)
+            if (import.meta.env.DEV) {
+                console.log('♟️ Challenge accepted, starting game:', data)
+                console.log('♟️ Received data.yourColor:', data.yourColor)
+                console.log('♟️ Opponent ID:', data.opponentId)
+                console.log('♟️ Current user ID:', user._id)
+            }
             
             // Read orientation directly from localStorage (don't use storedOrientation - it might be stale)
             const currentLocalStorageOrientation = localStorage.getItem("chessOrientation")
-            console.log('♟️ Current localStorage orientation:', currentLocalStorageOrientation)
-            console.log('♟️ Current orientation state:', orientation)
+            if (import.meta.env.DEV) {
+                console.log('♟️ Current localStorage orientation:', currentLocalStorageOrientation)
+                console.log('♟️ Current orientation state:', orientation)
+            }
             
-            // Orientation should already be set locally BEFORE navigation (like madechess)
-            // Socket data is just confirmation - don't overwrite if already set
-            const yourColor = currentLocalStorageOrientation || data.yourColor || orientation || 'white'
-            
-            // Only update if localStorage doesn't have it (shouldn't happen, but safety check)
-            if (!currentLocalStorageOrientation && yourColor) {
+            // CRITICAL: Orientation should already be set locally BEFORE navigation (like madechess)
+            // NEVER overwrite localStorage - it was set correctly before navigation
+            // Socket data is just confirmation - trust localStorage first
+            if (currentLocalStorageOrientation) {
+                // localStorage has the correct value - sync state to match it
+                // This ensures Saif (accepter) keeps "black" and Neyma (challenger) keeps "white"
+                setOrientation(currentLocalStorageOrientation)
+                if (import.meta.env.DEV) {
+                    console.log('♟️ Synced orientation state with localStorage:', currentLocalStorageOrientation)
+                }
+            } else {
+                // localStorage doesn't have it (shouldn't happen) - use socket data as backup
+                const yourColor = data.yourColor || orientation || 'white'
                 setOrientation(yourColor)
                 localStorage.setItem('chessOrientation', yourColor)
                 if (import.meta.env.DEV) {
                     console.log('♟️ Orientation set from socket (backup):', yourColor)
-                }
-            } else {
-                if (import.meta.env.DEV) {
-                    console.log('♟️ Orientation already set locally:', currentLocalStorageOrientation, '- keeping it!')
-                }
-                // Ensure state matches localStorage
-                if (orientation !== currentLocalStorageOrientation) {
-                    setOrientation(currentLocalStorageOrientation)
-                    if (import.meta.env.DEV) {
-                        console.log('♟️ Synced orientation state with localStorage:', currentLocalStorageOrientation)
-                    }
                 }
             }
             
