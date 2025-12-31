@@ -25,18 +25,13 @@ const ChessGamePage = () => {
     
     // Read orientation same way ChessTable does in madechess: localStorage first, then state
     // Line 201 in madechess: const storedOrientation = localStorage.getItem("chessOrientation") || orientation;
-    const storedOrientation = localStorage.getItem("chessOrientation") || orientation
-    
-    // DEBUG: Manual override to test - FORCE BLACK
-    const FORCE_BLACK = "black" // Change this to test
-    const finalOrientation = FORCE_BLACK || storedOrientation || "white"
+    const storedOrientation = localStorage.getItem("chessOrientation") || orientation || "white"
     
     // Debug: Log storedOrientation on every render
     console.log('🎯 ChessGamePage render:')
     console.log('  - localStorage chessOrientation:', localStorage.getItem("chessOrientation"))
     console.log('  - orientation state:', orientation)
-    console.log('  - storedOrientation:', storedOrientation)
-    console.log('  - finalOrientation (for board):', finalOrientation)
+    console.log('  - storedOrientation (for board):', storedOrientation)
     const [gameLive, setGameLive] = useState(false)
     const [showGameOverBox, setShowGameOverBox] = useState(false)
     const [over, setOver] = useState('')
@@ -289,16 +284,12 @@ const ChessGamePage = () => {
 
     function onDrop(sourceSquare, targetSquare) {
         // Use safeOrientation pattern from madechess: orientation || localStorage || "white"
-        // Use finalOrientation if available, otherwise fallback
-        const currentFinalOrientation = finalOrientation || orientation || localStorage.getItem("chessOrientation") || "white"
-        const safeOrientation = currentFinalOrientation
-        
-        console.log('🎮 onDrop - safeOrientation:', safeOrientation, '| chess.turn():', chess.turn(), '| finalOrientation:', finalOrientation)
+        // Line 157 in madechess: const safeOrientation = orientation || localStorage.getItem("chessOrientation") || "white";
+        const safeOrientation = orientation || localStorage.getItem("chessOrientation") || "white"
         
         // Only allow moves for current player (check if chess turn matches orientation)
         // Same pattern as madechess line 160
         if (chess.turn() !== safeOrientation[0]) {
-            console.log('❌ Not your turn! Turn:', chess.turn(), 'Orientation:', safeOrientation[0])
             return false // only current player moves (like madechess)
         }
         
@@ -392,22 +383,22 @@ const ChessGamePage = () => {
                     <Heading size="lg" mb={2} color="#5a3e2b" textAlign="center">
                         ♟️ Chess Match
                     </Heading>
-                    {gameLive && finalOrientation && (
+                    {gameLive && storedOrientation && (
                         <Text fontSize="sm" textAlign="center" mb={4} color="#5a3e2b" fontWeight="bold">
-                            You are playing as: {finalOrientation === 'white' ? '⚪ White' : '⚫ Black'}
-                            {chess.turn() === finalOrientation[0] ? ' (Your turn!)' : ' (Waiting...)'}
+                            You are playing as: {storedOrientation === 'white' ? '⚪ White' : '⚫ Black'}
+                            {chess.turn() === storedOrientation[0] ? ' (Your turn!)' : ' (Waiting...)'}
                         </Text>
                     )}
 
                     <Box w="400px" h="400px">
                         {/* Render board directly like madechess - no conditional rendering */}
                         {/* Madechess line 323-339: Just renders Chessboard with boardOrientation={storedOrientation} */}
-                        {/* Key includes orientation to force remount when it changes */}
+                        {/* Key includes orientation to force remount when it changes - CRITICAL for react-chessboard */}
                         <Chessboard
-                            key={`chess-board-${finalOrientation}`}
+                            key={`chess-board-${storedOrientation}`}
                             position={fen}
                             onPieceDrop={onDrop}
-                            boardOrientation={finalOrientation}
+                            boardOrientation={storedOrientation}
                             boardWidth={400}
                             animationDuration={250}
                             customDarkSquareStyle={{
