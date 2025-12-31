@@ -69,8 +69,12 @@ const ChessGamePage = () => {
         console.log('🎨 Orientation state:', orientation)
         console.log('🎨 Stored orientation (from localStorage):', storedOrientation)
         console.log('🎨 Chess turn:', chess.turn())
-        console.log('🎨 Can move?', chess.turn() === storedOrientation[0])
-        console.log('🎨 Board orientation should be:', storedOrientation === 'white' ? 'White at bottom' : 'Black at bottom')
+        if (storedOrientation) {
+            console.log('🎨 Can move?', chess.turn() === storedOrientation[0])
+            console.log('🎨 Board orientation should be:', storedOrientation === 'white' ? 'White at bottom' : 'Black at bottom')
+        } else {
+            console.log('🎨 Waiting for orientation from socket event...')
+        }
     }, [orientation, storedOrientation, chess])
     
     // Force board re-render when orientation changes
@@ -320,6 +324,13 @@ const ChessGamePage = () => {
         // Use storedOrientation (always reads from localStorage, like madechess)
         const currentOrientation = storedOrientation
         
+        // Safety check - don't allow moves if orientation is not set yet
+        if (!currentOrientation || (currentOrientation !== 'white' && currentOrientation !== 'black')) {
+            console.log('❌ Orientation not set yet, cannot make move')
+            showToast('Game Not Ready', 'Waiting for game to start...', 'warning')
+            return false
+        }
+        
         console.log('🎮 onDrop called:', {
             sourceSquare,
             targetSquare,
@@ -432,7 +443,7 @@ const ChessGamePage = () => {
                     <Heading size="lg" mb={2} color="#5a3e2b" textAlign="center">
                         ♟️ Chess Match
                     </Heading>
-                    {gameLive && (
+                    {gameLive && storedOrientation && (
                         <Text fontSize="sm" textAlign="center" mb={4} color="#5a3e2b" fontWeight="bold">
                             You are playing as: {storedOrientation === 'white' ? '⚪ White' : '⚫ Black'}
                             {chess.turn() === storedOrientation[0] ? ' (Your turn!)' : ' (Waiting...)'}
