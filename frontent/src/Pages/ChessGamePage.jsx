@@ -230,58 +230,33 @@ const ChessGamePage = () => {
         })
 
         const handleAcceptChallenge = (data) => {
-            if (import.meta.env.DEV) {
-                console.log('♟️ Challenge accepted, starting game:', data)
-                console.log('♟️ Received data.yourColor:', data.yourColor)
-                console.log('♟️ Opponent ID:', data.opponentId)
-                console.log('♟️ Current user ID:', user._id)
-            }
-            
-            // Read orientation directly from localStorage (don't use storedOrientation - it might be stale)
+            // Read orientation from localStorage (set before navigation)
             const currentLocalStorageOrientation = localStorage.getItem("chessOrientation")
-            if (import.meta.env.DEV) {
-                console.log('♟️ Current localStorage orientation:', currentLocalStorageOrientation)
-                console.log('♟️ Current orientation state:', orientation)
-            }
             
-            // CRITICAL: Orientation should already be set locally BEFORE navigation (like madechess)
-            // NEVER overwrite localStorage - it was set correctly before navigation
-            // Socket data is just confirmation - trust localStorage first
+            // Sync orientation state with localStorage (don't overwrite localStorage)
             if (currentLocalStorageOrientation) {
-                // localStorage has the correct value - sync state to match it
-                // This ensures Saif (accepter) keeps "black" and Neyma (challenger) keeps "white"
-                // DO NOT overwrite localStorage - it's already correct!
                 setOrientation(currentLocalStorageOrientation)
-                if (import.meta.env.DEV) {
-                    console.log('♟️ Synced orientation state with localStorage (NOT overwriting):', currentLocalStorageOrientation)
-                    console.log('♟️ Socket data.yourColor (ignored):', data.yourColor)
-                }
             } else {
-                // localStorage doesn't have it (shouldn't happen) - use socket data as backup
-                const yourColor = data.yourColor || orientation || 'white'
+                // Backup: use socket data if localStorage is empty
+                const yourColor = data.yourColor || 'white'
                 setOrientation(yourColor)
                 localStorage.setItem('chessOrientation', yourColor)
-                if (import.meta.env.DEV) {
-                    console.log('♟️ Orientation set from socket (backup - localStorage was empty):', yourColor)
-                }
             }
             
-            // Reset chess board to starting position
+            // Reset chess board
             chess.reset()
             setFen(chess.fen())
             
+            // Set roomId - CRITICAL for making moves
             setRoomId(data.roomId)
             
-            // Start game
+            // Ensure gameLive is true
             setGameLive(true)
-            localStorage.setItem('gameLive', 'true') // Save to localStorage like madechess
+            localStorage.setItem('gameLive', 'true')
             playSound('gameStart')
-            // Use the orientation from localStorage (already set correctly before navigation)
-            const finalOrientation = currentLocalStorageOrientation || data.yourColor || orientation || 'white'
+            
+            const finalOrientation = currentLocalStorageOrientation || data.yourColor || 'white'
             showToast('Game Started! ♟️', `You are playing as ${finalOrientation === 'white' ? 'White ⚪' : 'Black ⚫'}`, 'success')
-            if (import.meta.env.DEV) {
-                console.log('✅ Game started! gameLive set to true, orientation:', finalOrientation)
-            }
         }
 
         socket.on('acceptChessChallenge', handleAcceptChallenge)
@@ -411,24 +386,28 @@ const ChessGamePage = () => {
         }
         
         if (!gameLive) {
-            if (import.meta.env.DEV) {
-                console.log('❌ Game not live yet!')
+            // Check localStorage as backup
+            const localGameLive = localStorage.getItem("gameLive") === "true"
+            if (localGameLive) {
+                setGameLive(true)
+            } else {
+                if (import.meta.env.DEV) {
+                    console.log('❌ Game not live yet!')
+                }
+                return false
             }
-            return false
         }
         
         if (!socket) {
-            if (import.meta.env.DEV) {
-                console.log('❌ Socket not connected!')
-            }
             showToast('Error', 'Connection lost. Please refresh.', 'error')
             return false
         }
         
         if (!roomId || !opponentId) {
             if (import.meta.env.DEV) {
-                console.error('❌ Missing roomId or opponentId')
+                console.error('❌ Missing roomId or opponentId - roomId:', roomId, 'opponentId:', opponentId)
             }
+            showToast('Error', 'Waiting for game to start...', 'warning')
             return false
         }
 
