@@ -229,12 +229,11 @@ const ChessGamePage = () => {
             showToast('Connection Lost', 'Reconnecting...', 'warning')
         })
 
-        socket.on('acceptChessChallenge', (data) => {
+        const handleAcceptChallenge = (data) => {
             console.log('♟️ Challenge accepted, starting game:', data)
             console.log('♟️ Received data.yourColor:', data.yourColor)
             console.log('♟️ Opponent ID:', data.opponentId)
             console.log('♟️ Current user ID:', user._id)
-            console.log('♟️ Current orientation state:', orientation)
             
             // Use yourColor from backend (this is the SINGLE source of truth)
             // Backend assigns: challenger = white, accepter = black
@@ -245,6 +244,7 @@ const ChessGamePage = () => {
             console.log('♟️ Expected: challenger=white, accepter=black')
             
             // CRITICAL: Set orientation state FIRST (this is the source of truth)
+            // This will trigger the boardReady useEffect
             setOrientation(yourColor)
             // Also save to localStorage for persistence
             localStorage.setItem('chessOrientation', yourColor)
@@ -256,23 +256,23 @@ const ChessGamePage = () => {
             
             setRoomId(data.roomId)
             
-            // Use setTimeout to ensure orientation state update is processed before gameLive
-            setTimeout(() => {
-                setGameLive(true)
-                playSound('gameStart')
-                showToast('Game Started! ♟️', `You are playing as ${yourColor === 'white' ? 'White ⚪' : 'Black ⚫'}`, 'success')
-                
-                // Log for debugging after state updates
-                setTimeout(() => {
-                    console.log('♟️ After 1 second - Orientation state:', orientation)
-                    console.log('♟️ After 1 second - localStorage:', localStorage.getItem('chessOrientation'))
-                    console.log('♟️ After 1 second - Chess turn:', chess.turn())
-                    console.log('♟️ After 1 second - Can move?', chess.turn() === yourColor[0])
-                    console.log('♟️ Board should show:', yourColor === 'white' ? 'White at bottom' : 'Black at bottom')
-                }, 1000)
-            }, 100) // Small delay to ensure orientation state is updated
-        })
+            // Start game after orientation is set
+            setGameLive(true)
+            playSound('gameStart')
+            showToast('Game Started! ♟️', `You are playing as ${yourColor === 'white' ? 'White ⚪' : 'Black ⚫'}`, 'success')
+        }
 
+        socket.on('acceptChessChallenge', handleAcceptChallenge)
+
+        // Check immediately if orientation already exists in localStorage
+        // This handles the case where user navigates after event was received
+        const saved = localStorage.getItem('chessOrientation')
+        if (saved && (saved === 'white' || saved === 'black') && !orientation) {
+            console.log('♟️ Found existing orientation in localStorage on mount:', saved)
+            setOrientation(saved)
+            setGameLive(true)
+        }
+        
         socket.on('opponentMove', (data) => {
             console.log('♟️ Opponent move received:', data)
             // The move object from madechess has from, to, color, piece, etc.
@@ -314,12 +314,12 @@ const ChessGamePage = () => {
         return () => {
             socket.off('connect')
             socket.off('disconnect')
-            socket.off('acceptChessChallenge')
+            socket.off('acceptChessChallenge', handleAcceptChallenge)
             socket.off('opponentMove')
             socket.off('opponentResigned')
             socket.off('chessGameCanceled')
         }
-    }, [socket, navigate, showToast, makeAMove])
+    }, [socket, navigate, showToast, makeAMove, user._id, chess])
 
     function onDrop(sourceSquare, targetSquare) {
         // Use storedOrientation (always reads from localStorage, like madechess)
