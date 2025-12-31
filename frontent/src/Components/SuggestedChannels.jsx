@@ -247,18 +247,18 @@ const SuggestedChannels = ({ onUserFollowed }) => {
                         </RouterLink>
                     </Flex>
                     
-                    {/* Follow Button for Live Stream */}
+                    {/* Live Stream Buttons */}
                     <Button
                         onClick={async () => {
                             try {
                                 const baseUrl = import.meta.env.PROD ? window.location.origin : "http://localhost:5000"
-                                const res = await fetch(`${baseUrl}/api/news/post/livestream`, {
+                                const res = await fetch(`${baseUrl}/api/news/post/livestream?lang=english`, {
                                     method: 'POST',
                                     credentials: 'include'
                                 })
                                 const data = await res.json()
                                 if (res.ok) {
-                                    showToast('Success', '🔴 Live stream added to your feed!', 'success')
+                                    showToast('Success', '🔴 Al Jazeera English added to your feed!', 'success')
                                 } else {
                                     showToast('Info', data.message || 'Already in feed', 'info')
                                 }
@@ -270,12 +270,37 @@ const SuggestedChannels = ({ onUserFollowed }) => {
                         size="sm"
                         w="full"
                     >
-                        🔴 Watch Live
+                        🔴 Watch Live (English)
+                    </Button>
+                    
+                    <Button
+                        onClick={async () => {
+                            try {
+                                const baseUrl = import.meta.env.PROD ? window.location.origin : "http://localhost:5000"
+                                const res = await fetch(`${baseUrl}/api/news/post/livestream?lang=arabic`, {
+                                    method: 'POST',
+                                    credentials: 'include'
+                                })
+                                const data = await res.json()
+                                if (res.ok) {
+                                    showToast('Success', '🔴 الجزيرة مباشر added to your feed!', 'success')
+                                } else {
+                                    showToast('Info', data.message || 'Already in feed', 'info')
+                                }
+                            } catch (error) {
+                                showToast('Error', 'Failed to add live stream', 'error')
+                            }
+                        }}
+                        colorScheme="purple"
+                        size="sm"
+                        w="full"
+                    >
+                        🔴 Watch Live (العربية)
                     </Button>
                     
                     <Text fontSize="xs" color={secondaryTextColor} textAlign="center">
-                        Click to add live stream to your feed
-                    </Text>
+                        Choose your language
+                </Text>
                 </VStack>
             )}
         </Box>

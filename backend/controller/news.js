@@ -219,18 +219,37 @@ export const createLiveStreamPost = async (req, res) => {
             console.log('✅ Al Jazeera account created')
         }
         
-        // Check if post already exists today
+        // Get language parameter (default to english)
+        const language = req.query.lang || 'english'
+        
+        // YouTube URLs for both languages
+        const streamUrls = {
+            english: 'https://www.youtube.com/embed/gCNeDWCI0vo?autoplay=1&mute=0',
+            arabic: 'https://www.youtube.com/embed/bNyUyrR0PHo?autoplay=1&mute=0'
+        }
+        
+        const streamTexts = {
+            english: '🔴 Al Jazeera English - Live Stream\n\nWatch live news coverage 24/7',
+            arabic: '🔴 الجزيرة مباشر - البث المباشر\n\nتابع الأخبار العاجلة على مدار الساعة'
+        }
+        
+        const streamUrl = streamUrls[language] || streamUrls.english
+        const streamText = streamTexts[language] || streamTexts.english
+        
+        console.log(`📰 Creating ${language} live stream post...`)
+        
+        // Check if post already exists today for this language
         const todayStart = new Date()
         todayStart.setHours(0, 0, 0, 0)
         
         const existingPost = await Post.findOne({
             postedBy: alJazeeraAccount._id,
-            text: { $regex: /Live Stream/ },
+            img: streamUrl,
             createdAt: { $gte: todayStart }
         })
         
         if (existingPost) {
-            console.log('ℹ️ Live stream post already exists today')
+            console.log(`ℹ️ ${language} live stream post already exists today`)
             
             // Still emit to current user's socket
             await existingPost.populate("postedBy", "username profilePic name")
@@ -247,18 +266,17 @@ export const createLiveStreamPost = async (req, res) => {
             }
             
             return res.status(200).json({
-                message: 'Live stream post already in feed',
+                message: `${language} live stream post already in feed`,
                 postId: existingPost._id,
                 posted: false
             })
         }
         
         // Create live stream post
-        console.log('📰 Creating new live stream post...')
         const liveStreamPost = new Post({
             postedBy: alJazeeraAccount._id,
-            text: '🔴 Al Jazeera English - Live Stream\n\nWatch live news coverage 24/7',
-            img: 'https://www.youtube.com/embed/gCNeDWCI0vo?autoplay=1&mute=0' // YouTube embed URL with autoplay
+            text: streamText,
+            img: streamUrl
         })
         
         await liveStreamPost.save()
@@ -279,9 +297,10 @@ export const createLiveStreamPost = async (req, res) => {
         }
         
         res.status(200).json({
-            message: 'Live stream post created successfully',
+            message: `${language} live stream post created successfully`,
             postId: liveStreamPost._id,
-            posted: true
+            posted: true,
+            language: language
         })
         
     } catch (error) {
