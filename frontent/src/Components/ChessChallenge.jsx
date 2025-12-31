@@ -39,7 +39,11 @@ const ChessChallenge = () => {
 
     // Fetch followers and following who are online
     const fetchAvailableUsers = async () => {
-        if (!user || !user.following || !user.followers) return
+        if (!user) return
+        
+        console.log('🎮 Fetching available users...')
+        console.log('User:', user)
+        console.log('Online users:', onlineUsers)
         
         try {
             setLoading(true)
@@ -72,12 +76,26 @@ const ChessChallenge = () => {
             const allUsers = (await Promise.all(userPromises)).filter(u => u !== null)
             
             // Filter to only online users who are not busy
-            const onlineAvailableUsers = allUsers.filter(u => 
-                onlineUsers.some(online => online.userId === u._id) && 
-                u._id !== user._id &&
-                !busyUsers.includes(u._id)
-            )
+            console.log('All users fetched:', allUsers.length)
+            console.log('Online users available:', onlineUsers)
             
+            const onlineAvailableUsers = allUsers.filter(u => {
+                // Safety check for onlineUsers
+                if (!onlineUsers || !Array.isArray(onlineUsers)) {
+                    console.warn('⚠️ onlineUsers is not an array:', onlineUsers)
+                    return false
+                }
+                
+                const isOnline = onlineUsers.some(online => online.userId === u._id)
+                const isNotSelf = u._id !== user._id
+                const isNotBusy = !busyUsers.includes(u._id)
+                
+                console.log(`User ${u.username}: online=${isOnline}, notSelf=${isNotSelf}, notBusy=${isNotBusy}`)
+                
+                return isOnline && isNotSelf && isNotBusy
+            })
+            
+            console.log('✅ Online available users:', onlineAvailableUsers.length)
             setAvailableUsers(onlineAvailableUsers)
         } catch (error) {
             console.error('Error fetching users:', error)
