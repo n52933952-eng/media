@@ -60,20 +60,21 @@ const ChessGamePage = () => {
 
     // Debug: Log orientation changes
     useEffect(() => {
-        console.log('🎨 Orientation changed to:', orientation)
+        console.log('🎨 Orientation state:', orientation)
+        console.log('🎨 Stored orientation (from localStorage):', storedOrientation)
         console.log('🎨 Chess turn:', chess.turn())
-        console.log('🎨 Can move?', chess.turn() === orientation[0])
-        console.log('🎨 Board orientation should be:', orientation === 'white' ? 'White at bottom' : 'Black at bottom')
-    }, [orientation, chess])
+        console.log('🎨 Can move?', chess.turn() === storedOrientation[0])
+        console.log('🎨 Board orientation should be:', storedOrientation === 'white' ? 'White at bottom' : 'Black at bottom')
+    }, [orientation, storedOrientation, chess])
     
-    // Force board re-render when orientation changes
+    // Force board re-render when storedOrientation changes
     useEffect(() => {
-        console.log('🔄 Orientation state updated, forcing board re-render')
-        console.log('🔄 Current orientation:', orientation)
-        console.log('🔄 Board should show:', orientation === 'white' ? 'White pieces at bottom' : 'Black pieces at bottom')
+        console.log('🔄 Stored orientation changed, forcing board re-render')
+        console.log('🔄 Current storedOrientation:', storedOrientation)
+        console.log('🔄 Board should show:', storedOrientation === 'white' ? 'White pieces at bottom' : 'Black pieces at bottom')
         // Increment boardKey to force complete remount of Chessboard component
         setBoardKey(prev => prev + 1)
-    }, [orientation])
+    }, [storedOrientation])
 
     // Sound effects
     const sounds = useRef({})
@@ -298,26 +299,26 @@ const ChessGamePage = () => {
     }, [socket, navigate, showToast, makeAMove])
 
     function onDrop(sourceSquare, targetSquare) {
-        // Get safe orientation (fallback to localStorage if needed)
-        const safeOrientation = orientation || localStorage.getItem('chessOrientation') || 'white'
+        // Use storedOrientation (always reads from localStorage, like madechess)
+        const currentOrientation = storedOrientation
         
         console.log('🎮 onDrop called:', {
             sourceSquare,
             targetSquare,
             chessTurn: chess.turn(),
-            orientation: safeOrientation,
-            orientationFirstChar: safeOrientation[0],
-            canMove: chess.turn() === safeOrientation[0],
+            orientation: currentOrientation,
+            orientationFirstChar: currentOrientation[0],
+            canMove: chess.turn() === currentOrientation[0],
             gameLive
         })
         
         // Only allow moves for current player (check if chess turn matches orientation)
-        if (chess.turn() !== safeOrientation[0]) {
+        if (chess.turn() !== currentOrientation[0]) {
             console.log('❌ Not your turn!', { 
                 turn: chess.turn(), 
-                orientation: safeOrientation,
-                orientationFirstChar: safeOrientation[0],
-                expected: safeOrientation[0] === 'w' ? 'white' : 'black'
+                orientation: currentOrientation,
+                orientationFirstChar: currentOrientation[0],
+                expected: currentOrientation[0] === 'w' ? 'white' : 'black'
             })
             showToast('Not Your Turn', `It's ${chess.turn() === 'w' ? 'White' : 'Black'}'s turn!`, 'warning')
             return false
@@ -415,17 +416,17 @@ const ChessGamePage = () => {
                     </Heading>
                     {gameLive && (
                         <Text fontSize="sm" textAlign="center" mb={4} color="#5a3e2b" fontWeight="bold">
-                            You are playing as: {orientation === 'white' ? '⚪ White' : '⚫ Black'}
-                            {chess.turn() === orientation[0] ? ' (Your turn!)' : ' (Waiting...)'}
+                            You are playing as: {storedOrientation === 'white' ? '⚪ White' : '⚫ Black'}
+                            {chess.turn() === storedOrientation[0] ? ' (Your turn!)' : ' (Waiting...)'}
                         </Text>
                     )}
 
                     <Box w="400px" h="400px">
                         <Chessboard
-                            key={`chessboard-${orientation}-${boardKey}-${gameLive}`}
+                            key={`chessboard-${storedOrientation}-${boardKey}-${gameLive}`}
                             position={fen}
                             onPieceDrop={onDrop}
-                            boardOrientation={orientation}
+                            boardOrientation={storedOrientation}
                             boardWidth={400}
                             animationDuration={250}
                             customDarkSquareStyle={{
@@ -489,22 +490,22 @@ const ChessGamePage = () => {
                         <Box>
                             <Flex justify="center" mb={2}>
                                 <Avatar
-                                    src={orientation === 'white' ? opponent?.profilePic : user?.profilePic}
-                                    name={orientation === 'white' ? opponent?.name : user?.name}
+                                    src={storedOrientation === 'white' ? opponent?.profilePic : user?.profilePic}
+                                    name={storedOrientation === 'white' ? opponent?.name : user?.name}
                                     size="sm"
                                 />
                             </Flex>
                             <Text fontSize="xs" textAlign="center" color={textColor} mb={2} fontWeight="bold">
-                                {orientation === 'white' ? opponent?.username : user?.username}
+                                {storedOrientation === 'white' ? opponent?.username : user?.username}
                             </Text>
                             <Text fontSize="xs" textAlign="center" color="gray.500" mb={2}>
-                                {orientation === 'white' ? 'Black ⚫' : 'White ⚪'}
+                                {storedOrientation === 'white' ? 'Black ⚫' : 'White ⚪'}
                             </Text>
                             <Flex wrap="wrap" justify="center" gap={1}>
-                                {(orientation === 'white' ? capturedBlack : capturedWhite).length > 0 ? (
-                                    (orientation === 'white' ? capturedBlack : capturedWhite).map((p, i) => (
+                                {(storedOrientation === 'white' ? capturedBlack : capturedWhite).length > 0 ? (
+                                    (storedOrientation === 'white' ? capturedBlack : capturedWhite).map((p, i) => (
                                         <Text key={i} fontSize="2xl">
-                                            {getPieceUnicode(p, orientation === 'white' ? 'black' : 'white')}
+                                            {getPieceUnicode(p, storedOrientation === 'white' ? 'black' : 'white')}
                                         </Text>
                                     ))
                                 ) : (
@@ -517,22 +518,22 @@ const ChessGamePage = () => {
                         <Box>
                             <Flex justify="center" mb={2}>
                                 <Avatar
-                                    src={orientation === 'white' ? user?.profilePic : opponent?.profilePic}
-                                    name={orientation === 'white' ? user?.name : opponent?.name}
+                                    src={storedOrientation === 'white' ? user?.profilePic : opponent?.profilePic}
+                                    name={storedOrientation === 'white' ? user?.name : opponent?.name}
                                     size="sm"
                                 />
                             </Flex>
                             <Text fontSize="xs" textAlign="center" color={textColor} mb={2} fontWeight="bold">
-                                {orientation === 'white' ? user?.username : opponent?.username} (You)
+                                {storedOrientation === 'white' ? user?.username : opponent?.username} (You)
                             </Text>
                             <Text fontSize="xs" textAlign="center" color="gray.500" mb={2}>
-                                {orientation === 'white' ? 'White ⚪' : 'Black ⚫'}
+                                {storedOrientation === 'white' ? 'White ⚪' : 'Black ⚫'}
                             </Text>
                             <Flex wrap="wrap" justify="center" gap={1}>
-                                {(orientation === 'white' ? capturedWhite : capturedBlack).length > 0 ? (
-                                    (orientation === 'white' ? capturedWhite : capturedBlack).map((p, i) => (
+                                {(storedOrientation === 'white' ? capturedWhite : capturedBlack).length > 0 ? (
+                                    (storedOrientation === 'white' ? capturedWhite : capturedBlack).map((p, i) => (
                                         <Text key={i} fontSize="2xl">
-                                            {getPieceUnicode(p, orientation === 'white' ? 'white' : 'black')}
+                                            {getPieceUnicode(p, storedOrientation === 'white' ? 'white' : 'black')}
                                         </Text>
                                     ))
                                 ) : (
