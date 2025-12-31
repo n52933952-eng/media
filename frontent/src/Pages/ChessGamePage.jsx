@@ -169,11 +169,13 @@ const ChessGamePage = () => {
 
         socket.on('acceptChessChallenge', (data) => {
             console.log('♟️ Challenge accepted, starting game:', data)
+            console.log('♟️ Your color:', data.yourColor, '| Opponent:', data.opponentId)
             setRoomId(data.roomId)
+            // Set board orientation: 'white' = white pieces at bottom, 'black' = black pieces at bottom
             setOrientation(data.yourColor || 'white')
             setGameLive(true)
             playSound('gameStart')
-            showToast('Game Started! ♟️', 'Good luck!', 'success')
+            showToast('Game Started! ♟️', `You are playing as ${data.yourColor === 'white' ? 'White ⚪' : 'Black ⚫'}`, 'success')
         })
 
         socket.on('opponentMove', (data) => {
@@ -306,35 +308,37 @@ const ChessGamePage = () => {
 
     return (
         <Box bg={bgColor} minH="100vh" py={8}>
-            <Flex justify="center" align="center" px={4}>
-                <Flex gap={4} align="stretch">
-                    {/* Chess Board */}
-                    <Box
-                        bg={cardBg}
-                        p={6}
-                        borderRadius="xl"
-                        boxShadow="dark-lg"
-                        border="6px solid"
-                        borderColor="#a67c52"
-                        position="relative"
-                    >
+            <Flex justify="center" align="start" px={4} flexWrap="wrap" gap={4}>
+                {/* Chess Board - Center */}
+                <Box
+                    bg={cardBg}
+                    p={6}
+                    borderRadius="xl"
+                    boxShadow="dark-lg"
+                    border="6px solid"
+                    borderColor="#a67c52"
+                    position="relative"
+                    w="fit-content"
+                >
                     <Heading size="lg" mb={4} color="#5a3e2b" textAlign="center">
                         ♟️ Chess Match
                     </Heading>
 
-                    <Chessboard
-                        position={fen}
-                        onPieceDrop={onDrop}
-                        boardOrientation={orientation}
-                        boardWidth={400}
-                        animationDuration={250}
-                        customDarkSquareStyle={{
-                            backgroundColor: '#b58863'
-                        }}
-                        customLightSquareStyle={{
-                            backgroundColor: '#f0d9b5'
-                        }}
-                    />
+                    <Box w="400px" h="400px">
+                        <Chessboard
+                            position={fen}
+                            onPieceDrop={onDrop}
+                            boardOrientation={orientation}
+                            boardWidth={400}
+                            animationDuration={250}
+                            customDarkSquareStyle={{
+                                backgroundColor: '#b58863'
+                            }}
+                            customLightSquareStyle={{
+                                backgroundColor: '#f0d9b5'
+                            }}
+                        />
+                    </Box>
 
                     {showGameOverBox && (
                         <Flex
@@ -441,7 +445,6 @@ const ChessGamePage = () => {
                         </Box>
                     </Box>
                 )}
-                </Flex>
             </Flex>
         </Box>
     )

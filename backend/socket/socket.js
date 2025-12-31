@@ -252,12 +252,15 @@ export const initializeSocket = (app) => {
 
         socket.on("acceptChessChallenge", ({ from, to, roomId }) => {
             console.log(`♟️ Chess challenge accepted: ${roomId}`)
+            console.log(`♟️ Challenger (to): ${to} → WHITE`)
+            console.log(`♟️ Accepter (from): ${from} → BLACK`)
             
             // Determine colors (challenger is white, accepter is black)
             const challengerSocketId = userSocketMap[to]?.socketId
             const accepterSocketId = userSocketMap[from]?.socketId
 
             if (challengerSocketId) {
+                console.log(`♟️ Sending WHITE to challenger: ${to}`)
                 io.to(challengerSocketId).emit("acceptChessChallenge", {
                     roomId,
                     yourColor: 'white',
@@ -266,6 +269,7 @@ export const initializeSocket = (app) => {
             }
 
             if (accepterSocketId) {
+                console.log(`♟️ Sending BLACK to accepter: ${from}`)
                 io.to(accepterSocketId).emit("acceptChessChallenge", {
                     roomId,
                     yourColor: 'black',
