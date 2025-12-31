@@ -109,7 +109,9 @@ const ChessChallenge = () => {
 
         // Listen for challenge acceptance (sender side)
         socket.on('acceptChessChallenge', (data) => {
-            console.log('♟️ Challenge accepted! Navigating to game...', data)
+            if (import.meta.env.DEV) {
+                console.log('♟️ Challenge accepted! Navigating to game...', data)
+            }
             
             // Set orientation locally BEFORE navigating (like madechess)
             // Challenger is always WHITE
@@ -117,7 +119,9 @@ const ChessChallenge = () => {
             localStorage.setItem("chessOrientation", "white")
             // Also set gameLive to true (game starts when challenge is accepted)
             localStorage.setItem("gameLive", "true")
-            console.log('♟️ Challenger (Neyma) setting orientation to WHITE and gameLive to true locally (like madechess)')
+            if (import.meta.env.DEV) {
+                console.log('♟️ Challenger (Neyma) setting orientation to WHITE and gameLive to true locally (like madechess)')
+            }
             
             showToast('Challenge Accepted! ♟️', 'Starting game...', 'success')
             // Navigate to chess page (orientation and gameLive already set)
@@ -145,11 +149,13 @@ const ChessChallenge = () => {
         try {
             // Don't save orientation to localStorage yet - wait for game to start
             // This matches madechess pattern - orientation is set when game actually starts
-            console.log('♟️ SENDING CHESS CHALLENGE:', {
-                from: user._id,
-                to: opponent._id,
-                fromName: user.name
-            })
+            if (import.meta.env.DEV) {
+                console.log('♟️ SENDING CHESS CHALLENGE:', {
+                    from: user._id,
+                    to: opponent._id,
+                    fromName: user.name
+                })
+            }
             
             socket.emit('chessChallenge', {
                 from: user._id,
@@ -159,7 +165,9 @@ const ChessChallenge = () => {
                 fromProfilePic: user.profilePic
             })
 
-            console.log('✅ Challenge emitted successfully!')
+            if (import.meta.env.DEV) {
+                console.log('✅ Challenge emitted successfully!')
+            }
             showToast('Success', `Chess challenge sent to ${opponent.name}!`, 'success')
             onClose()
         } catch (error) {

@@ -54,8 +54,10 @@ const ChessNotification = () => {
         if (!socket) return
 
         const handleChessChallenge = (data) => {
-            console.log('♟️ CHESS CHALLENGE RECEIVED!', data)
-            console.log('From:', data.fromName, '| User ID:', data.from)
+            if (import.meta.env.DEV) {
+                console.log('♟️ CHESS CHALLENGE RECEIVED!', data)
+                console.log('From:', data.fromName, '| User ID:', data.from)
+            }
             
             // Add challenge to list
             setChallenges(prev => {
@@ -99,7 +101,9 @@ const ChessNotification = () => {
         localStorage.setItem("chessOrientation", "black")
         // Also set gameLive to true (game starts when challenge is accepted)
         localStorage.setItem("gameLive", "true")
-        console.log('♟️ Accepter (Saif) setting orientation to BLACK and gameLive to true locally (like madechess)')
+        if (import.meta.env.DEV) {
+            console.log('♟️ Accepter (Saif) setting orientation to BLACK and gameLive to true locally (like madechess)')
+        }
 
         // Emit accept event
         socket.emit('acceptChessChallenge', {

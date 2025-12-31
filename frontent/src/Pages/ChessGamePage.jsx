@@ -66,12 +66,14 @@ const ChessGamePage = () => {
     useEffect(() => {
         const savedOrientation = localStorage.getItem("chessOrientation")
         const savedGameLive = localStorage.getItem("gameLive") === "true"
-        console.log('♟️ ChessGamePage mounted - checking localStorage:', {
-            orientation: savedOrientation,
-            gameLive: savedGameLive
-        })
-        console.log('♟️ Current orientation state:', orientation)
-        console.log('♟️ Current gameLive state:', gameLive)
+        if (import.meta.env.DEV) {
+            console.log('♟️ ChessGamePage mounted - checking localStorage:', {
+                orientation: savedOrientation,
+                gameLive: savedGameLive
+            })
+            console.log('♟️ Current orientation state:', orientation)
+            console.log('♟️ Current gameLive state:', gameLive)
+        }
         
         if (savedOrientation && (savedOrientation === 'white' || savedOrientation === 'black')) {
             // CRITICAL: Always sync with localStorage on mount (like madechess)
@@ -90,14 +92,16 @@ const ChessGamePage = () => {
         }
     }, []) // Only run on mount
     
-    // Debug: Log orientation changes
+    // Debug: Log orientation changes (only in development)
     useEffect(() => {
-        console.log('🎨 Orientation state:', orientation)
-        console.log('🎨 Stored orientation (from localStorage):', storedOrientation)
-        console.log('🎨 Chess turn:', chess.turn())
-        if (storedOrientation) {
-            console.log('🎨 Can move?', chess.turn() === storedOrientation[0])
-            console.log('🎨 Board orientation should be:', storedOrientation === 'white' ? 'White at bottom' : 'Black at bottom')
+        if (import.meta.env.DEV) {
+            console.log('🎨 Orientation state:', orientation)
+            console.log('🎨 Stored orientation (from localStorage):', storedOrientation)
+            console.log('🎨 Chess turn:', chess.turn())
+            if (storedOrientation) {
+                console.log('🎨 Can move?', chess.turn() === storedOrientation[0])
+                console.log('🎨 Board orientation should be:', storedOrientation === 'white' ? 'White at bottom' : 'Black at bottom')
+            }
         }
     }, [orientation, storedOrientation, chess])
 
@@ -304,6 +308,11 @@ const ChessGamePage = () => {
             // chess.move() can accept this full move object
             if (data && data.move) {
                 try {
+                    // Validate move data structure
+                    if (typeof data.move !== 'object' || !data.move.from || !data.move.to) {
+                        throw new Error('Invalid move structure')
+                    }
+                    
                     const moveResult = makeAMove(data.move)
                     if (!moveResult) {
                         console.error('❌ Failed to apply opponent move:', data.move)
@@ -324,6 +333,9 @@ const ChessGamePage = () => {
             showToast('Victory! 🏆', 'Your opponent resigned', 'success')
             setOver('Your opponent resigned. You win!')
             setShowGameOverBox(true)
+            
+            // Cleanup is already handled by backend via chessGameCleanup event
+            // But we also call handleGameEnd to navigate
             setTimeout(() => {
                 if (handleGameEndRef.current) {
                     handleGameEndRef.current()
@@ -349,6 +361,23 @@ const ChessGamePage = () => {
             navigate('/home')
         })
 
+        // Listen for cleanup event from backend (when opponent resigns or game ends)
+        // This ensures BOTH users clear their localStorage
+        socket.on('chessGameCleanup', () => {
+            if (import.meta.env.DEV) {
+                console.log('♟️ Received cleanup event - clearing chess state')
+            }
+            // Clear localStorage for both users
+            localStorage.removeItem('chessOrientation')
+            localStorage.removeItem('gameLive')
+            localStorage.removeItem('chessFEN')
+            localStorage.removeItem('capturedWhite')
+            localStorage.removeItem('capturedBlack')
+            // Reset state
+            setOrientation(null)
+            setGameLive(false)
+        })
+
         return () => {
             socket.off('connect')
             socket.off('disconnect')
@@ -356,10 +385,19 @@ const ChessGamePage = () => {
             socket.off('opponentMove')
             socket.off('opponentResigned')
             socket.off('chessGameCanceled')
+            socket.off('chessGameCleanup')
         }
     }, [socket, navigate, showToast, makeAMove, user._id, chess])
 
     function onDrop(sourceSquare, targetSquare) {
+        // Input validation
+        if (!sourceSquare || !targetSquare || typeof sourceSquare !== 'string' || typeof targetSquare !== 'string') {
+            if (import.meta.env.DEV) {
+                console.error('❌ Invalid square coordinates:', { sourceSquare, targetSquare })
+            }
+            return false
+        }
+        
         // Use safeOrientation pattern from madechess: orientation || localStorage || "white"
         // Line 157 in madechess: const safeOrientation = orientation || localStorage.getItem("chessOrientation") || "white";
         const safeOrientation = orientation || localStorage.getItem("chessOrientation") || "white"
@@ -397,6 +435,14 @@ const ChessGamePage = () => {
             if (import.meta.env.DEV) {
                 console.log('❌ Socket not connected!')
             }
+            showToast('Error', 'Connection lost. Please refresh.', 'error')
+            return false
+        }
+        
+        if (!roomId || !opponentId) {
+            if (import.meta.env.DEV) {
+                console.error('❌ Missing roomId or opponentId')
+            }
             return false
         }
 
@@ -421,11 +467,17 @@ const ChessGamePage = () => {
         }
 
         // Send the FULL move object (result from makeAMove) - like madechess does
-        socket.emit('chessMove', {
-            roomId,
-            move: move, // Send full move object with from, to, color, piece, etc.
-            to: opponentId
-        })
+        try {
+            socket.emit('chessMove', {
+                roomId,
+                move: move, // Send full move object with from, to, color, piece, etc.
+                to: opponentId
+            })
+        } catch (error) {
+            console.error('❌ Error sending move:', error)
+            showToast('Error', 'Failed to send move', 'error')
+            return false
+        }
 
         return true
     }
@@ -479,6 +531,43 @@ const ChessGamePage = () => {
     useEffect(() => {
         handleGameEndRef.current = handleGameEnd
     }, [handleGameEnd])
+
+    // Cleanup when user navigates away from chess page (except dark mode toggle)
+    useEffect(() => {
+        return () => {
+            // This cleanup runs when component unmounts (user navigates away)
+            // Only clear if we're actually leaving the chess page
+            if (import.meta.env.DEV) {
+                console.log('♟️ ChessGamePage unmounting - cleaning up chess state')
+            }
+            
+            // Clear localStorage
+            localStorage.removeItem('chessOrientation')
+            localStorage.removeItem('gameLive')
+            localStorage.removeItem('chessFEN')
+            localStorage.removeItem('capturedWhite')
+            localStorage.removeItem('capturedBlack')
+            
+            // Reset state
+            setOrientation(null)
+            setGameLive(false)
+            
+            // Notify backend that user left the game
+            if (socket && roomId && opponentId && user?._id) {
+                try {
+                    socket.emit('chessGameEnd', {
+                        roomId,
+                        player1: user._id,
+                        player2: opponentId
+                    })
+                } catch (error) {
+                    if (import.meta.env.DEV) {
+                        console.error('❌ Error notifying backend on unmount:', error)
+                    }
+                }
+            }
+        }
+    }, [socket, roomId, opponentId, user?._id, setOrientation])
 
     const getPieceUnicode = (type, color) => {
         const unicodeMap = {

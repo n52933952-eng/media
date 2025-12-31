@@ -321,14 +321,22 @@ export const initializeSocket = (app) => {
         socket.on("resignChess", ({ roomId, to }) => {
             const recipientSocketId = userSocketMap[to]?.socketId
             const resignerSocketId = userSocketMap[socket.handshake.query.userId]?.socketId
+            const userId = socket.handshake.query.userId
             
             if (recipientSocketId) {
                 io.to(recipientSocketId).emit("opponentResigned")
             }
             
+            // Emit cleanup event to both players to clear localStorage
+            if (resignerSocketId) {
+                io.to(resignerSocketId).emit("chessGameCleanup")
+            }
+            if (recipientSocketId) {
+                io.to(recipientSocketId).emit("chessGameCleanup")
+            }
+            
             // Make users available again - TARGETED to specific users only (not all users)
             // This is critical for scalability - don't broadcast to 1M users!
-            const userId = socket.handshake.query.userId
             if (resignerSocketId) {
                 io.to(resignerSocketId).emit("userAvailableChess", { userId })
                 io.to(resignerSocketId).emit("userAvailableChess", { userId: to })
@@ -340,11 +348,19 @@ export const initializeSocket = (app) => {
         })
 
         socket.on("chessGameEnd", ({ roomId, player1, player2 }) => {
-            // Make users available again - TARGETED to specific users only (not all users)
-            // This is critical for scalability - don't broadcast to 1M users!
+            // Emit cleanup event to both players to clear localStorage
             const player1SocketId = userSocketMap[player1]?.socketId
             const player2SocketId = userSocketMap[player2]?.socketId
             
+            if (player1SocketId) {
+                io.to(player1SocketId).emit("chessGameCleanup")
+            }
+            if (player2SocketId) {
+                io.to(player2SocketId).emit("chessGameCleanup")
+            }
+            
+            // Make users available again - TARGETED to specific users only (not all users)
+            // This is critical for scalability - don't broadcast to 1M users!
             if (player1SocketId) {
                 io.to(player1SocketId).emit("userAvailableChess", { userId: player1 })
                 io.to(player1SocketId).emit("userAvailableChess", { userId: player2 })

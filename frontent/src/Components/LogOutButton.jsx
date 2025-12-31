@@ -28,7 +28,15 @@ const LogOutButton = () => {
                 showToast("Error",data.error,"error")
                 return
              }
-              localStorage.removeItem("userInfo")
+             
+             // Clean up chess game state on logout
+             localStorage.removeItem("chessOrientation")
+             localStorage.removeItem("gameLive")
+             localStorage.removeItem("chessFEN")
+             localStorage.removeItem("capturedWhite")
+             localStorage.removeItem("capturedBlack")
+             
+             localStorage.removeItem("userInfo")
              setUser(null)
         }
         catch(error){
