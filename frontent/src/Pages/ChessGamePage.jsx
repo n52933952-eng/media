@@ -25,13 +25,10 @@ const ChessGamePage = () => {
     
     // Read orientation same way ChessTable does in madechess: localStorage first, then state
     // Line 201 in madechess: const storedOrientation = localStorage.getItem("chessOrientation") || orientation;
-    const storedOrientation = localStorage.getItem("chessOrientation") || orientation || "white"
-    
-    // Debug: Log storedOrientation on every render
-    console.log('🎯 ChessGamePage render:')
-    console.log('  - localStorage chessOrientation:', localStorage.getItem("chessOrientation"))
-    console.log('  - orientation state:', orientation)
-    console.log('  - storedOrientation (for board):', storedOrientation)
+    // OPTIMIZED: Use useMemo to avoid reading localStorage on every render
+    const storedOrientation = useMemo(() => {
+        return localStorage.getItem("chessOrientation") || orientation || "white"
+    }, [orientation]) // Only recompute when orientation changes
     // Initialize gameLive from localStorage (like madechess)
     const [gameLive, setGameLive] = useState(() => {
         return localStorage.getItem("gameLive") === "true"
@@ -68,13 +65,17 @@ const ChessGamePage = () => {
             // Always sync with localStorage on mount (like madechess)
             if (orientation !== savedOrientation) {
                 setOrientation(savedOrientation)
-                console.log('♟️ Set orientation from localStorage on mount:', savedOrientation)
+                if (import.meta.env.DEV) {
+                    console.log('♟️ Set orientation from localStorage on mount:', savedOrientation)
+                }
             }
         }
         
         if (savedGameLive && !gameLive) {
             setGameLive(true)
-            console.log('♟️ Set gameLive from localStorage on mount:', savedGameLive)
+            if (import.meta.env.DEV) {
+                console.log('♟️ Set gameLive from localStorage on mount:', savedGameLive)
+            }
         }
     }, []) // Only run on mount
     
@@ -236,13 +237,19 @@ const ChessGamePage = () => {
             if (!currentLocalStorageOrientation && yourColor) {
                 setOrientation(yourColor)
                 localStorage.setItem('chessOrientation', yourColor)
-                console.log('♟️ Orientation set from socket (backup):', yourColor)
+                if (import.meta.env.DEV) {
+                    console.log('♟️ Orientation set from socket (backup):', yourColor)
+                }
             } else {
-                console.log('♟️ Orientation already set locally:', currentLocalStorageOrientation, '- keeping it!')
+                if (import.meta.env.DEV) {
+                    console.log('♟️ Orientation already set locally:', currentLocalStorageOrientation, '- keeping it!')
+                }
                 // Ensure state matches localStorage
                 if (orientation !== currentLocalStorageOrientation) {
                     setOrientation(currentLocalStorageOrientation)
-                    console.log('♟️ Synced orientation state with localStorage:', currentLocalStorageOrientation)
+                    if (import.meta.env.DEV) {
+                        console.log('♟️ Synced orientation state with localStorage:', currentLocalStorageOrientation)
+                    }
                 }
             }
             
@@ -258,13 +265,17 @@ const ChessGamePage = () => {
             playSound('gameStart')
             const finalOrientation = currentLocalStorageOrientation || yourColor
             showToast('Game Started! ♟️', `You are playing as ${finalOrientation === 'white' ? 'White ⚪' : 'Black ⚫'}`, 'success')
-            console.log('✅ Game started! gameLive set to true, orientation:', finalOrientation)
+            if (import.meta.env.DEV) {
+                console.log('✅ Game started! gameLive set to true, orientation:', finalOrientation)
+            }
         }
 
         socket.on('acceptChessChallenge', handleAcceptChallenge)
         
         socket.on('opponentMove', (data) => {
-            console.log('♟️ Opponent move received:', data)
+            if (import.meta.env.DEV) {
+                console.log('♟️ Opponent move received:', data)
+            }
             // The move object from madechess has from, to, color, piece, etc.
             // chess.move() can accept this full move object
             if (data && data.move) {
@@ -273,7 +284,7 @@ const ChessGamePage = () => {
                     if (!moveResult) {
                         console.error('❌ Failed to apply opponent move:', data.move)
                         showToast('Error', 'Failed to apply opponent move', 'error')
-                    } else {
+                    } else if (import.meta.env.DEV) {
                         console.log('✅ Opponent move applied successfully:', moveResult)
                     }
                 } catch (error) {
@@ -316,31 +327,39 @@ const ChessGamePage = () => {
         // Line 157 in madechess: const safeOrientation = orientation || localStorage.getItem("chessOrientation") || "white";
         const safeOrientation = orientation || localStorage.getItem("chessOrientation") || "white"
         
-        console.log('🎮 onDrop called:', {
-            sourceSquare,
-            targetSquare,
-            chessTurn: chess.turn(),
-            safeOrientation,
-            safeOrientationFirstChar: safeOrientation[0],
-            canMove: chess.turn() === safeOrientation[0],
-            gameLive,
-            socket: !!socket
-        })
+        if (import.meta.env.DEV) {
+            console.log('🎮 onDrop called:', {
+                sourceSquare,
+                targetSquare,
+                chessTurn: chess.turn(),
+                safeOrientation,
+                safeOrientationFirstChar: safeOrientation[0],
+                canMove: chess.turn() === safeOrientation[0],
+                gameLive,
+                socket: !!socket
+            })
+        }
         
         // Only allow moves for current player (check if chess turn matches orientation)
         // Same pattern as madechess line 160
         if (chess.turn() !== safeOrientation[0]) {
-            console.log('❌ Not your turn! Turn:', chess.turn(), 'Your color:', safeOrientation[0])
+            if (import.meta.env.DEV) {
+                console.log('❌ Not your turn! Turn:', chess.turn(), 'Your color:', safeOrientation[0])
+            }
             return false // only current player moves (like madechess)
         }
         
         if (!gameLive) {
-            console.log('❌ Game not live yet!')
+            if (import.meta.env.DEV) {
+                console.log('❌ Game not live yet!')
+            }
             return false
         }
         
         if (!socket) {
-            console.log('❌ Socket not connected!')
+            if (import.meta.env.DEV) {
+                console.log('❌ Socket not connected!')
+            }
             return false
         }
 
@@ -354,11 +373,15 @@ const ChessGamePage = () => {
         // Make the move locally first
         const move = makeAMove(moveData)
         if (!move) {
-            console.log('❌ Illegal move!')
+            if (import.meta.env.DEV) {
+                console.log('❌ Illegal move!')
+            }
             return false
         }
 
-        console.log('✅ Move made! Sending to opponent...', move)
+        if (import.meta.env.DEV) {
+            console.log('✅ Move made! Sending to opponent...', move)
+        }
 
         // Send the FULL move object (result from makeAMove) - like madechess does
         socket.emit('chessMove', {

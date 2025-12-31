@@ -285,9 +285,16 @@ export const initializeSocket = (app) => {
                 console.log(`⚠️ Accepter ${from} not found in socket map`)
             }
 
-            // Broadcast busy status
-            io.emit("userBusyChess", { userId: from })
-            io.emit("userBusyChess", { userId: to })
+            // Broadcast busy status - TARGETED to specific users only (not all users)
+            // This is critical for scalability - don't broadcast to 1M users!
+            if (challengerSocketId) {
+                io.to(challengerSocketId).emit("userBusyChess", { userId: from })
+                io.to(challengerSocketId).emit("userBusyChess", { userId: to })
+            }
+            if (accepterSocketId) {
+                io.to(accepterSocketId).emit("userBusyChess", { userId: from })
+                io.to(accepterSocketId).emit("userBusyChess", { userId: to })
+            }
         })
 
         socket.on("declineChessChallenge", ({ from, to }) => {
@@ -313,20 +320,39 @@ export const initializeSocket = (app) => {
 
         socket.on("resignChess", ({ roomId, to }) => {
             const recipientSocketId = userSocketMap[to]?.socketId
+            const resignerSocketId = userSocketMap[socket.handshake.query.userId]?.socketId
+            
             if (recipientSocketId) {
                 io.to(recipientSocketId).emit("opponentResigned")
             }
             
-            // Broadcast available status
+            // Make users available again - TARGETED to specific users only (not all users)
+            // This is critical for scalability - don't broadcast to 1M users!
             const userId = socket.handshake.query.userId
-            io.emit("userAvailableChess", { userId })
-            io.emit("userAvailableChess", { userId: to })
+            if (resignerSocketId) {
+                io.to(resignerSocketId).emit("userAvailableChess", { userId })
+                io.to(resignerSocketId).emit("userAvailableChess", { userId: to })
+            }
+            if (recipientSocketId) {
+                io.to(recipientSocketId).emit("userAvailableChess", { userId })
+                io.to(recipientSocketId).emit("userAvailableChess", { userId: to })
+            }
         })
 
         socket.on("chessGameEnd", ({ roomId, player1, player2 }) => {
-            // Broadcast available status for both players
-            io.emit("userAvailableChess", { userId: player1 })
-            io.emit("userAvailableChess", { userId: player2 })
+            // Make users available again - TARGETED to specific users only (not all users)
+            // This is critical for scalability - don't broadcast to 1M users!
+            const player1SocketId = userSocketMap[player1]?.socketId
+            const player2SocketId = userSocketMap[player2]?.socketId
+            
+            if (player1SocketId) {
+                io.to(player1SocketId).emit("userAvailableChess", { userId: player1 })
+                io.to(player1SocketId).emit("userAvailableChess", { userId: player2 })
+            }
+            if (player2SocketId) {
+                io.to(player2SocketId).emit("userAvailableChess", { userId: player1 })
+                io.to(player2SocketId).emit("userAvailableChess", { userId: player2 })
+            }
         })
 
         socket.on("disconnect", () => {
