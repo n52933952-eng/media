@@ -124,11 +124,11 @@ const SuggestedUsers = ({ onUserFollowed }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.following?.length]) // Refresh when following list changes
 
-  // Filter out already followed users AND system accounts (Football, AlJazeera)
+  // Filter out already followed users AND system accounts (Football, AlJazeera, KidsMovies)
   // Check both string and ObjectId comparison
   const filteredSuggestedUsers = suggestedUsers.filter(suggestedUser => {
     // Filter out system accounts
-    if (suggestedUser.username === 'Football' || suggestedUser.username === 'AlJazeera') {
+    if (suggestedUser.username === 'Football' || suggestedUser.username === 'AlJazeera' || suggestedUser.username === 'KidsMovies') {
       return false
     }
     

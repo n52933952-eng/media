@@ -25,6 +25,14 @@ const KidsMovies = ({ onUserFollowed }) => {
         try {
             setLoading(true)
             const baseUrl = import.meta.env.PROD ? window.location.origin : "http://localhost:5000"
+            
+            // First, initialize Kids account if it doesn't exist
+            await fetch(`${baseUrl}/api/kids/init`, {
+                method: 'POST',
+                credentials: 'include'
+            })
+            
+            // Then fetch the account
             const res = await fetch(`${baseUrl}/api/user/getUserPro/KidsMovies`, {
                 credentials: 'include'
             })

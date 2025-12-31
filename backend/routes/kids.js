@@ -1,8 +1,11 @@
 import express from 'express'
-import { postRandomCartoon, getAllCartoons, nextCartoon } from '../controller/kids.js'
+import { initializeKidsAccount, postRandomCartoon, getAllCartoons, nextCartoon } from '../controller/kids.js'
 import protectRoute from '../middlware/protectRoute.js'
 
 const router = express.Router()
+
+// Initialize Kids account (no auth needed - system initialization)
+router.post('/init', initializeKidsAccount)
 
 // Post random cartoon to feed (requires auth)
 router.post('/post/random', protectRoute, postRandomCartoon)

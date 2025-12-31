@@ -80,6 +80,25 @@ const getRandomCartoon = () => {
     return KIDS_CARTOONS[randomIndex]
 }
 
+// POST /api/kids/init - Initialize Kids account (manual trigger)
+export const initializeKidsAccount = async (req, res) => {
+    try {
+        const kidsAccount = await getKidsAccount()
+        res.status(200).json({
+            message: 'Kids account initialized successfully',
+            account: {
+                _id: kidsAccount._id,
+                username: kidsAccount.username,
+                name: kidsAccount.name,
+                profilePic: kidsAccount.profilePic
+            }
+        })
+    } catch (error) {
+        console.error('🎬 [initializeKidsAccount] Error:', error)
+        res.status(500).json({ error: error.message })
+    }
+}
+
 // POST /api/kids/post/random - Post random cartoon to feed
 export const postRandomCartoon = async (req, res) => {
     try {
