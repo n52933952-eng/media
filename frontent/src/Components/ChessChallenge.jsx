@@ -39,36 +39,46 @@ const ChessChallenge = () => {
 
     // Fetch followers and following who are online
     const fetchAvailableUsers = async () => {
-        if (!user) return
+        if (!user || !user.following || !user.followers) return
         
         try {
             setLoading(true)
             const baseUrl = import.meta.env.PROD ? window.location.origin : "http://localhost:5000"
             
-            // Get user's followers and following
-            const res = await fetch(`${baseUrl}/api/user/profile/${user.username}`, {
-                credentials: 'include'
-            })
-            const data = await res.json()
+            // Get unique user IDs from both followers and following
+            const allConnectionIds = [
+                ...(user.following || []),
+                ...(user.followers || [])
+            ]
             
-            if (res.ok) {
-                // Combine followers and following, remove duplicates
-                const allConnections = [
-                    ...(data.followers || []),
-                    ...(data.following || [])
-                ]
-                
-                // Filter to only online users and remove duplicates
-                const uniqueUsers = Array.from(
-                    new Map(allConnections.map(u => [u._id, u])).values()
-                ).filter(u => 
-                    onlineUsers.some(online => online.userId === u._id) && 
-                    u._id !== user._id &&
-                    !busyUsers.includes(u._id)
-                )
-                
-                setAvailableUsers(uniqueUsers)
-            }
+            // Remove duplicates
+            const uniqueIds = [...new Set(allConnectionIds)]
+            
+            // Fetch all users in parallel
+            const userPromises = uniqueIds.map(async (userId) => {
+                try {
+                    const res = await fetch(`${baseUrl}/api/user/getUserPro/${userId}`, {
+                        credentials: 'include'
+                    })
+                    if (res.ok) {
+                        return await res.json()
+                    }
+                } catch (err) {
+                    console.error('Error fetching user:', err)
+                }
+                return null
+            })
+            
+            const allUsers = (await Promise.all(userPromises)).filter(u => u !== null)
+            
+            // Filter to only online users who are not busy
+            const onlineAvailableUsers = allUsers.filter(u => 
+                onlineUsers.some(online => online.userId === u._id) && 
+                u._id !== user._id &&
+                !busyUsers.includes(u._id)
+            )
+            
+            setAvailableUsers(onlineAvailableUsers)
         } catch (error) {
             console.error('Error fetching users:', error)
         } finally {
