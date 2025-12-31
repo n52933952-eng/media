@@ -642,6 +642,7 @@ export const SocketContextProvider = ({ children }) => {
         answerCall,
         leaveCall,
         onlineUser,
+        onlineUsers: onlineUser, // Export as onlineUsers for consistency
         busyUsers, // Export busyUsers so components can check if a user is busy
         totalUnreadCount, // Export total unread message count
         setSelectedConversationId, // Function to update selected conversation for notification control
