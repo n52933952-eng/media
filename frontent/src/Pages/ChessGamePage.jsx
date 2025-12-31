@@ -42,16 +42,20 @@ const ChessGamePage = () => {
     })()
     
     // Initialize board ready state after orientation is set
+    // Only render board when we have a valid orientation
     useEffect(() => {
-        if (storedOrientation) {
+        const currentOrientation = localStorage.getItem('chessOrientation') || orientation
+        if (currentOrientation && (currentOrientation === 'white' || currentOrientation === 'black')) {
             // Small delay to ensure orientation is set before rendering board
             const timer = setTimeout(() => {
                 setBoardReady(true)
-                console.log('✅ Board ready with orientation:', storedOrientation)
-            }, 50)
+                console.log('✅ Board ready with orientation:', currentOrientation)
+            }, 100)
             return () => clearTimeout(timer)
+        } else {
+            setBoardReady(false)
         }
-    }, [storedOrientation])
+    }, [orientation])
     
     // Sync orientation from localStorage on mount (in case it was set before navigation)
     // This is critical - when accepter navigates, localStorage should already have 'black'
@@ -91,20 +95,31 @@ const ChessGamePage = () => {
     
     // Force board re-render when orientation changes
     useEffect(() => {
+        const currentStored = localStorage.getItem('chessOrientation') || orientation
         console.log('🔄 Orientation changed, forcing board re-render')
-        console.log('🔄 Current storedOrientation:', storedOrientation)
-        console.log('🔄 Board should show:', storedOrientation === 'white' ? 'White pieces at bottom' : 'Black pieces at bottom')
-        // Unmount board first, then remount with new orientation
+        console.log('🔄 Current storedOrientation:', currentStored)
+        console.log('🔄 Board should show:', currentStored === 'white' ? 'White pieces at bottom' : 'Black pieces at bottom')
+        
+        // Unmount board completely first
         setBoardReady(false)
+        
         // Increment boardKey to force complete remount of Chessboard component
-        setBoardKey(prev => prev + 1)
-        // Remount after a short delay to ensure orientation is set
+        setBoardKey(prev => {
+            const newKey = prev + 1
+            console.log('🔄 Board key incremented to:', newKey)
+            return newKey
+        })
+        
+        // Remount after a delay to ensure orientation is fully set
+        // Use a longer delay to ensure localStorage is persisted
         const timer = setTimeout(() => {
+            const finalOrientation = localStorage.getItem('chessOrientation') || orientation
+            console.log('🔄 Remounting board with final orientation:', finalOrientation)
             setBoardReady(true)
-            console.log('🔄 Board remounted with orientation:', storedOrientation)
-        }, 150)
+        }, 200)
+        
         return () => clearTimeout(timer)
-    }, [orientation, storedOrientation])
+    }, [orientation])
 
     // Sound effects
     const sounds = useRef({})
@@ -453,9 +468,9 @@ const ChessGamePage = () => {
 
                     <Box w="400px" h="400px">
                         {/* Conditionally render to force remount when orientation changes */}
-                        {boardReady && storedOrientation && (
+                        {boardReady && storedOrientation ? (
                             <Chessboard
-                                key={`chess-${storedOrientation}-${boardKey}-${Date.now()}`}
+                                key={`chess-${storedOrientation}-${boardKey}`}
                                 position={fen}
                                 onPieceDrop={onDrop}
                                 boardOrientation={storedOrientation}
@@ -468,10 +483,17 @@ const ChessGamePage = () => {
                                     backgroundColor: '#f0d9b5'
                                 }}
                             />
-                        )}
-                        {!boardReady && (
-                            <Box w="400px" h="400px" display="flex" alignItems="center" justifyContent="center">
-                                <Text>Loading board...</Text>
+                        ) : (
+                            <Box 
+                                w="400px" 
+                                h="400px" 
+                                display="flex" 
+                                alignItems="center" 
+                                justifyContent="center"
+                                bg="gray.100"
+                                borderRadius="md"
+                            >
+                                <Text color="gray.600">Setting up board...</Text>
                             </Box>
                         )}
                     </Box>
