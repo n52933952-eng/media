@@ -27,8 +27,16 @@ const ChessGamePage = () => {
     // Line 201 in madechess: const storedOrientation = localStorage.getItem("chessOrientation") || orientation;
     const storedOrientation = localStorage.getItem("chessOrientation") || orientation
     
+    // DEBUG: Manual override to test - FORCE BLACK
+    const FORCE_BLACK = "black" // Change this to test
+    const finalOrientation = FORCE_BLACK || storedOrientation || "white"
+    
     // Debug: Log storedOrientation on every render
-    console.log('🎯 ChessGamePage render - storedOrientation:', storedOrientation, '| orientation state:', orientation, '| localStorage:', localStorage.getItem("chessOrientation"))
+    console.log('🎯 ChessGamePage render:')
+    console.log('  - localStorage chessOrientation:', localStorage.getItem("chessOrientation"))
+    console.log('  - orientation state:', orientation)
+    console.log('  - storedOrientation:', storedOrientation)
+    console.log('  - finalOrientation (for board):', finalOrientation)
     const [gameLive, setGameLive] = useState(false)
     const [showGameOverBox, setShowGameOverBox] = useState(false)
     const [over, setOver] = useState('')
@@ -281,11 +289,16 @@ const ChessGamePage = () => {
 
     function onDrop(sourceSquare, targetSquare) {
         // Use safeOrientation pattern from madechess: orientation || localStorage || "white"
-        const safeOrientation = orientation || localStorage.getItem("chessOrientation") || "white"
+        // Use finalOrientation if available, otherwise fallback
+        const currentFinalOrientation = finalOrientation || orientation || localStorage.getItem("chessOrientation") || "white"
+        const safeOrientation = currentFinalOrientation
+        
+        console.log('🎮 onDrop - safeOrientation:', safeOrientation, '| chess.turn():', chess.turn(), '| finalOrientation:', finalOrientation)
         
         // Only allow moves for current player (check if chess turn matches orientation)
         // Same pattern as madechess line 160
         if (chess.turn() !== safeOrientation[0]) {
+            console.log('❌ Not your turn! Turn:', chess.turn(), 'Orientation:', safeOrientation[0])
             return false // only current player moves (like madechess)
         }
         
@@ -379,10 +392,10 @@ const ChessGamePage = () => {
                     <Heading size="lg" mb={2} color="#5a3e2b" textAlign="center">
                         ♟️ Chess Match
                     </Heading>
-                    {gameLive && storedOrientation && (
+                    {gameLive && finalOrientation && (
                         <Text fontSize="sm" textAlign="center" mb={4} color="#5a3e2b" fontWeight="bold">
-                            You are playing as: {storedOrientation === 'white' ? '⚪ White' : '⚫ Black'}
-                            {chess.turn() === storedOrientation[0] ? ' (Your turn!)' : ' (Waiting...)'}
+                            You are playing as: {finalOrientation === 'white' ? '⚪ White' : '⚫ Black'}
+                            {chess.turn() === finalOrientation[0] ? ' (Your turn!)' : ' (Waiting...)'}
                         </Text>
                     )}
 
@@ -391,10 +404,10 @@ const ChessGamePage = () => {
                         {/* Madechess line 323-339: Just renders Chessboard with boardOrientation={storedOrientation} */}
                         {/* Key includes orientation to force remount when it changes */}
                         <Chessboard
-                            key={`chess-board-${storedOrientation || 'default'}`}
+                            key={`chess-board-${finalOrientation}`}
                             position={fen}
                             onPieceDrop={onDrop}
-                            boardOrientation={storedOrientation || "white"}
+                            boardOrientation={finalOrientation}
                             boardWidth={400}
                             animationDuration={250}
                             customDarkSquareStyle={{
