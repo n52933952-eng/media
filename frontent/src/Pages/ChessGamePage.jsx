@@ -170,12 +170,24 @@ const ChessGamePage = () => {
         socket.on('acceptChessChallenge', (data) => {
             console.log('♟️ Challenge accepted, starting game:', data)
             console.log('♟️ Your color:', data.yourColor, '| Opponent:', data.opponentId)
-            setRoomId(data.roomId)
+            
             // Set board orientation: 'white' = white pieces at bottom, 'black' = black pieces at bottom
-            setOrientation(data.yourColor || 'white')
+            const yourColor = data.yourColor || 'white'
+            console.log('♟️ Setting orientation to:', yourColor)
+            setOrientation(yourColor)
+            // Also save to localStorage for persistence
+            localStorage.setItem('chessOrientation', yourColor)
+            setRoomId(data.roomId)
             setGameLive(true)
             playSound('gameStart')
-            showToast('Game Started! ♟️', `You are playing as ${data.yourColor === 'white' ? 'White ⚪' : 'Black ⚫'}`, 'success')
+            showToast('Game Started! ♟️', `You are playing as ${yourColor === 'white' ? 'White ⚪' : 'Black ⚫'}`, 'success')
+            
+            // Log for debugging
+            setTimeout(() => {
+                console.log('♟️ Current orientation state:', yourColor)
+                console.log('♟️ Chess turn:', chess.turn())
+                console.log('♟️ Can move?', chess.turn() === yourColor[0])
+            }, 1000)
         })
 
         socket.on('opponentMove', (data) => {
@@ -227,9 +239,28 @@ const ChessGamePage = () => {
     }, [socket, navigate, showToast, makeAMove])
 
     function onDrop(sourceSquare, targetSquare) {
-        // Only allow moves for current player
-        if (chess.turn() !== orientation[0]) {
-            console.log('❌ Not your turn!', { turn: chess.turn(), orientation: orientation[0] })
+        // Get safe orientation (fallback to localStorage if needed)
+        const safeOrientation = orientation || localStorage.getItem('chessOrientation') || 'white'
+        
+        console.log('🎮 onDrop called:', {
+            sourceSquare,
+            targetSquare,
+            chessTurn: chess.turn(),
+            orientation: safeOrientation,
+            orientationFirstChar: safeOrientation[0],
+            canMove: chess.turn() === safeOrientation[0],
+            gameLive
+        })
+        
+        // Only allow moves for current player (check if chess turn matches orientation)
+        if (chess.turn() !== safeOrientation[0]) {
+            console.log('❌ Not your turn!', { 
+                turn: chess.turn(), 
+                orientation: safeOrientation,
+                orientationFirstChar: safeOrientation[0],
+                expected: safeOrientation[0] === 'w' ? 'white' : 'black'
+            })
+            showToast('Not Your Turn', `It's ${chess.turn() === 'w' ? 'White' : 'Black'}'s turn!`, 'warning')
             return false
         }
         if (!gameLive) {
@@ -328,7 +359,7 @@ const ChessGamePage = () => {
                         <Chessboard
                             position={fen}
                             onPieceDrop={onDrop}
-                            boardOrientation={orientation}
+                            boardOrientation={orientation || localStorage.getItem('chessOrientation') || 'white'}
                             boardWidth={400}
                             animationDuration={250}
                             customDarkSquareStyle={{
