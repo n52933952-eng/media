@@ -111,9 +111,10 @@ const ChessChallenge = () => {
         socket.on('acceptChessChallenge', (data) => {
             console.log('♟️ Challenge accepted! Navigating to game...', data)
             console.log('♟️ Received yourColor from backend:', data.yourColor)
-            // Don't set localStorage here - let the socket event in ChessGamePage set it
-            // This avoids race conditions
-            console.log('♟️ Challenger (Neyma) - orientation will be set by socket event in ChessGamePage')
+            // Clear any stale orientation from localStorage
+            // The socket event will set the correct orientation
+            localStorage.removeItem('chessOrientation')
+            console.log('♟️ Challenger (Neyma) - cleared localStorage, orientation will be set by socket event')
             showToast('Challenge Accepted! ♟️', 'Starting game...', 'success')
             // Navigate immediately - orientation will be set by socket event
             navigate(`/chess/${data.opponentId}`)

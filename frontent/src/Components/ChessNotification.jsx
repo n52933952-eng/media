@@ -93,9 +93,10 @@ const ChessNotification = () => {
             return
         }
 
-        // Don't set localStorage here - let the socket event set it
-        // This avoids race conditions where both players navigate simultaneously
-        console.log('♟️ Accepter (Saif) accepting challenge - orientation will be set by socket event')
+        // Clear any stale orientation from localStorage
+        // The socket event will set the correct orientation
+        localStorage.removeItem('chessOrientation')
+        console.log('♟️ Accepter (Saif) accepting challenge - cleared localStorage, orientation will be set by socket event')
 
         // Emit accept event
         socket.emit('acceptChessChallenge', {

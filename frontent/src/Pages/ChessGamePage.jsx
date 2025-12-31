@@ -263,15 +263,10 @@ const ChessGamePage = () => {
         }
 
         socket.on('acceptChessChallenge', handleAcceptChallenge)
-
-        // Check immediately if orientation already exists in localStorage
-        // This handles the case where user navigates after event was received
-        const saved = localStorage.getItem('chessOrientation')
-        if (saved && (saved === 'white' || saved === 'black') && !orientation) {
-            console.log('♟️ Found existing orientation in localStorage on mount:', saved)
-            setOrientation(saved)
-            setGameLive(true)
-        }
+        
+        // Don't check localStorage on mount - wait for socket event
+        // This avoids reading stale values from previous games
+        // The socket event is the single source of truth
         
         socket.on('opponentMove', (data) => {
             console.log('♟️ Opponent move received:', data)
