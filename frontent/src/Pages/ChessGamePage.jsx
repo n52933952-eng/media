@@ -32,7 +32,10 @@ const ChessGamePage = () => {
     console.log('  - localStorage chessOrientation:', localStorage.getItem("chessOrientation"))
     console.log('  - orientation state:', orientation)
     console.log('  - storedOrientation (for board):', storedOrientation)
-    const [gameLive, setGameLive] = useState(false)
+    // Initialize gameLive from localStorage (like madechess)
+    const [gameLive, setGameLive] = useState(() => {
+        return localStorage.getItem("gameLive") === "true"
+    })
     const [showGameOverBox, setShowGameOverBox] = useState(false)
     const [over, setOver] = useState('')
     const [capturedWhite, setCapturedWhite] = useState([])
@@ -49,18 +52,31 @@ const ChessGamePage = () => {
     const chess = useMemo(() => new Chess(), [])
     const [fen, setFen] = useState(chess.fen())
 
-    // Initialize orientation from localStorage on mount (like madechess)
+    // Initialize orientation and gameLive from localStorage on mount (like madechess)
     // This ensures board is ready even if socket event is delayed
     useEffect(() => {
         const savedOrientation = localStorage.getItem("chessOrientation")
-        console.log('♟️ ChessGamePage mounted - checking localStorage:', savedOrientation)
+        const savedGameLive = localStorage.getItem("gameLive") === "true"
+        console.log('♟️ ChessGamePage mounted - checking localStorage:', {
+            orientation: savedOrientation,
+            gameLive: savedGameLive
+        })
         console.log('♟️ Current orientation state:', orientation)
+        console.log('♟️ Current gameLive state:', gameLive)
+        
         if (savedOrientation && (savedOrientation === 'white' || savedOrientation === 'black')) {
             // Always sync with localStorage on mount (like madechess)
-            setOrientation(savedOrientation)
-            console.log('♟️ Set orientation from localStorage on mount:', savedOrientation)
+            if (orientation !== savedOrientation) {
+                setOrientation(savedOrientation)
+                console.log('♟️ Set orientation from localStorage on mount:', savedOrientation)
+            }
         }
-    }, []) // Only run on mount - don't depend on orientation to avoid loops
+        
+        if (savedGameLive && !gameLive) {
+            setGameLive(true)
+            console.log('♟️ Set gameLive from localStorage on mount:', savedGameLive)
+        }
+    }, []) // Only run on mount
     
     // Debug: Log orientation changes
     useEffect(() => {

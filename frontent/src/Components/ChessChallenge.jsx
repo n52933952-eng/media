@@ -115,10 +115,12 @@ const ChessChallenge = () => {
             // Challenger is always WHITE
             setOrientation("white")
             localStorage.setItem("chessOrientation", "white")
-            console.log('♟️ Challenger (Neyma) setting orientation to WHITE locally (like madechess)')
+            // Also set gameLive to true (game starts when challenge is accepted)
+            localStorage.setItem("gameLive", "true")
+            console.log('♟️ Challenger (Neyma) setting orientation to WHITE and gameLive to true locally (like madechess)')
             
             showToast('Challenge Accepted! ♟️', 'Starting game...', 'success')
-            // Navigate to chess page (orientation already set)
+            // Navigate to chess page (orientation and gameLive already set)
             navigate(`/chess/${data.opponentId}`)
         })
 

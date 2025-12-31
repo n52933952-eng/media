@@ -97,7 +97,9 @@ const ChessNotification = () => {
         // Accepter is always BLACK
         setOrientation("black")
         localStorage.setItem("chessOrientation", "black")
-        console.log('♟️ Accepter (Saif) setting orientation to BLACK locally (like madechess)')
+        // Also set gameLive to true (game starts when challenge is accepted)
+        localStorage.setItem("gameLive", "true")
+        console.log('♟️ Accepter (Saif) setting orientation to BLACK and gameLive to true locally (like madechess)')
 
         // Emit accept event
         socket.emit('acceptChessChallenge', {
