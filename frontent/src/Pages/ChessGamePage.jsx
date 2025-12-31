@@ -190,6 +190,19 @@ const ChessGamePage = () => {
                         setOver('Game Over')
                     }
                     setShowGameOverBox(true)
+                    
+                    // Notify backend that game ended - marks both players as available
+                    if (socket && roomId && opponentId && user?._id) {
+                        socket.emit('chessGameEnd', {
+                            roomId,
+                            player1: user._id,
+                            player2: opponentId
+                        })
+                        if (import.meta.env.DEV) {
+                            console.log('♟️ Game ended - notifying backend:', { roomId, player1: user._id, player2: opponentId })
+                        }
+                    }
+                    
                     setTimeout(() => {
                         if (handleGameEndRef.current) {
                             handleGameEndRef.current()
@@ -308,6 +321,19 @@ const ChessGamePage = () => {
         })
 
         socket.on('chessGameCanceled', () => {
+            // Clean up localStorage
+            localStorage.removeItem('chessOrientation')
+            localStorage.removeItem('gameLive')
+            localStorage.removeItem('chessFEN')
+            localStorage.removeItem('capturedWhite')
+            localStorage.removeItem('capturedBlack')
+            
+            // Reset state
+            setGameLive(false)
+            setOrientation(null)
+            chess.reset()
+            setFen(chess.fen())
+            
             showToast('Game Canceled', 'The game has been canceled', 'info')
             navigate('/home')
         })
@@ -406,6 +432,26 @@ const ChessGamePage = () => {
     }
 
     const handleGameEnd = useCallback(() => {
+        // Notify backend that game ended - this marks both players as available again
+        if (socket && roomId && opponentId && user?._id) {
+            socket.emit('chessGameEnd', {
+                roomId,
+                player1: user._id,
+                player2: opponentId
+            })
+            if (import.meta.env.DEV) {
+                console.log('♟️ Game ended - notifying backend:', { roomId, player1: user._id, player2: opponentId })
+            }
+        }
+        
+        // Clean up localStorage
+        localStorage.removeItem('chessOrientation')
+        localStorage.removeItem('gameLive')
+        localStorage.removeItem('chessFEN')
+        localStorage.removeItem('capturedWhite')
+        localStorage.removeItem('capturedBlack')
+        
+        // Reset state
         chess.reset()
         setFen(chess.fen())
         setOver('')
@@ -413,8 +459,10 @@ const ChessGamePage = () => {
         setCapturedWhite([])
         setCapturedBlack([])
         setGameLive(false)
+        setOrientation(null)
+        
         navigate('/home')
-    }, [chess, navigate])
+    }, [chess, navigate, socket, roomId, opponentId, user?._id])
 
     // Store handleGameEnd in ref
     useEffect(() => {
