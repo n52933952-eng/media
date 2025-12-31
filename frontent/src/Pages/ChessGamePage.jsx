@@ -17,41 +17,36 @@ const ChessGamePage = () => {
     const { opponentId } = useParams()
     const navigate = useNavigate()
     const { socket } = useContext(SocketContext)
-    const { user } = useContext(UserContext)
+    const { user, orientation, setOrientation } = useContext(UserContext)
     const showToast = useShowToast()
 
     const [opponent, setOpponent] = useState(null)
     const [roomId, setRoomId] = useState(null)
-    // Initialize orientation as null - will be set by socket event
-    // This avoids race conditions with localStorage
-    const [orientation, setOrientation] = useState(null)
     // Force remount counter - increments when orientation changes
     const [boardKey, setBoardKey] = useState(0)
     // Force remount flag - toggles to force complete unmount/remount
     const [boardReady, setBoardReady] = useState(false)
     
-    // Computed orientation - use state value, fallback to localStorage only if state is null
-    const storedOrientation = orientation || localStorage.getItem('chessOrientation') || null
+    // Read orientation same way ChessTable does in madechess: localStorage first, then state
+    const storedOrientation = localStorage.getItem("chessOrientation") || orientation
     
-    // Initialize board ready state after orientation is set
-    // Only render board when we have a valid orientation from socket event
+    // Initialize board ready state - check storedOrientation (like madechess)
     useEffect(() => {
-        if (orientation && (orientation === 'white' || orientation === 'black')) {
+        if (storedOrientation && (storedOrientation === 'white' || storedOrientation === 'black')) {
             // Unmount board first to ensure clean remount
             setBoardReady(false)
             // Increment board key to force complete remount
             setBoardKey(prev => prev + 1)
-            // Wait a bit longer to ensure state is fully updated before remounting
+            // Wait a bit to ensure state is fully updated before remounting
             const timer = setTimeout(() => {
                 setBoardReady(true)
-                console.log('✅ Board ready with orientation:', orientation)
-                console.log('✅ Board will render with boardOrientation:', orientation)
+                console.log('✅ Board ready with orientation:', storedOrientation)
             }, 200)
             return () => clearTimeout(timer)
         } else {
             setBoardReady(false)
         }
-    }, [orientation])
+    }, [storedOrientation])
     const [gameLive, setGameLive] = useState(false)
     const [showGameOverBox, setShowGameOverBox] = useState(false)
     const [over, setOver] = useState('')
@@ -69,6 +64,18 @@ const ChessGamePage = () => {
     const chess = useMemo(() => new Chess(), [])
     const [fen, setFen] = useState(chess.fen())
 
+    // Initialize orientation from localStorage on mount (like madechess)
+    // This ensures board is ready even if socket event is delayed
+    useEffect(() => {
+        const savedOrientation = localStorage.getItem("chessOrientation")
+        if (savedOrientation && (savedOrientation === 'white' || savedOrientation === 'black')) {
+            if (!orientation) {
+                setOrientation(savedOrientation)
+                console.log('♟️ Initialized orientation from localStorage on mount:', savedOrientation)
+            }
+        }
+    }, []) // Only run on mount
+    
     // Debug: Log orientation changes
     useEffect(() => {
         console.log('🎨 Orientation state:', orientation)
@@ -77,8 +84,6 @@ const ChessGamePage = () => {
         if (storedOrientation) {
             console.log('🎨 Can move?', chess.turn() === storedOrientation[0])
             console.log('🎨 Board orientation should be:', storedOrientation === 'white' ? 'White at bottom' : 'Black at bottom')
-        } else {
-            console.log('🎨 Waiting for orientation from socket event...')
         }
     }, [orientation, storedOrientation, chess])
 
@@ -216,20 +221,18 @@ const ChessGamePage = () => {
             console.log('♟️ Opponent ID:', data.opponentId)
             console.log('♟️ Current user ID:', user._id)
             
-            // Use yourColor from backend (this is the SINGLE source of truth)
-            // Backend assigns: challenger = white, accepter = black
-            const yourColor = data.yourColor || 'white'
+            // Orientation should already be set locally (like madechess)
+            // But use socket data as backup/confirmation
+            const yourColor = data.yourColor || storedOrientation || 'white'
             
-            console.log('♟️ Final orientation to set:', yourColor)
-            console.log('♟️ Orientation first char:', yourColor[0])
-            console.log('♟️ Expected: challenger=white, accepter=black')
-            
-            // CRITICAL: Set orientation state FIRST (this is the source of truth)
-            // This will trigger the boardReady useEffect
-            setOrientation(yourColor)
-            // Also save to localStorage for persistence
-            localStorage.setItem('chessOrientation', yourColor)
-            console.log('♟️ Orientation set to:', yourColor, 'and saved to localStorage')
+            // Only update if different (backup/confirmation)
+            if (yourColor && yourColor !== storedOrientation) {
+                setOrientation(yourColor)
+                localStorage.setItem('chessOrientation', yourColor)
+                console.log('♟️ Orientation updated from socket (backup):', yourColor)
+            } else {
+                console.log('♟️ Orientation already set locally:', storedOrientation)
+            }
             
             // Reset chess board to starting position
             chess.reset()
@@ -237,17 +240,13 @@ const ChessGamePage = () => {
             
             setRoomId(data.roomId)
             
-            // Start game after orientation is set
+            // Start game
             setGameLive(true)
             playSound('gameStart')
-            showToast('Game Started! ♟️', `You are playing as ${yourColor === 'white' ? 'White ⚪' : 'Black ⚫'}`, 'success')
+            showToast('Game Started! ♟️', `You are playing as ${storedOrientation === 'white' ? 'White ⚪' : 'Black ⚫'}`, 'success')
         }
 
         socket.on('acceptChessChallenge', handleAcceptChallenge)
-        
-        // Don't check localStorage on mount - wait for socket event
-        // This avoids reading stale values from previous games
-        // The socket event is the single source of truth
         
         socket.on('opponentMove', (data) => {
             console.log('♟️ Opponent move received:', data)
@@ -298,43 +297,20 @@ const ChessGamePage = () => {
     }, [socket, navigate, showToast, makeAMove, user._id, chess])
 
     function onDrop(sourceSquare, targetSquare) {
-        // Use storedOrientation (always reads from localStorage, like madechess)
-        const currentOrientation = storedOrientation
-        
-        // Safety check - don't allow moves if orientation is not set yet
-        if (!currentOrientation || (currentOrientation !== 'white' && currentOrientation !== 'black')) {
-            console.log('❌ Orientation not set yet, cannot make move')
-            showToast('Game Not Ready', 'Waiting for game to start...', 'warning')
-            return false
-        }
-        
-        console.log('🎮 onDrop called:', {
-            sourceSquare,
-            targetSquare,
-            chessTurn: chess.turn(),
-            orientation: currentOrientation,
-            orientationFirstChar: currentOrientation[0],
-            canMove: chess.turn() === currentOrientation[0],
-            gameLive
-        })
+        // Use safeOrientation pattern from madechess: orientation || localStorage || "white"
+        const safeOrientation = orientation || localStorage.getItem("chessOrientation") || "white"
         
         // Only allow moves for current player (check if chess turn matches orientation)
-        if (chess.turn() !== currentOrientation[0]) {
-            console.log('❌ Not your turn!', { 
-                turn: chess.turn(), 
-                orientation: currentOrientation,
-                orientationFirstChar: currentOrientation[0],
-                expected: currentOrientation[0] === 'w' ? 'white' : 'black'
-            })
-            showToast('Not Your Turn', `It's ${chess.turn() === 'w' ? 'White' : 'Black'}'s turn!`, 'warning')
-            return false
+        // Same pattern as madechess line 160
+        if (chess.turn() !== safeOrientation[0]) {
+            return false // only current player moves (like madechess)
         }
+        
         if (!gameLive) {
-            console.log('❌ Game not live yet!')
             return false
         }
+        
         if (!socket) {
-            console.log('❌ Socket not connected!')
             return false
         }
 
@@ -429,12 +405,12 @@ const ChessGamePage = () => {
 
                     <Box w="400px" h="400px">
                         {/* Conditionally render to force remount when orientation changes */}
-                        {boardReady && orientation && (orientation === 'white' || orientation === 'black') ? (
+                        {boardReady && storedOrientation && (storedOrientation === 'white' || storedOrientation === 'black') ? (
                             <Chessboard
-                                key={`chess-${orientation}-${boardKey}`}
+                                key={`chess-${storedOrientation}-${boardKey}`}
                                 position={fen}
                                 onPieceDrop={onDrop}
-                                boardOrientation={orientation}
+                                boardOrientation={storedOrientation}
                                 boardWidth={400}
                                 animationDuration={250}
                                 customDarkSquareStyle={{

@@ -16,7 +16,7 @@ import { SocketContext } from '../context/SocketContext'
 import useShowToast from '../hooks/useShowToast'
 
 const ChessNotification = () => {
-    const { user } = useContext(UserContext)
+    const { user, setOrientation } = useContext(UserContext)
     const { socket } = useContext(SocketContext)
     const [challenges, setChallenges] = useState([])
     const navigate = useNavigate()
@@ -93,10 +93,11 @@ const ChessNotification = () => {
             return
         }
 
-        // Clear any stale orientation from localStorage
-        // The socket event will set the correct orientation
-        localStorage.removeItem('chessOrientation')
-        console.log('♟️ Accepter (Saif) accepting challenge - cleared localStorage, orientation will be set by socket event')
+        // Set orientation locally BEFORE navigating (like madechess)
+        // Accepter is always BLACK
+        setOrientation("black")
+        localStorage.setItem("chessOrientation", "black")
+        console.log('♟️ Accepter (Saif) setting orientation to BLACK locally (like madechess)')
 
         // Emit accept event
         socket.emit('acceptChessChallenge', {
@@ -108,7 +109,7 @@ const ChessNotification = () => {
         // Remove challenge from list
         setChallenges(prev => prev.filter(c => c.from !== challenge.from))
 
-        // Navigate immediately - orientation will be set by socket event
+        // Navigate to chess page (orientation already set)
         navigate(`/chess/${challenge.from}`)
     }
 

@@ -24,7 +24,7 @@ import { SocketContext } from '../context/SocketContext'
 import useShowToast from '../hooks/useShowToast'
 
 const ChessChallenge = () => {
-    const { user } = useContext(UserContext)
+    const { user, setOrientation } = useContext(UserContext)
     const { socket, onlineUsers } = useContext(SocketContext)
     const { isOpen, onOpen, onClose } = useDisclosure()
     const [availableUsers, setAvailableUsers] = useState([])
@@ -110,13 +110,15 @@ const ChessChallenge = () => {
         // Listen for challenge acceptance (sender side)
         socket.on('acceptChessChallenge', (data) => {
             console.log('♟️ Challenge accepted! Navigating to game...', data)
-            console.log('♟️ Received yourColor from backend:', data.yourColor)
-            // Clear any stale orientation from localStorage
-            // The socket event will set the correct orientation
-            localStorage.removeItem('chessOrientation')
-            console.log('♟️ Challenger (Neyma) - cleared localStorage, orientation will be set by socket event')
+            
+            // Set orientation locally BEFORE navigating (like madechess)
+            // Challenger is always WHITE
+            setOrientation("white")
+            localStorage.setItem("chessOrientation", "white")
+            console.log('♟️ Challenger (Neyma) setting orientation to WHITE locally (like madechess)')
+            
             showToast('Challenge Accepted! ♟️', 'Starting game...', 'success')
-            // Navigate immediately - orientation will be set by socket event
+            // Navigate to chess page (orientation already set)
             navigate(`/chess/${data.opponentId}`)
         })
 
