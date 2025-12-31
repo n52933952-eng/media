@@ -88,7 +88,19 @@ const ChessGamePage = () => {
     useEffect(() => {
         if (!socket) return
 
+        // Connection status
+        socket.on('connect', () => {
+            console.log('✅ Chess socket connected')
+            showToast('Connected', 'Chess connection restored', 'success')
+        })
+
+        socket.on('disconnect', () => {
+            console.log('⚠️ Chess socket disconnected')
+            showToast('Connection Lost', 'Reconnecting...', 'warning')
+        })
+
         socket.on('acceptChessChallenge', (data) => {
+            console.log('♟️ Challenge accepted, starting game:', data)
             setRoomId(data.roomId)
             setOrientation(data.yourColor || 'white')
             setGameLive(true)
@@ -97,7 +109,15 @@ const ChessGamePage = () => {
         })
 
         socket.on('opponentMove', (data) => {
-            makeAMove(data.move)
+            console.log('♟️ Opponent move received:', data)
+            // The move object should have 'from' and 'to' properties
+            if (data.move) {
+                // makeAMove expects { from, to, promotion } format
+                const moveResult = makeAMove(data.move)
+                if (!moveResult) {
+                    console.error('❌ Failed to apply opponent move:', data.move)
+                }
+            }
         })
 
         socket.on('opponentResigned', () => {
@@ -113,12 +133,14 @@ const ChessGamePage = () => {
         })
 
         return () => {
+            socket.off('connect')
+            socket.off('disconnect')
             socket.off('acceptChessChallenge')
             socket.off('opponentMove')
             socket.off('opponentResigned')
             socket.off('chessGameCanceled')
         }
-    }, [socket])
+    }, [socket, navigate, showToast])
 
     const makeAMove = useCallback((move) => {
         try {
@@ -167,8 +189,18 @@ const ChessGamePage = () => {
 
     function onDrop(sourceSquare, targetSquare) {
         // Only allow moves for current player
-        if (chess.turn() !== orientation[0]) return false
-        if (!gameLive) return false
+        if (chess.turn() !== orientation[0]) {
+            console.log('❌ Not your turn!', { turn: chess.turn(), orientation: orientation[0] })
+            return false
+        }
+        if (!gameLive) {
+            console.log('❌ Game not live yet!')
+            return false
+        }
+        if (!socket) {
+            console.log('❌ Socket not connected!')
+            return false
+        }
 
         const moveData = {
             from: sourceSquare,
@@ -177,13 +209,19 @@ const ChessGamePage = () => {
             promotion: 'q'
         }
 
+        // Make the move locally first
         const move = makeAMove(moveData)
-        if (!move) return false
+        if (!move) {
+            console.log('❌ Illegal move!')
+            return false
+        }
 
-        // Send move to opponent via socket
+        console.log('✅ Move made! Sending to opponent...', moveData)
+
+        // Send moveData (input format) to opponent - they will apply it with makeAMove
         socket.emit('chessMove', {
             roomId,
-            move: moveData,
+            move: moveData, // Send moveData format: { from, to, promotion }
             to: opponentId
         })
 
@@ -246,7 +284,7 @@ const ChessGamePage = () => {
                         position={fen}
                         onPieceDrop={onDrop}
                         boardOrientation={orientation}
-                        boardWidth={500}
+                        boardWidth={400}
                         animationDuration={250}
                         customDarkSquareStyle={{
                             backgroundColor: '#b58863'
@@ -299,7 +337,7 @@ const ChessGamePage = () => {
                         borderRadius="md"
                         boxShadow="md"
                         w="150px"
-                        h="622px"
+                        h="400px"
                         display="flex"
                         flexDirection="column"
                         justifyContent="space-between"
