@@ -6,7 +6,6 @@ import {PostContext} from '../context/PostContext'
 import {SocketContext} from '../context/SocketContext'
 import SuggestedUsers from '../Components/SuggestedUsers'
 import SuggestedChannels from '../Components/SuggestedChannels'
-import KidsMovies from '../Components/KidsMovies'
 
 
 
@@ -219,7 +218,6 @@ const HomePage = () => {
         minW={{ lg: '220px' }}
       >
         <SuggestedChannels onUserFollowed={fetchUserPosts} />
-        <KidsMovies onUserFollowed={fetchUserPosts} />
       </Box>
 
       {/* Main Feed - Center */}

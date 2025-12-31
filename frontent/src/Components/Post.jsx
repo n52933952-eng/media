@@ -34,9 +34,6 @@ const showToast = useShowToast()
   // Check if this is a Football post with match data
   const isFootballPost = postedBy?.username === 'Football' && post?.footballData
   
-  // Check if this is a Kids post
-  const isKidsPost = postedBy?.username === 'KidsMovies'
-  
   // Debug Al Jazeera posts
   if (postedBy?.username === 'AlJazeera') {
     console.log('🔴 Al Jazeera Post Data:', {
@@ -356,38 +353,6 @@ const showToast = useShowToast()
   <Flex gap={3} my={1}>
     <Actions post={post}/>
   </Flex>
-  
-  {/* Next Cartoon Button for Kids Posts */}
-  {isKidsPost && (
-    <Button
-      size="sm"
-      colorScheme="purple"
-      leftIcon={<Text>🎬</Text>}
-      onClick={async () => {
-        try {
-          const baseUrl = import.meta.env.PROD ? window.location.origin : "http://localhost:5000"
-          const res = await fetch(`${baseUrl}/api/kids/next/${post._id}`, {
-            method: 'POST',
-            credentials: 'include'
-          })
-          const data = await res.json()
-          if (res.ok) {
-            showToast('Success', `Now playing: ${data.cartoon}! 🎬`, 'success')
-            // Update post in context
-            setFollowPost(prev => prev.map(p => p._id === post._id ? data.post : p))
-          } else {
-            showToast('Error', data.error || 'Failed to change cartoon', 'error')
-          }
-        } catch (error) {
-          showToast('Error', 'Something went wrong', 'error')
-        }
-      }}
-      mt={2}
-      w="full"
-    >
-      Next Cartoon 🎬
-    </Button>
-  )}
   
    </Flex>
    
