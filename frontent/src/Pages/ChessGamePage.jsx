@@ -30,6 +30,8 @@ const ChessGamePage = () => {
     })
     // Force remount counter - increments when orientation changes
     const [boardKey, setBoardKey] = useState(0)
+    // Force remount flag - toggles to force complete unmount/remount
+    const [boardReady, setBoardReady] = useState(false)
     
     // Computed orientation - always reads from localStorage first (like madechess)
     // This ensures we always have the latest value, even if state hasn't updated yet
@@ -38,6 +40,18 @@ const ChessGamePage = () => {
         const saved = localStorage.getItem('chessOrientation')
         return saved || orientation
     })()
+    
+    // Initialize board ready state after orientation is set
+    useEffect(() => {
+        if (storedOrientation) {
+            // Small delay to ensure orientation is set before rendering board
+            const timer = setTimeout(() => {
+                setBoardReady(true)
+                console.log('✅ Board ready with orientation:', storedOrientation)
+            }, 50)
+            return () => clearTimeout(timer)
+        }
+    }, [storedOrientation])
     
     // Sync orientation from localStorage on mount (in case it was set before navigation)
     // This is critical - when accepter navigates, localStorage should already have 'black'
@@ -80,8 +94,16 @@ const ChessGamePage = () => {
         console.log('🔄 Orientation changed, forcing board re-render')
         console.log('🔄 Current storedOrientation:', storedOrientation)
         console.log('🔄 Board should show:', storedOrientation === 'white' ? 'White pieces at bottom' : 'Black pieces at bottom')
+        // Unmount board first, then remount with new orientation
+        setBoardReady(false)
         // Increment boardKey to force complete remount of Chessboard component
         setBoardKey(prev => prev + 1)
+        // Remount after a short delay to ensure orientation is set
+        const timer = setTimeout(() => {
+            setBoardReady(true)
+            console.log('🔄 Board remounted with orientation:', storedOrientation)
+        }, 150)
+        return () => clearTimeout(timer)
     }, [orientation, storedOrientation])
 
     // Sound effects
@@ -430,20 +452,28 @@ const ChessGamePage = () => {
                     )}
 
                     <Box w="400px" h="400px">
-                        <Chessboard
-                            key={`chessboard-${storedOrientation}-${boardKey}-${gameLive}`}
-                            position={fen}
-                            onPieceDrop={onDrop}
-                            boardOrientation={storedOrientation}
-                            boardWidth={400}
-                            animationDuration={250}
-                            customDarkSquareStyle={{
-                                backgroundColor: '#b58863'
-                            }}
-                            customLightSquareStyle={{
-                                backgroundColor: '#f0d9b5'
-                            }}
-                        />
+                        {/* Conditionally render to force remount when orientation changes */}
+                        {boardReady && storedOrientation && (
+                            <Chessboard
+                                key={`chess-${storedOrientation}-${boardKey}-${Date.now()}`}
+                                position={fen}
+                                onPieceDrop={onDrop}
+                                boardOrientation={storedOrientation}
+                                boardWidth={400}
+                                animationDuration={250}
+                                customDarkSquareStyle={{
+                                    backgroundColor: '#b58863'
+                                }}
+                                customLightSquareStyle={{
+                                    backgroundColor: '#f0d9b5'
+                                }}
+                            />
+                        )}
+                        {!boardReady && (
+                            <Box w="400px" h="400px" display="flex" alignItems="center" justifyContent="center">
+                                <Text>Loading board...</Text>
+                            </Box>
+                        )}
                     </Box>
 
                     {showGameOverBox && (
