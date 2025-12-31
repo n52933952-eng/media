@@ -31,6 +31,14 @@ const ChessGamePage = () => {
     // Force remount counter - increments when orientation changes
     const [boardKey, setBoardKey] = useState(0)
     
+    // Computed orientation - always reads from localStorage first (like madechess)
+    // This ensures we always have the latest value, even if state hasn't updated yet
+    // Compute it as a const that's recalculated on each render
+    const storedOrientation = (() => {
+        const saved = localStorage.getItem('chessOrientation')
+        return saved || orientation
+    })()
+    
     // Sync orientation from localStorage on mount (in case it was set before navigation)
     // This is critical - when accepter navigates, localStorage should already have 'black'
     useEffect(() => {
@@ -67,14 +75,14 @@ const ChessGamePage = () => {
         console.log('🎨 Board orientation should be:', storedOrientation === 'white' ? 'White at bottom' : 'Black at bottom')
     }, [orientation, storedOrientation, chess])
     
-    // Force board re-render when storedOrientation changes
+    // Force board re-render when orientation changes
     useEffect(() => {
-        console.log('🔄 Stored orientation changed, forcing board re-render')
+        console.log('🔄 Orientation changed, forcing board re-render')
         console.log('🔄 Current storedOrientation:', storedOrientation)
         console.log('🔄 Board should show:', storedOrientation === 'white' ? 'White pieces at bottom' : 'Black pieces at bottom')
         // Increment boardKey to force complete remount of Chessboard component
         setBoardKey(prev => prev + 1)
-    }, [storedOrientation])
+    }, [orientation, storedOrientation])
 
     // Sound effects
     const sounds = useRef({})
