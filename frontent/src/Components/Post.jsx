@@ -33,6 +33,17 @@ const showToast = useShowToast()
   
   // Check if this is a Football post with match data
   const isFootballPost = postedBy?.username === 'Football' && post?.footballData
+  
+  // Debug Al Jazeera posts
+  if (postedBy?.username === 'AlJazeera') {
+    console.log('🔴 Al Jazeera Post Data:', {
+      username: postedBy.username,
+      hasImg: !!post?.img,
+      imgUrl: post?.img,
+      isYouTube: post?.img?.includes('youtube')
+    })
+  }
+  
   let matchesData = []
   if (isFootballPost) {
     try {
@@ -292,10 +303,18 @@ const showToast = useShowToast()
   {post?.img && !isFootballPost && (
     <Box borderRadius={4} overflow="hidden" border="0.5px solid" borderColor="gray.light" my={2}>
       {/* YouTube Embed (Al Jazeera Live or any YouTube video) */}
-      {(post.img.includes('youtube.com/embed') || post.img.includes('youtu.be')) ? (
+      {(() => {
+        const isYouTube = post.img.includes('youtube.com/embed') || post.img.includes('youtu.be')
+        console.log('🎬 Checking media type:', {
+          url: post.img,
+          isYouTube,
+          username: postedBy?.username
+        })
+        return isYouTube
+      })() ? (
         <Box position="relative" paddingBottom="56.25%" height="0" overflow="hidden">
           <iframe
-            src={post.img + '?autoplay=1&mute=0'}
+            src={post.img}
             title="Live Stream"
             style={{
               position: 'absolute',
