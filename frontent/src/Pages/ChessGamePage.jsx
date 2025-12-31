@@ -37,11 +37,16 @@ const ChessGamePage = () => {
     // Only render board when we have a valid orientation from socket event
     useEffect(() => {
         if (orientation && (orientation === 'white' || orientation === 'black')) {
-            // Small delay to ensure orientation is set before rendering board
+            // Unmount board first to ensure clean remount
+            setBoardReady(false)
+            // Increment board key to force complete remount
+            setBoardKey(prev => prev + 1)
+            // Wait a bit longer to ensure state is fully updated before remounting
             const timer = setTimeout(() => {
                 setBoardReady(true)
                 console.log('✅ Board ready with orientation:', orientation)
-            }, 100)
+                console.log('✅ Board will render with boardOrientation:', orientation)
+            }, 200)
             return () => clearTimeout(timer)
         } else {
             setBoardReady(false)
@@ -76,34 +81,6 @@ const ChessGamePage = () => {
             console.log('🎨 Waiting for orientation from socket event...')
         }
     }, [orientation, storedOrientation, chess])
-    
-    // Force board re-render when orientation changes
-    useEffect(() => {
-        const currentStored = localStorage.getItem('chessOrientation') || orientation
-        console.log('🔄 Orientation changed, forcing board re-render')
-        console.log('🔄 Current storedOrientation:', currentStored)
-        console.log('🔄 Board should show:', currentStored === 'white' ? 'White pieces at bottom' : 'Black pieces at bottom')
-        
-        // Unmount board completely first
-        setBoardReady(false)
-        
-        // Increment boardKey to force complete remount of Chessboard component
-        setBoardKey(prev => {
-            const newKey = prev + 1
-            console.log('🔄 Board key incremented to:', newKey)
-            return newKey
-        })
-        
-        // Remount after a delay to ensure orientation is fully set
-        // Use a longer delay to ensure localStorage is persisted
-        const timer = setTimeout(() => {
-            const finalOrientation = localStorage.getItem('chessOrientation') || orientation
-            console.log('🔄 Remounting board with final orientation:', finalOrientation)
-            setBoardReady(true)
-        }, 200)
-        
-        return () => clearTimeout(timer)
-    }, [orientation])
 
     // Sound effects
     const sounds = useRef({})
@@ -452,12 +429,12 @@ const ChessGamePage = () => {
 
                     <Box w="400px" h="400px">
                         {/* Conditionally render to force remount when orientation changes */}
-                        {boardReady && storedOrientation ? (
+                        {boardReady && orientation && (orientation === 'white' || orientation === 'black') ? (
                             <Chessboard
-                                key={`chess-${storedOrientation}-${boardKey}`}
+                                key={`chess-${orientation}-${boardKey}`}
                                 position={fen}
                                 onPieceDrop={onDrop}
-                                boardOrientation={storedOrientation}
+                                boardOrientation={orientation}
                                 boardWidth={400}
                                 animationDuration={250}
                                 customDarkSquareStyle={{
