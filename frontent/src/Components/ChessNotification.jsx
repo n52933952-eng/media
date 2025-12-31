@@ -54,7 +54,8 @@ const ChessNotification = () => {
         if (!socket) return
 
         const handleChessChallenge = (data) => {
-            console.log('🎮 Chess challenge received:', data)
+            console.log('♟️ CHESS CHALLENGE RECEIVED!', data)
+            console.log('From:', data.fromName, '| User ID:', data.from)
             
             // Add challenge to list
             setChallenges(prev => {

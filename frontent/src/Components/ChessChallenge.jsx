@@ -124,6 +124,12 @@ const ChessChallenge = () => {
 
         try {
             // Send challenge via socket
+            console.log('♟️ SENDING CHESS CHALLENGE:', {
+                from: user._id,
+                to: opponent._id,
+                fromName: user.name
+            })
+            
             socket.emit('chessChallenge', {
                 from: user._id,
                 to: opponent._id,
@@ -132,6 +138,7 @@ const ChessChallenge = () => {
                 fromProfilePic: user.profilePic
             })
 
+            console.log('✅ Challenge emitted successfully!')
             showToast('Success', `Chess challenge sent to ${opponent.name}!`, 'success')
             onClose()
         } catch (error) {
