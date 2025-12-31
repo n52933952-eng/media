@@ -61,36 +61,19 @@ const ChessGamePage = () => {
     const chess = useMemo(() => new Chess(), [])
     const [fen, setFen] = useState(chess.fen())
 
-    // Initialize orientation and gameLive from localStorage on mount (like madechess)
-    // This ensures board is ready even if socket event is delayed
+    // Initialize from localStorage on mount
     useEffect(() => {
         const savedOrientation = localStorage.getItem("chessOrientation")
         const savedGameLive = localStorage.getItem("gameLive") === "true"
-        if (import.meta.env.DEV) {
-            console.log('♟️ ChessGamePage mounted - checking localStorage:', {
-                orientation: savedOrientation,
-                gameLive: savedGameLive
-            })
-            console.log('♟️ Current orientation state:', orientation)
-            console.log('♟️ Current gameLive state:', gameLive)
-        }
         
-        if (savedOrientation && (savedOrientation === 'white' || savedOrientation === 'black')) {
-            // CRITICAL: Always sync with localStorage on mount (like madechess)
-            // Don't check if different - just set it to ensure it's correct
+        if (savedOrientation === 'white' || savedOrientation === 'black') {
             setOrientation(savedOrientation)
-            if (import.meta.env.DEV) {
-                console.log('♟️ Set orientation from localStorage on mount:', savedOrientation)
-            }
         }
         
-        if (savedGameLive && !gameLive) {
+        if (savedGameLive) {
             setGameLive(true)
-            if (import.meta.env.DEV) {
-                console.log('♟️ Set gameLive from localStorage on mount:', savedGameLive)
-            }
         }
-    }, []) // Only run on mount
+    }, []) // Only run once on mount
     
     // Debug: Log orientation changes (only in development)
     useEffect(() => {
@@ -535,42 +518,20 @@ const ChessGamePage = () => {
         handleGameEndRef.current = handleGameEnd
     }, [handleGameEnd])
 
-    // Cleanup when user navigates away from chess page (except dark mode toggle)
+    // Only notify backend when leaving - don't clear localStorage here
+    // localStorage is cleared in handleGameEnd when game actually ends
     useEffect(() => {
         return () => {
-            // This cleanup runs when component unmounts (user navigates away)
-            // Only clear if we're actually leaving the chess page
-            if (import.meta.env.DEV) {
-                console.log('♟️ ChessGamePage unmounting - cleaning up chess state')
-            }
-            
-            // Clear localStorage
-            localStorage.removeItem('chessOrientation')
-            localStorage.removeItem('gameLive')
-            localStorage.removeItem('chessFEN')
-            localStorage.removeItem('capturedWhite')
-            localStorage.removeItem('capturedBlack')
-            
-            // Reset state
-            setOrientation(null)
-            setGameLive(false)
-            
-            // Notify backend that user left the game
-            if (socket && roomId && opponentId && user?._id) {
-                try {
-                    socket.emit('chessGameEnd', {
-                        roomId,
-                        player1: user._id,
-                        player2: opponentId
-                    })
-                } catch (error) {
-                    if (import.meta.env.DEV) {
-                        console.error('❌ Error notifying backend on unmount:', error)
-                    }
-                }
+            // Only notify backend if game was live
+            if (gameLive && socket && roomId && opponentId && user?._id) {
+                socket.emit('chessGameEnd', {
+                    roomId,
+                    player1: user._id,
+                    player2: opponentId
+                })
             }
         }
-    }, [socket, roomId, opponentId, user?._id, setOrientation])
+    }, [socket, roomId, opponentId, user?._id, gameLive])
 
     const getPieceUnicode = (type, color) => {
         const unicodeMap = {
