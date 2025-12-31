@@ -16,6 +16,8 @@ import CreatePost from './Components/CreatePost'
 import MessagesPage from './Pages/MessagesPage'
 import FootballPage from './Pages/FootballPage'
 import NewsPage from './Pages/NewsPage'
+import NotificationsPage from './Pages/NotificationsPage'
+import ChessGamePage from './Pages/ChessGamePage'
 import CallNotification from './Components/CallNotification'
 
 const AppContent = () => {
@@ -71,7 +73,8 @@ const AppContent = () => {
                 <Route path="/update" element={user ? <UpdateProfile/> : <Navigate  to="/"/>}/>
                 <Route path="/football" element={<FootballPage/>} />
                 <Route path="/news" element={<NewsPage/>} />
-                <Route path="/notifications" element={user ? <Box p={8} textAlign="center"><Text>Notifications coming soon!</Text></Box> : <Navigate to="/" />} />
+                <Route path="/notifications" element={user ? <NotificationsPage /> : <Navigate to="/" />} />
+                <Route path="/chess/:opponentId" element={user ? <ChessGamePage /> : <Navigate to="/" />} />
                 <Route path="/:username/post/:id" element={<PostPage/>}/>
               </Routes>
               {user && <LogOutButton/>}

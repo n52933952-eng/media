@@ -6,6 +6,7 @@ import {PostContext} from '../context/PostContext'
 import {SocketContext} from '../context/SocketContext'
 import SuggestedUsers from '../Components/SuggestedUsers'
 import SuggestedChannels from '../Components/SuggestedChannels'
+import ChessChallenge from '../Components/ChessChallenge'
 
 
 
@@ -218,6 +219,7 @@ const HomePage = () => {
         minW={{ lg: '220px' }}
       >
         <SuggestedChannels onUserFollowed={fetchUserPosts} />
+        <ChessChallenge />
       </Box>
 
       {/* Main Feed - Center */}

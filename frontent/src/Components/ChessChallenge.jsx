@@ -1,0 +1,253 @@
+import React, { useState, useContext, useEffect } from 'react'
+import {
+    Box,
+    Button,
+    VStack,
+    Text,
+    Image,
+    useColorModeValue,
+    Modal,
+    ModalOverlay,
+    ModalContent,
+    ModalHeader,
+    ModalBody,
+    ModalCloseButton,
+    useDisclosure,
+    Flex,
+    Avatar,
+    Badge,
+    Spinner
+} from '@chakra-ui/react'
+import { UserContext } from '../context/UserContext'
+import { SocketContext } from '../context/SocketContext'
+import useShowToast from '../hooks/useShowToast'
+
+const ChessChallenge = () => {
+    const { user } = useContext(UserContext)
+    const { socket, onlineUsers } = useContext(SocketContext)
+    const { isOpen, onOpen, onClose } = useDisclosure()
+    const [availableUsers, setAvailableUsers] = useState([])
+    const [loading, setLoading] = useState(false)
+    const [busyUsers, setBusyUsers] = useState([])
+    const showToast = useShowToast()
+
+    const bgColor = useColorModeValue('white', '#1a1a1a')
+    const borderColor = useColorModeValue('gray.200', '#2d2d2d')
+    const hoverBg = useColorModeValue('gray.50', '#252525')
+    const textColor = useColorModeValue('gray.800', 'white')
+    const secondaryTextColor = useColorModeValue('gray.600', 'gray.400')
+
+    // Fetch followers and following who are online
+    const fetchAvailableUsers = async () => {
+        if (!user) return
+        
+        try {
+            setLoading(true)
+            const baseUrl = import.meta.env.PROD ? window.location.origin : "http://localhost:5000"
+            
+            // Get user's followers and following
+            const res = await fetch(`${baseUrl}/api/user/profile/${user.username}`, {
+                credentials: 'include'
+            })
+            const data = await res.json()
+            
+            if (res.ok) {
+                // Combine followers and following, remove duplicates
+                const allConnections = [
+                    ...(data.followers || []),
+                    ...(data.following || [])
+                ]
+                
+                // Filter to only online users and remove duplicates
+                const uniqueUsers = Array.from(
+                    new Map(allConnections.map(u => [u._id, u])).values()
+                ).filter(u => 
+                    onlineUsers.some(online => online.userId === u._id) && 
+                    u._id !== user._id &&
+                    !busyUsers.includes(u._id)
+                )
+                
+                setAvailableUsers(uniqueUsers)
+            }
+        } catch (error) {
+            console.error('Error fetching users:', error)
+        } finally {
+            setLoading(false)
+        }
+    }
+
+    // Listen for busy users via socket
+    useEffect(() => {
+        if (!socket) return
+
+        socket.on('userBusyChess', ({ userId }) => {
+            setBusyUsers(prev => [...prev, userId])
+        })
+
+        socket.on('userAvailableChess', ({ userId }) => {
+            setBusyUsers(prev => prev.filter(id => id !== userId))
+        })
+
+        return () => {
+            socket.off('userBusyChess')
+            socket.off('userAvailableChess')
+        }
+    }, [socket])
+
+    const handleOpenModal = () => {
+        fetchAvailableUsers()
+        onOpen()
+    }
+
+    const handleChallenge = async (opponent) => {
+        if (!socket) {
+            showToast('Error', 'Connection lost. Please refresh.', 'error')
+            return
+        }
+
+        try {
+            // Send challenge via socket
+            socket.emit('chessChallenge', {
+                from: user._id,
+                to: opponent._id,
+                fromName: user.name,
+                fromUsername: user.username,
+                fromProfilePic: user.profilePic
+            })
+
+            showToast('Success', `Chess challenge sent to ${opponent.name}!`, 'success')
+            onClose()
+        } catch (error) {
+            showToast('Error', 'Failed to send challenge', 'error')
+        }
+    }
+
+    return (
+        <>
+            <Box
+                bg={bgColor}
+                borderRadius="md"
+                border="1px solid"
+                borderColor={borderColor}
+                mt={4}
+                overflow="hidden"
+                _hover={{ shadow: 'md' }}
+                transition="all 0.2s"
+                cursor="pointer"
+                onClick={handleOpenModal}
+            >
+                {/* Chess Image - Square */}
+                <Box
+                    position="relative"
+                    paddingBottom="100%"
+                    bg="linear-gradient(135deg, #667eea 0%, #764ba2 100%)"
+                    overflow="hidden"
+                >
+                    <Flex
+                        position="absolute"
+                        top="0"
+                        left="0"
+                        right="0"
+                        bottom="0"
+                        align="center"
+                        justify="center"
+                        flexDirection="column"
+                    >
+                        <Text fontSize="6xl">♟️</Text>
+                        <Text fontSize="2xl" fontWeight="bold" color="white" mt={2}>
+                            Chess
+                        </Text>
+                    </Flex>
+                </Box>
+
+                {/* Button */}
+                <Button
+                    colorScheme="purple"
+                    size="sm"
+                    w="full"
+                    borderRadius="0"
+                    _hover={{ bg: 'purple.600' }}
+                >
+                    ♟️ Play Chess with Friend
+                </Button>
+            </Box>
+
+            {/* Modal - Online Users List */}
+            <Modal isOpen={isOpen} onClose={onClose} isCentered>
+                <ModalOverlay />
+                <ModalContent bg={bgColor}>
+                    <ModalHeader color={textColor}>
+                        🟢 Online Friends - Choose Opponent
+                    </ModalHeader>
+                    <ModalCloseButton />
+                    <ModalBody pb={6}>
+                        {loading ? (
+                            <Flex justify="center" py={10}>
+                                <Spinner size="lg" />
+                            </Flex>
+                        ) : availableUsers.length === 0 ? (
+                            <Text textAlign="center" color={secondaryTextColor} py={10}>
+                                No friends online right now 😔
+                                <br />
+                                <Text fontSize="sm" mt={2}>
+                                    Follow more people to play chess!
+                                </Text>
+                            </Text>
+                        ) : (
+                            <VStack spacing={3} align="stretch">
+                                {availableUsers.map(opponent => {
+                                    const isBusy = busyUsers.includes(opponent._id)
+                                    return (
+                                        <Flex
+                                            key={opponent._id}
+                                            align="center"
+                                            justify="space-between"
+                                            p={3}
+                                            borderRadius="md"
+                                            border="1px solid"
+                                            borderColor={borderColor}
+                                            _hover={{ bg: hoverBg }}
+                                            transition="all 0.2s"
+                                        >
+                                            <Flex align="center" gap={3}>
+                                                <Avatar
+                                                    src={opponent.profilePic}
+                                                    name={opponent.name}
+                                                    size="md"
+                                                />
+                                                <VStack align="start" spacing={0}>
+                                                    <Text fontSize="sm" fontWeight="semibold" color={textColor}>
+                                                        {opponent.name}
+                                                    </Text>
+                                                    <Text fontSize="xs" color={secondaryTextColor}>
+                                                        @{opponent.username}
+                                                    </Text>
+                                                    {isBusy && (
+                                                        <Badge colorScheme="red" fontSize="xs" mt={1}>
+                                                            🎮 In Game
+                                                        </Badge>
+                                                    )}
+                                                </VStack>
+                                            </Flex>
+                                            <Button
+                                                size="sm"
+                                                colorScheme="purple"
+                                                onClick={() => handleChallenge(opponent)}
+                                                isDisabled={isBusy}
+                                            >
+                                                {isBusy ? 'Playing' : 'Challenge ♟️'}
+                                            </Button>
+                                        </Flex>
+                                    )
+                                })}
+                            </VStack>
+                        )}
+                    </ModalBody>
+                </ModalContent>
+            </Modal>
+        </>
+    )
+}
+
+export default ChessChallenge
+

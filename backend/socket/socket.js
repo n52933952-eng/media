@@ -236,6 +236,81 @@ export const initializeSocket = (app) => {
             }
         })
 
+        // Chess Challenge Events
+        socket.on("chessChallenge", ({ from, to, fromName, fromUsername, fromProfilePic }) => {
+            console.log(`♟️ Chess challenge from ${from} to ${to}`)
+            const recipientSocketId = userSocketMap[to]?.socketId
+            if (recipientSocketId) {
+                io.to(recipientSocketId).emit("chessChallenge", {
+                    from,
+                    fromName,
+                    fromUsername,
+                    fromProfilePic
+                })
+            }
+        })
+
+        socket.on("acceptChessChallenge", ({ from, to, roomId }) => {
+            console.log(`♟️ Chess challenge accepted: ${roomId}`)
+            
+            // Determine colors (challenger is white, accepter is black)
+            const challengerSocketId = userSocketMap[to]?.socketId
+            const accepterSocketId = userSocketMap[from]?.socketId
+
+            if (challengerSocketId) {
+                io.to(challengerSocketId).emit("acceptChessChallenge", {
+                    roomId,
+                    yourColor: 'white',
+                    opponentId: from
+                })
+            }
+
+            if (accepterSocketId) {
+                io.to(accepterSocketId).emit("acceptChessChallenge", {
+                    roomId,
+                    yourColor: 'black',
+                    opponentId: to
+                })
+            }
+
+            // Broadcast busy status
+            io.emit("userBusyChess", { userId: from })
+            io.emit("userBusyChess", { userId: to })
+        })
+
+        socket.on("declineChessChallenge", ({ from, to }) => {
+            console.log(`♟️ Chess challenge declined by ${from}`)
+            const challengerSocketId = userSocketMap[to]?.socketId
+            if (challengerSocketId) {
+                io.to(challengerSocketId).emit("chessDeclined", { from })
+            }
+        })
+
+        socket.on("chessMove", ({ roomId, move, to }) => {
+            const recipientSocketId = userSocketMap[to]?.socketId
+            if (recipientSocketId) {
+                io.to(recipientSocketId).emit("opponentMove", { move })
+            }
+        })
+
+        socket.on("resignChess", ({ roomId, to }) => {
+            const recipientSocketId = userSocketMap[to]?.socketId
+            if (recipientSocketId) {
+                io.to(recipientSocketId).emit("opponentResigned")
+            }
+            
+            // Broadcast available status
+            const userId = socket.handshake.query.userId
+            io.emit("userAvailableChess", { userId })
+            io.emit("userAvailableChess", { userId: to })
+        })
+
+        socket.on("chessGameEnd", ({ roomId, player1, player2 }) => {
+            // Broadcast available status for both players
+            io.emit("userAvailableChess", { userId: player1 })
+            io.emit("userAvailableChess", { userId: player2 })
+        })
+
         socket.on("disconnect", () => {
             console.log("user disconnected", socket.id)
             
