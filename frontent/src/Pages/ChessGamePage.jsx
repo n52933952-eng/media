@@ -28,6 +28,8 @@ const ChessGamePage = () => {
         console.log('♟️ Initializing orientation from localStorage:', saved)
         return saved || 'white'
     })
+    // Force remount counter - increments when orientation changes
+    const [boardKey, setBoardKey] = useState(0)
     
     // Sync orientation from localStorage on mount (in case it was set before navigation)
     // This is critical - when accepter navigates, localStorage should already have 'black'
@@ -69,9 +71,8 @@ const ChessGamePage = () => {
         console.log('🔄 Orientation state updated, forcing board re-render')
         console.log('🔄 Current orientation:', orientation)
         console.log('🔄 Board should show:', orientation === 'white' ? 'White pieces at bottom' : 'Black pieces at bottom')
-        // The key prop on Chessboard will force re-render
-        // Also force a state update to trigger re-render
-        setFen(prev => prev) // This will trigger a re-render
+        // Increment boardKey to force complete remount of Chessboard component
+        setBoardKey(prev => prev + 1)
     }, [orientation])
 
     // Sound effects
@@ -421,7 +422,7 @@ const ChessGamePage = () => {
 
                     <Box w="400px" h="400px">
                         <Chessboard
-                            key={`chessboard-${orientation}-${gameLive}`}
+                            key={`chessboard-${orientation}-${boardKey}-${gameLive}`}
                             position={fen}
                             onPieceDrop={onDrop}
                             boardOrientation={orientation}
