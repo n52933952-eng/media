@@ -22,7 +22,11 @@ const ChessGamePage = () => {
 
     const [opponent, setOpponent] = useState(null)
     const [roomId, setRoomId] = useState(null)
-    const [orientation, setOrientation] = useState('white')
+    // Initialize orientation from localStorage if available
+    const [orientation, setOrientation] = useState(() => {
+        const saved = localStorage.getItem('chessOrientation')
+        return saved || 'white'
+    })
     const [gameLive, setGameLive] = useState(false)
     const [showGameOverBox, setShowGameOverBox] = useState(false)
     const [over, setOver] = useState('')
@@ -39,6 +43,13 @@ const ChessGamePage = () => {
     // Create Chess instance
     const chess = useMemo(() => new Chess(), [])
     const [fen, setFen] = useState(chess.fen())
+
+    // Debug: Log orientation changes
+    useEffect(() => {
+        console.log('🎨 Orientation changed to:', orientation)
+        console.log('🎨 Chess turn:', chess.turn())
+        console.log('🎨 Can move?', chess.turn() === orientation[0])
+    }, [orientation, chess])
 
     // Sound effects
     const sounds = useRef({})
@@ -169,24 +180,34 @@ const ChessGamePage = () => {
 
         socket.on('acceptChessChallenge', (data) => {
             console.log('♟️ Challenge accepted, starting game:', data)
-            console.log('♟️ Your color:', data.yourColor, '| Opponent:', data.opponentId)
+            console.log('♟️ Received data.yourColor:', data.yourColor)
+            console.log('♟️ Opponent ID:', data.opponentId)
             
             // Set board orientation: 'white' = white pieces at bottom, 'black' = black pieces at bottom
             const yourColor = data.yourColor || 'white'
             console.log('♟️ Setting orientation to:', yourColor)
+            console.log('♟️ Orientation first char:', yourColor[0])
+            
+            // Force update orientation immediately
             setOrientation(yourColor)
             // Also save to localStorage for persistence
             localStorage.setItem('chessOrientation', yourColor)
+            
+            // Reset chess board to starting position
+            chess.reset()
+            setFen(chess.fen())
+            
             setRoomId(data.roomId)
             setGameLive(true)
             playSound('gameStart')
             showToast('Game Started! ♟️', `You are playing as ${yourColor === 'white' ? 'White ⚪' : 'Black ⚫'}`, 'success')
             
-            // Log for debugging
+            // Log for debugging after state updates
             setTimeout(() => {
-                console.log('♟️ Current orientation state:', yourColor)
-                console.log('♟️ Chess turn:', chess.turn())
-                console.log('♟️ Can move?', chess.turn() === yourColor[0])
+                const currentOrientation = localStorage.getItem('chessOrientation') || yourColor
+                console.log('♟️ After 1 second - Orientation:', currentOrientation)
+                console.log('♟️ After 1 second - Chess turn:', chess.turn())
+                console.log('♟️ After 1 second - Can move?', chess.turn() === currentOrientation[0])
             }, 1000)
         })
 
@@ -351,12 +372,19 @@ const ChessGamePage = () => {
                     position="relative"
                     w="fit-content"
                 >
-                    <Heading size="lg" mb={4} color="#5a3e2b" textAlign="center">
+                    <Heading size="lg" mb={2} color="#5a3e2b" textAlign="center">
                         ♟️ Chess Match
                     </Heading>
+                    {gameLive && (
+                        <Text fontSize="sm" textAlign="center" mb={4} color="#5a3e2b" fontWeight="bold">
+                            You are playing as: {orientation === 'white' ? '⚪ White' : '⚫ Black'}
+                            {chess.turn() === orientation[0] ? ' (Your turn!)' : ' (Waiting...)'}
+                        </Text>
+                    )}
 
                     <Box w="400px" h="400px">
                         <Chessboard
+                            key={`chessboard-${orientation}`}
                             position={fen}
                             onPieceDrop={onDrop}
                             boardOrientation={orientation || localStorage.getItem('chessOrientation') || 'white'}

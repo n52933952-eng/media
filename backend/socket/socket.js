@@ -260,21 +260,29 @@ export const initializeSocket = (app) => {
             const accepterSocketId = userSocketMap[from]?.socketId
 
             if (challengerSocketId) {
-                console.log(`♟️ Sending WHITE to challenger: ${to}`)
-                io.to(challengerSocketId).emit("acceptChessChallenge", {
+                console.log(`♟️ Sending WHITE to challenger: ${to} (socket: ${challengerSocketId})`)
+                const challengerData = {
                     roomId,
                     yourColor: 'white',
                     opponentId: from
-                })
+                }
+                console.log(`♟️ Challenger data:`, challengerData)
+                io.to(challengerSocketId).emit("acceptChessChallenge", challengerData)
+            } else {
+                console.log(`⚠️ Challenger ${to} not found in socket map`)
             }
 
             if (accepterSocketId) {
-                console.log(`♟️ Sending BLACK to accepter: ${from}`)
-                io.to(accepterSocketId).emit("acceptChessChallenge", {
+                console.log(`♟️ Sending BLACK to accepter: ${from} (socket: ${accepterSocketId})`)
+                const accepterData = {
                     roomId,
                     yourColor: 'black',
                     opponentId: to
-                })
+                }
+                console.log(`♟️ Accepter data:`, accepterData)
+                io.to(accepterSocketId).emit("acceptChessChallenge", accepterData)
+            } else {
+                console.log(`⚠️ Accepter ${from} not found in socket map`)
             }
 
             // Broadcast busy status
