@@ -267,9 +267,11 @@ const ChessGamePage = () => {
             if (currentLocalStorageOrientation) {
                 // localStorage has the correct value - sync state to match it
                 // This ensures Saif (accepter) keeps "black" and Neyma (challenger) keeps "white"
+                // DO NOT overwrite localStorage - it's already correct!
                 setOrientation(currentLocalStorageOrientation)
                 if (import.meta.env.DEV) {
-                    console.log('♟️ Synced orientation state with localStorage:', currentLocalStorageOrientation)
+                    console.log('♟️ Synced orientation state with localStorage (NOT overwriting):', currentLocalStorageOrientation)
+                    console.log('♟️ Socket data.yourColor (ignored):', data.yourColor)
                 }
             } else {
                 // localStorage doesn't have it (shouldn't happen) - use socket data as backup
@@ -277,7 +279,7 @@ const ChessGamePage = () => {
                 setOrientation(yourColor)
                 localStorage.setItem('chessOrientation', yourColor)
                 if (import.meta.env.DEV) {
-                    console.log('♟️ Orientation set from socket (backup):', yourColor)
+                    console.log('♟️ Orientation set from socket (backup - localStorage was empty):', yourColor)
                 }
             }
             
@@ -291,7 +293,8 @@ const ChessGamePage = () => {
             setGameLive(true)
             localStorage.setItem('gameLive', 'true') // Save to localStorage like madechess
             playSound('gameStart')
-            const finalOrientation = currentLocalStorageOrientation || yourColor
+            // Use the orientation from localStorage (already set correctly before navigation)
+            const finalOrientation = currentLocalStorageOrientation || data.yourColor || orientation || 'white'
             showToast('Game Started! ♟️', `You are playing as ${finalOrientation === 'white' ? 'White ⚪' : 'Black ⚫'}`, 'success')
             if (import.meta.env.DEV) {
                 console.log('✅ Game started! gameLive set to true, orientation:', finalOrientation)

@@ -95,17 +95,21 @@ const ChessNotification = () => {
             return
         }
 
-        // Set orientation locally BEFORE navigating (like madechess)
-        // Accepter is always BLACK
-        setOrientation("black")
+        // CRITICAL: Set orientation locally BEFORE navigating (like madechess)
+        // Accepter is always BLACK - must set BOTH localStorage AND state
+        // Set localStorage FIRST (synchronously) before any async operations
         localStorage.setItem("chessOrientation", "black")
-        // Also set gameLive to true (game starts when challenge is accepted)
         localStorage.setItem("gameLive", "true")
+        
+        // Then update state
+        setOrientation("black")
+        
         if (import.meta.env.DEV) {
-            console.log('♟️ Accepter (Saif) setting orientation to BLACK and gameLive to true locally (like madechess)')
+            console.log('♟️ Accepter setting orientation to BLACK in localStorage:', localStorage.getItem("chessOrientation"))
+            console.log('♟️ Accepter setting gameLive to true in localStorage:', localStorage.getItem("gameLive"))
         }
 
-        // Emit accept event
+        // Emit accept event AFTER setting localStorage
         socket.emit('acceptChessChallenge', {
             from: user._id,
             to: challenge.from,
@@ -115,8 +119,11 @@ const ChessNotification = () => {
         // Remove challenge from list
         setChallenges(prev => prev.filter(c => c.from !== challenge.from))
 
-        // Navigate to chess page (orientation already set)
-        navigate(`/chess/${challenge.from}`)
+        // Navigate to chess page (orientation already set in localStorage)
+        // Use setTimeout to ensure localStorage is written before navigation
+        setTimeout(() => {
+            navigate(`/chess/${challenge.from}`)
+        }, 0)
     }
 
     const handleDecline = (challenge) => {

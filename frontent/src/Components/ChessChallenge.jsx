@@ -113,19 +113,26 @@ const ChessChallenge = () => {
                 console.log('♟️ Challenge accepted! Navigating to game...', data)
             }
             
-            // Set orientation locally BEFORE navigating (like madechess)
-            // Challenger is always WHITE
-            setOrientation("white")
+            // CRITICAL: Set orientation locally BEFORE navigating (like madechess)
+            // Challenger is always WHITE - must set BOTH localStorage AND state
+            // Set localStorage FIRST (synchronously) before any async operations
             localStorage.setItem("chessOrientation", "white")
-            // Also set gameLive to true (game starts when challenge is accepted)
             localStorage.setItem("gameLive", "true")
+            
+            // Then update state
+            setOrientation("white")
+            
             if (import.meta.env.DEV) {
-                console.log('♟️ Challenger (Neyma) setting orientation to WHITE and gameLive to true locally (like madechess)')
+                console.log('♟️ Challenger setting orientation to WHITE in localStorage:', localStorage.getItem("chessOrientation"))
+                console.log('♟️ Challenger setting gameLive to true in localStorage:', localStorage.getItem("gameLive"))
             }
             
             showToast('Challenge Accepted! ♟️', 'Starting game...', 'success')
-            // Navigate to chess page (orientation and gameLive already set)
-            navigate(`/chess/${data.opponentId}`)
+            // Navigate to chess page (orientation already set in localStorage)
+            // Use setTimeout to ensure localStorage is written before navigation
+            setTimeout(() => {
+                navigate(`/chess/${data.opponentId}`)
+            }, 0)
         })
 
         return () => {
