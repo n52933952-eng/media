@@ -353,47 +353,59 @@ const ChessGamePage = () => {
     function onDrop(sourceSquare, targetSquare) {
         // Input validation
         if (!sourceSquare || !targetSquare || typeof sourceSquare !== 'string' || typeof targetSquare !== 'string') {
-            if (import.meta.env.DEV) {
-                console.error('❌ Invalid square coordinates:', { sourceSquare, targetSquare })
-            }
+            console.error('❌ Invalid square coordinates:', { sourceSquare, targetSquare })
             return false
         }
         
         // Use safeOrientation pattern from madechess: orientation || localStorage || "white"
-        // Line 157 in madechess: const safeOrientation = orientation || localStorage.getItem("chessOrientation") || "white";
         const safeOrientation = orientation || localStorage.getItem("chessOrientation") || "white"
+        const currentTurn = chess.turn() // 'w' for white, 'b' for black
         
-        if (import.meta.env.DEV) {
-            console.log('🎮 onDrop called:', {
-                sourceSquare,
-                targetSquare,
-                chessTurn: chess.turn(),
-                safeOrientation,
-                safeOrientationFirstChar: safeOrientation[0],
-                canMove: chess.turn() === safeOrientation[0],
-                gameLive,
-                socket: !!socket
-            })
-        }
+        // Comprehensive logging
+        console.log('🎮 onDrop called - Move attempt:', {
+            sourceSquare,
+            targetSquare,
+            chessTurn: currentTurn,
+            orientation: orientation,
+            localStorageOrientation: localStorage.getItem("chessOrientation"),
+            safeOrientation: safeOrientation,
+            safeOrientationFirstChar: safeOrientation[0],
+            canMove: currentTurn === safeOrientation[0],
+            gameLive: gameLive,
+            localStorageGameLive: localStorage.getItem("gameLive"),
+            socket: !!socket,
+            roomId: roomId,
+            opponentId: opponentId
+        })
         
         // Only allow moves for current player (check if chess turn matches orientation)
-        // Same pattern as madechess line 160
-        if (chess.turn() !== safeOrientation[0]) {
-            if (import.meta.env.DEV) {
-                console.log('❌ Not your turn! Turn:', chess.turn(), 'Your color:', safeOrientation[0])
-            }
-            return false // only current player moves (like madechess)
+        if (currentTurn !== safeOrientation[0]) {
+            console.log('❌ Not your turn!', {
+                chessTurn: currentTurn,
+                yourColor: safeOrientation[0],
+                message: `Chess turn is ${currentTurn === 'w' ? 'WHITE' : 'BLACK'}, but you are ${safeOrientation[0] === 'w' ? 'WHITE' : 'BLACK'}`
+            })
+            return false
         }
         
         if (!gameLive) {
+            console.log('❌ Game not live!', {
+                gameLive: gameLive,
+                localStorageGameLive: localStorage.getItem("gameLive")
+            })
             return false
         }
         
         if (!socket) {
+            console.log('❌ Socket not connected!')
             return false
         }
         
         if (!roomId || !opponentId) {
+            console.log('❌ Missing roomId or opponentId!', {
+                roomId: roomId,
+                opponentId: opponentId
+            })
             return false
         }
 
@@ -404,26 +416,31 @@ const ChessGamePage = () => {
             promotion: 'q'
         }
 
+        console.log('✅ All checks passed, attempting move:', moveData)
+
         // Make the move locally first
         const move = makeAMove(moveData)
         if (!move) {
-            if (import.meta.env.DEV) {
-                console.log('❌ Illegal move!')
-            }
+            console.log('❌ Illegal move! Move was rejected by chess.js')
             return false
         }
 
-        if (import.meta.env.DEV) {
-            console.log('✅ Move made! Sending to opponent...', move)
-        }
+        console.log('✅ Move made successfully!', {
+            move: move,
+            newFen: chess.fen(),
+            nextTurn: chess.turn()
+        })
 
         // Send the FULL move object (result from makeAMove) - like madechess does
         try {
-            socket.emit('chessMove', {
+            const movePayload = {
                 roomId,
-                move: move, // Send full move object with from, to, color, piece, etc.
+                move: move,
                 to: opponentId
-            })
+            }
+            console.log('📤 Sending move to opponent:', movePayload)
+            socket.emit('chessMove', movePayload)
+            console.log('✅ Move sent successfully!')
         } catch (error) {
             console.error('❌ Error sending move:', error)
             showToast('Error', 'Failed to send move', 'error')
