@@ -67,7 +67,11 @@ const ChessGamePage = () => {
     // Force board re-render when orientation changes
     useEffect(() => {
         console.log('🔄 Orientation state updated, forcing board re-render')
+        console.log('🔄 Current orientation:', orientation)
+        console.log('🔄 Board should show:', orientation === 'white' ? 'White pieces at bottom' : 'Black pieces at bottom')
         // The key prop on Chessboard will force re-render
+        // Also force a state update to trigger re-render
+        setFen(prev => prev) // This will trigger a re-render
     }, [orientation])
 
     // Sound effects
@@ -100,13 +104,14 @@ const ChessGamePage = () => {
         const fetchOpponent = async () => {
             try {
                 const baseUrl = import.meta.env.PROD ? window.location.origin : "http://localhost:5000"
-                const res = await fetch(`${baseUrl}/api/user/profile/${opponentId}`, {
+                const res = await fetch(`${baseUrl}/api/user/getUserPro/${opponentId}`, {
                     credentials: 'include'
                 })
-                const data = await res.json()
-                if (res.ok) {
-                    setOpponent(data)
+                if (!res.ok) {
+                    throw new Error(`HTTP error! status: ${res.status}`)
                 }
+                const data = await res.json()
+                setOpponent(data)
             } catch (error) {
                 console.error('Error fetching opponent:', error)
             }
@@ -215,9 +220,9 @@ const ChessGamePage = () => {
             console.log('♟️ Orientation first char:', yourColor[0])
             console.log('♟️ Expected: challenger=white, accepter=black')
             
-            // CRITICAL: Force update orientation immediately - this will trigger re-render
+            // CRITICAL: Set orientation FIRST, then wait a tick before starting game
+            // This ensures the board re-renders with correct orientation before gameLive is set
             setOrientation(yourColor)
-            // Also save to localStorage for persistence
             localStorage.setItem('chessOrientation', yourColor)
             
             // Reset chess board to starting position
@@ -225,20 +230,22 @@ const ChessGamePage = () => {
             setFen(chess.fen())
             
             setRoomId(data.roomId)
-            setGameLive(true)
-            playSound('gameStart')
-            showToast('Game Started! ♟️', `You are playing as ${yourColor === 'white' ? 'White ⚪' : 'Black ⚫'}`, 'success')
             
-            // Log for debugging after state updates
+            // Use setTimeout to ensure orientation state update is processed before gameLive
             setTimeout(() => {
-                const currentOrientation = localStorage.getItem('chessOrientation') || yourColor
-                const currentState = orientation
-                console.log('♟️ After 1 second - localStorage:', currentOrientation)
-                console.log('♟️ After 1 second - State:', currentState)
-                console.log('♟️ After 1 second - Chess turn:', chess.turn())
-                console.log('♟️ After 1 second - Can move?', chess.turn() === currentOrientation[0])
-                console.log('♟️ Board should show:', currentOrientation === 'white' ? 'White at bottom' : 'Black at bottom')
-            }, 1000)
+                setGameLive(true)
+                playSound('gameStart')
+                showToast('Game Started! ♟️', `You are playing as ${yourColor === 'white' ? 'White ⚪' : 'Black ⚫'}`, 'success')
+                
+                // Log for debugging after state updates
+                setTimeout(() => {
+                    const currentOrientation = localStorage.getItem('chessOrientation') || yourColor
+                    console.log('♟️ After 1 second - localStorage:', currentOrientation)
+                    console.log('♟️ After 1 second - Chess turn:', chess.turn())
+                    console.log('♟️ After 1 second - Can move?', chess.turn() === currentOrientation[0])
+                    console.log('♟️ Board should show:', currentOrientation === 'white' ? 'White at bottom' : 'Black at bottom')
+                }, 1000)
+            }, 50) // Small delay to ensure orientation state is updated
         })
 
         socket.on('opponentMove', (data) => {
@@ -414,10 +421,10 @@ const ChessGamePage = () => {
 
                     <Box w="400px" h="400px">
                         <Chessboard
-                            key={`chessboard-${orientation}`}
+                            key={`chessboard-${orientation}-${gameLive}`}
                             position={fen}
                             onPieceDrop={onDrop}
-                            boardOrientation={orientation || localStorage.getItem('chessOrientation') || 'white'}
+                            boardOrientation={orientation}
                             boardWidth={400}
                             animationDuration={250}
                             customDarkSquareStyle={{
