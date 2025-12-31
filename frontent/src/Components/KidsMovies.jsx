@@ -40,9 +40,16 @@ const KidsMovies = ({ onUserFollowed }) => {
             if (res.ok && data._id) {
                 setKidsAccount(data)
                 // Check if already following
-                const currentUser = JSON.parse(localStorage.getItem('user-threds'))
-                if (currentUser?.following?.includes(data._id)) {
-                    setIsFollowing(true)
+                try {
+                    const userStr = localStorage.getItem('user-threds')
+                    if (userStr) {
+                        const currentUser = JSON.parse(userStr)
+                        if (currentUser?.following?.includes(data._id)) {
+                            setIsFollowing(true)
+                        }
+                    }
+                } catch (error) {
+                    console.error('Error parsing user from localStorage:', error)
                 }
             }
         } catch (error) {
@@ -87,13 +94,20 @@ const KidsMovies = ({ onUserFollowed }) => {
                 showToast('Success', data.message, 'success')
                 
                 // Update local storage
-                const currentUser = JSON.parse(localStorage.getItem('user-threds'))
-                if (!isFollowing) {
-                    currentUser.following = [...(currentUser.following || []), kidsAccount._id]
-                } else {
-                    currentUser.following = currentUser.following.filter(id => id !== kidsAccount._id)
+                try {
+                    const userStr = localStorage.getItem('user-threds')
+                    if (userStr) {
+                        const currentUser = JSON.parse(userStr)
+                        if (!isFollowing) {
+                            currentUser.following = [...(currentUser.following || []), kidsAccount._id]
+                        } else {
+                            currentUser.following = currentUser.following.filter(id => id !== kidsAccount._id)
+                        }
+                        localStorage.setItem('user-threds', JSON.stringify(currentUser))
+                    }
+                } catch (error) {
+                    console.error('Error updating localStorage:', error)
                 }
-                localStorage.setItem('user-threds', JSON.stringify(currentUser))
                 
                 // Notify parent to refresh
                 if (onUserFollowed) {
