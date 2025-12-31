@@ -9,6 +9,7 @@ import {
     Link as ChakraLink,
     useColorModeValue 
 } from '@chakra-ui/react'
+import { Link as RouterLink } from 'react-router-dom'
 import { formatDistanceToNow } from 'date-fns'
 
 const AlJazeeraNews = () => {
@@ -62,17 +63,26 @@ const AlJazeeraNews = () => {
             maxW="280px"
             mt={4}
         >
-            {/* Header */}
-            <Flex align="center" mb={3} gap={2}>
-                <Image 
-                    src="https://upload.wikimedia.org/wikipedia/en/thumb/f/f1/Al_Jazeera_English_logo.svg/1200px-Al_Jazeera_English_logo.svg.png"
-                    h="20px"
-                    alt="Al Jazeera"
-                />
-                <Text fontSize="sm" fontWeight="bold" color={textColor}>
-                    Latest News
-                </Text>
-            </Flex>
+            {/* Header - Clickable to go to news page */}
+            <RouterLink to="/news">
+                <Flex 
+                    align="center" 
+                    mb={3} 
+                    gap={2}
+                    cursor="pointer"
+                    _hover={{ opacity: 0.8 }}
+                    transition="opacity 0.2s"
+                >
+                    <Image 
+                        src="https://upload.wikimedia.org/wikipedia/en/thumb/f/f1/Al_Jazeera_English_logo.svg/1200px-Al_Jazeera_English_logo.svg.png"
+                        h="20px"
+                        alt="Al Jazeera"
+                    />
+                    <Text fontSize="sm" fontWeight="bold" color={textColor}>
+                        Latest News
+                    </Text>
+                </Flex>
+            </RouterLink>
             
             {/* Loading */}
             {loading ? (
@@ -81,7 +91,7 @@ const AlJazeeraNews = () => {
                 </Flex>
             ) : articles.length > 0 ? (
                 <VStack spacing={3} align="stretch">
-                    {articles.map((article, index) => (
+                    {articles.slice(0, 3).map((article, index) => (
                         <ChakraLink
                             key={index}
                             href={article.url}
@@ -97,19 +107,6 @@ const AlJazeeraNews = () => {
                                 transition="all 0.2s"
                                 cursor="pointer"
                             >
-                                {/* Article Image */}
-                                {article.urlToImage && (
-                                    <Image
-                                        src={article.urlToImage}
-                                        w="full"
-                                        h="100px"
-                                        objectFit="cover"
-                                        borderRadius="md"
-                                        mb={2}
-                                        fallbackSrc="https://via.placeholder.com/280x100?text=Al+Jazeera"
-                                    />
-                                )}
-                                
                                 {/* Article Title */}
                                 <Text 
                                     fontSize="xs" 
@@ -130,11 +127,35 @@ const AlJazeeraNews = () => {
                             </Box>
                         </ChakraLink>
                     ))}
+                    
+                    {/* View All Link */}
+                    <RouterLink to="/news">
+                        <Text 
+                            fontSize="xs" 
+                            color="blue.500" 
+                            textAlign="center"
+                            cursor="pointer"
+                            _hover={{ textDecoration: 'underline' }}
+                        >
+                            View all news →
+                        </Text>
+                    </RouterLink>
                 </VStack>
             ) : (
-                <Text fontSize="sm" color={secondaryTextColor} textAlign="center">
-                    No news available
-                </Text>
+                <RouterLink to="/news">
+                    <Box 
+                        textAlign="center"
+                        cursor="pointer"
+                        _hover={{ opacity: 0.8 }}
+                    >
+                        <Text fontSize="sm" color={secondaryTextColor}>
+                            No news available
+                        </Text>
+                        <Text fontSize="xs" color="blue.500" mt={2}>
+                            Click to view news page →
+                        </Text>
+                    </Box>
+                </RouterLink>
             )}
             
             {/* Footer */}

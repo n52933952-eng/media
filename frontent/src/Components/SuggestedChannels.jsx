@@ -278,11 +278,6 @@ const SuggestedChannels = ({ onUserFollowed }) => {
                     </Text>
                 </VStack>
             )}
-            ) : (
-                <Text fontSize="sm" color={secondaryTextColor} textAlign="center">
-                    No channels available
-                </Text>
-            )}
         </Box>
     )
 }
