@@ -370,9 +370,9 @@ const ChessGamePage = () => {
         // Listen for cleanup event from backend (when opponent resigns or game ends)
         // This ensures BOTH users clear their localStorage
         socket.on('chessGameCleanup', () => {
-            if (import.meta.env.DEV) {
-                console.log('♟️ Received cleanup event - clearing chess state')
-            }
+            console.log('🎯 [ChessGamePage] Received chessGameCleanup event - clearing chess state')
+            console.log('🎯 [ChessGamePage] Before cleanup - localStorage chessOrientation:', localStorage.getItem("chessOrientation"))
+            
             // Clear localStorage for both users
             localStorage.removeItem('chessOrientation')
             localStorage.removeItem('gameLive')
@@ -380,6 +380,16 @@ const ChessGamePage = () => {
             localStorage.removeItem('chessFEN')
             localStorage.removeItem('capturedWhite')
             localStorage.removeItem('capturedBlack')
+            
+            // Verify cleanup
+            const afterCleanup = localStorage.getItem("chessOrientation")
+            console.log('🎯 [ChessGamePage] After cleanup - localStorage chessOrientation:', afterCleanup)
+            if (afterCleanup) {
+                console.error('❌ [ChessGamePage] ERROR: localStorage still has chessOrientation after cleanup!')
+            } else {
+                console.log('✅ [ChessGamePage] localStorage successfully cleared')
+            }
+            
             // Reset state
             setOrientation(null)
             setGameLive(false)
@@ -570,24 +580,50 @@ const ChessGamePage = () => {
     // This works like resign - clears storage and notifies other user
     useEffect(() => {
         return () => {
-            // Only cleanup if game is actually live (not on initial mount)
-            if (gameLive && roomId && opponentId && user?._id) {
-                // Notify backend that user left the game
-                if (socket) {
+            console.log('🎯 [ChessGamePage] Cleanup useEffect running - component unmounting')
+            
+            // Check if game was live (either from state or localStorage)
+            const localGameLive = localStorage.getItem('gameLive') === 'true'
+            const shouldCleanup = gameLive || localGameLive
+            
+            console.log('🎯 [ChessGamePage] Cleanup check:', {
+                gameLiveState: gameLive,
+                localStorageGameLive: localGameLive,
+                shouldCleanup: shouldCleanup,
+                roomId: roomId,
+                opponentId: opponentId
+            })
+            
+            // Always clear localStorage if game was live (even if roomId not set yet)
+            if (shouldCleanup) {
+                console.log('🎯 [ChessGamePage] Clearing localStorage (game was live)')
+                
+                // Notify backend only if we have roomId and opponentId
+                if (socket && roomId && opponentId && user?._id) {
                     socket.emit('chessGameEnd', {
                         roomId,
                         player1: user._id,
                         player2: opponentId
                     })
+                    console.log('🎯 [ChessGamePage] Emitted chessGameEnd to backend')
+                } else {
+                    console.log('⚠️ [ChessGamePage] Skipped backend notification (missing roomId or opponentId)')
                 }
                 
-                // Clear localStorage (same as resign)
+                // Always clear localStorage
                 localStorage.removeItem('chessOrientation')
                 localStorage.removeItem('gameLive')
                 localStorage.removeItem('chessRoomId')
                 localStorage.removeItem('chessFEN')
                 localStorage.removeItem('capturedWhite')
                 localStorage.removeItem('capturedBlack')
+                
+                // Verify cleanup
+                const verifyOrientation = localStorage.getItem('chessOrientation')
+                const verifyGameLive = localStorage.getItem('gameLive')
+                console.log('✅ [ChessGamePage] Cleanup complete - chessOrientation:', verifyOrientation, 'gameLive:', verifyGameLive)
+            } else {
+                console.log('⚠️ [ChessGamePage] Cleanup skipped - game was not live')
             }
         }
     }, [socket, roomId, opponentId, user?._id, gameLive])
