@@ -646,12 +646,18 @@ export const createChessGamePost = async (player1Id, player2Id, roomId) => {
         
         // Emit newPost event to online followers of both players
         const io = getIO()
+        console.log('🔍 [createChessGamePost] Checking IO instance:', !!io)
+        
         if (io) {
             const userSocketMap = getUserSocketMap()
+            console.log('🔍 [createChessGamePost] User socket map size:', Object.keys(userSocketMap).length)
             
             // Get followers of both players
             const player1User = await User.findById(player1Id).select('followers')
             const player2User = await User.findById(player2Id).select('followers')
+            
+            console.log('🔍 [createChessGamePost] Player1 followers:', player1User?.followers?.length || 0)
+            console.log('🔍 [createChessGamePost] Player2 followers:', player2User?.followers?.length || 0)
             
             // Collect all unique online followers
             const onlineFollowersSet = new Set()
@@ -662,6 +668,7 @@ export const createChessGamePost = async (player1Id, player2Id, roomId) => {
                     const followerIdStr = followerId.toString()
                     if (userSocketMap[followerIdStr]) {
                         onlineFollowersSet.add(userSocketMap[followerIdStr].socketId)
+                        console.log(`✅ [createChessGamePost] Found online follower (player1): ${followerIdStr}`)
                     }
                 })
             }
@@ -672,20 +679,39 @@ export const createChessGamePost = async (player1Id, player2Id, roomId) => {
                     const followerIdStr = followerId.toString()
                     if (userSocketMap[followerIdStr]) {
                         onlineFollowersSet.add(userSocketMap[followerIdStr].socketId)
+                        console.log(`✅ [createChessGamePost] Found online follower (player2): ${followerIdStr}`)
                     }
                 })
             }
             
             // Emit newPost event to all online followers for each post
             const onlineFollowers = Array.from(onlineFollowersSet)
+            console.log(`📊 [createChessGamePost] Total online followers to notify: ${onlineFollowers.length}`)
+            
             if (onlineFollowers.length > 0) {
                 posts.forEach(post => {
-                    io.to(onlineFollowers).emit("newPost", post)
-                    console.log(`📤 [createChessGamePost] Emitted newPost to ${onlineFollowers.length} followers for post: ${post._id}`)
+                    // Convert Mongoose document to plain object for socket emission
+                    const postObject = post.toObject ? post.toObject() : post
+                    console.log(`📤 [createChessGamePost] Emitting newPost to ${onlineFollowers.length} followers for post: ${post._id}`)
+                    console.log(`📤 [createChessGamePost] Post data:`, {
+                        _id: postObject._id,
+                        postedBy: postObject.postedBy,
+                        text: postObject.text,
+                        hasChessGameData: !!postObject.chessGameData
+                    })
+                    
+                    // Emit to each online follower individually
+                    onlineFollowers.forEach(socketId => {
+                        io.to(socketId).emit("newPost", postObject)
+                    })
+                    
+                    console.log(`✅ [createChessGamePost] Emitted newPost event to ${onlineFollowers.length} sockets for post: ${post._id}`)
                 })
             } else {
                 console.log('ℹ️ [createChessGamePost] No online followers to notify')
             }
+        } else {
+            console.error('❌ [createChessGamePost] IO instance is not available!')
         }
         
         return posts // Return posts so we can track them
