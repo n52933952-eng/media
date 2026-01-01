@@ -346,11 +346,13 @@ export const initializeSocket = (app) => {
             
             // Create chess game post in feed for followers
             // Use setTimeout to ensure socket connections are fully established
+            // This is important because the post creation happens immediately when game starts,
+            // but followers' sockets might not be registered in userSocketMap yet
             setTimeout(() => {
                 createChessGamePost(to, from, roomId).catch(err => {
                     console.error('❌ [socket] Error creating chess game post:', err)
                 })
-            }, 100) // Small delay to ensure all socket connections are registered
+            }, 500) // Delay to ensure all socket connections are registered in userSocketMap
         })
 
         socket.on("declineChessChallenge", ({ from, to }) => {

@@ -674,26 +674,13 @@ export const createChessGamePost = async (player1Id, player2Id, roomId) => {
                 console.log(`🔍 [createChessGamePost] Socket map entries:`, Object.entries(userSocketMap).map(([id, data]) => ({ userId: id, socketId: data.socketId })))
                 
                 postAuthor.followers.forEach(followerId => {
-                    // Try multiple formats to handle different ID types
+                    // Use same simple approach as postDeleted (which works)
                     const followerIdStr = followerId.toString()
-                    const followerIdObj = followerId._id ? followerId._id.toString() : null
-                    const followerIdDirect = typeof followerId === 'string' ? followerId : null
-                    
-                    // Check all possible formats
-                    let followerData = userSocketMap[followerIdStr]
-                    if (!followerData && followerIdObj) {
-                        followerData = userSocketMap[followerIdObj]
-                    }
-                    if (!followerData && followerIdDirect) {
-                        followerData = userSocketMap[followerIdDirect]
-                    }
-                    
-                    if (followerData) {
-                        onlineFollowers.push(followerData.socketId)
-                        console.log(`✅ [createChessGamePost] Found online follower of ${postAuthorId}: ${followerIdStr} (socket: ${followerData.socketId})`)
+                    if (userSocketMap[followerIdStr]) {
+                        onlineFollowers.push(userSocketMap[followerIdStr].socketId)
+                        console.log(`✅ [createChessGamePost] Found online follower of ${postAuthorId}: ${followerIdStr} (socket: ${userSocketMap[followerIdStr].socketId})`)
                     } else {
                         console.log(`⚠️ [createChessGamePost] Follower ${followerIdStr} is not online (not in socket map)`)
-                        console.log(`   Tried formats: ${followerIdStr}, ${followerIdObj || 'N/A'}, ${followerIdDirect || 'N/A'}`)
                     }
                 })
                 
@@ -709,19 +696,13 @@ export const createChessGamePost = async (player1Id, player2Id, roomId) => {
                     })
                     console.log(`📤 [createChessGamePost] Socket IDs to emit to:`, onlineFollowers)
                     
-                    // Emit to each online follower individually
-                    let emittedCount = 0
+                    // Use same pattern as postDeleted (which works for User N)
+                    // Emit to each socket individually to ensure delivery
                     onlineFollowers.forEach(socketId => {
-                        try {
-                            io.to(socketId).emit("newPost", postObject)
-                            emittedCount++
-                            console.log(`✅ [createChessGamePost] Emitted to socket: ${socketId}`)
-                        } catch (error) {
-                            console.error(`❌ [createChessGamePost] Error emitting to socket ${socketId}:`, error)
-                        }
+                        io.to(socketId).emit("newPost", postObject)
+                        console.log(`✅ [createChessGamePost] Emitted newPost to socket: ${socketId}`)
                     })
-                    
-                    console.log(`✅ [createChessGamePost] Emitted newPost event to ${emittedCount}/${onlineFollowers.length} sockets for post: ${post._id}`)
+                    console.log(`✅ [createChessGamePost] Emitted newPost event to ${onlineFollowers.length} sockets for post: ${post._id}`)
                 } else {
                     console.log(`ℹ️ [createChessGamePost] No online followers for post author ${postAuthorId}`)
                     console.log(`🔍 [createChessGamePost] All followers of ${postAuthorId}:`, postAuthor.followers.map(f => f.toString()))
