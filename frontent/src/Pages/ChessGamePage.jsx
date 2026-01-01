@@ -682,8 +682,8 @@ const ChessGamePage = () => {
     }
 
     return (
-        <Box bg={bgColor} minH="100vh" py={4}>
-            <Flex justify="center" align="start" px={4} direction={{ base: 'column', md: 'row' }} gap={4}>
+        <Box bg={bgColor} minH="100vh" py={2}>
+            <Flex justify="center" align="start" px={4} direction={{ base: 'column', md: 'row' }} gap={3}>
                 {/* Captured Pieces Panel - Left Side */}
                 {gameLive && (
                     <Box
@@ -767,7 +767,7 @@ const ChessGamePage = () => {
                 {/* Chess Board - Center */}
                 <Box
                     bg={cardBg}
-                    p={4}
+                    p={3}
                     borderRadius="xl"
                     boxShadow="dark-lg"
                     border="6px solid"
@@ -780,7 +780,7 @@ const ChessGamePage = () => {
                         ♟️ Chess Match
                     </Heading>
                     {gameLive && storedOrientation && (
-                        <Text fontSize="xs" textAlign="center" mb={2} color="#5a3e2b" fontWeight="bold">
+                        <Text fontSize="xs" textAlign="center" mb={1.5} color="#5a3e2b" fontWeight="bold">
                             You are playing as: {storedOrientation === 'white' ? '⚪ White' : '⚫ Black'}
                             {chess.turn() === storedOrientation[0] ? ' (Your turn!)' : ' (Waiting...)'}
                         </Text>
@@ -829,7 +829,7 @@ const ChessGamePage = () => {
                     )}
 
                     {gameLive && (
-                        <Flex justify="center" mt={4}>
+                        <Flex justify="center" mt={2}>
                             <Button
                                 colorScheme="red"
                                 size="sm"
