@@ -112,31 +112,43 @@ const ChessNotification = () => {
         localStorage.removeItem("gameLive")
         localStorage.removeItem("chessRoomId")
         
-        // Set new values
-        localStorage.setItem("chessOrientation", "black")
-        localStorage.setItem("gameLive", "true")
-        setOrientation("black")
-        
-        // Verify it was set correctly
-        const verifyOrientation = localStorage.getItem("chessOrientation")
-        const verifyGameLive = localStorage.getItem("gameLive")
-        console.log('🎯 [ChessNotification] After setting - localStorage chessOrientation:', verifyOrientation)
-        console.log('🎯 [ChessNotification] After setting - localStorage gameLive:', verifyGameLive)
-        
-        if (verifyOrientation !== "black") {
-            console.error('❌ [ChessNotification] ERROR: localStorage was not set correctly! Expected "black", got:', verifyOrientation)
-        } else {
-            console.log('✅ [ChessNotification] localStorage verified correctly set to "black"')
-        }
-
-        // Emit accept event
+        // Emit accept event first (generate roomId)
         const roomId = `chess_${challenge.from}_${user._id}_${Date.now()}`
         const acceptData = {
             from: user._id,
             to: challenge.from,
             roomId: roomId
         }
-        console.log('🎯 [ChessNotification] Emitting acceptChessChallenge:', acceptData)
+        
+        // Set new values (BEFORE navigating)
+        localStorage.setItem("chessOrientation", "black")
+        localStorage.setItem("gameLive", "true")
+        localStorage.setItem("chessRoomId", roomId)
+        setOrientation("black")
+        
+        // Verify it was set correctly
+        const verifyOrientation = localStorage.getItem("chessOrientation")
+        const verifyGameLive = localStorage.getItem("gameLive")
+        const verifyRoomId = localStorage.getItem("chessRoomId")
+        if (import.meta.env.DEV) {
+            console.log('🎯 [ChessNotification] After setting - localStorage chessOrientation:', verifyOrientation)
+            console.log('🎯 [ChessNotification] After setting - localStorage gameLive:', verifyGameLive)
+            console.log('🎯 [ChessNotification] After setting - localStorage chessRoomId:', verifyRoomId)
+        }
+        
+        if (verifyOrientation !== "black") {
+            if (import.meta.env.DEV) {
+                console.error('❌ [ChessNotification] ERROR: localStorage was not set correctly! Expected "black", got:', verifyOrientation)
+            }
+        } else {
+            if (import.meta.env.DEV) {
+                console.log('✅ [ChessNotification] localStorage verified correctly set to "black"')
+            }
+        }
+
+        if (import.meta.env.DEV) {
+            console.log('🎯 [ChessNotification] Emitting acceptChessChallenge:', acceptData)
+        }
         socket.emit('acceptChessChallenge', acceptData)
 
         // Remove challenge from list
