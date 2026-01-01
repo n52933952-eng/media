@@ -697,21 +697,22 @@ export const deleteChessGamePost = async (roomId) => {
                             }
                         }
                     }
-                } catch (parseError) {
-                    console.error(`Error parsing chessGameData for post ${post._id}:`, parseError)
                 }
+            } catch (parseError) {
+                console.error(`Error parsing chessGameData for post ${post._id}:`, parseError)
             }
-
-            if (deletedCount > 0) {
-                console.log(`✅ Deleted ${deletedCount} chess game post(s) for roomId: ${roomId}`)
-            } else {
-                console.log(`⚠️ No chess game posts found for roomId: ${roomId}`)
-            }
-        } catch (error) {
-            console.error('Error deleting chess game post:', error)
-            throw error
         }
+
+        if (deletedCount > 0) {
+            console.log(`✅ Deleted ${deletedCount} chess game post(s) for roomId: ${roomId}`)
+        } else {
+            console.log(`⚠️ No chess game posts found for roomId: ${roomId}`)
+        }
+    } catch (error) {
+        console.error('Error deleting chess game post:', error)
+        throw error
     }
+}
 
 export const LikeComent = async(req,res) => {
 
