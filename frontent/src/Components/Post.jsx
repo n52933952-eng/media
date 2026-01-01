@@ -65,17 +65,66 @@ const showToast = useShowToast()
     }
   }
   
-  const handleChessPostClick = () => {
-    if (chessGameData) {
-      // Navigate to chess page to view/spectate
-      // Determine which player is the "opponent" from current user's perspective
-      const currentUserId = user?._id?.toString()
-      const player1Id = chessGameData.player1?._id
-      const player2Id = chessGameData.player2?._id
-      
-      // Navigate to view the game (use player1 as opponent for now)
-      navigate(`/chess/${player1Id}`)
+  const handleChessPostClick = (e) => {
+    // CRITICAL: Stop all event propagation immediately - MUST be first
+    if (e) {
+      e.preventDefault()
+      e.stopPropagation()
+      if (e.nativeEvent) {
+        e.nativeEvent.stopImmediatePropagation()
+      }
     }
+    
+    if (import.meta.env.DEV) {
+      console.log('🎯 [Post] Chess card clicked!', { chessGameData, event: e })
+    }
+    
+    if (!chessGameData) {
+      if (import.meta.env.DEV) {
+        console.error('❌ [Post] No chessGameData!')
+      }
+      return
+    }
+    
+    // Navigate to chess page to view/spectate
+    // Determine which player to use based on current user
+    const currentUserId = user?._id?.toString()
+    const player1Id = chessGameData.player1?._id
+    const player2Id = chessGameData.player2?._id
+    
+    let opponentIdToUse = player1Id // Default to player1
+    
+    // If current user is player1, navigate to player2 (to view as player1)
+    if (currentUserId === player1Id) {
+      opponentIdToUse = player2Id
+    }
+    // If current user is player2, navigate to player1 (to view as player2)
+    else if (currentUserId === player2Id) {
+      opponentIdToUse = player1Id
+    }
+    // If current user is neither (spectator), use player1 to view the game
+    else {
+      opponentIdToUse = player1Id
+    }
+    
+    if (import.meta.env.DEV) {
+      console.log('🎯 [Post] Navigating to chess page:', `/chess/${opponentIdToUse}`, {
+        currentUserId,
+        player1Id,
+        player2Id,
+        opponentIdToUse
+      })
+    }
+    
+    if (opponentIdToUse) {
+      // Use setTimeout to ensure navigation happens after event is fully stopped
+      setTimeout(() => {
+        navigate(`/chess/${opponentIdToUse}`, { replace: false })
+      }, 0)
+    }
+    
+    // Return false to prevent any default behavior
+    return false
   }
 
   const handleDeletepost = async(e) => {
@@ -328,6 +377,9 @@ const showToast = useShowToast()
   {/* Chess Game Post Display */}
   {isChessPost && chessGameData && (
     <Box
+      as="button"
+      type="button"
+      data-chess-card
       mt={3}
       mb={2}
       bg={cardBg}
@@ -339,6 +391,15 @@ const showToast = useShowToast()
       _hover={{ shadow: 'md', borderColor: 'purple.500' }}
       transition="all 0.2s"
       onClick={handleChessPostClick}
+      onMouseDown={(e) => {
+        // Also stop on mousedown to prevent any Link activation
+        e.preventDefault()
+        e.stopPropagation()
+      }}
+      position="relative"
+      zIndex={10}
+      w="full"
+      textAlign="left"
     >
       <Flex align="center" justify="space-between" mb={3}>
         <Flex align="center" gap={3}>
@@ -357,37 +418,39 @@ const showToast = useShowToast()
         </Text>
       </Flex>
       
-      <Flex align="center" justify="space-around" gap={4}>
+      <Flex align="center" justify="space-around" gap={4} onClick={(e) => e.stopPropagation()}>
         {/* Player 1 */}
-        <VStack spacing={1}>
+        <VStack spacing={1} onClick={(e) => e.stopPropagation()}>
           <Avatar
             src={chessGameData.player1?.profilePic}
             name={chessGameData.player1?.name}
             size="md"
+            pointerEvents="none"
           />
-          <Text fontSize="xs" fontWeight="semibold" color={textColor} textAlign="center">
+          <Text fontSize="xs" fontWeight="semibold" color={textColor} textAlign="center" pointerEvents="none">
             {chessGameData.player1?.name}
           </Text>
-          <Text fontSize="xs" color={secondaryTextColor}>
+          <Text fontSize="xs" color={secondaryTextColor} pointerEvents="none">
             @{chessGameData.player1?.username}
           </Text>
         </VStack>
         
-        <Text fontSize="xl" color={textColor} fontWeight="bold">
+        <Text fontSize="xl" color={textColor} fontWeight="bold" pointerEvents="none">
           vs
         </Text>
         
         {/* Player 2 */}
-        <VStack spacing={1}>
+        <VStack spacing={1} onClick={(e) => e.stopPropagation()}>
           <Avatar
             src={chessGameData.player2?.profilePic}
             name={chessGameData.player2?.name}
             size="md"
+            pointerEvents="none"
           />
-          <Text fontSize="xs" fontWeight="semibold" color={textColor} textAlign="center">
+          <Text fontSize="xs" fontWeight="semibold" color={textColor} textAlign="center" pointerEvents="none">
             {chessGameData.player2?.name}
           </Text>
-          <Text fontSize="xs" color={secondaryTextColor}>
+          <Text fontSize="xs" color={secondaryTextColor} pointerEvents="none">
             @{chessGameData.player2?.username}
           </Text>
         </VStack>
@@ -454,6 +517,33 @@ const showToast = useShowToast()
     </Flex>
   )
 
+  // For chess posts, don't wrap in Link - only chess card should be clickable
+  // Make the wrapper non-clickable to prevent any navigation
+  if (isChessPost) {
+    return (
+      <Box 
+        onClick={(e) => {
+          // Only allow navigation if clicking the chess card itself
+          const chessCard = e.target.closest('[data-chess-card]')
+          if (!chessCard) {
+            // If clicking outside chess card, prevent any navigation
+            e.preventDefault()
+            e.stopPropagation()
+          }
+        }}
+        onMouseDown={(e) => {
+          const chessCard = e.target.closest('[data-chess-card]')
+          if (!chessCard) {
+            e.preventDefault()
+            e.stopPropagation()
+          }
+        }}
+      >
+        {postContent}
+      </Box>
+    )
+  }
+  
   return (
     <Link to={`/${postedBy?.username}/post/${post._id}`}>
       {postContent}
