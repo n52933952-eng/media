@@ -92,7 +92,12 @@ const HomePage = () => {
 
       if(res.ok){
         if (loadMore) {
-          setFollowPost(prev => [...prev, ...(data.posts || [])])
+          // When loading more, check for duplicates
+          setFollowPost(prev => {
+            const existingIds = new Set(prev.map(p => p._id?.toString()))
+            const newPosts = (data.posts || []).filter(p => !existingIds.has(p._id?.toString()))
+            return [...prev, ...newPosts]
+          })
         } else {
           setFollowPost(data.posts || [])
         }
@@ -151,9 +156,17 @@ const HomePage = () => {
       console.log('📨 New post received via socket:', newPost._id)
       // Add new post to the top of the feed
       setFollowPost(prev => {
-        // Check if post already exists (prevent duplicates)
-        const exists = prev.some(p => p._id === newPost._id)
-        if (exists) return prev
+        // Check if post already exists (prevent duplicates) - compare by _id string
+        const exists = prev.some(p => {
+          const prevId = p._id?.toString()
+          const newId = newPost._id?.toString()
+          return prevId === newId
+        })
+        if (exists) {
+          console.log('⚠️ [HomePage] Duplicate post detected, skipping:', newPost._id)
+          return prev
+        }
+        console.log('✅ [HomePage] Adding new post to feed:', newPost._id)
         return [newPost, ...prev]
       })
     }

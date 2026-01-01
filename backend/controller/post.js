@@ -644,7 +644,8 @@ export const createChessGamePost = async (player1Id, player2Id, roomId) => {
         
         console.log('✅ [createChessGamePost] Created chess game posts:', posts.map(p => p._id))
         
-        // Emit newPost event to online followers of both players
+        // Emit newPost event to online followers of each post's author (not both players)
+        // Each post should only go to followers of that specific post's author
         const io = getIO()
         console.log('🔍 [createChessGamePost] Checking IO instance:', !!io)
         
@@ -652,47 +653,32 @@ export const createChessGamePost = async (player1Id, player2Id, roomId) => {
             const userSocketMap = getUserSocketMap()
             console.log('🔍 [createChessGamePost] User socket map size:', Object.keys(userSocketMap).length)
             
-            // Get followers of both players
-            const player1User = await User.findById(player1Id).select('followers')
-            const player2User = await User.findById(player2Id).select('followers')
-            
-            console.log('🔍 [createChessGamePost] Player1 followers:', player1User?.followers?.length || 0)
-            console.log('🔍 [createChessGamePost] Player2 followers:', player2User?.followers?.length || 0)
-            
-            // Collect all unique online followers
-            const onlineFollowersSet = new Set()
-            
-            // Add player1's online followers
-            if (player1User && player1User.followers && player1User.followers.length > 0) {
-                player1User.followers.forEach(followerId => {
+            // Emit each post only to followers of that post's author
+            for (const post of posts) {
+                const postAuthorId = post.postedBy.toString()
+                
+                // Get followers of this specific post's author
+                const postAuthor = await User.findById(postAuthorId).select('followers')
+                
+                if (!postAuthor || !postAuthor.followers || postAuthor.followers.length === 0) {
+                    console.log(`ℹ️ [createChessGamePost] Post author ${postAuthorId} has no followers`)
+                    continue
+                }
+                
+                // Find online followers of this post's author
+                const onlineFollowers = []
+                postAuthor.followers.forEach(followerId => {
                     const followerIdStr = followerId.toString()
                     if (userSocketMap[followerIdStr]) {
-                        onlineFollowersSet.add(userSocketMap[followerIdStr].socketId)
-                        console.log(`✅ [createChessGamePost] Found online follower (player1): ${followerIdStr}`)
+                        onlineFollowers.push(userSocketMap[followerIdStr].socketId)
+                        console.log(`✅ [createChessGamePost] Found online follower of ${postAuthorId}: ${followerIdStr}`)
                     }
                 })
-            }
-            
-            // Add player2's online followers
-            if (player2User && player2User.followers && player2User.followers.length > 0) {
-                player2User.followers.forEach(followerId => {
-                    const followerIdStr = followerId.toString()
-                    if (userSocketMap[followerIdStr]) {
-                        onlineFollowersSet.add(userSocketMap[followerIdStr].socketId)
-                        console.log(`✅ [createChessGamePost] Found online follower (player2): ${followerIdStr}`)
-                    }
-                })
-            }
-            
-            // Emit newPost event to all online followers for each post
-            const onlineFollowers = Array.from(onlineFollowersSet)
-            console.log(`📊 [createChessGamePost] Total online followers to notify: ${onlineFollowers.length}`)
-            
-            if (onlineFollowers.length > 0) {
-                posts.forEach(post => {
+                
+                if (onlineFollowers.length > 0) {
                     // Convert Mongoose document to plain object for socket emission
                     const postObject = post.toObject ? post.toObject() : post
-                    console.log(`📤 [createChessGamePost] Emitting newPost to ${onlineFollowers.length} followers for post: ${post._id}`)
+                    console.log(`📤 [createChessGamePost] Emitting newPost to ${onlineFollowers.length} followers of ${postAuthorId} for post: ${post._id}`)
                     console.log(`📤 [createChessGamePost] Post data:`, {
                         _id: postObject._id,
                         postedBy: postObject.postedBy,
@@ -706,9 +692,9 @@ export const createChessGamePost = async (player1Id, player2Id, roomId) => {
                     })
                     
                     console.log(`✅ [createChessGamePost] Emitted newPost event to ${onlineFollowers.length} sockets for post: ${post._id}`)
-                })
-            } else {
-                console.log('ℹ️ [createChessGamePost] No online followers to notify')
+                } else {
+                    console.log(`ℹ️ [createChessGamePost] No online followers for post author ${postAuthorId}`)
+                }
             }
         } else {
             console.error('❌ [createChessGamePost] IO instance is not available!')
