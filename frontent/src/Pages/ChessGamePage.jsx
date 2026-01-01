@@ -704,15 +704,16 @@ const ChessGamePage = () => {
                         <Box>
                             <Flex justify="center" mb={2}>
                                 <Avatar
-                                    src={storedOrientation === 'white' ? opponent?.profilePic : user?.profilePic}
-                                    name={storedOrientation === 'white' ? opponent?.name : user?.name}
+                                    src={opponent?.profilePic}
+                                    name={opponent?.name}
                                     size="sm"
                                 />
                             </Flex>
                             <Text fontSize="xs" textAlign="center" color={textColor} mb={2} fontWeight="bold">
-                                {storedOrientation === 'white' ? opponent?.username : user?.username}
+                                {opponent?.username}
                             </Text>
                             <Text fontSize="xs" textAlign="center" color="gray.500" mb={2}>
+                                {/* Opponent is always the opposite color of user */}
                                 {storedOrientation === 'white' ? 'Black ⚫' : 'White ⚪'}
                             </Text>
                             <Flex wrap="wrap" justify="center" gap={1} minH="60px">
@@ -734,15 +735,16 @@ const ChessGamePage = () => {
                         <Box>
                             <Flex justify="center" mb={2}>
                                 <Avatar
-                                    src={storedOrientation === 'white' ? user?.profilePic : opponent?.profilePic}
-                                    name={storedOrientation === 'white' ? user?.name : opponent?.name}
+                                    src={user?.profilePic}
+                                    name={user?.name}
                                     size="sm"
                                 />
                             </Flex>
                             <Text fontSize="xs" textAlign="center" color={textColor} mb={2} fontWeight="bold">
-                                {storedOrientation === 'white' ? user?.username : opponent?.username} (You)
+                                {user?.username} (You)
                             </Text>
                             <Text fontSize="xs" textAlign="center" color="gray.500" mb={2}>
+                                {/* User's color is always storedOrientation */}
                                 {storedOrientation === 'white' ? 'White ⚪' : 'Black ⚫'}
                             </Text>
                             <Flex wrap="wrap" justify="center" gap={1} minH="60px">
