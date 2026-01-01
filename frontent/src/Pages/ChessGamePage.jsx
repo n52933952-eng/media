@@ -59,6 +59,14 @@ const ChessGamePage = () => {
 
     // Refs to avoid circular dependencies
     const handleGameEndRef = useRef(null)
+    const socketRef = useRef(socket)
+    const userRef = useRef(user)
+    
+    // Update refs when values change
+    useEffect(() => {
+        socketRef.current = socket
+        userRef.current = user
+    }, [socket, user])
 
     const bgColor = useColorModeValue('gray.50', '#101010')
     const cardBg = useColorModeValue('white', '#1a1a1a')
@@ -609,55 +617,58 @@ const ChessGamePage = () => {
 
     // Cleanup when user navigates away (home, messages, profile, etc.)
     // This works like resign - clears storage and notifies other user
+    // IMPORTANT: Only run cleanup on unmount, NOT when dependencies change
+    // This prevents clearing localStorage immediately after it's set
     useEffect(() => {
         return () => {
-            console.log('🎯 [ChessGamePage] Cleanup useEffect running - component unmounting')
+            if (import.meta.env.DEV) {
+                console.log('🎯 [ChessGamePage] Cleanup useEffect running - component unmounting')
+            }
             
-            // Check if game was live (either from state or localStorage)
+            // Read current values from localStorage at unmount time
             const localGameLive = localStorage.getItem('gameLive') === 'true'
-            const shouldCleanup = gameLive || localGameLive
+            const localRoomId = localStorage.getItem('chessRoomId')
+            const localOpponentId = opponentId // opponentId from useParams
             
-            console.log('🎯 [ChessGamePage] Cleanup check:', {
-                gameLiveState: gameLive,
-                localStorageGameLive: localGameLive,
-                shouldCleanup: shouldCleanup,
-                roomId: roomId,
-                opponentId: opponentId
-            })
+            if (import.meta.env.DEV) {
+                console.log('🎯 [ChessGamePage] Cleanup check (on unmount):', {
+                    localStorageGameLive: localGameLive,
+                    localRoomId: localRoomId,
+                    localOpponentId: localOpponentId
+                })
+            }
             
-            // Always clear localStorage if game was live (even if roomId not set yet)
-            if (shouldCleanup) {
-                console.log('🎯 [ChessGamePage] Clearing localStorage (game was live)')
-                
-                // Notify backend only if we have roomId and opponentId
-                if (socket && roomId && opponentId && user?._id) {
-                    socket.emit('chessGameEnd', {
-                        roomId,
-                        player1: user._id,
-                        player2: opponentId
-                    })
-                    console.log('🎯 [ChessGamePage] Emitted chessGameEnd to backend')
-                } else {
-                    console.log('⚠️ [ChessGamePage] Skipped backend notification (missing roomId or opponentId)')
+            // Only cleanup if game was actually live
+            if (localGameLive) {
+                if (import.meta.env.DEV) {
+                    console.log('🎯 [ChessGamePage] Clearing localStorage (game was live)')
                 }
                 
-                // Always clear localStorage
+                // Notify backend only if we have roomId and opponentId
+                // Use refs to get current values (captured at unmount time)
+                const currentSocket = socketRef.current
+                const currentUser = userRef.current
+                if (currentSocket && localRoomId && localOpponentId && currentUser?._id) {
+                    currentSocket.emit('chessGameEnd', {
+                        roomId: localRoomId,
+                        player1: currentUser._id,
+                        player2: localOpponentId
+                    })
+                    if (import.meta.env.DEV) {
+                        console.log('🎯 [ChessGamePage] Emitted chessGameEnd to backend')
+                    }
+                }
+                
+                // Clear localStorage
                 localStorage.removeItem('chessOrientation')
                 localStorage.removeItem('gameLive')
                 localStorage.removeItem('chessRoomId')
                 localStorage.removeItem('chessFEN')
                 localStorage.removeItem('capturedWhite')
                 localStorage.removeItem('capturedBlack')
-                
-                // Verify cleanup
-                const verifyOrientation = localStorage.getItem('chessOrientation')
-                const verifyGameLive = localStorage.getItem('gameLive')
-                console.log('✅ [ChessGamePage] Cleanup complete - chessOrientation:', verifyOrientation, 'gameLive:', verifyGameLive)
-            } else {
-                console.log('⚠️ [ChessGamePage] Cleanup skipped - game was not live')
             }
         }
-    }, [socket, roomId, opponentId, user?._id, gameLive])
+    }, [opponentId]) // Only opponentId as dependency (from useParams, doesn't change during component lifetime)
 
     const getPieceUnicode = (type, color) => {
         const unicodeMap = {
