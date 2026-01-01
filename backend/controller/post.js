@@ -644,6 +644,50 @@ export const createChessGamePost = async (player1Id, player2Id, roomId) => {
         
         console.log('✅ [createChessGamePost] Created chess game posts:', posts.map(p => p._id))
         
+        // Emit newPost event to online followers of both players
+        const io = getIO()
+        if (io) {
+            const userSocketMap = getUserSocketMap()
+            
+            // Get followers of both players
+            const player1User = await User.findById(player1Id).select('followers')
+            const player2User = await User.findById(player2Id).select('followers')
+            
+            // Collect all unique online followers
+            const onlineFollowersSet = new Set()
+            
+            // Add player1's online followers
+            if (player1User && player1User.followers && player1User.followers.length > 0) {
+                player1User.followers.forEach(followerId => {
+                    const followerIdStr = followerId.toString()
+                    if (userSocketMap[followerIdStr]) {
+                        onlineFollowersSet.add(userSocketMap[followerIdStr].socketId)
+                    }
+                })
+            }
+            
+            // Add player2's online followers
+            if (player2User && player2User.followers && player2User.followers.length > 0) {
+                player2User.followers.forEach(followerId => {
+                    const followerIdStr = followerId.toString()
+                    if (userSocketMap[followerIdStr]) {
+                        onlineFollowersSet.add(userSocketMap[followerIdStr].socketId)
+                    }
+                })
+            }
+            
+            // Emit newPost event to all online followers for each post
+            const onlineFollowers = Array.from(onlineFollowersSet)
+            if (onlineFollowers.length > 0) {
+                posts.forEach(post => {
+                    io.to(onlineFollowers).emit("newPost", post)
+                    console.log(`📤 [createChessGamePost] Emitted newPost to ${onlineFollowers.length} followers for post: ${post._id}`)
+                })
+            } else {
+                console.log('ℹ️ [createChessGamePost] No online followers to notify')
+            }
+        }
+        
         return posts // Return posts so we can track them
     } catch (error) {
         console.error('Error creating chess game post:', error)
