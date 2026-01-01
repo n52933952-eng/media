@@ -16,7 +16,7 @@ const Header = () => {
   const{colorMode,toggleColorMode}=useColorMode()
 
    const{user}=useContext(UserContext)
-   const {socket, totalUnreadCount} = useContext(SocketContext) || {}
+   const {socket, totalUnreadCount, notificationCount} = useContext(SocketContext) || {}
   
   
   
@@ -72,9 +72,30 @@ const Header = () => {
             )}
           </Box>
           
-          <Link to="/notifications">
-            <IoNotificationsOutline size={24} />
-          </Link>
+          <Box position="relative">
+            <Link to="/notifications">
+              <IoNotificationsOutline size={24} />
+            </Link>
+            {notificationCount > 0 && (
+              <Badge
+                position="absolute"
+                top="-8px"
+                right="-8px"
+                borderRadius="full"
+                bg="red.500"
+                color="white"
+                fontSize="10px"
+                minW="18px"
+                h="18px"
+                display="flex"
+                alignItems="center"
+                justifyContent="center"
+                px={1}
+              >
+                {notificationCount > 99 ? '99+' : notificationCount}
+              </Badge>
+            )}
+          </Box>
           
           <Link to={`/${user?.username}`}>
             <CgProfile size={24} />

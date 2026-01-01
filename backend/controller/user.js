@@ -144,6 +144,12 @@ export const FollowAndUnfollow = async(req,res) => {
             const updatecurrent = await User.findById(req.user._id)
             const targetUser = await User.findById(id)
 
+            // Create notification for the user being followed
+            const { createNotification } = await import('./notification.js')
+            createNotification(id, 'follow', req.user._id).catch(err => {
+                console.error('Error creating follow notification:', err)
+            })
+
            res.status(200).json({action:"follow",current:updatecurrent,target:targetUser})
          }
           

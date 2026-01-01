@@ -24,6 +24,7 @@ export const SocketContextProvider = ({ children }) => {
   const [me, setMe] = useState('');
   const [busyUsers, setBusyUsers] = useState(new Set()); // Track which users are busy
   const [totalUnreadCount, setTotalUnreadCount] = useState(0); // Global unread message count
+  const [notificationCount, setNotificationCount] = useState(0); // Global unread notification count
 
   const myVideo = useRef();
   const userVideo = useRef();
@@ -139,6 +140,12 @@ export const SocketContextProvider = ({ children }) => {
       setTotalUnreadCount(totalUnread || 0);
     });
 
+    // Listen for new notifications
+    newSocket?.on('newNotification', (notification) => {
+      console.log('🔔 New notification received:', notification)
+      setNotificationCount(prev => prev + 1)
+    });
+
     // Listen for new messages globally - play sound for unread messages
     newSocket?.on('newMessage', (message) => {
       if (!message || !message.sender || !user?._id) return;
@@ -211,9 +218,34 @@ export const SocketContextProvider = ({ children }) => {
     };
     fetchInitialUnreadCount();
 
+    // Fetch initial notification count
+    const fetchInitialNotificationCount = async () => {
+      if (!user?._id) {
+        setNotificationCount(0);
+        return;
+      }
+      try {
+        const socketUrl = import.meta.env.PROD 
+          ? window.location.origin 
+          : "http://localhost:5000";
+        const res = await fetch(`${socketUrl}/api/notification/unread-count`, {
+          credentials: 'include',
+        });
+        const data = await res.json();
+        if (res.ok && data.unreadCount !== undefined) {
+          console.log('✅ Initial notification count fetched:', data.unreadCount);
+          setNotificationCount(data.unreadCount);
+        }
+      } catch (error) {
+        console.log('Error fetching initial notification count:', error);
+      }
+    };
+    fetchInitialNotificationCount();
+
     return () => {
       newSocket?.off('unreadCountUpdate');
       newSocket?.off('newMessage');
+      newSocket?.off('newNotification');
       newSocket.close();
     };
   }, [user]);
@@ -645,6 +677,8 @@ export const SocketContextProvider = ({ children }) => {
         onlineUsers: onlineUser, // Export as onlineUsers for consistency
         busyUsers, // Export busyUsers so components can check if a user is busy
         totalUnreadCount, // Export total unread message count
+        notificationCount, // Export unread notification count
+        setNotificationCount, // Function to update notification count
         setSelectedConversationId, // Function to update selected conversation for notification control
       }}
     >

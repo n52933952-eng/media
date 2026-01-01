@@ -353,6 +353,45 @@ export const ReplyPost = async(req,res) => {
 
         // Return the saved reply (it will have _id and all fields after saving)
         const savedReply = post.replies[post.replies.length - 1]
+        
+        // Create notifications
+        const { createNotification } = await import('./notification.js')
+        const User = (await import('../models/user.js')).default
+        
+        // 1. Notify post owner if commenter is not the post owner
+        if (post.postedBy.toString() !== userId.toString()) {
+            createNotification(post.postedBy, 'comment', userId, {
+                postId: post._id,
+                commentText: text
+            }).catch(err => {
+                console.error('Error creating comment notification:', err)
+            })
+        }
+        
+        // 2. Check for @mentions in the comment text (e.g., @username)
+        const mentionRegex = /@(\w+)/g
+        const mentions = text.match(mentionRegex)
+        if (mentions) {
+            const mentionedUsernames = [...new Set(mentions.map(m => m.substring(1)))] // Remove @ and get unique usernames
+            
+            for (const username of mentionedUsernames) {
+                try {
+                    const mentionedUser = await User.findOne({ username })
+                    if (mentionedUser && mentionedUser._id.toString() !== userId.toString() && mentionedUser._id.toString() !== post.postedBy.toString()) {
+                        // Don't notify if they're the commenter or post owner (already notified above)
+                        createNotification(mentionedUser._id, 'mention', userId, {
+                            postId: post._id,
+                            commentText: text
+                        }).catch(err => {
+                            console.error('Error creating mention notification:', err)
+                        })
+                    }
+                } catch (err) {
+                    console.error('Error finding mentioned user:', err)
+                }
+            }
+        }
+        
         res.status(200).json(savedReply)
 
     }
@@ -570,6 +609,62 @@ export const ReplyToComment = async(req, res) => {
 
         // Return the newly created reply (it will have _id after saving)
         const newReply = post.replies[post.replies.length - 1]
+        
+        // Create notifications
+        const { createNotification } = await import('./notification.js')
+        const User = (await import('../models/user.js')).default
+        
+        // Track who we've already notified to avoid duplicates
+        const notifiedUsers = new Set()
+        notifiedUsers.add(userId.toString()) // Don't notify the commenter
+        
+        // 1. Notify post owner if commenter is not the post owner
+        if (post.postedBy.toString() !== userId.toString()) {
+            notifiedUsers.add(post.postedBy.toString())
+            createNotification(post.postedBy, 'comment', userId, {
+                postId: post._id,
+                commentText: text
+            }).catch(err => {
+                console.error('Error creating comment notification:', err)
+            })
+        }
+        
+        // 2. Notify mentioned user (if replying to a comment, the parent comment author is mentioned)
+        if (mentionedUser && mentionedUser.userId && mentionedUser.userId.toString() !== userId.toString()) {
+            if (!notifiedUsers.has(mentionedUser.userId.toString())) {
+                notifiedUsers.add(mentionedUser.userId.toString())
+                createNotification(mentionedUser.userId, 'mention', userId, {
+                    postId: post._id,
+                    commentText: text
+                }).catch(err => {
+                    console.error('Error creating mention notification:', err)
+                })
+            }
+        }
+        
+        // 3. Check for @mentions in the comment text (e.g., @username)
+        const mentionRegex = /@(\w+)/g
+        const mentions = text.match(mentionRegex)
+        if (mentions) {
+            const mentionedUsernames = [...new Set(mentions.map(m => m.substring(1)))] // Remove @ and get unique usernames
+            
+            for (const username of mentionedUsernames) {
+                try {
+                    const mentionedUser = await User.findOne({ username })
+                    if (mentionedUser && !notifiedUsers.has(mentionedUser._id.toString())) {
+                        notifiedUsers.add(mentionedUser._id.toString())
+                        createNotification(mentionedUser._id, 'mention', userId, {
+                            postId: post._id,
+                            commentText: text
+                        }).catch(err => {
+                            console.error('Error creating mention notification:', err)
+                        })
+                    }
+                } catch (err) {
+                    console.error('Error finding mentioned user:', err)
+                }
+            }
+        }
         
         res.status(200).json(newReply)
     }
