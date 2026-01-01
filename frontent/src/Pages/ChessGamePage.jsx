@@ -143,6 +143,32 @@ const ChessGamePage = () => {
         }
     }, [searchParams])
     
+    // Separate useEffect to join socket room when spectator mode is active
+    useEffect(() => {
+        if (isSpectator && roomId && socket) {
+            if (socket.connected) {
+                console.log('👁️ [ChessGamePage] Spectator joining room via useEffect (already connected):', roomId)
+                socket.emit('joinChessRoom', { roomId })
+            } else {
+                console.log('👁️ [ChessGamePage] Socket not connected yet, waiting...')
+                // Wait for connection
+                const onConnect = () => {
+                    console.log('👁️ [ChessGamePage] Socket connected, spectator joining room:', roomId)
+                    socket.emit('joinChessRoom', { roomId })
+                    socket.off('connect', onConnect)
+                }
+                socket.on('connect', onConnect)
+                return () => {
+                    socket.off('connect', onConnect)
+                }
+            }
+        } else {
+            if (import.meta.env.DEV) {
+                console.log('👁️ [ChessGamePage] Spectator room join skipped:', { isSpectator, roomId: !!roomId, socket: !!socket })
+            }
+        }
+    }, [isSpectator, roomId, socket])
+    
     // Debug: Log orientation changes (only in development)
     useEffect(() => {
         if (import.meta.env.DEV) {
@@ -300,24 +326,18 @@ const ChessGamePage = () => {
         socket.on('connect', () => {
             console.log('✅ Chess socket connected')
             showToast('Connected', 'Chess connection restored', 'success')
+            
+            // If spectator mode, join the room when socket connects
+            if (isSpectator && roomId) {
+                console.log('👁️ [ChessGamePage] Spectator joining room on connect:', roomId)
+                socket.emit('joinChessRoom', { roomId })
+            }
         })
-        
-        // Join room for spectators when roomId is set
-        if (isSpectator && roomId && socket.connected) {
-            console.log('👁️ [ChessGamePage] Spectator joining room:', roomId)
-            socket.emit('joinChessRoom', { roomId })
-        }
 
         socket.on('disconnect', () => {
             console.log('⚠️ Chess socket disconnected')
             showToast('Connection Lost', 'Reconnecting...', 'warning')
         })
-        
-        // Join room for spectators when roomId is set
-        if (isSpectator && roomId && socket.connected) {
-            console.log('👁️ [ChessGamePage] Spectator joining room:', roomId)
-            socket.emit('joinChessRoom', { roomId })
-        }
 
         const handleAcceptChallenge = (data) => {
             console.log('🎯 [ChessGamePage] handleAcceptChallenge socket event received:', data)

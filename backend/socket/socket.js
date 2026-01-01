@@ -262,6 +262,27 @@ export const initializeSocket = (app) => {
             const challengerSocketId = userSocketMap[to]?.socketId
             const accepterSocketId = userSocketMap[from]?.socketId
 
+            // Create chess room and join both players to Socket.IO room
+            if (roomId) {
+                // Join challenger to room
+                if (challengerSocketId) {
+                    const challengerSocket = io.sockets.sockets.get(challengerSocketId)
+                    if (challengerSocket) {
+                        challengerSocket.join(roomId)
+                        console.log(`♟️ Challenger ${to} joined room: ${roomId}`)
+                    }
+                }
+                // Join accepter to room
+                if (accepterSocketId) {
+                    const accepterSocket = io.sockets.sockets.get(accepterSocketId)
+                    if (accepterSocket) {
+                        accepterSocket.join(roomId)
+                        console.log(`♟️ Accepter ${from} joined room: ${roomId}`)
+                    }
+                }
+                console.log(`♟️ Created chess room: ${roomId} with both players`)
+            }
+
             if (challengerSocketId) {
                 console.log(`♟️ Sending WHITE to challenger: ${to} (socket: ${challengerSocketId})`)
                 const challengerData = {
@@ -343,11 +364,17 @@ export const initializeSocket = (app) => {
             }
             
             // ALSO emit to all spectators in the room (if roomId exists)
-            if (roomId && chessRooms.has(roomId)) {
-                const room = chessRooms.get(roomId)
-                console.log(`👁️ Broadcasting move to ${room.length} spectators in room ${roomId}`)
-                // Emit to all sockets in the room (excluding the sender)
-                io.to(roomId).emit("opponentMove", { move })
+            // Use Socket.IO room system - if anyone joined the room, broadcast to them
+            if (roomId) {
+                // Check if room exists (has at least one socket joined)
+                const room = io.sockets.adapter.rooms.get(roomId)
+                if (room && room.size > 0) {
+                    console.log(`👁️ Broadcasting move to ${room.size} sockets in room ${roomId}`)
+                    // Emit to all sockets in the room (including players and spectators)
+                    io.to(roomId).emit("opponentMove", { move })
+                } else {
+                    console.log(`⚠️ Room ${roomId} doesn't exist or is empty`)
+                }
             }
         })
 
