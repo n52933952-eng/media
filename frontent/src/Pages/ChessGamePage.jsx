@@ -47,8 +47,15 @@ const ChessGamePage = () => {
     })
     const [showGameOverBox, setShowGameOverBox] = useState(false)
     const [over, setOver] = useState('')
-    const [capturedWhite, setCapturedWhite] = useState([])
-    const [capturedBlack, setCapturedBlack] = useState([])
+    // Initialize captured pieces from localStorage (like madechess)
+    const [capturedWhite, setCapturedWhite] = useState(() => {
+        const saved = localStorage.getItem("capturedWhite")
+        return saved ? JSON.parse(saved) : []
+    })
+    const [capturedBlack, setCapturedBlack] = useState(() => {
+        const saved = localStorage.getItem("capturedBlack")
+        return saved ? JSON.parse(saved) : []
+    })
 
     // Refs to avoid circular dependencies
     const handleGameEndRef = useRef(null)
@@ -59,7 +66,14 @@ const ChessGamePage = () => {
 
     // Create Chess instance
     const chess = useMemo(() => new Chess(), [])
-    const [fen, setFen] = useState(chess.fen())
+    // Initialize FEN from localStorage if available (like madechess)
+    const [fen, setFen] = useState(() => {
+        const savedFen = localStorage.getItem("chessFEN")
+        if (savedFen && chess.load(savedFen)) {
+            return savedFen
+        }
+        return chess.fen()
+    })
 
     // Initialize orientation, gameLive, and roomId from localStorage on mount
     useEffect(() => {
@@ -181,13 +195,23 @@ const ChessGamePage = () => {
             if (result) {
                 const newFen = chess.fen()
                 setFen(newFen)
+                // Save FEN to localStorage after every move (like madechess)
+                localStorage.setItem("chessFEN", newFen)
 
-                // Track captured pieces
+                // Track captured pieces and save to localStorage (like madechess)
                 if (result.captured) {
                     if (result.color === 'w') {
-                        setCapturedBlack(prev => [...prev, result.captured])
+                        setCapturedBlack(prev => {
+                            const updated = [...prev, result.captured]
+                            localStorage.setItem("capturedBlack", JSON.stringify(updated))
+                            return updated
+                        })
                     } else {
-                        setCapturedWhite(prev => [...prev, result.captured])
+                        setCapturedWhite(prev => {
+                            const updated = [...prev, result.captured]
+                            localStorage.setItem("capturedWhite", JSON.stringify(updated))
+                            return updated
+                        })
                     }
                 }
 
@@ -279,9 +303,16 @@ const ChessGamePage = () => {
                 localStorage.setItem('chessOrientation', yourColor)
             }
             
-            // Reset chess board
+            // Reset chess board for new game (clear old game state)
             chess.reset()
-            setFen(chess.fen())
+            const newFen = chess.fen()
+            setFen(newFen)
+            // Clear old game state from localStorage and reset state (starting fresh game)
+            localStorage.removeItem("chessFEN")
+            localStorage.removeItem("capturedWhite")
+            localStorage.removeItem("capturedBlack")
+            setCapturedWhite([])
+            setCapturedBlack([])
             
             // Set roomId - required for making moves
             console.log('🎯 [ChessGamePage] Setting roomId:', data.roomId)
