@@ -351,6 +351,18 @@ const ChessGamePage = () => {
             setGameLive(false)
         })
 
+        // Listen for when opponent leaves the game
+        socket.on('opponentLeftGame', () => {
+            showToast('Opponent Left', 'Your opponent left the game', 'info')
+            setOver('Your opponent left the game.')
+            setShowGameOverBox(true)
+            
+            // Navigate to home after a short delay
+            setTimeout(() => {
+                handleGameEnd()
+            }, 3000)
+        })
+
         return () => {
             socket.off('connect')
             socket.off('disconnect')
@@ -359,6 +371,7 @@ const ChessGamePage = () => {
             socket.off('opponentResigned')
             socket.off('chessGameCanceled')
             socket.off('chessGameCleanup')
+            socket.off('opponentLeftGame')
         }
     }, [socket, navigate, showToast, makeAMove, user._id, chess])
 
@@ -462,28 +475,23 @@ const ChessGamePage = () => {
         return true
     }
 
-    const handleResign = () => {
-        if (!socket) return
-
-        socket.emit('resignChess', {
-            roomId,
-            to: opponentId
-        })
-
-        showToast('Resigned', 'You resigned from the game', 'info')
-        handleGameEnd()
-    }
-
-    const handleGameEnd = useCallback(() => {
-        // Notify backend that game ended - this marks both players as available again
-        if (socket && roomId && opponentId && user?._id) {
-            socket.emit('chessGameEnd', {
-                roomId,
-                player1: user._id,
-                player2: opponentId
-            })
-            if (import.meta.env.DEV) {
-                console.log('♟️ Game ended - notifying backend:', { roomId, player1: user._id, player2: opponentId })
+    // Unified function to leave/end game - used for resign, navigate away, etc.
+    const leaveGame = useCallback((reason = 'left') => {
+        // Only notify backend if game is actually live
+        if (gameLive && socket && roomId && opponentId && user?._id) {
+            if (reason === 'resign') {
+                // Use resign event for resign (shows different message to opponent)
+                socket.emit('resignChess', {
+                    roomId,
+                    to: opponentId
+                })
+            } else {
+                // Use chessGameEnd for leaving/navigating away
+                socket.emit('chessGameEnd', {
+                    roomId,
+                    player1: user._id,
+                    player2: opponentId
+                })
             }
         }
         
@@ -505,8 +513,19 @@ const ChessGamePage = () => {
         setGameLive(false)
         setOrientation(null)
         
+        // Navigate to home
         navigate('/home')
-    }, [chess, navigate, socket, roomId, opponentId, user?._id])
+    }, [chess, navigate, socket, roomId, opponentId, user?._id, gameLive])
+
+    const handleResign = () => {
+        if (!socket) return
+        showToast('Resigned', 'You resigned from the game', 'info')
+        leaveGame('resign')
+    }
+
+    const handleGameEnd = useCallback(() => {
+        leaveGame('end')
+    }, [leaveGame])
 
     // Store handleGameEnd in ref
     useEffect(() => {

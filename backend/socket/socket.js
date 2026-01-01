@@ -348,15 +348,25 @@ export const initializeSocket = (app) => {
         })
 
         socket.on("chessGameEnd", ({ roomId, player1, player2 }) => {
-            // Emit cleanup event to both players to clear localStorage
+            // The player who emitted this event is leaving
+            const currentUserId = socket.handshake.query.userId
             const player1SocketId = userSocketMap[player1]?.socketId
             const player2SocketId = userSocketMap[player2]?.socketId
             
-            if (player1SocketId) {
-                io.to(player1SocketId).emit("chessGameCleanup")
+            // Determine which player left and who the other player is
+            const leavingPlayerSocketId = currentUserId === player1 ? player1SocketId : player2SocketId
+            const otherPlayerId = currentUserId === player1 ? player2 : player1
+            const otherPlayerSocketId = currentUserId === player1 ? player2SocketId : player1SocketId
+            
+            // Notify the other player that their opponent left (same as resign)
+            if (otherPlayerSocketId) {
+                io.to(otherPlayerSocketId).emit("opponentLeftGame")
+                io.to(otherPlayerSocketId).emit("chessGameCleanup")
             }
-            if (player2SocketId) {
-                io.to(player2SocketId).emit("chessGameCleanup")
+            
+            // Cleanup for the player who left
+            if (leavingPlayerSocketId) {
+                io.to(leavingPlayerSocketId).emit("chessGameCleanup")
             }
             
             // Make users available again - TARGETED to specific users only (not all users)
