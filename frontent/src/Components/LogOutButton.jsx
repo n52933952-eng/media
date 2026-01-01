@@ -32,6 +32,7 @@ const LogOutButton = () => {
              // Clean up chess game state on logout
              localStorage.removeItem("chessOrientation")
              localStorage.removeItem("gameLive")
+             localStorage.removeItem("chessRoomId")
              localStorage.removeItem("chessFEN")
              localStorage.removeItem("capturedWhite")
              localStorage.removeItem("capturedBlack")

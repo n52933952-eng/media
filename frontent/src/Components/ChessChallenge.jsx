@@ -112,6 +112,10 @@ const ChessChallenge = () => {
             // Challenger is always WHITE - set localStorage and state
             localStorage.setItem("chessOrientation", "white")
             localStorage.setItem("gameLive", "true")
+            // Store roomId in localStorage so ChessGamePage can read it
+            if (data.roomId) {
+                localStorage.setItem("chessRoomId", data.roomId)
+            }
             setOrientation("white")
             
             showToast('Challenge Accepted! ♟️', 'Starting game...', 'success')

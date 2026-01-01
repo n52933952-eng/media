@@ -61,10 +61,11 @@ const ChessGamePage = () => {
     const chess = useMemo(() => new Chess(), [])
     const [fen, setFen] = useState(chess.fen())
 
-    // Initialize orientation and gameLive from localStorage on mount
+    // Initialize orientation, gameLive, and roomId from localStorage on mount
     useEffect(() => {
         const savedOrientation = localStorage.getItem("chessOrientation")
         const savedGameLive = localStorage.getItem("gameLive") === "true"
+        const savedRoomId = localStorage.getItem("chessRoomId")
         
         if (savedOrientation && (savedOrientation === 'white' || savedOrientation === 'black')) {
             setOrientation(savedOrientation)
@@ -72,6 +73,11 @@ const ChessGamePage = () => {
         
         if (savedGameLive) {
             setGameLive(true)
+        }
+        
+        // Set roomId from localStorage if available (for challenger who navigated)
+        if (savedRoomId && !roomId) {
+            setRoomId(savedRoomId)
         }
     }, [])
     
@@ -249,6 +255,10 @@ const ChessGamePage = () => {
             
             // Set roomId - required for making moves
             setRoomId(data.roomId)
+            // Store in localStorage for consistency
+            if (data.roomId) {
+                localStorage.setItem('chessRoomId', data.roomId)
+            }
             
             // Start game
             setGameLive(true)
@@ -308,6 +318,7 @@ const ChessGamePage = () => {
             // Clean up localStorage
             localStorage.removeItem('chessOrientation')
             localStorage.removeItem('gameLive')
+            localStorage.removeItem('chessRoomId')
             localStorage.removeItem('chessFEN')
             localStorage.removeItem('capturedWhite')
             localStorage.removeItem('capturedBlack')
@@ -331,6 +342,7 @@ const ChessGamePage = () => {
             // Clear localStorage for both users
             localStorage.removeItem('chessOrientation')
             localStorage.removeItem('gameLive')
+            localStorage.removeItem('chessRoomId')
             localStorage.removeItem('chessFEN')
             localStorage.removeItem('capturedWhite')
             localStorage.removeItem('capturedBlack')
@@ -478,6 +490,7 @@ const ChessGamePage = () => {
         // Clean up localStorage
         localStorage.removeItem('chessOrientation')
         localStorage.removeItem('gameLive')
+        localStorage.removeItem('chessRoomId')
         localStorage.removeItem('chessFEN')
         localStorage.removeItem('capturedWhite')
         localStorage.removeItem('capturedBlack')
