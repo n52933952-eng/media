@@ -2,7 +2,7 @@ import React, { useState, useMemo, useCallback, useEffect, useContext, useRef } 
 import { Chessboard } from 'react-chessboard'
 import { Chess } from 'chess.js'
 import { Box, Heading, Text, Flex, VStack, HStack, Avatar, useColorModeValue, Button } from '@chakra-ui/react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { UserContext } from '../context/UserContext'
 import { SocketContext } from '../context/SocketContext'
 import useShowToast from '../hooks/useShowToast'
@@ -15,6 +15,7 @@ import gameStartSound from '../assets/start.mp3'
 
 const ChessGamePage = () => {
     const { opponentId } = useParams()
+    const [searchParams] = useSearchParams()
     const navigate = useNavigate()
     const { socket } = useContext(SocketContext)
     const { user, orientation, setOrientation } = useContext(UserContext)
@@ -22,6 +23,7 @@ const ChessGamePage = () => {
 
     const [opponent, setOpponent] = useState(null)
     const [roomId, setRoomId] = useState(null)
+    const [isSpectator, setIsSpectator] = useState(false)
     
     // Read orientation same way ChessTable does in madechess: localStorage first, then state
     // Line 201 in madechess: const storedOrientation = localStorage.getItem("chessOrientation") || orientation;
@@ -84,41 +86,62 @@ const ChessGamePage = () => {
     })
 
     // Initialize orientation, gameLive, and roomId from localStorage on mount
+    // Also check URL params for spectator mode
     useEffect(() => {
         console.log('🎯 [ChessGamePage] Initialization useEffect - Mounting')
         const savedOrientation = localStorage.getItem("chessOrientation")
         const savedGameLive = localStorage.getItem("gameLive") === "true"
         const savedRoomId = localStorage.getItem("chessRoomId")
         
+        // Check if user is a spectator (from URL params)
+        const urlRoomId = searchParams.get('roomId')
+        const isSpectatorMode = searchParams.get('spectator') === 'true'
+        
         console.log('🎯 [ChessGamePage] Initialization - localStorage values:', {
             savedOrientation,
             savedGameLive,
             savedRoomId,
+            urlRoomId,
+            isSpectatorMode,
             currentOrientationState: orientation,
             currentGameLiveState: gameLive,
             currentRoomIdState: roomId
         })
         
-        if (savedOrientation && (savedOrientation === 'white' || savedOrientation === 'black')) {
-            console.log('🎯 [ChessGamePage] Setting orientation from localStorage:', savedOrientation)
-            setOrientation(savedOrientation)
-        } else {
-            console.log('⚠️ [ChessGamePage] No valid orientation in localStorage:', savedOrientation)
-        }
-        
-        if (savedGameLive) {
-            console.log('🎯 [ChessGamePage] Setting gameLive from localStorage:', savedGameLive)
+        // SPECTATOR MODE: User is viewing someone else's game
+        if (isSpectatorMode && urlRoomId) {
+            console.log('👁️ [ChessGamePage] SPECTATOR MODE detected!')
+            setIsSpectator(true)
+            setRoomId(urlRoomId)
+            // Set default orientation for viewing (white at bottom)
+            setOrientation('white')
+            // Enable game viewing
             setGameLive(true)
-        } else {
-            console.log('⚠️ [ChessGamePage] gameLive not set in localStorage')
+            console.log('👁️ [ChessGamePage] Spectator mode activated - roomId:', urlRoomId)
         }
-        
-        // Set roomId from localStorage if available (for challenger who navigated)
-        if (savedRoomId && !roomId) {
-            console.log('🎯 [ChessGamePage] Setting roomId from localStorage:', savedRoomId)
-            setRoomId(savedRoomId)
+        // PLAYER MODE: User is one of the players
+        else {
+            if (savedOrientation && (savedOrientation === 'white' || savedOrientation === 'black')) {
+                console.log('🎯 [ChessGamePage] Setting orientation from localStorage:', savedOrientation)
+                setOrientation(savedOrientation)
+            } else {
+                console.log('⚠️ [ChessGamePage] No valid orientation in localStorage:', savedOrientation)
+            }
+            
+            if (savedGameLive) {
+                console.log('🎯 [ChessGamePage] Setting gameLive from localStorage:', savedGameLive)
+                setGameLive(true)
+            } else {
+                console.log('⚠️ [ChessGamePage] gameLive not set in localStorage')
+            }
+            
+            // Set roomId from localStorage if available (for challenger who navigated)
+            if (savedRoomId && !roomId) {
+                console.log('🎯 [ChessGamePage] Setting roomId from localStorage:', savedRoomId)
+                setRoomId(savedRoomId)
+            }
         }
-    }, [])
+    }, [searchParams])
     
     // Debug: Log orientation changes (only in development)
     useEffect(() => {
@@ -269,7 +292,7 @@ const ChessGamePage = () => {
         }
     }, [chess])
 
-    // Socket: Accept chess challenge
+    // Socket: Accept chess challenge and handle spectator mode
     useEffect(() => {
         if (!socket) return
 
@@ -278,11 +301,23 @@ const ChessGamePage = () => {
             console.log('✅ Chess socket connected')
             showToast('Connected', 'Chess connection restored', 'success')
         })
+        
+        // Join room for spectators when roomId is set
+        if (isSpectator && roomId && socket.connected) {
+            console.log('👁️ [ChessGamePage] Spectator joining room:', roomId)
+            socket.emit('joinChessRoom', { roomId })
+        }
 
         socket.on('disconnect', () => {
             console.log('⚠️ Chess socket disconnected')
             showToast('Connection Lost', 'Reconnecting...', 'warning')
         })
+        
+        // Join room for spectators when roomId is set
+        if (isSpectator && roomId && socket.connected) {
+            console.log('👁️ [ChessGamePage] Spectator joining room:', roomId)
+            socket.emit('joinChessRoom', { roomId })
+        }
 
         const handleAcceptChallenge = (data) => {
             console.log('🎯 [ChessGamePage] handleAcceptChallenge socket event received:', data)
@@ -459,6 +494,15 @@ const ChessGamePage = () => {
     }, [socket, navigate, showToast, makeAMove, user._id, chess])
 
     function onDrop(sourceSquare, targetSquare) {
+        // SPECTATORS CANNOT MAKE MOVES
+        if (isSpectator) {
+            if (import.meta.env.DEV) {
+                console.log('👁️ [ChessGamePage] Spectator attempted to make a move - blocked')
+            }
+            showToast('Spectator Mode', 'You are viewing this game. Only players can make moves.', 'info')
+            return false
+        }
+        
         // Input validation
         if (!sourceSquare || !targetSquare || typeof sourceSquare !== 'string' || typeof targetSquare !== 'string') {
             console.error('❌ Invalid square coordinates:', { sourceSquare, targetSquare })
@@ -779,7 +823,11 @@ const ChessGamePage = () => {
                     <Heading size="md" mb={1} color="#5a3e2b" textAlign="center">
                         ♟️ Chess Match
                     </Heading>
-                    {gameLive && storedOrientation && (
+                    {isSpectator ? (
+                        <Text fontSize="xs" textAlign="center" mb={1.5} color="#5a3e2b" fontWeight="bold">
+                            👁️ Spectator Mode - Watching Live Game
+                        </Text>
+                    ) : gameLive && storedOrientation && (
                         <Text fontSize="xs" textAlign="center" mb={1.5} color="#5a3e2b" fontWeight="bold">
                             You are playing as: {storedOrientation === 'white' ? '⚪ White' : '⚫ Black'}
                             {chess.turn() === storedOrientation[0] ? ' (Your turn!)' : ' (Waiting...)'}
@@ -828,7 +876,7 @@ const ChessGamePage = () => {
                         </Flex>
                     )}
 
-                    {gameLive && (
+                    {gameLive && !isSpectator && (
                         <Flex justify="center" mt={2}>
                             <Button
                                 colorScheme="red"

@@ -107,21 +107,30 @@ const showToast = useShowToast()
       opponentIdToUse = player1Id
     }
     
-    if (import.meta.env.DEV) {
-      console.log('🎯 [Post] Navigating to chess page:', `/chess/${opponentIdToUse}`, {
-        currentUserId,
-        player1Id,
-        player2Id,
-        opponentIdToUse
-      })
-    }
-    
-    if (opponentIdToUse) {
-      // Use setTimeout to ensure navigation happens after event is fully stopped
-      setTimeout(() => {
-        navigate(`/chess/${opponentIdToUse}`, { replace: false })
-      }, 0)
-    }
+      // Get roomId from chessGameData for spectators
+      const roomId = chessGameData.roomId
+      
+      if (import.meta.env.DEV) {
+        console.log('🎯 [Post] Navigating to chess page:', `/chess/${opponentIdToUse}`, {
+          currentUserId,
+          player1Id,
+          player2Id,
+          opponentIdToUse,
+          roomId
+        })
+      }
+      
+      if (opponentIdToUse) {
+        // Pass roomId as URL param for spectator mode
+        const chessUrl = roomId 
+          ? `/chess/${opponentIdToUse}?roomId=${roomId}&spectator=true`
+          : `/chess/${opponentIdToUse}`
+        
+        // Use setTimeout to ensure navigation happens after event is fully stopped
+        setTimeout(() => {
+          navigate(chessUrl, { replace: false })
+        }, 0)
+      }
     
     // Return false to prevent any default behavior
     return false

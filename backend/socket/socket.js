@@ -13,6 +13,8 @@ let server = null
 const userSocketMap = {}
 // Track active calls: { callId: { user1, user2 } }
 const activeCalls = new Map()
+// Track chess game rooms: { roomId: [socketId1, socketId2, ...] }
+const chessRooms = new Map()
 
 export const initializeSocket = (app) => {
     // Create HTTP server from Express app
@@ -311,9 +313,26 @@ export const initializeSocket = (app) => {
             }
         })
 
+        // Join chess room for spectators
+        socket.on("joinChessRoom", ({ roomId }) => {
+            if (roomId) {
+                if (!chessRooms.has(roomId)) {
+                    chessRooms.set(roomId, [])
+                }
+                const room = chessRooms.get(roomId)
+                if (!room.includes(socket.id)) {
+                    room.push(socket.id)
+                    socket.join(roomId) // Join Socket.IO room
+                    console.log(`👁️ Spectator joined chess room: ${roomId} (socket: ${socket.id})`)
+                }
+            }
+        })
+
         socket.on("chessMove", ({ roomId, move, to }) => {
             console.log(`♟️ Chess move received from ${socket.handshake.query.userId} to ${to}`)
             console.log(`♟️ Move data:`, move)
+            
+            // Emit to the opponent (specific user)
             const recipientSocketId = userSocketMap[to]?.socketId
             if (recipientSocketId) {
                 console.log(`♟️ Forwarding move to ${to} (socket: ${recipientSocketId})`)
@@ -321,6 +340,14 @@ export const initializeSocket = (app) => {
                 io.to(recipientSocketId).emit("opponentMove", { move })
             } else {
                 console.log(`⚠️ Recipient ${to} not found in socket map`)
+            }
+            
+            // ALSO emit to all spectators in the room (if roomId exists)
+            if (roomId && chessRooms.has(roomId)) {
+                const room = chessRooms.get(roomId)
+                console.log(`👁️ Broadcasting move to ${room.length} spectators in room ${roomId}`)
+                // Emit to all sockets in the room (excluding the sender)
+                io.to(roomId).emit("opponentMove", { move })
             }
         })
 
@@ -420,6 +447,20 @@ export const initializeSocket = (app) => {
                             io.to(otherUserData.socketId).emit("CallCanceled")
                             io.emit("cancleCall", { userToCall: otherUserId, from: disconnectedUserId })
                         }
+                    }
+                }
+            }
+
+            // Remove socket from chess rooms
+            for (const [roomId, room] of chessRooms.entries()) {
+                const index = room.indexOf(socket.id)
+                if (index !== -1) {
+                    room.splice(index, 1)
+                    console.log(`👁️ Removed socket ${socket.id} from chess room ${roomId}`)
+                    // Clean up empty rooms
+                    if (room.length === 0) {
+                        chessRooms.delete(roomId)
+                        console.log(`🗑️ Deleted empty chess room: ${roomId}`)
                     }
                 }
             }
