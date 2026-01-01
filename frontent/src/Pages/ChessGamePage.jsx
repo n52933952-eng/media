@@ -157,6 +157,8 @@ const ChessGamePage = () => {
     
     // Track previous roomId to detect game switches
     const previousRoomIdRef = useRef(null)
+    // Store pending game state in case it arrives before component is ready
+    const pendingGameStateRef = useRef(null)
     
     // Separate useEffect to join socket room when spectator mode is active
     // Also handles switching between multiple games
@@ -178,10 +180,37 @@ const ChessGamePage = () => {
                 setFen(chess.fen())
                 setCapturedWhite([])
                 setCapturedBlack([])
+                // Clear pending state
+                pendingGameStateRef.current = null
             }
             
             // Update previous roomId
             previousRoomIdRef.current = roomId
+            
+            // Apply any pending game state if we have one
+            if (pendingGameStateRef.current && pendingGameStateRef.current.roomId === roomId) {
+                console.log('📥 [ChessGamePage] Applying pending game state:', pendingGameStateRef.current)
+                const state = pendingGameStateRef.current
+                try {
+                    if (state.fen && chess.load(state.fen)) {
+                        setFen(state.fen)
+                        localStorage.setItem("chessFEN", state.fen)
+                    }
+                    if (state.capturedWhite) {
+                        setCapturedWhite(state.capturedWhite)
+                        localStorage.setItem("capturedWhite", JSON.stringify(state.capturedWhite))
+                    }
+                    if (state.capturedBlack) {
+                        setCapturedBlack(state.capturedBlack)
+                        localStorage.setItem("capturedBlack", JSON.stringify(state.capturedBlack))
+                    }
+                    pendingGameStateRef.current = null
+                    console.log('✅ [ChessGamePage] Applied pending game state')
+                } catch (error) {
+                    console.error('❌ [ChessGamePage] Error applying pending game state:', error)
+                    pendingGameStateRef.current = null
+                }
+            }
             
             if (socket.connected) {
                 console.log('👁️ [ChessGamePage] Spectator joining room via useEffect (already connected):', roomId)
@@ -567,43 +596,70 @@ const ChessGamePage = () => {
         })
 
         // Listen for game state (for spectator catch-up when joining/rejoining)
+        // Check URL params directly to handle race conditions
         socket.on('chessGameState', (data) => {
-            if (isSpectator && data && data.roomId === roomId) {
-                console.log('📥 [ChessGamePage] Received game state for catch-up:', {
-                    roomId: data.roomId,
-                    fen: data.fen,
-                    capturedWhite: data.capturedWhite?.length || 0,
-                    capturedBlack: data.capturedBlack?.length || 0
-                })
-                
-                try {
-                    // Load the FEN position
-                    if (data.fen && chess.load(data.fen)) {
-                        setFen(data.fen)
-                        localStorage.setItem("chessFEN", data.fen)
-                        console.log('✅ [ChessGamePage] Applied FEN from game state')
-                    } else {
-                        console.warn('⚠️ [ChessGamePage] Invalid FEN received, using starting position')
+            // Check if we're a spectator by looking at URL params (more reliable than state)
+            const urlParams = new URLSearchParams(window.location.search)
+            const isSpectatorMode = urlParams.get('spectator') === 'true'
+            const urlRoomId = urlParams.get('roomId')
+            
+            // Apply state if: we're a spectator AND roomId matches (from URL or state)
+            if (data && data.roomId && (data.roomId === urlRoomId || data.roomId === roomId)) {
+                // Only apply if we're actually in spectator mode
+                if (isSpectatorMode || isSpectator) {
+                    console.log('📥 [ChessGamePage] Received game state for catch-up:', {
+                        roomId: data.roomId,
+                        fen: data.fen,
+                        capturedWhite: data.capturedWhite?.length || 0,
+                        capturedBlack: data.capturedBlack?.length || 0,
+                        isSpectatorMode,
+                        isSpectatorState: isSpectator,
+                        currentRoomId: roomId
+                    })
+                    
+                    // If component isn't ready yet (roomId not set), store it for later
+                    if (!roomId && urlRoomId === data.roomId) {
+                        console.log('⏳ [ChessGamePage] Component not ready, storing game state for later')
+                        pendingGameStateRef.current = {
+                            roomId: data.roomId,
+                            fen: data.fen,
+                            capturedWhite: data.capturedWhite || [],
+                            capturedBlack: data.capturedBlack || []
+                        }
+                        return
+                    }
+                    
+                    try {
+                        // Load the FEN position
+                        if (data.fen && chess.load(data.fen)) {
+                            setFen(data.fen)
+                            localStorage.setItem("chessFEN", data.fen)
+                            console.log('✅ [ChessGamePage] Applied FEN from game state')
+                        } else {
+                            console.warn('⚠️ [ChessGamePage] Invalid FEN received, using starting position')
+                            chess.reset()
+                            setFen(chess.fen())
+                        }
+                        
+                        // Apply captured pieces
+                        if (data.capturedWhite && Array.isArray(data.capturedWhite)) {
+                            setCapturedWhite(data.capturedWhite)
+                            localStorage.setItem("capturedWhite", JSON.stringify(data.capturedWhite))
+                        }
+                        if (data.capturedBlack && Array.isArray(data.capturedBlack)) {
+                            setCapturedBlack(data.capturedBlack)
+                            localStorage.setItem("capturedBlack", JSON.stringify(data.capturedBlack))
+                        }
+                        
+                        console.log('✅ [ChessGamePage] Game state applied - spectator caught up!')
+                    } catch (error) {
+                        console.error('❌ [ChessGamePage] Error applying game state:', error)
+                        // Reset to starting position on error
                         chess.reset()
                         setFen(chess.fen())
                     }
-                    
-                    // Apply captured pieces
-                    if (data.capturedWhite && Array.isArray(data.capturedWhite)) {
-                        setCapturedWhite(data.capturedWhite)
-                        localStorage.setItem("capturedWhite", JSON.stringify(data.capturedWhite))
-                    }
-                    if (data.capturedBlack && Array.isArray(data.capturedBlack)) {
-                        setCapturedBlack(data.capturedBlack)
-                        localStorage.setItem("capturedBlack", JSON.stringify(data.capturedBlack))
-                    }
-                    
-                    console.log('✅ [ChessGamePage] Game state applied - spectator caught up!')
-                } catch (error) {
-                    console.error('❌ [ChessGamePage] Error applying game state:', error)
-                    // Reset to starting position on error
-                    chess.reset()
-                    setFen(chess.fen())
+                } else {
+                    console.log('⚠️ [ChessGamePage] Received game state but not in spectator mode, ignoring')
                 }
             }
         })
