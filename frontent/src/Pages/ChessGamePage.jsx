@@ -646,38 +646,27 @@ const ChessGamePage = () => {
                         if (data.fen) {
                             console.log('🔄 [ChessGamePage] Attempting to load FEN:', data.fen)
                             
-                            // Reset chess instance first to ensure clean state
-                            chess.reset()
+                            // Set FEN state directly - Chessboard component will render it
+                            // The chess instance will sync when moves arrive via opponentMove
+                            setFen(data.fen)
+                            localStorage.setItem("chessFEN", data.fen)
                             
-                            // Try to load the FEN
+                            // Try to sync chess instance, but don't fail if it doesn't work
+                            // Moves will sync it when they arrive
                             try {
+                                chess.reset()
                                 const loadResult = chess.load(data.fen)
                                 if (loadResult) {
-                                    setFen(data.fen)
-                                    localStorage.setItem("chessFEN", data.fen)
-                                    console.log('✅ [ChessGamePage] Applied FEN from game state')
+                                    console.log('✅ [ChessGamePage] Chess instance synced with FEN')
                                 } else {
-                                    console.error('❌ [ChessGamePage] chess.load() returned false for FEN:', data.fen)
-                                    // The FEN might be valid but chess instance might be in a bad state
-                                    // Reset and try loading again
-                                    chess.reset()
-                                    const retryLoad = chess.load(data.fen)
-                                    if (retryLoad) {
-                                        setFen(data.fen)
-                                        localStorage.setItem("chessFEN", data.fen)
-                                        console.log('✅ [ChessGamePage] Applied FEN after reset and retry')
-                                    } else {
-                                        // FEN is likely invalid - log it for debugging
-                                        console.error('❌ [ChessGamePage] FEN appears to be invalid:', data.fen)
-                                        throw new Error('FEN load failed even after reset')
-                                    }
+                                    console.warn('⚠️ [ChessGamePage] Chess instance failed to load FEN, but FEN state is set. Moves will sync it.')
                                 }
                             } catch (loadError) {
-                                console.error('❌ [ChessGamePage] Error loading FEN:', loadError)
-                                console.warn('⚠️ [ChessGamePage] Invalid FEN received, using starting position')
-                                chess.reset()
-                                setFen(chess.fen())
+                                console.warn('⚠️ [ChessGamePage] Error loading FEN into chess instance:', loadError)
+                                console.log('ℹ️ [ChessGamePage] FEN state is set, chess instance will sync when moves arrive')
                             }
+                            
+                            console.log('✅ [ChessGamePage] Applied FEN from game state')
                         } else {
                             console.warn('⚠️ [ChessGamePage] No FEN in game state, using starting position')
                             chess.reset()
