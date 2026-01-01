@@ -513,17 +513,28 @@ const ChessGamePage = () => {
         handleGameEndRef.current = handleGameEnd
     }, [handleGameEnd])
 
-    // Only notify backend when leaving - don't clear localStorage here
-    // localStorage is cleared in handleGameEnd when game actually ends
+    // Cleanup when user navigates away (home, messages, profile, etc.)
+    // This works like resign - clears storage and notifies other user
     useEffect(() => {
         return () => {
-            // Only notify backend if game was live
-            if (gameLive && socket && roomId && opponentId && user?._id) {
-                socket.emit('chessGameEnd', {
-                    roomId,
-                    player1: user._id,
-                    player2: opponentId
-                })
+            // Only cleanup if game is actually live (not on initial mount)
+            if (gameLive && roomId && opponentId && user?._id) {
+                // Notify backend that user left the game
+                if (socket) {
+                    socket.emit('chessGameEnd', {
+                        roomId,
+                        player1: user._id,
+                        player2: opponentId
+                    })
+                }
+                
+                // Clear localStorage (same as resign)
+                localStorage.removeItem('chessOrientation')
+                localStorage.removeItem('gameLive')
+                localStorage.removeItem('chessRoomId')
+                localStorage.removeItem('chessFEN')
+                localStorage.removeItem('capturedWhite')
+                localStorage.removeItem('capturedBlack')
             }
         }
     }, [socket, roomId, opponentId, user?._id, gameLive])
