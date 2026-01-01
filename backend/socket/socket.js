@@ -17,6 +17,8 @@ const activeCalls = new Map()
 const chessRooms = new Map()
 // Track active chess games: { userId: roomId } - to know which game a user is in
 const activeChessGames = new Map()
+// Track chess game state: { roomId: { fen, capturedWhite, capturedBlack } }
+const chessGameStates = new Map()
 
 export const initializeSocket = (app) => {
     // Create HTTP server from Express app
@@ -326,6 +328,17 @@ export const initializeSocket = (app) => {
                 io.to(accepterSocketId).emit("userBusyChess", { userId: to })
             }
             
+            // Initialize game state (starting position)
+            if (roomId) {
+                chessGameStates.set(roomId, {
+                    fen: "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+                    capturedWhite: [],
+                    capturedBlack: [],
+                    lastUpdated: Date.now()
+                })
+                console.log(`💾 Initialized game state for room ${roomId}`)
+            }
+            
             // Create chess game post in feed for followers
             createChessGamePost(to, from, roomId).catch(err => {
                 console.error('❌ [socket] Error creating chess game post:', err)
@@ -351,13 +364,50 @@ export const initializeSocket = (app) => {
                     room.push(socket.id)
                     socket.join(roomId) // Join Socket.IO room
                     console.log(`👁️ Spectator joined chess room: ${roomId} (socket: ${socket.id})`)
+                    
+                    // Send current game state to spectator for catch-up
+                    const gameState = chessGameStates.get(roomId)
+                    if (gameState) {
+                        console.log(`📤 Sending game state to spectator for catch-up:`, {
+                            roomId,
+                            fen: gameState.fen,
+                            capturedWhite: gameState.capturedWhite?.length || 0,
+                            capturedBlack: gameState.capturedBlack?.length || 0
+                        })
+                        socket.emit("chessGameState", {
+                            roomId,
+                            fen: gameState.fen,
+                            capturedWhite: gameState.capturedWhite || [],
+                            capturedBlack: gameState.capturedBlack || []
+                        })
+                    } else {
+                        console.log(`⚠️ No game state found for room ${roomId} - game may not have started yet`)
+                        // Send empty state (starting position)
+                        socket.emit("chessGameState", {
+                            roomId,
+                            fen: "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+                            capturedWhite: [],
+                            capturedBlack: []
+                        })
+                    }
                 }
             }
         })
 
-        socket.on("chessMove", ({ roomId, move, to }) => {
+        socket.on("chessMove", ({ roomId, move, to, fen, capturedWhite, capturedBlack }) => {
             console.log(`♟️ Chess move received from ${socket.handshake.query.userId} to ${to}`)
             console.log(`♟️ Move data:`, move)
+            
+            // Update game state in backend (for spectator catch-up)
+            if (roomId && fen) {
+                chessGameStates.set(roomId, {
+                    fen,
+                    capturedWhite: capturedWhite || [],
+                    capturedBlack: capturedBlack || [],
+                    lastUpdated: Date.now()
+                })
+                console.log(`💾 Updated game state for room ${roomId}`)
+            }
             
             // Emit to the opponent (specific user)
             const recipientSocketId = userSocketMap[to]?.socketId
@@ -418,6 +468,9 @@ export const initializeSocket = (app) => {
                 // Remove from active games tracking
                 activeChessGames.delete(userId)
                 activeChessGames.delete(to)
+                // Clean up game state
+                chessGameStates.delete(roomId)
+                console.log(`🗑️ Cleaned up game state for room ${roomId}`)
             }
             
             // Make users available again - TARGETED to specific users only (not all users)
@@ -482,6 +535,9 @@ export const initializeSocket = (app) => {
                 // Remove from active games tracking
                 activeChessGames.delete(player1)
                 activeChessGames.delete(player2)
+                // Clean up game state
+                chessGameStates.delete(roomId)
+                console.log(`🗑️ Cleaned up game state for room ${roomId}`)
             }
             
             // Make users available again - TARGETED to specific users only (not all users)
@@ -575,6 +631,10 @@ export const initializeSocket = (app) => {
                 if (otherPlayerId) {
                     activeChessGames.delete(otherPlayerId)
                 }
+                
+                // Clean up game state
+                chessGameStates.delete(gameRoomId)
+                console.log(`🗑️ Cleaned up game state for room ${gameRoomId}`)
             }
             
             // Remove socket from chess rooms

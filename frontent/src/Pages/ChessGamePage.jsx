@@ -117,6 +117,18 @@ const ChessGamePage = () => {
             setOrientation('white')
             // Enable game viewing
             setGameLive(true)
+            
+            // Clear any old game state from localStorage for spectators
+            // This ensures they start with a fresh board when joining a game
+            localStorage.removeItem('chessFEN')
+            localStorage.removeItem('capturedWhite')
+            localStorage.removeItem('capturedBlack')
+            // Reset chess board to starting position
+            chess.reset()
+            setFen(chess.fen())
+            setCapturedWhite([])
+            setCapturedBlack([])
+            
             console.log('👁️ [ChessGamePage] Spectator mode activated - roomId:', urlRoomId)
         }
         // PLAYER MODE: User is one of the players
@@ -143,9 +155,34 @@ const ChessGamePage = () => {
         }
     }, [searchParams])
     
+    // Track previous roomId to detect game switches
+    const previousRoomIdRef = useRef(null)
+    
     // Separate useEffect to join socket room when spectator mode is active
+    // Also handles switching between multiple games
     useEffect(() => {
         if (isSpectator && roomId && socket) {
+            // If switching to a different game, clean up previous game state
+            if (previousRoomIdRef.current && previousRoomIdRef.current !== roomId) {
+                console.log('👁️ [ChessGamePage] Spectator switching games:', {
+                    from: previousRoomIdRef.current,
+                    to: roomId
+                })
+                
+                // Leave the old room (Socket.IO automatically handles this when joining new room)
+                // But we should still clean up localStorage and reset board
+                localStorage.removeItem('chessFEN')
+                localStorage.removeItem('capturedWhite')
+                localStorage.removeItem('capturedBlack')
+                chess.reset()
+                setFen(chess.fen())
+                setCapturedWhite([])
+                setCapturedBlack([])
+            }
+            
+            // Update previous roomId
+            previousRoomIdRef.current = roomId
+            
             if (socket.connected) {
                 console.log('👁️ [ChessGamePage] Spectator joining room via useEffect (already connected):', roomId)
                 socket.emit('joinChessRoom', { roomId })
@@ -167,7 +204,7 @@ const ChessGamePage = () => {
                 console.log('👁️ [ChessGamePage] Spectator room join skipped:', { isSpectator, roomId: !!roomId, socket: !!socket })
             }
         }
-    }, [isSpectator, roomId, socket])
+    }, [isSpectator, roomId, socket, chess])
     
     // Debug: Log orientation changes (only in development)
     useEffect(() => {
@@ -529,6 +566,48 @@ const ChessGamePage = () => {
             }, 3000)
         })
 
+        // Listen for game state (for spectator catch-up when joining/rejoining)
+        socket.on('chessGameState', (data) => {
+            if (isSpectator && data && data.roomId === roomId) {
+                console.log('📥 [ChessGamePage] Received game state for catch-up:', {
+                    roomId: data.roomId,
+                    fen: data.fen,
+                    capturedWhite: data.capturedWhite?.length || 0,
+                    capturedBlack: data.capturedBlack?.length || 0
+                })
+                
+                try {
+                    // Load the FEN position
+                    if (data.fen && chess.load(data.fen)) {
+                        setFen(data.fen)
+                        localStorage.setItem("chessFEN", data.fen)
+                        console.log('✅ [ChessGamePage] Applied FEN from game state')
+                    } else {
+                        console.warn('⚠️ [ChessGamePage] Invalid FEN received, using starting position')
+                        chess.reset()
+                        setFen(chess.fen())
+                    }
+                    
+                    // Apply captured pieces
+                    if (data.capturedWhite && Array.isArray(data.capturedWhite)) {
+                        setCapturedWhite(data.capturedWhite)
+                        localStorage.setItem("capturedWhite", JSON.stringify(data.capturedWhite))
+                    }
+                    if (data.capturedBlack && Array.isArray(data.capturedBlack)) {
+                        setCapturedBlack(data.capturedBlack)
+                        localStorage.setItem("capturedBlack", JSON.stringify(data.capturedBlack))
+                    }
+                    
+                    console.log('✅ [ChessGamePage] Game state applied - spectator caught up!')
+                } catch (error) {
+                    console.error('❌ [ChessGamePage] Error applying game state:', error)
+                    // Reset to starting position on error
+                    chess.reset()
+                    setFen(chess.fen())
+                }
+            }
+        })
+
         // Listen for game ended event (for spectators)
         socket.on('chessGameEnded', (data) => {
             const reason = data?.reason || 'ended'
@@ -540,6 +619,20 @@ const ChessGamePage = () => {
                 message = 'One of the players left. The game has ended.'
             } else if (reason === 'player_disconnected') {
                 message = 'One of the players disconnected. The game has ended.'
+            }
+            
+            // Clear localStorage for spectators when game ends
+            // This prevents old game state from showing when joining a new game
+            if (isSpectator) {
+                console.log('👁️ [ChessGamePage] Spectator game ended - clearing localStorage')
+                localStorage.removeItem('chessFEN')
+                localStorage.removeItem('capturedWhite')
+                localStorage.removeItem('capturedBlack')
+                // Reset chess board state
+                chess.reset()
+                setFen(chess.fen())
+                setCapturedWhite([])
+                setCapturedBlack([])
             }
             
             showToast('Game Ended', message, 'info')
@@ -561,6 +654,7 @@ const ChessGamePage = () => {
             socket.off('chessGameCanceled')
             socket.off('chessGameCleanup')
             socket.off('opponentLeftGame')
+            socket.off('chessGameState')
             socket.off('chessGameEnded')
         }
     }, [socket, navigate, showToast, makeAMove, user?._id, chess, isSpectator, roomId])
@@ -656,11 +750,15 @@ const ChessGamePage = () => {
         })
 
         // Send the FULL move object (result from makeAMove) - like madechess does
+        // Also include current game state (FEN, captured pieces) for spectator catch-up
         try {
             const movePayload = {
                 roomId,
                 move: move,
-                to: opponentId
+                to: opponentId,
+                fen: chess.fen(),
+                capturedWhite: capturedWhite,
+                capturedBlack: capturedBlack
             }
             console.log('📤 Sending move to opponent:', movePayload)
             socket.emit('chessMove', movePayload)
