@@ -11,6 +11,7 @@ import FootballRoute from './routes/football.js'
 import NewsRoute from './routes/news.js'
 import { initializeSocket } from './socket/socket.js'
 import { initializeFootballCron } from './services/footballCron.js'
+import { initializeChessPostCleanup } from './services/chessPostCleanup.js'
 import path from 'path'
 import { fileURLToPath } from 'url'
 
@@ -77,4 +78,7 @@ server.listen(process.env.PORT, () => {
     
     // Initialize Football Cron Jobs after server starts
     initializeFootballCron()
+    
+    // Initialize Chess Post Cleanup Cron Job
+    initializeChessPostCleanup()
 })

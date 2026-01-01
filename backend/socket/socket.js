@@ -4,6 +4,7 @@ import http from 'http'
 import Message from '../models/message.js'
 import Conversation from '../models/conversation.js'
 import User from '../models/user.js'
+import { createChessGamePost } from '../controller/post.js'
 
 // This will be set from index.js
 let io = null
@@ -295,6 +296,11 @@ export const initializeSocket = (app) => {
                 io.to(accepterSocketId).emit("userBusyChess", { userId: from })
                 io.to(accepterSocketId).emit("userBusyChess", { userId: to })
             }
+            
+            // Create chess game post in feed for followers
+            createChessGamePost(to, from, roomId).catch(err => {
+                console.error('❌ [socket] Error creating chess game post:', err)
+            })
         })
 
         socket.on("declineChessChallenge", ({ from, to }) => {

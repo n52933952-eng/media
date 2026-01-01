@@ -586,6 +586,104 @@ export const ReplyToComment = async(req, res) => {
 
 
 
+// Create chess game post when two players start a game
+export const createChessGamePost = async (player1Id, player2Id, roomId) => {
+    try {
+        // Get both players' info
+        const player1 = await User.findById(player1Id).select('username name profilePic')
+        const player2 = await User.findById(player2Id).select('username name profilePic')
+        
+        if (!player1 || !player2) {
+            console.error('❌ [createChessGamePost] Player not found:', { player1Id, player2Id })
+            return null
+        }
+        
+        // Create chess game data
+        const chessGameData = {
+            player1: {
+                _id: player1._id.toString(),
+                username: player1.username,
+                name: player1.name,
+                profilePic: player1.profilePic
+            },
+            player2: {
+                _id: player2._id.toString(),
+                username: player2.username,
+                name: player2.name,
+                profilePic: player2.profilePic
+            },
+            roomId: roomId,
+            gameStatus: 'active', // active, ended, canceled
+            createdAt: new Date()
+        }
+        
+        // Create posts for both players (so followers of either see it)
+        const posts = []
+        
+        // Post from player1's perspective
+        const post1 = new Post({
+            postedBy: player1Id,
+            text: `Playing chess with ${player2.name} ♟️`,
+            chessGameData: JSON.stringify(chessGameData)
+        })
+        await post1.save()
+        await post1.populate("postedBy", "username profilePic name")
+        posts.push(post1)
+        
+        // Post from player2's perspective (if different from player1)
+        if (player1Id.toString() !== player2Id.toString()) {
+            const post2 = new Post({
+                postedBy: player2Id,
+                text: `Playing chess with ${player1.name} ♟️`,
+                chessGameData: JSON.stringify(chessGameData)
+            })
+            await post2.save()
+            await post2.populate("postedBy", "username profilePic name")
+            posts.push(post2)
+        }
+        
+        console.log('✅ [createChessGamePost] Created chess game posts:', posts.map(p => p._id))
+        
+        // Emit new post to followers of both players
+        const io = getIO()
+        if (io) {
+            // Get followers of both players
+            const player1Data = await User.findById(player1Id).select('followers')
+            const player2Data = await User.findById(player2Id).select('followers')
+            
+            const allFollowers = new Set()
+            if (player1Data?.followers) {
+                player1Data.followers.forEach(id => allFollowers.add(id.toString()))
+            }
+            if (player2Data?.followers) {
+                player2Data.followers.forEach(id => allFollowers.add(id.toString()))
+            }
+            
+            // Emit to online followers
+            const userSocketMap = getUserSocketMap()
+            const onlineFollowers = []
+            allFollowers.forEach(followerId => {
+                if (userSocketMap[followerId]) {
+                    onlineFollowers.push(userSocketMap[followerId].socketId)
+                }
+            })
+            
+            // Emit both posts to followers
+            if (onlineFollowers.length > 0) {
+                posts.forEach(post => {
+                    io.to(onlineFollowers).emit("newPost", post)
+                })
+                console.log(`✅ [createChessGamePost] Emitted to ${onlineFollowers.length} online followers`)
+            }
+        }
+        
+        return posts
+    } catch (error) {
+        console.error('❌ [createChessGamePost] Error:', error)
+        return null
+    }
+}
+
 export const LikeComent = async(req,res) => {
 
     try{

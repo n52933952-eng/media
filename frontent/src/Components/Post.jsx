@@ -34,6 +34,9 @@ const showToast = useShowToast()
   // Check if this is a Football post with match data
   const isFootballPost = postedBy?.username === 'Football' && post?.footballData
   
+  // Check if this is a Chess game post
+  const isChessPost = post?.chessGameData
+  
   // Debug Al Jazeera posts
   if (postedBy?.username === 'AlJazeera') {
     console.log('🔴 Al Jazeera Post Data:', {
@@ -50,6 +53,28 @@ const showToast = useShowToast()
       matchesData = JSON.parse(post.footballData)
     } catch (e) {
       console.error('Failed to parse football data:', e)
+    }
+  }
+  
+  let chessGameData = null
+  if (isChessPost) {
+    try {
+      chessGameData = JSON.parse(post.chessGameData)
+    } catch (e) {
+      console.error('Failed to parse chess game data:', e)
+    }
+  }
+  
+  const handleChessPostClick = () => {
+    if (chessGameData) {
+      // Navigate to chess page to view/spectate
+      // Determine which player is the "opponent" from current user's perspective
+      const currentUserId = user?._id?.toString()
+      const player1Id = chessGameData.player1?._id
+      const player2Id = chessGameData.player2?._id
+      
+      // Navigate to view the game (use player1 as opponent for now)
+      navigate(`/chess/${player1Id}`)
     }
   }
 
@@ -300,7 +325,77 @@ const showToast = useShowToast()
     </VStack>
   )}
   
-  {post?.img && !isFootballPost && (
+  {/* Chess Game Post Display */}
+  {isChessPost && chessGameData && (
+    <Box
+      mt={3}
+      mb={2}
+      bg={cardBg}
+      borderRadius="lg"
+      border="1px solid"
+      borderColor={borderColor}
+      p={4}
+      cursor="pointer"
+      _hover={{ shadow: 'md', borderColor: 'purple.500' }}
+      transition="all 0.2s"
+      onClick={handleChessPostClick}
+    >
+      <Flex align="center" justify="space-between" mb={3}>
+        <Flex align="center" gap={3}>
+          <Text fontSize="3xl">♟️</Text>
+          <VStack align="start" spacing={0}>
+            <Text fontSize="sm" fontWeight="bold" color={textColor}>
+              Playing Chess
+            </Text>
+            <Text fontSize="xs" color={secondaryTextColor}>
+              Click to view game
+            </Text>
+          </VStack>
+        </Flex>
+        <Text fontSize="xs" color="green.500" fontWeight="semibold">
+          Live
+        </Text>
+      </Flex>
+      
+      <Flex align="center" justify="space-around" gap={4}>
+        {/* Player 1 */}
+        <VStack spacing={1}>
+          <Avatar
+            src={chessGameData.player1?.profilePic}
+            name={chessGameData.player1?.name}
+            size="md"
+          />
+          <Text fontSize="xs" fontWeight="semibold" color={textColor} textAlign="center">
+            {chessGameData.player1?.name}
+          </Text>
+          <Text fontSize="xs" color={secondaryTextColor}>
+            @{chessGameData.player1?.username}
+          </Text>
+        </VStack>
+        
+        <Text fontSize="xl" color={textColor} fontWeight="bold">
+          vs
+        </Text>
+        
+        {/* Player 2 */}
+        <VStack spacing={1}>
+          <Avatar
+            src={chessGameData.player2?.profilePic}
+            name={chessGameData.player2?.name}
+            size="md"
+          />
+          <Text fontSize="xs" fontWeight="semibold" color={textColor} textAlign="center">
+            {chessGameData.player2?.name}
+          </Text>
+          <Text fontSize="xs" color={secondaryTextColor}>
+            @{chessGameData.player2?.username}
+          </Text>
+        </VStack>
+      </Flex>
+    </Box>
+  )}
+  
+  {post?.img && !isFootballPost && !isChessPost && (
     <Box borderRadius={4} overflow="hidden" border="0.5px solid" borderColor="gray.light" my={2}>
       {/* YouTube Embed (Al Jazeera Live or any YouTube video) */}
       {(() => {

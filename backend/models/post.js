@@ -25,6 +25,10 @@ const PostSchema = mongoose.Schema({
         type:String // JSON string of match data for Football posts
     },
 
+    chessGameData:{
+        type:String // JSON string of chess game data: {player1, player2, roomId, gameStatus}
+    },
+
     likes:{
        type:[mongoose.Schema.Types.ObjectId],
        ref:"User",
