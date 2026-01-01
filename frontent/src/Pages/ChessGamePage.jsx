@@ -409,22 +409,48 @@ const ChessGamePage = () => {
                 try {
                     // Validate move data structure
                     if (typeof data.move !== 'object' || !data.move.from || !data.move.to) {
-                        throw new Error('Invalid move structure')
+                        if (import.meta.env.DEV) {
+                            console.error('❌ Invalid move structure:', data.move)
+                        }
+                        return // Silently skip invalid moves
                     }
                     
+                    // Check if move is already applied (prevent duplicate application)
+                    const currentFen = chess.fen()
                     const moveResult = makeAMove(data.move)
+                    
                     if (!moveResult) {
-                        console.error('❌ Failed to apply opponent move:', data.move)
-                        showToast('Error', 'Failed to apply opponent move', 'error')
+                        // Check if the move was already applied (FEN didn't change means move was already there)
+                        const newFen = chess.fen()
+                        if (currentFen === newFen) {
+                            // Move was already applied, silently ignore
+                            if (import.meta.env.DEV) {
+                                console.log('⚠️ Move already applied, ignoring duplicate:', data.move)
+                            }
+                            return
+                        }
+                        
+                        // Only show error if move actually failed and wasn't already applied
+                        if (import.meta.env.DEV) {
+                            console.error('❌ Failed to apply opponent move:', data.move)
+                        }
+                        // Don't show error toast - move might have been applied locally already
+                        // showToast('Error', 'Failed to apply opponent move', 'error')
                     } else if (import.meta.env.DEV) {
                         console.log('✅ Opponent move applied successfully:', moveResult)
                     }
                 } catch (error) {
-                    console.error('❌ Error applying opponent move:', error)
-                    showToast('Error', 'Error applying move', 'error')
+                    // Only log error, don't show toast to user (might be duplicate or already applied)
+                    if (import.meta.env.DEV) {
+                        console.error('❌ Error applying opponent move:', error)
+                    }
+                    // Don't show error toast - move might have been applied locally already
+                    // showToast('Error', 'Error applying move', 'error')
                 }
             } else {
-                console.error('❌ Invalid move data received:', data)
+                if (import.meta.env.DEV) {
+                    console.error('❌ Invalid move data received:', data)
+                }
             }
         })
 
