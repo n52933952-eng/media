@@ -691,12 +691,14 @@ const ChessGamePage = () => {
                         p={4}
                         borderRadius="md"
                         boxShadow="md"
-                        w={{ base: '100%', md: '150px' }}
+                        w={{ base: '100%', md: '200px' }}
                         minH={{ base: 'auto', md: '400px' }}
+                        maxW={{ base: '100%', md: '200px' }}
                         display="flex"
                         flexDirection="column"
                         justifyContent="space-between"
                         order={{ base: 2, md: 1 }}
+                        flexShrink={0}
                     >
                         {/* Top: Opponent */}
                         <Box>
@@ -713,11 +715,13 @@ const ChessGamePage = () => {
                             <Text fontSize="xs" textAlign="center" color="gray.500" mb={2}>
                                 {storedOrientation === 'white' ? 'Black ⚫' : 'White ⚪'}
                             </Text>
-                            <Flex wrap="wrap" justify="center" gap={1}>
-                                {(storedOrientation === 'white' ? capturedBlack : capturedWhite).length > 0 ? (
-                                    (storedOrientation === 'white' ? capturedBlack : capturedWhite).map((p, i) => (
+                            <Flex wrap="wrap" justify="center" gap={1} minH="60px">
+                                {/* If user is white, opponent is black - show pieces black captured (white pieces) = capturedWhite */}
+                                {/* If user is black, opponent is white - show pieces white captured (black pieces) = capturedBlack */}
+                                {(storedOrientation === 'white' ? capturedWhite : capturedBlack).length > 0 ? (
+                                    (storedOrientation === 'white' ? capturedWhite : capturedBlack).map((p, i) => (
                                         <Text key={i} fontSize="2xl">
-                                            {getPieceUnicode(p, storedOrientation === 'white' ? 'black' : 'white')}
+                                            {getPieceUnicode(p, storedOrientation === 'white' ? 'white' : 'black')}
                                         </Text>
                                     ))
                                 ) : (
@@ -741,11 +745,13 @@ const ChessGamePage = () => {
                             <Text fontSize="xs" textAlign="center" color="gray.500" mb={2}>
                                 {storedOrientation === 'white' ? 'White ⚪' : 'Black ⚫'}
                             </Text>
-                            <Flex wrap="wrap" justify="center" gap={1}>
-                                {(storedOrientation === 'white' ? capturedWhite : capturedBlack).length > 0 ? (
-                                    (storedOrientation === 'white' ? capturedWhite : capturedBlack).map((p, i) => (
+                            <Flex wrap="wrap" justify="center" gap={1} minH="60px">
+                                {/* If user is white, show pieces white captured (black pieces) = capturedBlack */}
+                                {/* If user is black, show pieces black captured (white pieces) = capturedWhite */}
+                                {(storedOrientation === 'white' ? capturedBlack : capturedWhite).length > 0 ? (
+                                    (storedOrientation === 'white' ? capturedBlack : capturedWhite).map((p, i) => (
                                         <Text key={i} fontSize="2xl">
-                                            {getPieceUnicode(p, storedOrientation === 'white' ? 'white' : 'black')}
+                                            {getPieceUnicode(p, storedOrientation === 'white' ? 'black' : 'white')}
                                         </Text>
                                     ))
                                 ) : (
