@@ -372,9 +372,11 @@ export const initializeSocket = (app) => {
                             roomId,
                             fen: gameState.fen,
                             capturedWhite: gameState.capturedWhite?.length || 0,
-                            capturedBlack: gameState.capturedBlack?.length || 0
+                            capturedBlack: gameState.capturedBlack?.length || 0,
+                            lastUpdated: new Date(gameState.lastUpdated).toISOString()
                         })
-                        socket.emit("chessGameState", {
+                        // Use io.to() to ensure it reaches the spectator socket
+                        io.to(socket.id).emit("chessGameState", {
                             roomId,
                             fen: gameState.fen,
                             capturedWhite: gameState.capturedWhite || [],
@@ -382,8 +384,9 @@ export const initializeSocket = (app) => {
                         })
                     } else {
                         console.log(`⚠️ No game state found for room ${roomId} - game may not have started yet`)
+                        console.log(`🔍 Available game states:`, Array.from(chessGameStates.keys()))
                         // Send empty state (starting position)
-                        socket.emit("chessGameState", {
+                        io.to(socket.id).emit("chessGameState", {
                             roomId,
                             fen: "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
                             capturedWhite: [],
@@ -406,7 +409,13 @@ export const initializeSocket = (app) => {
                     capturedBlack: capturedBlack || [],
                     lastUpdated: Date.now()
                 })
-                console.log(`💾 Updated game state for room ${roomId}`)
+                console.log(`💾 Updated game state for room ${roomId}:`, {
+                    fen: fen.substring(0, 50) + '...',
+                    capturedWhite: capturedWhite?.length || 0,
+                    capturedBlack: capturedBlack?.length || 0
+                })
+            } else {
+                console.warn(`⚠️ Cannot update game state - missing roomId or fen:`, { roomId: !!roomId, fen: !!fen })
             }
             
             // Emit to the opponent (specific user)

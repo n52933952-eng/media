@@ -120,16 +120,18 @@ const ChessGamePage = () => {
             
             // Clear any old game state from localStorage for spectators
             // This ensures they start with a fresh board when joining a game
+            // BUT we will wait for the backend to send the current game state
             localStorage.removeItem('chessFEN')
             localStorage.removeItem('capturedWhite')
             localStorage.removeItem('capturedBlack')
-            // Reset chess board to starting position
+            // Reset chess board to starting position (will be updated when game state arrives)
             chess.reset()
             setFen(chess.fen())
             setCapturedWhite([])
             setCapturedBlack([])
             
             console.log('👁️ [ChessGamePage] Spectator mode activated - roomId:', urlRoomId)
+            console.log('👁️ [ChessGamePage] Waiting for game state from backend...')
         }
         // PLAYER MODE: User is one of the players
         else {
@@ -598,10 +600,20 @@ const ChessGamePage = () => {
         // Listen for game state (for spectator catch-up when joining/rejoining)
         // Check URL params directly to handle race conditions
         socket.on('chessGameState', (data) => {
+            console.log('📨 [ChessGamePage] chessGameState event received:', data)
+            
             // Check if we're a spectator by looking at URL params (more reliable than state)
             const urlParams = new URLSearchParams(window.location.search)
             const isSpectatorMode = urlParams.get('spectator') === 'true'
             const urlRoomId = urlParams.get('roomId')
+            
+            console.log('📨 [ChessGamePage] Checking game state match:', {
+                dataRoomId: data?.roomId,
+                urlRoomId: urlRoomId,
+                stateRoomId: roomId,
+                isSpectatorMode: isSpectatorMode,
+                isSpectatorState: isSpectator
+            })
             
             // Apply state if: we're a spectator AND roomId matches (from URL or state)
             if (data && data.roomId && (data.roomId === urlRoomId || data.roomId === roomId)) {
@@ -609,7 +621,7 @@ const ChessGamePage = () => {
                 if (isSpectatorMode || isSpectator) {
                     console.log('📥 [ChessGamePage] Received game state for catch-up:', {
                         roomId: data.roomId,
-                        fen: data.fen,
+                        fen: data.fen?.substring(0, 50) + '...',
                         capturedWhite: data.capturedWhite?.length || 0,
                         capturedBlack: data.capturedBlack?.length || 0,
                         isSpectatorMode,
