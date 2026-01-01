@@ -3,7 +3,8 @@ import {
     getNotifications,
     markNotificationAsRead,
     markAllNotificationsAsRead,
-    getUnreadCount
+    getUnreadCount,
+    deleteNotification
 } from '../controller/notification.js'
 import protectRoute from '../middlware/protectRoute.js'
 
@@ -20,5 +21,8 @@ router.put('/:notificationId/read', protectRoute, markNotificationAsRead)
 
 // Mark all notifications as read
 router.put('/read-all', protectRoute, markAllNotificationsAsRead)
+
+// Delete a notification
+router.delete('/:notificationId', protectRoute, deleteNotification)
 
 export default router

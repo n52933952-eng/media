@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useContext } from 'react'
-import { Box, Container, Heading, Text, VStack, HStack, Avatar, Flex, Button, Spinner, useColorModeValue, Badge } from '@chakra-ui/react'
+import { Box, Container, Heading, Text, VStack, HStack, Avatar, Flex, Button, Spinner, useColorModeValue, Badge, IconButton } from '@chakra-ui/react'
 import { Link, useNavigate } from 'react-router-dom'
 import { formatDistanceToNow } from 'date-fns'
+import { FaTrash } from 'react-icons/fa'
 import ChessNotification from '../Components/ChessNotification'
 import { SocketContext } from '../context/SocketContext'
 import { UserContext } from '../context/UserContext'
@@ -64,38 +65,74 @@ const NotificationsPage = () => {
     }, [socket, setNotificationCount])
 
     // Mark notification as read when clicked
-    const handleNotificationClick = async (notification) => {
-        if (notification.read) return
+    const handleNotificationClick = async (notification, e) => {
+        // Don't navigate if delete button was clicked
+        if (e?.target?.closest('button')) {
+            return
+        }
+
+        // Mark as read if not already read
+        if (!notification.read) {
+            try {
+                const baseUrl = import.meta.env.PROD ? window.location.origin : "http://localhost:5000"
+                await fetch(`${baseUrl}/api/notification/${notification._id}/read`, {
+                    method: 'PUT',
+                    credentials: 'include'
+                })
+
+                // Update local state
+                setNotifications(prev => 
+                    prev.map(n => n._id === notification._id ? { ...n, read: true } : n)
+                )
+                
+                // Update count
+                if (setNotificationCount) {
+                    setNotificationCount(prev => Math.max(0, prev - 1))
+                }
+            } catch (error) {
+                console.error('Error marking notification as read:', error)
+            }
+        }
+
+        // Navigate based on notification type
+        if (notification.type === 'follow') {
+            navigate(`/${notification.from?.username || notification.from?.name || 'user'}`)
+        } else if (notification.type === 'comment' || notification.type === 'mention') {
+            if (notification.post && notification.post._id) {
+                // Get post owner from populated post
+                const postOwner = notification.post.postedBy?.username || notification.post.postedBy?.name || user?.username
+                navigate(`/${postOwner}/post/${notification.post._id}`)
+            }
+        }
+    }
+
+    // Delete notification
+    const handleDeleteNotification = async (notificationId, e) => {
+        e.stopPropagation() // Prevent triggering the click handler
 
         try {
             const baseUrl = import.meta.env.PROD ? window.location.origin : "http://localhost:5000"
-            await fetch(`${baseUrl}/api/notification/${notification._id}/read`, {
-                method: 'PUT',
+            const res = await fetch(`${baseUrl}/api/notification/${notificationId}`, {
+                method: 'DELETE',
                 credentials: 'include'
             })
 
-            // Update local state
-            setNotifications(prev => 
-                prev.map(n => n._id === notification._id ? { ...n, read: true } : n)
-            )
-            
-            // Update count
-            if (setNotificationCount) {
-                setNotificationCount(prev => Math.max(0, prev - 1))
-            }
-
-            // Navigate based on notification type
-            if (notification.type === 'follow') {
-                navigate(`/${notification.from.username}`)
-            } else if (notification.type === 'comment' || notification.type === 'mention') {
-                if (notification.post && notification.post._id) {
-                    // Try to get post owner from populated post or fetch it
-                    const postOwner = notification.post.postedBy?.username || user?.username
-                    navigate(`/${postOwner}/post/${notification.post._id}`)
-                }
+            if (res.ok) {
+                // Remove from local state
+                setNotifications(prev => {
+                    const deleted = prev.find(n => n._id === notificationId)
+                    const newNotifications = prev.filter(n => n._id !== notificationId)
+                    
+                    // Update count if notification was unread
+                    if (deleted && !deleted.read && setNotificationCount) {
+                        setNotificationCount(prev => Math.max(0, prev - 1))
+                    }
+                    
+                    return newNotifications
+                })
             }
         } catch (error) {
-            console.error('Error marking notification as read:', error)
+            console.error('Error deleting notification:', error)
         }
     }
 
@@ -189,8 +226,9 @@ const NotificationsPage = () => {
                                 borderLeft={notification.read ? 'none' : '4px solid'}
                                 borderColor={notification.read ? 'transparent' : 'blue.500'}
                                 cursor="pointer"
-                                onClick={() => handleNotificationClick(notification)}
+                                onClick={(e) => handleNotificationClick(notification, e)}
                                 _hover={{ bg: useColorModeValue('gray.50', '#252b3b') }}
+                                position="relative"
                             >
                                 <HStack spacing={3} align="start">
                                     <Avatar
@@ -217,6 +255,15 @@ const NotificationsPage = () => {
                                             {formatDistanceToNow(new Date(notification.createdAt), { addSuffix: true })}
                                         </Text>
                                     </Flex>
+                                    <IconButton
+                                        icon={<FaTrash />}
+                                        size="sm"
+                                        variant="ghost"
+                                        colorScheme="red"
+                                        aria-label="Delete notification"
+                                        onClick={(e) => handleDeleteNotification(notification._id, e)}
+                                        _hover={{ bg: useColorModeValue('red.50', 'red.900') }}
+                                    />
                                 </HStack>
                             </Box>
                         ))

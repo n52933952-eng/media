@@ -24,18 +24,67 @@ export const createNotification = async (userId, type, fromUserId, options = {})
         
         // Populate 'from' field for socket emission
         await notification.populate('from', 'username name profilePic')
+        if (notification.post) {
+            await notification.populate({
+                path: 'post',
+                select: 'text img postedBy',
+                populate: {
+                    path: 'postedBy',
+                    select: 'username'
+                }
+            })
+        }
         
         // Emit real-time notification to user if online
-        const io = getIO()
-        if (io) {
-            const userSocketMap = getUserSocketMap()
-            const userSocketData = userSocketMap[userId.toString()]
-            
-            if (userSocketData) {
-                io.to(userSocketData.socketId).emit('newNotification', notification)
-                console.log(`📬 [createNotification] Sent notification to user ${userId} (socket: ${userSocketData.socketId})`)
+        // Use setTimeout to ensure socket is fully ready
+        setTimeout(() => {
+            const io = getIO()
+            if (io) {
+                const userSocketMap = getUserSocketMap()
+                const userSocketData = userSocketMap[userId.toString()]
+                
+                if (userSocketData) {
+                    // Convert Mongoose document to plain object for socket emission
+                    let notificationObj
+                    if (notification.toObject) {
+                        notificationObj = notification.toObject()
+                    } else if (typeof notification.toJSON === 'function') {
+                        notificationObj = notification.toJSON()
+                    } else {
+                        notificationObj = JSON.parse(JSON.stringify(notification))
+                    }
+                    
+                    // Ensure all nested objects are properly serialized
+                    if (notificationObj.from && typeof notificationObj.from === 'object') {
+                        notificationObj.from = {
+                            _id: notificationObj.from._id?.toString() || notificationObj.from._id,
+                            username: notificationObj.from.username,
+                            name: notificationObj.from.name,
+                            profilePic: notificationObj.from.profilePic
+                        }
+                    }
+                    
+                    if (notificationObj.post && typeof notificationObj.post === 'object') {
+                        notificationObj.post = {
+                            _id: notificationObj.post._id?.toString() || notificationObj.post._id,
+                            text: notificationObj.post.text,
+                            img: notificationObj.post.img,
+                            postedBy: notificationObj.post.postedBy ? {
+                                username: notificationObj.post.postedBy.username || notificationObj.post.postedBy
+                            } : null
+                        }
+                    }
+                    
+                    io.to(userSocketData.socketId).emit('newNotification', notificationObj)
+                    console.log(`📬 [createNotification] Sent notification to user ${userId} (socket: ${userSocketData.socketId})`)
+                } else {
+                    console.log(`⚠️ [createNotification] User ${userId} is not online (not in socket map)`)
+                    console.log(`🔍 [createNotification] Available users in socket map:`, Object.keys(userSocketMap))
+                }
+            } else {
+                console.log(`⚠️ [createNotification] Socket.IO not initialized`)
             }
-        }
+        }, 200) // Small delay to ensure socket is ready
 
         return notification
     } catch (error) {
@@ -135,5 +184,29 @@ export const getUnreadCount = async (req, res) => {
     } catch (error) {
         console.error('Error fetching unread count:', error)
         res.status(500).json({ error: 'Failed to fetch unread count' })
+    }
+}
+
+// Delete a notification
+export const deleteNotification = async (req, res) => {
+    try {
+        const { notificationId } = req.params
+        const userId = req.user._id
+
+        const notification = await Notification.findOne({
+            _id: notificationId,
+            user: userId
+        })
+
+        if (!notification) {
+            return res.status(404).json({ error: 'Notification not found' })
+        }
+
+        await Notification.findByIdAndDelete(notificationId)
+
+        res.status(200).json({ message: 'Notification deleted successfully' })
+    } catch (error) {
+        console.error('Error deleting notification:', error)
+        res.status(500).json({ error: 'Failed to delete notification' })
     }
 }
