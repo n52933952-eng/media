@@ -692,7 +692,7 @@ const ChessGamePage = () => {
                         borderRadius="md"
                         boxShadow="md"
                         w={{ base: '100%', md: '200px' }}
-                        minH={{ base: 'auto', md: '400px' }}
+                        minH={{ base: 'auto', md: '350px' }}
                         maxW={{ base: '100%', md: '200px' }}
                         display="flex"
                         flexDirection="column"
@@ -786,7 +786,7 @@ const ChessGamePage = () => {
                         </Text>
                     )}
 
-                    <Box w="400px" h="400px">
+                    <Box w="350px" h="350px">
                         {/* Render board directly like madechess - no conditional rendering */}
                         {/* Madechess line 323-339: Just renders Chessboard with boardOrientation={storedOrientation} */}
                         {/* Key includes orientation to force remount when it changes - CRITICAL for react-chessboard */}
@@ -795,7 +795,7 @@ const ChessGamePage = () => {
                             position={fen}
                             onPieceDrop={onDrop}
                             boardOrientation={storedOrientation}
-                            boardWidth={400}
+                            boardWidth={350}
                             animationDuration={250}
                             customDarkSquareStyle={{
                                 backgroundColor: '#b58863'
