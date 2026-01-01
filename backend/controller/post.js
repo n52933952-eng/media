@@ -655,7 +655,23 @@ export const createChessGamePost = async (player1Id, player2Id, roomId) => {
             
             // Emit each post only to followers of that post's author
             for (const post of posts) {
-                const postAuthorId = post.postedBy.toString()
+                // Get the author ID - handle both ObjectId and populated object
+                // Since we populated postedBy above, it's an object with _id
+                let postAuthorId
+                if (post.postedBy && typeof post.postedBy === 'object') {
+                    // If postedBy is populated (object with _id)
+                    postAuthorId = post.postedBy._id ? post.postedBy._id.toString() : post.postedBy.toString()
+                } else {
+                    // If postedBy is just an ObjectId
+                    postAuthorId = post.postedBy.toString()
+                }
+                
+                if (!postAuthorId) {
+                    console.error(`❌ [createChessGamePost] Post ${post._id} has invalid postedBy field:`, post.postedBy)
+                    continue
+                }
+                
+                console.log(`🔍 [createChessGamePost] Post author ID: ${postAuthorId}`)
                 
                 // Get followers of this specific post's author
                 const postAuthor = await User.findById(postAuthorId).select('followers')
