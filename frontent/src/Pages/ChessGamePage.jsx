@@ -259,16 +259,20 @@ const ChessGamePage = () => {
             
             // Read orientation from localStorage (already set before navigation)
             const currentLocalStorageOrientation = localStorage.getItem("chessOrientation")
-            console.log('🎯 [ChessGamePage] handleAcceptChallenge - localStorage chessOrientation:', currentLocalStorageOrientation)
+            console.log('🎯 [ChessGamePage] handleAcceptChallenge - localStorage chessOrientation BEFORE check:', currentLocalStorageOrientation)
             console.log('🎯 [ChessGamePage] handleAcceptChallenge - socket data.yourColor:', data.yourColor)
+            console.log('🎯 [ChessGamePage] handleAcceptChallenge - Expected: accepter should be BLACK, challenger should be WHITE')
             
-            // Don't overwrite localStorage - it's already correct
+            // CRITICAL: Don't overwrite localStorage - it was set correctly before navigation
+            // If localStorage has a value, use it (it's correct)
+            // Only use socket data as backup if localStorage is empty
             if (currentLocalStorageOrientation) {
-                console.log('✅ [ChessGamePage] localStorage has orientation, using it:', currentLocalStorageOrientation)
+                console.log('✅ [ChessGamePage] localStorage has orientation, using it (NOT overwriting):', currentLocalStorageOrientation)
+                console.log('✅ [ChessGamePage] Socket data.yourColor will be IGNORED:', data.yourColor)
                 setOrientation(currentLocalStorageOrientation)
             } else {
-                // Backup only if localStorage is empty
-                console.log('⚠️ [ChessGamePage] localStorage is empty, using socket data as backup')
+                // Backup only if localStorage is empty (shouldn't happen for accepter)
+                console.log('⚠️ [ChessGamePage] localStorage is EMPTY! Using socket data as backup')
                 const yourColor = data.yourColor || 'white'
                 console.log('🎯 [ChessGamePage] Setting orientation from socket (backup):', yourColor)
                 setOrientation(yourColor)

@@ -107,12 +107,27 @@ const ChessNotification = () => {
         console.log('🎯 [ChessNotification] Before setting - localStorage chessOrientation:', localStorage.getItem("chessOrientation"))
         console.log('🎯 [ChessNotification] Before setting - localStorage gameLive:', localStorage.getItem("gameLive"))
         
+        // Clear any old values first (safety measure)
+        localStorage.removeItem("chessOrientation")
+        localStorage.removeItem("gameLive")
+        localStorage.removeItem("chessRoomId")
+        
+        // Set new values
         localStorage.setItem("chessOrientation", "black")
         localStorage.setItem("gameLive", "true")
         setOrientation("black")
         
-        console.log('🎯 [ChessNotification] After setting - localStorage chessOrientation:', localStorage.getItem("chessOrientation"))
-        console.log('🎯 [ChessNotification] After setting - localStorage gameLive:', localStorage.getItem("gameLive"))
+        // Verify it was set correctly
+        const verifyOrientation = localStorage.getItem("chessOrientation")
+        const verifyGameLive = localStorage.getItem("gameLive")
+        console.log('🎯 [ChessNotification] After setting - localStorage chessOrientation:', verifyOrientation)
+        console.log('🎯 [ChessNotification] After setting - localStorage gameLive:', verifyGameLive)
+        
+        if (verifyOrientation !== "black") {
+            console.error('❌ [ChessNotification] ERROR: localStorage was not set correctly! Expected "black", got:', verifyOrientation)
+        } else {
+            console.log('✅ [ChessNotification] localStorage verified correctly set to "black"')
+        }
 
         // Emit accept event
         const roomId = `chess_${challenge.from}_${user._id}_${Date.now()}`
