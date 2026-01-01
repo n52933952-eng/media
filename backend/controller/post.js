@@ -667,11 +667,17 @@ export const createChessGamePost = async (player1Id, player2Id, roomId) => {
                 
                 // Find online followers of this post's author
                 const onlineFollowers = []
+                console.log(`🔍 [createChessGamePost] Checking ${postAuthor.followers.length} followers of ${postAuthorId}`)
+                console.log(`🔍 [createChessGamePost] Available user IDs in socket map:`, Object.keys(userSocketMap))
+                
                 postAuthor.followers.forEach(followerId => {
                     const followerIdStr = followerId.toString()
-                    if (userSocketMap[followerIdStr]) {
-                        onlineFollowers.push(userSocketMap[followerIdStr].socketId)
-                        console.log(`✅ [createChessGamePost] Found online follower of ${postAuthorId}: ${followerIdStr}`)
+                    const followerData = userSocketMap[followerIdStr]
+                    if (followerData) {
+                        onlineFollowers.push(followerData.socketId)
+                        console.log(`✅ [createChessGamePost] Found online follower of ${postAuthorId}: ${followerIdStr} (socket: ${followerData.socketId})`)
+                    } else {
+                        console.log(`⚠️ [createChessGamePost] Follower ${followerIdStr} is not online (not in socket map)`)
                     }
                 })
                 

@@ -37,12 +37,17 @@ export const initializeSocket = (app) => {
         console.log("user connected", socket.id)
         
         const userId = socket.handshake.query.userId
+        console.log("🔌 [socket] User connecting with userId:", userId)
         // Store socket info as object like madechess
         if (userId && userId !== "undefined") {
             userSocketMap[userId] = {
                 socketId: socket.id,
                 onlineAt: Date.now(),
             }
+            console.log(`✅ [socket] User ${userId} added to socket map (socket: ${socket.id})`)
+            console.log(`📊 [socket] Total users in socket map: ${Object.keys(userSocketMap).length}`)
+        } else {
+            console.warn("⚠️ [socket] User connected without valid userId:", userId)
         }
 
         // Emit online users as array of objects like madechess
