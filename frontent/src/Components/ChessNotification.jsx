@@ -120,13 +120,14 @@ const ChessNotification = () => {
             roomId: roomId
         }
         
-        // Set new values (BEFORE navigating)
+        // Set new values FIRST (BEFORE emitting socket event)
+        // This prevents ChessChallenge from overwriting it with "white"
         localStorage.setItem("chessOrientation", "black")
         localStorage.setItem("gameLive", "true")
         localStorage.setItem("chessRoomId", roomId)
         setOrientation("black")
         
-        // Verify it was set correctly
+        // Verify it was set correctly BEFORE emitting
         const verifyOrientation = localStorage.getItem("chessOrientation")
         const verifyGameLive = localStorage.getItem("gameLive")
         const verifyRoomId = localStorage.getItem("chessRoomId")
@@ -146,10 +147,30 @@ const ChessNotification = () => {
             }
         }
 
+        // Now emit socket event (this will trigger ChessChallenge on challenger's side)
+        // But accepter's localStorage is already set to "black", so it won't be overwritten
         if (import.meta.env.DEV) {
             console.log('🎯 [ChessNotification] Emitting acceptChessChallenge:', acceptData)
         }
         socket.emit('acceptChessChallenge', acceptData)
+        
+        // Double-check after a tiny delay to catch any race conditions
+        setTimeout(() => {
+            const checkOrientation = localStorage.getItem("chessOrientation")
+            if (import.meta.env.DEV) {
+                console.log('🎯 [ChessNotification] Double-check after emit - localStorage chessOrientation:', checkOrientation)
+            }
+            if (checkOrientation !== "black") {
+                if (import.meta.env.DEV) {
+                    console.error('❌ [ChessNotification] RACE CONDITION DETECTED! Orientation was overwritten to:', checkOrientation)
+                }
+                // Fix it immediately
+                localStorage.setItem("chessOrientation", "black")
+                if (import.meta.env.DEV) {
+                    console.log('✅ [ChessNotification] Fixed race condition - set back to "black"')
+                }
+            }
+        }, 50)
 
         // Remove challenge from list
         setChallenges(prev => prev.filter(c => c.from !== challenge.from))

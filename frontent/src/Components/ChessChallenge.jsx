@@ -107,19 +107,32 @@ const ChessChallenge = () => {
             setBusyUsers(prev => prev.filter(id => id !== userId))
         })
 
-        // Listen for challenge acceptance (sender side)
+        // Listen for challenge acceptance (sender side - CHALLENGER ONLY)
+        // CRITICAL: Only process if we're the challenger
+        // The backend sends acceptChessChallenge to BOTH users, but only challenger should set "white"
+        // We know we're the challenger if the socket event's yourColor is "white"
         socket.on('acceptChessChallenge', (data) => {
-            // Challenger is always WHITE - set localStorage and state
-            localStorage.setItem("chessOrientation", "white")
-            localStorage.setItem("gameLive", "true")
-            // Store roomId in localStorage so ChessGamePage can read it
-            if (data.roomId) {
-                localStorage.setItem("chessRoomId", data.roomId)
+            // Only process if socket says we're white (meaning we're the challenger)
+            if (data.yourColor === 'white') {
+                if (import.meta.env.DEV) {
+                    console.log('♟️ [ChessChallenge] Received accept - we are CHALLENGER (yourColor=white), setting WHITE')
+                }
+                // Challenger is always WHITE - set localStorage and state
+                localStorage.setItem("chessOrientation", "white")
+                localStorage.setItem("gameLive", "true")
+                // Store roomId in localStorage so ChessGamePage can read it
+                if (data.roomId) {
+                    localStorage.setItem("chessRoomId", data.roomId)
+                }
+                setOrientation("white")
+                
+                showToast('Challenge Accepted! ♟️', 'Starting game...', 'success')
+                navigate(`/chess/${data.opponentId}`)
+            } else {
+                if (import.meta.env.DEV) {
+                    console.log('⚠️ [ChessChallenge] Received acceptChessChallenge but yourColor is not "white" (we are accepter), ignoring to prevent overwriting black')
+                }
             }
-            setOrientation("white")
-            
-            showToast('Challenge Accepted! ♟️', 'Starting game...', 'success')
-            navigate(`/chess/${data.opponentId}`)
         })
 
         return () => {
