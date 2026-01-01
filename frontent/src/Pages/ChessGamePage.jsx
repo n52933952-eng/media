@@ -683,7 +683,79 @@ const ChessGamePage = () => {
 
     return (
         <Box bg={bgColor} minH="100vh" py={8}>
-            <Flex justify="center" align="start" px={4} flexWrap="wrap" gap={4}>
+            <Flex justify="center" align="start" px={4} direction={{ base: 'column', md: 'row' }} gap={4}>
+                {/* Captured Pieces Panel - Left Side */}
+                {gameLive && (
+                    <Box
+                        bg={cardBg}
+                        p={4}
+                        borderRadius="md"
+                        boxShadow="md"
+                        w={{ base: '100%', md: '150px' }}
+                        minH={{ base: 'auto', md: '400px' }}
+                        display="flex"
+                        flexDirection="column"
+                        justifyContent="space-between"
+                        order={{ base: 2, md: 1 }}
+                    >
+                        {/* Top: Opponent */}
+                        <Box>
+                            <Flex justify="center" mb={2}>
+                                <Avatar
+                                    src={storedOrientation === 'white' ? opponent?.profilePic : user?.profilePic}
+                                    name={storedOrientation === 'white' ? opponent?.name : user?.name}
+                                    size="sm"
+                                />
+                            </Flex>
+                            <Text fontSize="xs" textAlign="center" color={textColor} mb={2} fontWeight="bold">
+                                {storedOrientation === 'white' ? opponent?.username : user?.username}
+                            </Text>
+                            <Text fontSize="xs" textAlign="center" color="gray.500" mb={2}>
+                                {storedOrientation === 'white' ? 'Black ⚫' : 'White ⚪'}
+                            </Text>
+                            <Flex wrap="wrap" justify="center" gap={1}>
+                                {(storedOrientation === 'white' ? capturedBlack : capturedWhite).length > 0 ? (
+                                    (storedOrientation === 'white' ? capturedBlack : capturedWhite).map((p, i) => (
+                                        <Text key={i} fontSize="2xl">
+                                            {getPieceUnicode(p, storedOrientation === 'white' ? 'black' : 'white')}
+                                        </Text>
+                                    ))
+                                ) : (
+                                    <Text fontSize="xs" color="gray.500">No pieces</Text>
+                                )}
+                            </Flex>
+                        </Box>
+
+                        {/* Bottom: You */}
+                        <Box>
+                            <Flex justify="center" mb={2}>
+                                <Avatar
+                                    src={storedOrientation === 'white' ? user?.profilePic : opponent?.profilePic}
+                                    name={storedOrientation === 'white' ? user?.name : opponent?.name}
+                                    size="sm"
+                                />
+                            </Flex>
+                            <Text fontSize="xs" textAlign="center" color={textColor} mb={2} fontWeight="bold">
+                                {storedOrientation === 'white' ? user?.username : opponent?.username} (You)
+                            </Text>
+                            <Text fontSize="xs" textAlign="center" color="gray.500" mb={2}>
+                                {storedOrientation === 'white' ? 'White ⚪' : 'Black ⚫'}
+                            </Text>
+                            <Flex wrap="wrap" justify="center" gap={1}>
+                                {(storedOrientation === 'white' ? capturedWhite : capturedBlack).length > 0 ? (
+                                    (storedOrientation === 'white' ? capturedWhite : capturedBlack).map((p, i) => (
+                                        <Text key={i} fontSize="2xl">
+                                            {getPieceUnicode(p, storedOrientation === 'white' ? 'white' : 'black')}
+                                        </Text>
+                                    ))
+                                ) : (
+                                    <Text fontSize="xs" color="gray.500">No pieces</Text>
+                                )}
+                            </Flex>
+                        </Box>
+                    </Box>
+                )}
+
                 {/* Chess Board - Center */}
                 <Box
                     bg={cardBg}
@@ -694,6 +766,7 @@ const ChessGamePage = () => {
                     borderColor="#a67c52"
                     position="relative"
                     w="fit-content"
+                    order={{ base: 1, md: 2 }}
                 >
                     <Heading size="lg" mb={2} color="#5a3e2b" textAlign="center">
                         ♟️ Chess Match
@@ -759,77 +832,6 @@ const ChessGamePage = () => {
                         </Flex>
                     )}
                 </Box>
-
-                {/* Captured Pieces Panel - Right Side */}
-                {gameLive && (
-                    <Box
-                        bg={cardBg}
-                        p={4}
-                        borderRadius="md"
-                        boxShadow="md"
-                        w="150px"
-                        h="400px"
-                        display="flex"
-                        flexDirection="column"
-                        justifyContent="space-between"
-                    >
-                        {/* Top: Opponent */}
-                        <Box>
-                            <Flex justify="center" mb={2}>
-                                <Avatar
-                                    src={storedOrientation === 'white' ? opponent?.profilePic : user?.profilePic}
-                                    name={storedOrientation === 'white' ? opponent?.name : user?.name}
-                                    size="sm"
-                                />
-                            </Flex>
-                            <Text fontSize="xs" textAlign="center" color={textColor} mb={2} fontWeight="bold">
-                                {storedOrientation === 'white' ? opponent?.username : user?.username}
-                            </Text>
-                            <Text fontSize="xs" textAlign="center" color="gray.500" mb={2}>
-                                {storedOrientation === 'white' ? 'Black ⚫' : 'White ⚪'}
-                            </Text>
-                            <Flex wrap="wrap" justify="center" gap={1}>
-                                {(storedOrientation === 'white' ? capturedBlack : capturedWhite).length > 0 ? (
-                                    (storedOrientation === 'white' ? capturedBlack : capturedWhite).map((p, i) => (
-                                        <Text key={i} fontSize="2xl">
-                                            {getPieceUnicode(p, storedOrientation === 'white' ? 'black' : 'white')}
-                                        </Text>
-                                    ))
-                                ) : (
-                                    <Text fontSize="xs" color="gray.500">No pieces</Text>
-                                )}
-                            </Flex>
-                        </Box>
-
-                        {/* Bottom: You */}
-                        <Box>
-                            <Flex justify="center" mb={2}>
-                                <Avatar
-                                    src={storedOrientation === 'white' ? user?.profilePic : opponent?.profilePic}
-                                    name={storedOrientation === 'white' ? user?.name : opponent?.name}
-                                    size="sm"
-                                />
-                            </Flex>
-                            <Text fontSize="xs" textAlign="center" color={textColor} mb={2} fontWeight="bold">
-                                {storedOrientation === 'white' ? user?.username : opponent?.username} (You)
-                            </Text>
-                            <Text fontSize="xs" textAlign="center" color="gray.500" mb={2}>
-                                {storedOrientation === 'white' ? 'White ⚪' : 'Black ⚫'}
-                            </Text>
-                            <Flex wrap="wrap" justify="center" gap={1}>
-                                {(storedOrientation === 'white' ? capturedWhite : capturedBlack).length > 0 ? (
-                                    (storedOrientation === 'white' ? capturedWhite : capturedBlack).map((p, i) => (
-                                        <Text key={i} fontSize="2xl">
-                                            {getPieceUnicode(p, storedOrientation === 'white' ? 'white' : 'black')}
-                                        </Text>
-                                    ))
-                                ) : (
-                                    <Text fontSize="xs" color="gray.500">No pieces</Text>
-                                )}
-                            </Flex>
-                        </Box>
-                    </Box>
-                )}
             </Flex>
         </Box>
     )
