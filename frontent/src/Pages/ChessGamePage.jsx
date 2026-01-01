@@ -63,20 +63,37 @@ const ChessGamePage = () => {
 
     // Initialize orientation, gameLive, and roomId from localStorage on mount
     useEffect(() => {
+        console.log('🎯 [ChessGamePage] Initialization useEffect - Mounting')
         const savedOrientation = localStorage.getItem("chessOrientation")
         const savedGameLive = localStorage.getItem("gameLive") === "true"
         const savedRoomId = localStorage.getItem("chessRoomId")
         
+        console.log('🎯 [ChessGamePage] Initialization - localStorage values:', {
+            savedOrientation,
+            savedGameLive,
+            savedRoomId,
+            currentOrientationState: orientation,
+            currentGameLiveState: gameLive,
+            currentRoomIdState: roomId
+        })
+        
         if (savedOrientation && (savedOrientation === 'white' || savedOrientation === 'black')) {
+            console.log('🎯 [ChessGamePage] Setting orientation from localStorage:', savedOrientation)
             setOrientation(savedOrientation)
+        } else {
+            console.log('⚠️ [ChessGamePage] No valid orientation in localStorage:', savedOrientation)
         }
         
         if (savedGameLive) {
+            console.log('🎯 [ChessGamePage] Setting gameLive from localStorage:', savedGameLive)
             setGameLive(true)
+        } else {
+            console.log('⚠️ [ChessGamePage] gameLive not set in localStorage')
         }
         
         // Set roomId from localStorage if available (for challenger who navigated)
         if (savedRoomId && !roomId) {
+            console.log('🎯 [ChessGamePage] Setting roomId from localStorage:', savedRoomId)
             setRoomId(savedRoomId)
         }
     }, [])
@@ -236,15 +253,24 @@ const ChessGamePage = () => {
         })
 
         const handleAcceptChallenge = (data) => {
+            console.log('🎯 [ChessGamePage] handleAcceptChallenge socket event received:', data)
+            console.log('🎯 [ChessGamePage] handleAcceptChallenge - Current user ID:', user._id)
+            console.log('🎯 [ChessGamePage] handleAcceptChallenge - Current orientation state:', orientation)
+            
             // Read orientation from localStorage (already set before navigation)
             const currentLocalStorageOrientation = localStorage.getItem("chessOrientation")
+            console.log('🎯 [ChessGamePage] handleAcceptChallenge - localStorage chessOrientation:', currentLocalStorageOrientation)
+            console.log('🎯 [ChessGamePage] handleAcceptChallenge - socket data.yourColor:', data.yourColor)
             
             // Don't overwrite localStorage - it's already correct
             if (currentLocalStorageOrientation) {
+                console.log('✅ [ChessGamePage] localStorage has orientation, using it:', currentLocalStorageOrientation)
                 setOrientation(currentLocalStorageOrientation)
             } else {
                 // Backup only if localStorage is empty
+                console.log('⚠️ [ChessGamePage] localStorage is empty, using socket data as backup')
                 const yourColor = data.yourColor || 'white'
+                console.log('🎯 [ChessGamePage] Setting orientation from socket (backup):', yourColor)
                 setOrientation(yourColor)
                 localStorage.setItem('chessOrientation', yourColor)
             }
@@ -254,10 +280,12 @@ const ChessGamePage = () => {
             setFen(chess.fen())
             
             // Set roomId - required for making moves
+            console.log('🎯 [ChessGamePage] Setting roomId:', data.roomId)
             setRoomId(data.roomId)
             // Store in localStorage for consistency
             if (data.roomId) {
                 localStorage.setItem('chessRoomId', data.roomId)
+                console.log('🎯 [ChessGamePage] Stored roomId in localStorage:', data.roomId)
             }
             
             // Start game
@@ -266,6 +294,8 @@ const ChessGamePage = () => {
             playSound('gameStart')
             
             const finalOrientation = currentLocalStorageOrientation || data.yourColor || 'white'
+            console.log('✅ [ChessGamePage] Game started! Final orientation:', finalOrientation)
+            console.log('✅ [ChessGamePage] After handleAcceptChallenge - localStorage chessOrientation:', localStorage.getItem("chessOrientation"))
             showToast('Game Started! ♟️', `You are playing as ${finalOrientation === 'white' ? 'White ⚪' : 'Black ⚫'}`, 'success')
         }
 

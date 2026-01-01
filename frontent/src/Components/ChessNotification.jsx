@@ -90,27 +90,45 @@ const ChessNotification = () => {
     }, [socket, showToast])
 
     const handleAccept = (challenge) => {
+        console.log('🎯 [ChessNotification] handleAccept called:', {
+            challengeFrom: challenge.from,
+            currentUserId: user._id,
+            socket: !!socket
+        })
+
         if (!socket) {
+            console.error('❌ [ChessNotification] No socket connection!')
             showToast('Error', 'Connection lost. Please refresh.', 'error')
             return
         }
 
         // Accepter is always BLACK - set localStorage and state
+        console.log('🎯 [ChessNotification] Setting orientation to BLACK (accepter)')
+        console.log('🎯 [ChessNotification] Before setting - localStorage chessOrientation:', localStorage.getItem("chessOrientation"))
+        console.log('🎯 [ChessNotification] Before setting - localStorage gameLive:', localStorage.getItem("gameLive"))
+        
         localStorage.setItem("chessOrientation", "black")
         localStorage.setItem("gameLive", "true")
         setOrientation("black")
+        
+        console.log('🎯 [ChessNotification] After setting - localStorage chessOrientation:', localStorage.getItem("chessOrientation"))
+        console.log('🎯 [ChessNotification] After setting - localStorage gameLive:', localStorage.getItem("gameLive"))
 
         // Emit accept event
-        socket.emit('acceptChessChallenge', {
+        const roomId = `chess_${challenge.from}_${user._id}_${Date.now()}`
+        const acceptData = {
             from: user._id,
             to: challenge.from,
-            roomId: `chess_${challenge.from}_${user._id}_${Date.now()}`
-        })
+            roomId: roomId
+        }
+        console.log('🎯 [ChessNotification] Emitting acceptChessChallenge:', acceptData)
+        socket.emit('acceptChessChallenge', acceptData)
 
         // Remove challenge from list
         setChallenges(prev => prev.filter(c => c.from !== challenge.from))
 
         // Navigate to chess page
+        console.log('🎯 [ChessNotification] Navigating to chess page:', `/chess/${challenge.from}`)
         navigate(`/chess/${challenge.from}`)
     }
 
