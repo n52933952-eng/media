@@ -682,7 +682,7 @@ const ChessGamePage = () => {
     }
 
     return (
-        <Box bg={bgColor} minH="100vh" py={8}>
+        <Box bg={bgColor} minH="100vh" py={4}>
             <Flex justify="center" align="start" px={4} direction={{ base: 'column', md: 'row' }} gap={4}>
                 {/* Captured Pieces Panel - Left Side */}
                 {gameLive && (
@@ -692,7 +692,7 @@ const ChessGamePage = () => {
                         borderRadius="md"
                         boxShadow="md"
                         w={{ base: '100%', md: '200px' }}
-                        minH={{ base: 'auto', md: '350px' }}
+                        minH={{ base: 'auto', md: '400px' }}
                         maxW={{ base: '100%', md: '200px' }}
                         display="flex"
                         flexDirection="column"
@@ -767,7 +767,7 @@ const ChessGamePage = () => {
                 {/* Chess Board - Center */}
                 <Box
                     bg={cardBg}
-                    p={6}
+                    p={4}
                     borderRadius="xl"
                     boxShadow="dark-lg"
                     border="6px solid"
@@ -776,17 +776,17 @@ const ChessGamePage = () => {
                     w="fit-content"
                     order={{ base: 1, md: 2 }}
                 >
-                    <Heading size="lg" mb={2} color="#5a3e2b" textAlign="center">
+                    <Heading size="md" mb={1} color="#5a3e2b" textAlign="center">
                         ♟️ Chess Match
                     </Heading>
                     {gameLive && storedOrientation && (
-                        <Text fontSize="sm" textAlign="center" mb={4} color="#5a3e2b" fontWeight="bold">
+                        <Text fontSize="xs" textAlign="center" mb={2} color="#5a3e2b" fontWeight="bold">
                             You are playing as: {storedOrientation === 'white' ? '⚪ White' : '⚫ Black'}
                             {chess.turn() === storedOrientation[0] ? ' (Your turn!)' : ' (Waiting...)'}
                         </Text>
                     )}
 
-                    <Box w="350px" h="350px">
+                    <Box w="400px" h="400px">
                         {/* Render board directly like madechess - no conditional rendering */}
                         {/* Madechess line 323-339: Just renders Chessboard with boardOrientation={storedOrientation} */}
                         {/* Key includes orientation to force remount when it changes - CRITICAL for react-chessboard */}
@@ -795,7 +795,7 @@ const ChessGamePage = () => {
                             position={fen}
                             onPieceDrop={onDrop}
                             boardOrientation={storedOrientation}
-                            boardWidth={350}
+                            boardWidth={400}
                             animationDuration={250}
                             customDarkSquareStyle={{
                                 backgroundColor: '#b58863'
