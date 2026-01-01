@@ -360,39 +360,50 @@ export const initializeSocket = (app) => {
                     chessRooms.set(roomId, [])
                 }
                 const room = chessRooms.get(roomId)
-                if (!room.includes(socket.id)) {
+                const wasAlreadyInRoom = room.includes(socket.id)
+                
+                if (!wasAlreadyInRoom) {
                     room.push(socket.id)
-                    socket.join(roomId) // Join Socket.IO room
+                }
+                
+                // Always join the Socket.IO room (even if already tracked)
+                socket.join(roomId)
+                
+                if (!wasAlreadyInRoom) {
                     console.log(`👁️ Spectator joined chess room: ${roomId} (socket: ${socket.id})`)
-                    
-                    // Send current game state to spectator for catch-up
-                    const gameState = chessGameStates.get(roomId)
-                    if (gameState) {
-                        console.log(`📤 Sending game state to spectator for catch-up:`, {
-                            roomId,
-                            fen: gameState.fen,
-                            capturedWhite: gameState.capturedWhite?.length || 0,
-                            capturedBlack: gameState.capturedBlack?.length || 0,
-                            lastUpdated: new Date(gameState.lastUpdated).toISOString()
-                        })
-                        // Use io.to() to ensure it reaches the spectator socket
-                        io.to(socket.id).emit("chessGameState", {
-                            roomId,
-                            fen: gameState.fen,
-                            capturedWhite: gameState.capturedWhite || [],
-                            capturedBlack: gameState.capturedBlack || []
-                        })
-                    } else {
-                        console.log(`⚠️ No game state found for room ${roomId} - game may not have started yet`)
-                        console.log(`🔍 Available game states:`, Array.from(chessGameStates.keys()))
-                        // Send empty state (starting position)
-                        io.to(socket.id).emit("chessGameState", {
-                            roomId,
-                            fen: "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
-                            capturedWhite: [],
-                            capturedBlack: []
-                        })
-                    }
+                } else {
+                    console.log(`👁️ Spectator rejoined chess room: ${roomId} (socket: ${socket.id})`)
+                }
+                
+                // ALWAYS send current game state when joining/rejoining (for catch-up)
+                // This ensures spectators see current position even if they navigate away and come back
+                const gameState = chessGameStates.get(roomId)
+                if (gameState) {
+                    console.log(`📤 Sending game state to spectator for catch-up:`, {
+                        roomId,
+                        fen: gameState.fen,
+                        capturedWhite: gameState.capturedWhite?.length || 0,
+                        capturedBlack: gameState.capturedBlack?.length || 0,
+                        lastUpdated: new Date(gameState.lastUpdated).toISOString(),
+                        isRejoin: wasAlreadyInRoom
+                    })
+                    // Use io.to() to ensure it reaches the spectator socket
+                    io.to(socket.id).emit("chessGameState", {
+                        roomId,
+                        fen: gameState.fen,
+                        capturedWhite: gameState.capturedWhite || [],
+                        capturedBlack: gameState.capturedBlack || []
+                    })
+                } else {
+                    console.log(`⚠️ No game state found for room ${roomId} - game may not have started yet`)
+                    console.log(`🔍 Available game states:`, Array.from(chessGameStates.keys()))
+                    // Send empty state (starting position)
+                    io.to(socket.id).emit("chessGameState", {
+                        roomId,
+                        fen: "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+                        capturedWhite: [],
+                        capturedBlack: []
+                    })
                 }
             }
         })

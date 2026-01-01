@@ -163,11 +163,14 @@ const ChessGamePage = () => {
     const pendingGameStateRef = useRef(null)
     
     // Separate useEffect to join socket room when spectator mode is active
-    // Also handles switching between multiple games
+    // Also handles switching between multiple games and rejoining
     useEffect(() => {
         if (isSpectator && roomId && socket) {
+            const isSwitchingGames = previousRoomIdRef.current && previousRoomIdRef.current !== roomId
+            const isRejoining = previousRoomIdRef.current === roomId
+            
             // If switching to a different game, clean up previous game state
-            if (previousRoomIdRef.current && previousRoomIdRef.current !== roomId) {
+            if (isSwitchingGames) {
                 console.log('👁️ [ChessGamePage] Spectator switching games:', {
                     from: previousRoomIdRef.current,
                     to: roomId
@@ -183,6 +186,17 @@ const ChessGamePage = () => {
                 setCapturedWhite([])
                 setCapturedBlack([])
                 // Clear pending state
+                pendingGameStateRef.current = null
+            } else if (isRejoining) {
+                console.log('👁️ [ChessGamePage] Spectator rejoining same game - requesting fresh game state')
+                // Clear old state and request fresh state from backend
+                localStorage.removeItem('chessFEN')
+                localStorage.removeItem('capturedWhite')
+                localStorage.removeItem('capturedBlack')
+                chess.reset()
+                setFen(chess.fen())
+                setCapturedWhite([])
+                setCapturedBlack([])
                 pendingGameStateRef.current = null
             }
             
@@ -214,6 +228,8 @@ const ChessGamePage = () => {
                 }
             }
             
+            // Always emit joinChessRoom to request game state (even if rejoining)
+            // Backend will always send current game state
             if (socket.connected) {
                 console.log('👁️ [ChessGamePage] Spectator joining room via useEffect (already connected):', roomId)
                 socket.emit('joinChessRoom', { roomId })
