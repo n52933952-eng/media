@@ -644,45 +644,74 @@ export const createChessGamePost = async (player1Id, player2Id, roomId) => {
         
         console.log('✅ [createChessGamePost] Created chess game posts:', posts.map(p => p._id))
         
-        // Emit new post to followers of both players
-        const io = getIO()
-        if (io) {
-            // Get followers of both players
-            const player1Data = await User.findById(player1Id).select('followers')
-            const player2Data = await User.findById(player2Id).select('followers')
-            
-            const allFollowers = new Set()
-            if (player1Data?.followers) {
-                player1Data.followers.forEach(id => allFollowers.add(id.toString()))
-            }
-            if (player2Data?.followers) {
-                player2Data.followers.forEach(id => allFollowers.add(id.toString()))
-            }
-            
-            // Emit to online followers
-            const userSocketMap = getUserSocketMap()
-            const onlineFollowers = []
-            allFollowers.forEach(followerId => {
-                if (userSocketMap[followerId]) {
-                    onlineFollowers.push(userSocketMap[followerId].socketId)
-                }
-            })
-            
-            // Emit both posts to followers
-            if (onlineFollowers.length > 0) {
-                posts.forEach(post => {
-                    io.to(onlineFollowers).emit("newPost", post)
-                })
-                console.log(`✅ [createChessGamePost] Emitted to ${onlineFollowers.length} online followers`)
-            }
-        }
-        
-        return posts
+        return posts // Return posts so we can track them
     } catch (error) {
-        console.error('❌ [createChessGamePost] Error:', error)
-        return null
+        console.error('Error creating chess game post:', error)
+        throw error
     }
 }
+
+// Function to delete chess game posts by roomId
+export const deleteChessGamePost = async (roomId) => {
+    try {
+        if (!roomId) {
+            console.log('⚠️ No roomId provided for chess post deletion')
+            return
+        }
+
+        // Find all posts with this roomId in chessGameData
+        const posts = await Post.find({
+            chessGameData: { $exists: true, $ne: null }
+        })
+
+        let deletedCount = 0
+        for (const post of posts) {
+            try {
+                if (post.chessGameData) {
+                    const chessData = JSON.parse(post.chessGameData)
+                    if (chessData.roomId === roomId) {
+                        // Get followers before deleting
+                        const postAuthorId = post.postedBy.toString()
+                        const author = await User.findById(postAuthorId).select('followers')
+                        
+                        // Delete the post
+                        await Post.findByIdAndDelete(post._id)
+                        deletedCount++
+                        console.log(`🗑️ Deleted chess game post: ${post._id} for roomId: ${roomId}`)
+
+                        // Emit post deleted to online followers
+                        const io = getIO()
+                        if (io && author && author.followers && author.followers.length > 0) {
+                            const userSocketMap = getUserSocketMap()
+                            const onlineFollowers = []
+                            
+                            author.followers.forEach(followerId => {
+                                const followerIdStr = followerId.toString()
+                                if (userSocketMap[followerIdStr]) {
+                                    onlineFollowers.push(userSocketMap[followerIdStr].socketId)
+                                }
+                            })
+                            
+                            if (onlineFollowers.length > 0) {
+                                io.to(onlineFollowers).emit("postDeleted", { postId: post._id })
+                            }
+                        }
+                    }
+                } catch (parseError) {
+                    console.error(`Error parsing chessGameData for post ${post._id}:`, parseError)
+                }
+            }
+
+            if (deletedCount > 0) {
+                console.log(`✅ Deleted ${deletedCount} chess game post(s) for roomId: ${roomId}`)
+            } else {
+                console.log(`⚠️ No chess game posts found for roomId: ${roomId}`)
+            }
+        } catch (error) {
+            console.error('Error deleting chess game post:', error)
+            throw error
+        }
+    }
 
 export const LikeComent = async(req,res) => {
 

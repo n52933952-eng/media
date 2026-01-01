@@ -4,7 +4,7 @@ import http from 'http'
 import Message from '../models/message.js'
 import Conversation from '../models/conversation.js'
 import User from '../models/user.js'
-import { createChessGamePost } from '../controller/post.js'
+import { createChessGamePost, deleteChessGamePost } from '../controller/post.js'
 
 // This will be set from index.js
 let io = null
@@ -15,6 +15,8 @@ const userSocketMap = {}
 const activeCalls = new Map()
 // Track chess game rooms: { roomId: [socketId1, socketId2, ...] }
 const chessRooms = new Map()
+// Track active chess games: { userId: roomId } - to know which game a user is in
+const activeChessGames = new Map()
 
 export const initializeSocket = (app) => {
     // Create HTTP server from Express app
@@ -264,6 +266,10 @@ export const initializeSocket = (app) => {
 
             // Create chess room and join both players to Socket.IO room
             if (roomId) {
+                // Track active games for both players
+                activeChessGames.set(to, roomId)
+                activeChessGames.set(from, roomId)
+                
                 // Join challenger to room
                 if (challengerSocketId) {
                     const challengerSocket = io.sockets.sockets.get(challengerSocketId)
@@ -395,6 +401,25 @@ export const initializeSocket = (app) => {
                 io.to(recipientSocketId).emit("chessGameCleanup")
             }
             
+            // Notify all spectators in the room that game ended
+            if (roomId) {
+                const room = io.sockets.adapter.rooms.get(roomId)
+                if (room && room.size > 0) {
+                    console.log(`👁️ Notifying ${room.size} spectators that game ended (resign)`)
+                    io.to(roomId).emit("chessGameEnded", { reason: 'resigned' })
+                }
+            }
+            
+            // Delete chess game post immediately
+            if (roomId) {
+                deleteChessGamePost(roomId).catch(err => {
+                    console.error('❌ Error deleting chess game post on resign:', err)
+                })
+                // Remove from active games tracking
+                activeChessGames.delete(userId)
+                activeChessGames.delete(to)
+            }
+            
             // Make users available again - TARGETED to specific users only (not all users)
             // This is critical for scalability - don't broadcast to 1M users!
             if (resignerSocketId) {
@@ -407,8 +432,8 @@ export const initializeSocket = (app) => {
             }
         })
 
-        socket.on("chessGameEnd", ({ roomId, player1, player2 }) => {
-            // The player who emitted this event is leaving
+        socket.on("chessGameEnd", ({ roomId, player1, player2, reason }) => {
+            // The player who emitted this event is leaving or game ended normally
             const currentUserId = socket.handshake.query.userId
             const player1SocketId = userSocketMap[player1]?.socketId
             const player2SocketId = userSocketMap[player2]?.socketId
@@ -418,15 +443,45 @@ export const initializeSocket = (app) => {
             const otherPlayerId = currentUserId === player1 ? player2 : player1
             const otherPlayerSocketId = currentUserId === player1 ? player2SocketId : player1SocketId
             
-            // Notify the other player that their opponent left (same as resign)
-            if (otherPlayerSocketId) {
-                io.to(otherPlayerSocketId).emit("opponentLeftGame")
-                io.to(otherPlayerSocketId).emit("chessGameCleanup")
+            // If game ended normally (checkmate/draw), notify both players
+            if (reason === 'game_over' || reason === 'checkmate' || reason === 'draw') {
+                if (player1SocketId) {
+                    io.to(player1SocketId).emit("chessGameCleanup")
+                }
+                if (player2SocketId) {
+                    io.to(player2SocketId).emit("chessGameCleanup")
+                }
+            } else {
+                // Player left - notify the other player
+                if (otherPlayerSocketId) {
+                    io.to(otherPlayerSocketId).emit("opponentLeftGame")
+                    io.to(otherPlayerSocketId).emit("chessGameCleanup")
+                }
+                
+                // Cleanup for the player who left
+                if (leavingPlayerSocketId) {
+                    io.to(leavingPlayerSocketId).emit("chessGameCleanup")
+                }
             }
             
-            // Cleanup for the player who left
-            if (leavingPlayerSocketId) {
-                io.to(leavingPlayerSocketId).emit("chessGameCleanup")
+            // Notify all spectators in the room that game ended
+            if (roomId) {
+                const room = io.sockets.adapter.rooms.get(roomId)
+                if (room && room.size > 0) {
+                    const endReason = reason || 'player_left'
+                    console.log(`👁️ Notifying ${room.size} spectators that game ended (${endReason})`)
+                    io.to(roomId).emit("chessGameEnded", { reason: endReason })
+                }
+            }
+            
+            // Delete chess game post immediately
+            if (roomId) {
+                deleteChessGamePost(roomId).catch(err => {
+                    console.error('❌ Error deleting chess game post on game end:', err)
+                })
+                // Remove from active games tracking
+                activeChessGames.delete(player1)
+                activeChessGames.delete(player2)
             }
             
             // Make users available again - TARGETED to specific users only (not all users)
@@ -478,6 +533,50 @@ export const initializeSocket = (app) => {
                 }
             }
 
+            // Check if disconnected user was in an active chess game
+            if (disconnectedUserId && activeChessGames.has(disconnectedUserId)) {
+                const gameRoomId = activeChessGames.get(disconnectedUserId)
+                console.log(`♟️ User ${disconnectedUserId} disconnected while in game: ${gameRoomId}`)
+                
+                // Find the other player
+                let otherPlayerId = null
+                for (const [userId, roomId] of activeChessGames.entries()) {
+                    if (roomId === gameRoomId && userId !== disconnectedUserId) {
+                        otherPlayerId = userId
+                        break
+                    }
+                }
+                
+                // Notify the other player
+                if (otherPlayerId) {
+                    const otherPlayerSocketId = userSocketMap[otherPlayerId]?.socketId
+                    if (otherPlayerSocketId) {
+                        io.to(otherPlayerSocketId).emit("opponentLeftGame")
+                        io.to(otherPlayerSocketId).emit("chessGameCleanup")
+                    }
+                }
+                
+                // Notify all spectators in the room
+                if (gameRoomId) {
+                    const room = io.sockets.adapter.rooms.get(gameRoomId)
+                    if (room && room.size > 0) {
+                        console.log(`👁️ Notifying ${room.size} spectators that game ended (player disconnected)`)
+                        io.to(gameRoomId).emit("chessGameEnded", { reason: 'player_disconnected' })
+                    }
+                }
+                
+                // Delete chess game post immediately
+                deleteChessGamePost(gameRoomId).catch(err => {
+                    console.error('❌ Error deleting chess game post on disconnect:', err)
+                })
+                
+                // Remove from active games tracking
+                activeChessGames.delete(disconnectedUserId)
+                if (otherPlayerId) {
+                    activeChessGames.delete(otherPlayerId)
+                }
+            }
+            
             // Remove socket from chess rooms
             for (const [roomId, room] of chessRooms.entries()) {
                 const index = room.indexOf(socket.id)

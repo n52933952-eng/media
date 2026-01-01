@@ -295,13 +295,15 @@ const ChessGamePage = () => {
                     
                     // Notify backend that game ended - marks both players as available
                     if (socket && roomId && opponentId && user?._id) {
+                        const gameEndReason = chess.isCheckmate() ? 'checkmate' : chess.isDraw() ? 'draw' : 'game_over'
                         socket.emit('chessGameEnd', {
                             roomId,
                             player1: user._id,
-                            player2: opponentId
+                            player2: opponentId,
+                            reason: gameEndReason
                         })
                         if (import.meta.env.DEV) {
-                            console.log('♟️ Game ended - notifying backend:', { roomId, player1: user._id, player2: opponentId })
+                            console.log('♟️ Game ended - notifying backend:', { roomId, player1: user._id, player2: opponentId, reason: gameEndReason })
                         }
                     }
                     
@@ -527,6 +529,29 @@ const ChessGamePage = () => {
             }, 3000)
         })
 
+        // Listen for game ended event (for spectators)
+        socket.on('chessGameEnded', (data) => {
+            const reason = data?.reason || 'ended'
+            let message = 'The game has ended.'
+            
+            if (reason === 'resigned') {
+                message = 'One of the players resigned. The game has ended.'
+            } else if (reason === 'player_left') {
+                message = 'One of the players left. The game has ended.'
+            } else if (reason === 'player_disconnected') {
+                message = 'One of the players disconnected. The game has ended.'
+            }
+            
+            showToast('Game Ended', message, 'info')
+            setOver(message)
+            setShowGameOverBox(true)
+            
+            // Navigate to home after a short delay
+            setTimeout(() => {
+                navigate('/home')
+            }, 3000)
+        })
+
         return () => {
             socket.off('connect')
             socket.off('disconnect')
@@ -536,8 +561,9 @@ const ChessGamePage = () => {
             socket.off('chessGameCanceled')
             socket.off('chessGameCleanup')
             socket.off('opponentLeftGame')
+            socket.off('chessGameEnded')
         }
-    }, [socket, navigate, showToast, makeAMove, user._id, chess])
+    }, [socket, navigate, showToast, makeAMove, user?._id, chess, isSpectator, roomId])
 
     function onDrop(sourceSquare, targetSquare) {
         // SPECTATORS CANNOT MAKE MOVES
