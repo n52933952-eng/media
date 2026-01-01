@@ -345,9 +345,12 @@ export const initializeSocket = (app) => {
             }
             
             // Create chess game post in feed for followers
-            createChessGamePost(to, from, roomId).catch(err => {
-                console.error('❌ [socket] Error creating chess game post:', err)
-            })
+            // Use setTimeout to ensure socket connections are fully established
+            setTimeout(() => {
+                createChessGamePost(to, from, roomId).catch(err => {
+                    console.error('❌ [socket] Error creating chess game post:', err)
+                })
+            }, 100) // Small delay to ensure all socket connections are registered
         })
 
         socket.on("declineChessChallenge", ({ from, to }) => {
