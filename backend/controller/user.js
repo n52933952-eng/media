@@ -131,6 +131,12 @@ export const FollowAndUnfollow = async(req,res) => {
            await User.findByIdAndUpdate(req.user._id,{$pull:{following:id}})
            await User.findByIdAndUpdate(id,{$pull:{followers:req.user._id}})
           
+           // Delete follow notification when user unfollows
+           const { deleteFollowNotification } = await import('./notification.js')
+           deleteFollowNotification(id, req.user._id).catch(err => {
+               console.error('Error deleting follow notification:', err)
+           })
+          
            const updatecurrent = await User.findById(req.user._id)
            const targetUser = await User.findById(id)
 

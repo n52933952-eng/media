@@ -146,6 +146,15 @@ export const SocketContextProvider = ({ children }) => {
       setNotificationCount(prev => prev + 1)
     });
 
+    // Listen for notification deletions (e.g., when user unfollows)
+    newSocket?.on('notificationDeleted', (data) => {
+      console.log('🗑️ Notification deleted via socket:', data)
+      // Decrease count if a follow notification was deleted
+      if (data.type === 'follow') {
+        setNotificationCount(prev => Math.max(0, prev - 1))
+      }
+    });
+
     // Listen for new messages globally - play sound for unread messages
     newSocket?.on('newMessage', (message) => {
       if (!message || !message.sender || !user?._id) return;
@@ -246,6 +255,7 @@ export const SocketContextProvider = ({ children }) => {
       newSocket?.off('unreadCountUpdate');
       newSocket?.off('newMessage');
       newSocket?.off('newNotification');
+      newSocket?.off('notificationDeleted');
       newSocket.close();
     };
   }, [user]);

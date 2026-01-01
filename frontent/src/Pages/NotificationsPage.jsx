@@ -57,10 +57,30 @@ const NotificationsPage = () => {
             }
         }
 
+        const handleNotificationDeleted = (data) => {
+            console.log('🗑️ Notification deleted via socket:', data)
+            // Remove follow notifications from the specified user
+            if (data.type === 'follow' && data.from) {
+                setNotifications(prev => {
+                    const filtered = prev.filter(n => 
+                        !(n.type === 'follow' && n.from?._id?.toString() === data.from && !n.read)
+                    )
+                    // Update count if we removed any unread notifications
+                    const removedCount = prev.length - filtered.length
+                    if (removedCount > 0 && setNotificationCount) {
+                        setNotificationCount(prevCount => Math.max(0, prevCount - removedCount))
+                    }
+                    return filtered
+                })
+            }
+        }
+
         socket.on('newNotification', handleNewNotification)
+        socket.on('notificationDeleted', handleNotificationDeleted)
 
         return () => {
             socket.off('newNotification', handleNewNotification)
+            socket.off('notificationDeleted', handleNotificationDeleted)
         }
     }, [socket, setNotificationCount])
 

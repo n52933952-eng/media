@@ -11,6 +11,7 @@ export const createNotification = async (userId, type, fromUserId, options = {})
             return null
         }
 
+        // Create new notification
         const notification = new Notification({
             user: userId,
             type: type, // 'follow', 'comment', or 'mention'
@@ -22,6 +23,7 @@ export const createNotification = async (userId, type, fromUserId, options = {})
 
         await notification.save()
         
+        // Populate notification (for both new and existing) before emitting
         // Populate 'from' field for socket emission
         await notification.populate('from', 'username name profilePic')
         if (notification.post) {
@@ -208,5 +210,42 @@ export const deleteNotification = async (req, res) => {
     } catch (error) {
         console.error('Error deleting notification:', error)
         res.status(500).json({ error: 'Failed to delete notification' })
+    }
+}
+
+// Delete follow notification when user unfollows
+export const deleteFollowNotification = async (userId, fromUserId) => {
+    try {
+        // Delete unread follow notifications from this user
+        const deleted = await Notification.deleteMany({
+            user: userId,
+            type: 'follow',
+            from: fromUserId,
+            read: false // Only delete unread notifications
+        })
+
+        if (deleted.deletedCount > 0) {
+            console.log(`🗑️ [deleteFollowNotification] Deleted ${deleted.deletedCount} follow notification(s) for user ${userId} from ${fromUserId}`)
+            
+            // Emit notification deletion to user if online
+            const io = getIO()
+            if (io) {
+                const userSocketMap = getUserSocketMap()
+                const userSocketData = userSocketMap[userId.toString()]
+                
+                if (userSocketData) {
+                    io.to(userSocketData.socketId).emit('notificationDeleted', {
+                        type: 'follow',
+                        from: fromUserId.toString()
+                    })
+                    console.log(`📤 [deleteFollowNotification] Emitted notificationDeleted to user ${userId}`)
+                }
+            }
+        }
+
+        return deleted
+    } catch (error) {
+        console.error('Error deleting follow notification:', error)
+        return null
     }
 }
