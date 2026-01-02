@@ -185,8 +185,11 @@ const NotificationsPage = () => {
             case 'mention':
                 return `${fromName} mentioned you in a comment`
             case 'like':
-                // Check if it's a comment like (has comment text) or post like
+                // Check if it's a comment/reply like (has comment text) or post like
                 if (notification.comment) {
+                    // Check if it's a reply (nested comment) or top-level comment
+                    // We can't directly check isReply from notification, but we can infer from context
+                    // For now, use "liked your comment" for both - the notification system works the same
                     return `${fromName} liked your comment`
                 } else {
                     return `${fromName} liked your post`

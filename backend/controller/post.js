@@ -959,15 +959,18 @@ export const LikeComent = async(req,res) => {
             // Like: add userId to likes array
             reply.likes.push(userId)  
             
-            // Create notification for comment owner when someone likes their comment
-            // Don't notify if user is liking their own comment
+            // Create notification for comment/reply owner when someone likes their comment or reply
+            // Don't notify if user is liking their own comment/reply
             if (reply.userId && reply.userId.toString() !== userId.toString()) {
                 const { createNotification } = await import('./notification.js')
+                // Check if it's a reply (has parentReplyId) or a top-level comment
+                const isReply = reply.parentReplyId !== null && reply.parentReplyId !== undefined
                 createNotification(reply.userId, 'like', userId, {
                     postId: post._id,
-                    commentText: reply.text
+                    commentText: reply.text,
+                    isReply: isReply // Pass flag to distinguish reply from comment
                 }).catch(err => {
-                    console.error('Error creating comment like notification:', err)
+                    console.error('Error creating comment/reply like notification:', err)
                 })
             }
         }
