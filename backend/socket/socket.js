@@ -840,4 +840,5 @@ export const getRecipientSockedId = (recipientId) => {
 // Export getters for io and server
 export const getIO = () => io
 export const getUserSocketMap = () => userSocketMap
+export { getAllUserSockets } // Export the async function
 export const getServer = () => server

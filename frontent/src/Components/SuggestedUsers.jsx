@@ -124,11 +124,17 @@ const SuggestedUsers = ({ onUserFollowed }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.following?.length]) // Refresh when following list changes
 
-  // Filter out already followed users AND system accounts (Football, AlJazeera)
+  // Filter out already followed users AND system accounts (Football, and all channel accounts)
   // Check both string and ObjectId comparison
+  const channelUsernames = [
+    'Football', 'AlJazeera', 'NBCNews', 'SkySportsNews', 'SkyNews', 
+    'Cartoonito', 'NatGeoKids', 'SciShowKids', 'JJAnimalTime', 
+    'KidsArabic', 'NatGeoAnimals', 'MBCDrama', 'Fox11'
+  ]
+  
   const filteredSuggestedUsers = suggestedUsers.filter(suggestedUser => {
-    // Filter out system accounts
-    if (suggestedUser.username === 'Football' || suggestedUser.username === 'AlJazeera') {
+    // Filter out system accounts and all channel accounts
+    if (channelUsernames.includes(suggestedUser.username)) {
       return false
     }
     
@@ -179,7 +185,13 @@ const SuggestedUsers = ({ onUserFollowed }) => {
           ) : searchResults.length > 0 ? (
             <Flex direction="column" gap={2}>
               {searchResults
-                .filter(searchUser => !user?.following?.includes(searchUser._id))
+                .filter(searchUser => {
+                  // Filter out channel accounts from search results too
+                  if (channelUsernames.includes(searchUser.username)) {
+                    return false
+                  }
+                  return !user?.following?.includes(searchUser._id)
+                })
                 .map((searchUser) => (
                   <SuggestedUser 
                     key={searchUser._id} 

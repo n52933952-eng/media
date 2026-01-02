@@ -47,14 +47,53 @@ const showToast = useShowToast()
     })
   }
   
-  let matchesData = []
-  if (isFootballPost) {
-    try {
-      matchesData = JSON.parse(post.footballData)
-    } catch (e) {
-      console.error('Failed to parse football data:', e)
+  const [matchesData, setMatchesData] = useState([])
+  
+  // Parse initial football data
+  useEffect(() => {
+    if (isFootballPost && post?.footballData) {
+      try {
+        const parsed = JSON.parse(post.footballData)
+        setMatchesData(parsed)
+      } catch (e) {
+        console.error('Failed to parse football data:', e)
+        setMatchesData([])
+      }
+    } else {
+      setMatchesData([])
     }
-  }
+  }, [post?.footballData, isFootballPost])
+  
+  // Listen for real-time football match updates
+  useEffect(() => {
+    if (!isFootballPost || !post?._id) return
+    
+    const handleMatchUpdate = (event) => {
+      const { postId, matchData, updatedAt } = event.detail
+      
+      // Only update if this is the correct post
+      if (postId === post._id.toString()) {
+        console.log('⚽ Updating match data for post:', postId)
+        setMatchesData(matchData)
+        
+        // Move post to top of feed
+        if (setFollowPost) {
+          setFollowPost(prev => {
+            const filtered = prev.filter(p => p._id !== post._id)
+            // Get updated post and move to top
+            const updatedPost = { ...post, footballData: JSON.stringify(matchData) }
+            return [updatedPost, ...filtered]
+          })
+        }
+      }
+    }
+    
+    window.addEventListener('footballMatchUpdate', handleMatchUpdate)
+    
+    return () => {
+      window.removeEventListener('footballMatchUpdate', handleMatchUpdate)
+    }
+  }, [isFootballPost, post?._id, post, setFollowPost])
   
   let chessGameData = null
   if (isChessPost) {
@@ -242,7 +281,15 @@ const showToast = useShowToast()
         <Text fontSize="sm" color="gray.light" textAlign="right" width={36}>
          {post?.createdAt && formatDistanceToNow(new Date(post.createdAt))} ago </Text>
         
-         {user?._id === postedBy?._id && <MdOutlineDeleteOutline onClick={handleDeletepost}/>}
+         {/* Show delete button if user is post author OR user added this channel post */}
+         {(user?._id === postedBy?._id || (post?.channelAddedBy && post.channelAddedBy === user?._id?.toString())) && (
+           <MdOutlineDeleteOutline 
+             onClick={handleDeletepost}
+             cursor="pointer"
+             color={useColorModeValue('gray.600', 'gray.400')}
+             _hover={{ color: 'red.500' }}
+           />
+         )}
      </Flex>
    
   

@@ -251,11 +251,19 @@ export const SocketContextProvider = ({ children }) => {
     };
     fetchInitialNotificationCount();
 
+    // Listen for football match updates
+    newSocket?.on('footballMatchUpdate', (data) => {
+      console.log('⚽ Football match update received:', data);
+      // Emit custom event that Post component can listen to
+      window.dispatchEvent(new CustomEvent('footballMatchUpdate', { detail: data }));
+    });
+
     return () => {
       newSocket?.off('unreadCountUpdate');
       newSocket?.off('newMessage');
       newSocket?.off('newNotification');
       newSocket?.off('notificationDeleted');
+      newSocket?.off('footballMatchUpdate');
       newSocket.close();
     };
   }, [user]);

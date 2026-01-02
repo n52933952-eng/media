@@ -29,6 +29,10 @@ const PostSchema = mongoose.Schema({
         type:String // JSON string of chess game data: {player1, player2, roomId, gameStatus}
     },
 
+    channelAddedBy:{
+        type:String // User ID who added this channel post (for tracking and deletion)
+    },
+
     likes:{
        type:[mongoose.Schema.Types.ObjectId],
        ref:"User",

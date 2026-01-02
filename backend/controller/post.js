@@ -192,7 +192,13 @@ export const deletePost = async(req,res) => {
         return res.status(400).json({message:"no post"})
       }
 
-      if(post.postedBy.toString() !== req.user._id.toString()){
+      // Allow deletion if:
+      // 1. User is the post author, OR
+      // 2. User added this channel post (channelAddedBy matches)
+      const isPostAuthor = post.postedBy.toString() === req.user._id.toString()
+      const isChannelPostAddedByUser = post.channelAddedBy && post.channelAddedBy === req.user._id.toString()
+      
+      if(!isPostAuthor && !isChannelPostAddedByUser){
         return res.status(400).json({message:"you cant delete other users post"})
       }
 
@@ -448,11 +454,22 @@ export const getFeedPost = async(req,res) => {
             return userPosts
         })
         
-        // Wait for all posts to be fetched
-        const allPostsArrays = await Promise.all(postsPromises)
+        // Also get channel posts that this user added
+        const channelPostsPromise = Post.find({ 
+            channelAddedBy: userId.toString() 
+        })
+            .populate("postedBy", "-password")
+            .sort({ createdAt: -1 })
+            .limit(20) // Get all channel posts user added
         
-        // Flatten array of arrays into single array
-        let allPosts = allPostsArrays.flat()
+        // Wait for all posts to be fetched
+        const [allPostsArrays, channelPosts] = await Promise.all([
+            Promise.all(postsPromises),
+            channelPostsPromise
+        ])
+        
+        // Flatten array of arrays into single array and add channel posts
+        let allPosts = [...allPostsArrays.flat(), ...channelPosts]
         
         // Sort all posts by createdAt (newest first)
         allPosts.sort((a, b) => {

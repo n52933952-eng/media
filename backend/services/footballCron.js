@@ -2,7 +2,7 @@ import cron from 'node-cron'
 import { Match } from '../models/football.js'
 import User from '../models/user.js'
 import Post from '../models/post.js'
-import { getIO, getUserSocketMap } from '../socket/socket.js'
+import { getIO, getAllUserSockets } from '../socket/socket.js'
 import mongoose from 'mongoose'
 import { autoPostTodayMatches } from '../controller/football.js'
 
@@ -318,15 +318,16 @@ const fetchAndUpdateLiveMatches = async () => {
                                 const followerIds = freshFootballAccount?.followers?.map(f => f.toString()) || []
                                 
                                 // Emit to all online followers
-                                const socketMap = getUserSocketMap()
+                                const socketMap = await getAllUserSockets()
                                 let onlineCount = 0
                                 
                                 followerIds.forEach(followerId => {
-                                    const socketId = socketMap.get(followerId)
-                                    if (socketId) {
-                                        io.to(socketId).emit('footballMatchUpdate', {
+                                    const socketData = socketMap[followerId]
+                                    if (socketData && socketData.socketId) {
+                                        io.to(socketData.socketId).emit('footballMatchUpdate', {
                                             postId: todayPost._id.toString(),
-                                            matchData: matchData
+                                            matchData: matchData,
+                                            updatedAt: new Date()
                                         })
                                         onlineCount++
                                     }

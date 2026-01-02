@@ -247,18 +247,15 @@ export const createLiveStreamPost = async (req, res) => {
         
         console.log(`📺 Creating ${channelConfig.name} ${streamConfig.language} live stream post...`)
         
-        // Check if post already exists today for this stream
-        const todayStart = new Date()
-        todayStart.setHours(0, 0, 0, 0)
-        
+        // Check if post already exists for this user and stream (persistent posts)
         const existingPost = await Post.findOne({
             postedBy: channelAccount._id,
             img: streamUrl,
-            createdAt: { $gte: todayStart }
+            'channelAddedBy': req.user._id.toString()
         })
         
         if (existingPost) {
-            console.log(`ℹ️ ${channelConfig.name} live stream post already exists today`)
+            console.log(`ℹ️ ${channelConfig.name} live stream post already exists for user`)
             
             // Still emit to current user's socket
             await existingPost.populate("postedBy", "username profilePic name")
@@ -281,17 +278,18 @@ export const createLiveStreamPost = async (req, res) => {
             })
         }
         
-        // Create live stream post
+        // Create live stream post (persistent - saved to database)
         const liveStreamPost = new Post({
             postedBy: channelAccount._id,
             text: streamConfig.text,
-            img: streamUrl
+            img: streamUrl,
+            channelAddedBy: req.user._id.toString() // Track which user added this channel post
         })
         
         await liveStreamPost.save()
         await liveStreamPost.populate("postedBy", "username profilePic name")
         
-        console.log(`✅ Created live stream post: ${liveStreamPost._id}`)
+        console.log(`✅ Created live stream post: ${liveStreamPost._id} for user: ${req.user._id}`)
         
         // Emit to current user via socket
         const io = getIO()

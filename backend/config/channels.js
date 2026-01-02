@@ -44,18 +44,18 @@ export const LIVE_CHANNELS = [
         ]
     },
     {
-        id: 'relive',
-        name: 'RELIVE',
-        username: 'RELIVE',
-        category: 'entertainment',
-        logo: 'https://via.placeholder.com/200x200/FF6B6B/FFFFFF?text=RELIVE',
-        bio: '🔴 Live entertainment stream',
+        id: 'sky-sports-news',
+        name: 'Sky Sports News',
+        username: 'SkySportsNews',
+        category: 'sports',
+        logo: 'https://via.placeholder.com/200x200/FF6B6B/FFFFFF?text=Sky+Sports',
+        bio: '🔴 Live sports news and updates',
         streams: [
             {
                 language: 'english',
                 name: 'Watch Live',
-                youtubeId: '0pF6fbTX9-c',
-                text: '🔴 RELIVE - Live Stream\n\nLive entertainment and content',
+                youtubeId: 'c2AvvZYe7Jg',
+                text: '🔴 Sky Sports News - Live Stream\n\nLive sports news, scores, and updates',
                 buttonColor: 'red'
             }
         ]
@@ -78,18 +78,18 @@ export const LIVE_CHANNELS = [
         ]
     },
     {
-        id: 'mst3k',
-        name: 'MST3K FOREVER-a-thon',
-        username: 'MST3K',
-        category: 'entertainment',
-        logo: 'https://upload.wikimedia.org/wikipedia/en/thumb/8/8a/Mystery_Science_Theater_3000_logo.svg/200px-Mystery_Science_Theater_3000_logo.svg.png',
-        bio: '🔴 Mystery Science Theater 3000 marathon',
+        id: 'cartoonito',
+        name: 'Cartoonito',
+        username: 'Cartoonito',
+        category: 'kids',
+        logo: 'https://via.placeholder.com/200x200/9B59B6/FFFFFF?text=Cartoonito',
+        bio: '🔴 Kids cartoons and shows',
         streams: [
             {
                 language: 'english',
                 name: 'Watch Live',
-                youtubeId: 'B7qOZraAIlw',
-                text: '🔴 MST3K FOREVER-a-thon - Live Stream\n\nMystery Science Theater 3000 marathon',
+                youtubeId: 'XfZetbS9084',
+                text: '🔴 Cartoonito - Live Stream\n\nKids cartoons and entertainment',
                 buttonColor: 'purple'
             }
         ]
