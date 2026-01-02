@@ -48,7 +48,7 @@ export const LIVE_CHANNELS = [
         name: 'RELIVE',
         username: 'RELIVE',
         category: 'entertainment',
-        logo: 'https://yt3.ggpht.com/ytc/AIdro_nqJq0qJq0qJq0qJq0qJq0qJq0qJq0qJq0qJq0qJq0qJq0q=s176-c-k-c0x00ffffff-no-rj',
+        logo: 'https://via.placeholder.com/200x200/FF6B6B/FFFFFF?text=RELIVE',
         bio: '🔴 Live entertainment stream',
         streams: [
             {
@@ -116,7 +116,7 @@ export const LIVE_CHANNELS = [
         name: 'SciShow Kids',
         username: 'SciShowKids',
         category: 'kids',
-        logo: 'https://yt3.ggpht.com/ytc/AIdro_nqJq0qJq0qJq0qJq0qJq0qJq0qJq0qJq0qJq0qJq0qJq0q=s176-c-k-c0x00ffffff-no-rj',
+        logo: 'https://via.placeholder.com/200x200/3498DB/FFFFFF?text=SciShow',
         bio: '🔴 Science education for kids',
         streams: [
             {
@@ -133,7 +133,7 @@ export const LIVE_CHANNELS = [
         name: "JJ's Animal Time LIVE!",
         username: 'JJAnimalTime',
         category: 'kids',
-        logo: 'https://yt3.ggpht.com/ytc/AIdro_nqJq0qJq0qJq0qJq0qJq0qJq0qJq0qJq0qJq0qJq0qJq0q=s176-c-k-c0x00ffffff-no-rj',
+        logo: 'https://via.placeholder.com/200x200/FFA500/FFFFFF?text=JJ+Animals',
         bio: '🔴 Live animal content for kids',
         streams: [
             {
@@ -150,7 +150,7 @@ export const LIVE_CHANNELS = [
         name: 'Kids Arabic',
         username: 'KidsArabic',
         category: 'kids',
-        logo: 'https://yt3.ggpht.com/ytc/AIdro_nqJq0qJq0qJq0qJq0qJq0qJq0qJq0qJq0qJq0qJq0qJq0q=s176-c-k-c0x00ffffff-no-rj',
+        logo: 'https://via.placeholder.com/200x200/16A085/FFFFFF?text=Kids+Arabic',
         bio: '🔴 Arabic content for kids',
         streams: [
             {
@@ -184,7 +184,7 @@ export const LIVE_CHANNELS = [
         name: 'MBC Drama',
         username: 'MBCDrama',
         category: 'entertainment',
-        logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/4/4a/MBC_Drama_Logo.svg/200px-MBC_Drama_Logo.svg.png',
+        logo: 'https://upload.wikimedia.org/wikipedia/commons/4/4a/MBC_Drama_Logo.svg',
         bio: '🔴 Arabic drama series 24/7',
         streams: [
             {
@@ -201,7 +201,7 @@ export const LIVE_CHANNELS = [
         name: 'Fox 11',
         username: 'Fox11',
         category: 'news',
-        logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/7/7a/Fox_News_Channel_logo.svg/200px-Fox_News_Channel_logo.svg.png',
+        logo: 'https://upload.wikimedia.org/wikipedia/en/thumb/6/6a/KTTV_2020.svg/200px-KTTV_2020.svg.png',
         bio: '🔴 Live news from Los Angeles',
         streams: [
             {
