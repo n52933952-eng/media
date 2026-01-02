@@ -795,32 +795,31 @@ export const autoPostTodayMatches = async () => {
         
         console.log('✅ [autoPostTodayMatches] Creating new post for today...')
         
-        // Get today's matches: LIVE + Upcoming (from start of today to +24 hours)
+        // Get today's matches: ONLY LIVE matches (currently happening)
         const now = new Date()
         const later = new Date(now.getTime() + (24 * 60 * 60 * 1000)) // 24 hours from now
         
-        console.log('⚽ [autoPostTodayMatches] Searching for matches from:', todayStart, 'to:', later)
+        console.log('⚽ [autoPostTodayMatches] Searching for LIVE matches from:', todayStart, 'to:', later)
         
-        // Search for BOTH live and upcoming matches
+        // Search for ONLY live matches (currently happening)
         const matches = await Match.find({
             'fixture.date': { $gte: todayStart, $lte: later },
             'fixture.status.short': { 
                 $in: [
-                    'NS', 'SCHEDULED', 'TIMED',  // Upcoming
-                    '1H', '2H', 'HT', 'LIVE', 'ET', 'P', 'BT'  // Live
+                    '1H', '2H', 'HT', 'LIVE', 'ET', 'P', 'BT'  // Only LIVE matches
                 ] 
             }
         })
-        .sort({ 'fixture.status.short': -1, 'fixture.date': 1 }) // Live first, then by date
-        .limit(5)
+        .sort({ 'fixture.status.short': -1, 'fixture.date': 1 }) // Live matches sorted by status
+        .limit(10) // Show more live matches if available
         
         console.log('⚽ [autoPostTodayMatches] Found matches:', matches.length)
         
         if (matches.length === 0) {
-            // No matches found - create a post saying so
+            // No live matches found - create a post saying so
             const noMatchesPost = new Post({
                 postedBy: footballAccount._id,
-                text: `⚽ Football Live\n\nNo live or upcoming matches in the next 24 hours.\n\n📅 Check back later for live updates!`
+                text: `⚽ Football Live\n\nNo live matches happening right now.\n\n📅 Check back later for live updates!`
             })
             
             await noMatchesPost.save()
@@ -899,7 +898,7 @@ export const autoPostTodayMatches = async () => {
         // Create the post with JSON data
         const newPost = new Post({
             postedBy: footballAccount._id,
-            text: `⚽ Today's Top Matches ⚽`,
+            text: `⚽ Today's Live Matches ⚽\n\nMatches happening right now with live score updates!`,
             footballData: JSON.stringify(matchData)
         })
         
