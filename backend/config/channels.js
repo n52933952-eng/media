@@ -173,7 +173,7 @@ export const LIVE_CHANNELS = [
             {
                 language: 'english',
                 name: 'Watch Live',
-                youtubeId: 'Jqy2q5HTwnI',
+                youtubeId: 'THooYCltViI',
                 text: '🔴 Nat Geo Animals - Live Stream\n\nAmazing animal documentaries and content',
                 buttonColor: 'green'
             }

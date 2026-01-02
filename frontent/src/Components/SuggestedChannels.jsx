@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useContext } from 'react'
-import { Box, Flex, Text, Avatar, Button, VStack, Spinner, useColorModeValue } from '@chakra-ui/react'
+import { Box, Flex, Text, Avatar, Button, VStack, Spinner, useColorModeValue, Grid, GridItem, SimpleGrid } from '@chakra-ui/react'
 import { Link as RouterLink } from 'react-router-dom'
 import { UserContext } from '../context/UserContext'
 import useShowToast from '../hooks/useShowToast'
@@ -12,6 +12,7 @@ const SuggestedChannels = ({ onUserFollowed }) => {
     const [followLoading, setFollowLoading] = useState(false)
     const [isFollowing, setIsFollowing] = useState(false)
     const [streamLoading, setStreamLoading] = useState({})
+    const [expandedChannel, setExpandedChannel] = useState(null) // Track which channel is expanded
     
     const showToast = useShowToast()
     
@@ -261,82 +262,129 @@ const SuggestedChannels = ({ onUserFollowed }) => {
             {/* Live Stream Channels */}
             {!loading && channels.length > 0 && (
                 <VStack spacing={4} align="stretch" mt={4}>
-                    <Text fontSize="sm" fontWeight="bold" color={textColor} mb={2}>
-                        🔴 Live Channels
-                    </Text>
+                    <Flex align="center" gap={2} mb={2}>
+                        <Text fontSize="sm" fontWeight="bold" color={textColor}>
+                            🔴 Live Channels
+                        </Text>
+                    </Flex>
                     
-                    {channels.map((channel) => (
+                    {/* Compact Icon Grid */}
+                    <SimpleGrid columns={3} spacing={2} mb={3}>
+                        {channels.map((channel) => (
+                            <Box
+                                key={channel.id}
+                                as="button"
+                                onClick={() => setExpandedChannel(expandedChannel === channel.id ? null : channel.id)}
+                                bg={expandedChannel === channel.id ? hoverBg : cardBg}
+                                borderRadius="md"
+                                p={2}
+                                border="1px solid"
+                                borderColor={expandedChannel === channel.id ? 'blue.400' : borderColor}
+                                _hover={{ bg: hoverBg, borderColor: 'blue.300' }}
+                                transition="all 0.2s"
+                                cursor="pointer"
+                                position="relative"
+                            >
+                                <VStack spacing={1}>
+                                    <Avatar 
+                                        src={channel.logo}
+                                        size="sm"
+                                        bg="white"
+                                        p={channel.id === 'aljazeera' ? 0.5 : 0}
+                                    />
+                                    <Text fontSize="2xs" color={textColor} textAlign="center" noOfLines={1}>
+                                        {channel.name.length > 10 ? channel.name.substring(0, 8) + '...' : channel.name}
+                                    </Text>
+                                </VStack>
+                            </Box>
+                        ))}
+                    </SimpleGrid>
+                    
+                    {/* Expanded Channel Details */}
+                    {expandedChannel && (
                         <Box
-                            key={channel.id}
                             bg={cardBg}
                             borderRadius="md"
                             p={3}
                             border="1px solid"
                             borderColor={borderColor}
+                            animation="slideDown 0.2s ease-out"
                         >
-                            {/* Channel Header */}
-                            <Flex align="center" gap={3} mb={3}>
-                                <Avatar 
-                                    src={channel.logo}
-                                    size="md"
-                                    bg="white"
-                                    p={channel.id === 'aljazeera' ? 1 : 0}
-                                />
-                                <VStack align="start" spacing={0} flex={1}>
-                                    <Flex align="center" gap={1}>
-                                        <Text fontSize="sm" fontWeight="semibold" color={textColor}>
-                                            {channel.name}
-                                        </Text>
-                                        <Text fontSize="lg">
-                                            {channel.category === 'news' ? '📰' : 
-                                             channel.category === 'kids' ? '🧒' : '🎬'}
-                                        </Text>
-                                    </Flex>
-                                    <Text fontSize="xs" color={secondaryTextColor} noOfLines={1}>
-                                        {channel.bio}
-                                    </Text>
-                                </VStack>
-                            </Flex>
-                            
-                            {/* Stream Buttons */}
-                            <VStack spacing={2} align="stretch">
-                                {channel.streams.map((stream, index) => {
-                                    const loadingKey = `${channel.id}-${index}`
-                                    const isLoading = streamLoading[loadingKey]
-                                    
-                                    // Map button colors
-                                    const colorMap = {
-                                        'red': 'red',
-                                        'blue': 'blue',
-                                        'purple': 'purple',
-                                        'green': 'green',
-                                        'orange': 'orange',
-                                        'teal': 'teal'
-                                    }
-                                    
-                                    return (
-                                        <Button
-                                            key={index}
-                                            onClick={() => handleStreamClick(channel.id, index)}
-                                            isLoading={isLoading}
-                                            colorScheme={colorMap[stream.buttonColor] || 'blue'}
-                                            size="sm"
-                                            w="full"
-                                            leftIcon={<Text>🔴</Text>}
-                                        >
-                                            Watch Live {stream.name && `(${stream.name})`}
-                                        </Button>
-                                    )
-                                })}
+                            {(() => {
+                                const channel = channels.find(c => c.id === expandedChannel)
+                                if (!channel) return null
                                 
-                                {channel.streams.length > 1 && (
-                                    <Text fontSize="xs" color={secondaryTextColor} textAlign="center" mt={1}>
-                                        Choose your language
-                                    </Text>
-                                )}
-                            </VStack>
+                                return (
+                                    <>
+                                        {/* Channel Header */}
+                                        <Flex align="center" gap={3} mb={3}>
+                                            <Avatar 
+                                                src={channel.logo}
+                                                size="md"
+                                                bg="white"
+                                                p={channel.id === 'aljazeera' ? 1 : 0}
+                                            />
+                                            <VStack align="start" spacing={0} flex={1}>
+                                                <Flex align="center" gap={1}>
+                                                    <Text fontSize="sm" fontWeight="semibold" color={textColor}>
+                                                        {channel.name}
+                                                    </Text>
+                                                    <Text fontSize="lg">
+                                                        {channel.category === 'news' ? '📰' : 
+                                                         channel.category === 'kids' ? '🧒' : '🎬'}
+                                                    </Text>
+                                                </Flex>
+                                                <Flex align="center" gap={1} mt={1}>
+                                                    <Box w="8px" h="8px" bg="red.500" borderRadius="full" />
+                                                    <Text fontSize="xs" color={secondaryTextColor} noOfLines={1}>
+                                                        {channel.bio}
+                                                    </Text>
+                                                </Flex>
+                                            </VStack>
+                                        </Flex>
+                                        
+                                        {/* Stream Buttons */}
+                                        <VStack spacing={2} align="stretch">
+                                            {channel.streams.map((stream, index) => {
+                                                const loadingKey = `${channel.id}-${index}`
+                                                const isLoading = streamLoading[loadingKey]
+                                                
+                                                // Map button colors
+                                                const colorMap = {
+                                                    'red': 'red',
+                                                    'blue': 'blue',
+                                                    'purple': 'purple',
+                                                    'green': 'green',
+                                                    'orange': 'orange',
+                                                    'teal': 'teal'
+                                                }
+                                                
+                                                return (
+                                                    <Button
+                                                        key={index}
+                                                        onClick={() => handleStreamClick(channel.id, index)}
+                                                        isLoading={isLoading}
+                                                        colorScheme={colorMap[stream.buttonColor] || 'blue'}
+                                                        size="sm"
+                                                        w="full"
+                                                        leftIcon={<Box w="8px" h="8px" bg="red.500" borderRadius="full" />}
+                                                    >
+                                                        Watch Live {stream.name && `(${stream.name})`}
+                                                    </Button>
+                                                )
+                                            })}
+                                            
+                                            {channel.streams.length > 1 && (
+                                                <Text fontSize="xs" color={secondaryTextColor} textAlign="center" mt={1}>
+                                                    Choose your language
+                                                </Text>
+                                            )}
+                                        </VStack>
+                                    </>
+                                )
+                            })()}
                         </Box>
-                    ))}
+                    )}
                 </VStack>
             )}
         </Box>
