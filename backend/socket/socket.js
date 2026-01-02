@@ -5,7 +5,7 @@ import Message from '../models/message.js'
 import Conversation from '../models/conversation.js'
 import User from '../models/user.js'
 import { createChessGamePost, deleteChessGamePost } from '../controller/post.js'
-import { getRedis, redisSet, redisGet, redisDel, isRedisAvailable } from '../services/redis.js'
+import { getRedis, redisSet, redisGet, redisDel, isRedisAvailable, ensureRedis } from '../services/redis.js'
 
 // This will be set from index.js
 let io = null
