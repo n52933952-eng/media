@@ -13,7 +13,7 @@ import NotificationRoute from './routes/notification.js'
 import { initializeSocket } from './socket/socket.js'
 import { initializeFootballCron } from './services/footballCron.js'
 import { initializeChessPostCleanup } from './services/chessPostCleanup.js'
-import { initRedis } from './services/redis.js'
+import { initRedis, isRedisAvailable } from './services/redis.js'
 import path from 'path'
 import { fileURLToPath } from 'url'
 
@@ -72,7 +72,31 @@ mongoose.connect(process.env.MONGO, {
     process.exit(1) // Exit if database connection fails
 })
 
-
+// Health check endpoint for load balancer
+app.get('/health', async (req, res) => {
+    try {
+        const health = {
+            status: 'ok',
+            timestamp: new Date().toISOString(),
+            uptime: process.uptime(),
+            checks: {
+                database: mongoose.connection.readyState === 1 ? 'ok' : 'error',
+                redis: isRedisAvailable() ? 'ok' : 'error'
+            }
+        }
+        
+        const allHealthy = Object.values(health.checks).every(c => c === 'ok')
+        const statusCode = allHealthy ? 200 : 503
+        
+        res.status(statusCode).json(health)
+    } catch (error) {
+        res.status(503).json({
+            status: 'error',
+            timestamp: new Date().toISOString(),
+            error: error.message
+        })
+    }
+})
 
 app.use("/api/user",UserRoute)
 app.use("/api/post",PostRoute)
