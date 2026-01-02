@@ -1,4 +1,5 @@
 import User from '../models/user.js'
+import Post from '../models/post.js'
 import bcryptjs from 'bcryptjs' 
 import GenerateToken from '../utils/GenerateToken.js'
 import mongoose from 'mongoose'
@@ -137,6 +138,9 @@ export const FollowAndUnfollow = async(req,res) => {
                console.error('Error deleting follow notification:', err)
            })
           
+           // Note: Football posts remain in database (global) but won't show in feed
+           // because feed filters by following list. This ensures other followers still see posts.
+          
            const updatecurrent = await User.findById(req.user._id)
            const targetUser = await User.findById(id)
 
@@ -146,6 +150,9 @@ export const FollowAndUnfollow = async(req,res) => {
             await User.findByIdAndUpdate(req.user._id,{$push:{following:id}})
             await User.findByIdAndUpdate(id,{$push:{followers:req.user._id}})
            
+            // Note: Football posts are global and remain in database.
+            // Feed already filters by following list, so user will see Football posts in feed.
+            // Frontend triggers post creation when following Football (in SuggestedChannels.jsx)
           
             const updatecurrent = await User.findById(req.user._id)
             const targetUser = await User.findById(id)

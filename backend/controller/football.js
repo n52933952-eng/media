@@ -768,6 +768,19 @@ export const autoPostTodayMatches = async () => {
         const todayEnd = new Date(todayStart)
         todayEnd.setHours(23, 59, 59, 999)
         
+        // Delete ALL old football posts (older than today) to keep feed clean
+        // This ensures users always see fresh matches, not yesterday's matches
+        const deletedOldPosts = await Post.deleteMany({
+            postedBy: footballAccount._id,
+            footballData: { $exists: true, $ne: null },
+            createdAt: { $lt: todayStart }
+        })
+        
+        if (deletedOldPosts.deletedCount > 0) {
+            console.log(`🗑️ [autoPostTodayMatches] Deleted ${deletedOldPosts.deletedCount} old football posts from previous days`)
+        }
+        
+        // Check if post exists for today
         const existingPost = await Post.findOne({
             postedBy: footballAccount._id,
             footballData: { $exists: true, $ne: null },
@@ -777,20 +790,35 @@ export const autoPostTodayMatches = async () => {
             }
         })
         
+        // If post exists for today, check if it needs refresh
+        // Refresh if: no live matches OR post is older than 2 hours (to get latest matches)
         if (existingPost) {
-            console.log('✅ [autoPostTodayMatches] Post already exists for today, skipping...')
-            return { success: true, message: 'Post already exists for today', postId: existingPost._id }
-        }
-        
-        // Delete old football posts (older than today) to keep feed clean
-        const deletedOldPosts = await Post.deleteMany({
-            postedBy: footballAccount._id,
-            footballData: { $exists: true, $ne: null },
-            createdAt: { $lt: todayStart }
-        })
-        
-        if (deletedOldPosts.deletedCount > 0) {
-            console.log(`🗑️ [autoPostTodayMatches] Deleted ${deletedOldPosts.deletedCount} old football posts`)
+            try {
+                const existingMatchData = JSON.parse(existingPost.footballData || '[]')
+                const hasLiveMatches = existingMatchData.some(match => 
+                    ['1H', '2H', 'HT', 'LIVE', 'ET', 'P', 'BT'].includes(match.status?.short)
+                )
+                
+                // Check if post is older than 2 hours
+                const postAge = new Date() - new Date(existingPost.createdAt)
+                const twoHoursInMs = 2 * 60 * 60 * 1000
+                const isPostOld = postAge > twoHoursInMs
+                
+                if (!hasLiveMatches || isPostOld) {
+                    // No live matches or post is old, delete it and create fresh one
+                    console.log(`🔄 [autoPostTodayMatches] Refreshing post (hasLiveMatches: ${hasLiveMatches}, isOld: ${isPostOld})...`)
+                    await Post.findByIdAndDelete(existingPost._id)
+                } else {
+                    // Post exists with live matches and is recent, skip creating new one
+                    // Real-time updates will handle score changes
+                    console.log('✅ [autoPostTodayMatches] Post already exists for today with live matches, skipping...')
+                    return { success: true, message: 'Post already exists for today with live matches', postId: existingPost._id }
+                }
+            } catch (e) {
+                // If parsing fails, delete old post and create fresh one
+                console.log('🔄 [autoPostTodayMatches] Error parsing existing post data, refreshing...')
+                await Post.findByIdAndDelete(existingPost._id)
+            }
         }
         
         console.log('✅ [autoPostTodayMatches] Creating new post for today...')

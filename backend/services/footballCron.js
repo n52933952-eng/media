@@ -412,6 +412,12 @@ export const initializeFootballCron = () => {
         await autoPostTodayMatches()
     })
     
+    // Job 6: Refresh post every 2 hours to ensure users see latest live matches
+    cron.schedule('0 */2 * * *', async () => {
+        console.log('🔄 [CRON] Refreshing Football post with latest live matches...')
+        await autoPostTodayMatches()
+    })
+    
     // Job 3: Create football account if not exists (runs once on startup)
     setTimeout(async () => {
         await getFootballAccount()
