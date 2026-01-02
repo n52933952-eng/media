@@ -210,16 +210,28 @@ const fetchAndUpdateLiveMatches = async () => {
     try {
         console.log('⚽ [fetchAndUpdateLiveMatches] Fetching live matches...')
         
-        const today = new Date().toISOString().split('T')[0]
+        // Fetch matches from last 2 days to today + 1 day (to catch matches that started yesterday or today)
+        const yesterday = new Date()
+        yesterday.setDate(yesterday.getDate() - 1)
+        const tomorrow = new Date()
+        tomorrow.setDate(tomorrow.getDate() + 1)
+        
+        const dateFrom = yesterday.toISOString().split('T')[0]
+        const dateTo = tomorrow.toISOString().split('T')[0]
+        
         let allLiveMatches = []
         
         // Fetch matches from all leagues and filter for live ones
         for (const league of SUPPORTED_LEAGUES) {
-            const result = await fetchFromAPI(`/competitions/${league.code}/matches?dateFrom=${today}&dateTo=${today}`)
+            const result = await fetchFromAPI(`/competitions/${league.code}/matches?dateFrom=${dateFrom}&dateTo=${dateTo}`)
             
             if (result.success && result.data) {
-                // Filter for live matches (IN_PLAY, PAUSED)
-                const liveMatches = result.data.filter(m => m.status === 'IN_PLAY' || m.status === 'PAUSED')
+                // Filter for live matches (IN_PLAY, PAUSED, LIVE)
+                const liveMatches = result.data.filter(m => 
+                    m.status === 'IN_PLAY' || 
+                    m.status === 'PAUSED' ||
+                    m.status === 'LIVE'
+                )
                 if (liveMatches.length > 0) {
                     console.log(`⚽ [fetchAndUpdateLiveMatches] Found ${liveMatches.length} live matches in ${league.name}`)
                     allLiveMatches.push(...liveMatches.map(m => ({ ...m, leagueInfo: league })))
@@ -243,11 +255,50 @@ const fetchAndUpdateLiveMatches = async () => {
             
             const previousGoalsHome = previousMatch?.goals?.home || 0
             const previousGoalsAway = previousMatch?.goals?.away || 0
-            const currentGoalsHome = matchData.score?.fullTime?.home || matchData.score?.halfTime?.home || 0
-            const currentGoalsAway = matchData.score?.fullTime?.away || matchData.score?.halfTime?.away || 0
+            
+            // Get current score - prioritize fullTime, fallback to halfTime, then live score
+            const currentGoalsHome = matchData.score?.fullTime?.home ?? 
+                                     matchData.score?.halfTime?.home ?? 
+                                     matchData.score?.regular?.home ??
+                                     matchData.score?.live?.home ?? 0
+            const currentGoalsAway = matchData.score?.fullTime?.away ?? 
+                                     matchData.score?.halfTime?.away ?? 
+                                     matchData.score?.regular?.away ??
+                                     matchData.score?.live?.away ?? 0
+            
+            // Fetch detailed match info to get accurate elapsed time
+            let detailedMatch = matchData
+            try {
+                const detailResult = await fetchFromAPI(`/matches/${matchData.id}`)
+                if (detailResult.success && detailResult.data) {
+                    detailedMatch = detailResult.data
+                    console.log(`  📊 [fetchAndUpdateLiveMatches] Fetched details for match ${matchData.id}, status: ${detailedMatch.status}, elapsed: ${detailedMatch.minute || 'N/A'}`)
+                }
+            } catch (error) {
+                console.log(`  ⚠️ [fetchAndUpdateLiveMatches] Could not fetch details for match ${matchData.id}, using basic data`)
+            }
             
             // Convert and update match in database
-            const convertedMatch = convertMatchFormat(matchData, matchData.leagueInfo)
+            const convertedMatch = convertMatchFormat(detailedMatch, matchData.leagueInfo)
+            
+            // Update with actual elapsed time if available
+            if (detailedMatch.minute) {
+                const elapsed = parseInt(detailedMatch.minute) || null
+                if (elapsed !== null) {
+                    // Determine status based on elapsed time
+                    if (elapsed <= 45) {
+                        convertedMatch.fixture.status.short = '1H'
+                        convertedMatch.fixture.status.elapsed = elapsed
+                    } else if (elapsed <= 90) {
+                        convertedMatch.fixture.status.short = '2H'
+                        convertedMatch.fixture.status.elapsed = elapsed
+                    } else if (elapsed === 45) {
+                        convertedMatch.fixture.status.short = 'HT'
+                        convertedMatch.fixture.status.elapsed = 45
+                    }
+                }
+            }
+            
             convertedMatch.goals.home = currentGoalsHome
             convertedMatch.goals.away = currentGoalsAway
             
@@ -257,11 +308,29 @@ const fetchAndUpdateLiveMatches = async () => {
                 { upsert: true, new: true }
             )
             
-            // Emit real-time update to frontend if score or status changed
+            // Check what changed
             const scoreChanged = (currentGoalsHome !== previousGoalsHome) || (currentGoalsAway !== previousGoalsAway)
             const statusChanged = previousMatch?.fixture?.status?.short !== updatedMatch.fixture?.status?.short
+            const elapsedChanged = previousMatch?.fixture?.status?.elapsed !== updatedMatch.fixture?.status?.elapsed
             
-            if (scoreChanged || statusChanged) {
+            // Always update post if score, status, or elapsed time changed (for real-time updates)
+            if (scoreChanged || statusChanged || elapsedChanged) {
+                console.log(`  🔔 Match update detected: ${updatedMatch.teams?.home?.name} vs ${updatedMatch.teams?.away?.name}`)
+                if (scoreChanged) {
+                    console.log(`     Score: ${previousGoalsHome}-${previousGoalsAway} → ${currentGoalsHome}-${currentGoalsAway}`)
+                }
+                if (statusChanged) {
+                    console.log(`     Status: ${previousMatch?.fixture?.status?.short || 'N/A'} → ${updatedMatch.fixture?.status?.short}`)
+                }
+                if (elapsedChanged) {
+                    console.log(`     Elapsed: ${previousMatch?.fixture?.status?.elapsed || 'N/A'}' → ${updatedMatch.fixture?.status?.elapsed || 'N/A'}'`)
+                }
+            } else {
+                console.log(`  ✓ Match unchanged: ${updatedMatch.teams?.home?.name} vs ${updatedMatch.teams?.away?.name} (${currentGoalsHome}-${currentGoalsAway})`)
+            }
+            
+            // Always update post if there are changes (score, status, or elapsed time)
+            if (scoreChanged || statusChanged || elapsedChanged) {
                 console.log(`  🔔 Match updated: ${updatedMatch.teams?.home?.name} vs ${updatedMatch.teams?.away?.name}`)
                 console.log(`     Score: ${previousGoalsHome}-${previousGoalsAway} → ${currentGoalsHome}-${currentGoalsAway}`)
                 
