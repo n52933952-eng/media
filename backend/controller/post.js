@@ -313,6 +313,18 @@ export const LikePost = async(req,res) => {
      }else{
       post.likes.push(userId)
       await post.save()
+      
+      // Create notification for post owner when someone likes their post
+      // Don't notify if user is liking their own post
+      if (post.postedBy.toString() !== userId.toString()) {
+          const { createNotification } = await import('./notification.js')
+          createNotification(post.postedBy, 'like', userId, {
+              postId: post._id
+          }).catch(err => {
+              console.error('Error creating like notification:', err)
+          })
+      }
+      
       res.status(200).json({message:"post liked scfully"})
      }
 
@@ -946,6 +958,18 @@ export const LikeComent = async(req,res) => {
         }else{
             // Like: add userId to likes array
             reply.likes.push(userId)  
+            
+            // Create notification for comment owner when someone likes their comment
+            // Don't notify if user is liking their own comment
+            if (reply.userId && reply.userId.toString() !== userId.toString()) {
+                const { createNotification } = await import('./notification.js')
+                createNotification(reply.userId, 'like', userId, {
+                    postId: post._id,
+                    commentText: reply.text
+                }).catch(err => {
+                    console.error('Error creating comment like notification:', err)
+                })
+            }
         }
 
    

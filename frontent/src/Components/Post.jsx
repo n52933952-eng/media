@@ -204,6 +204,25 @@ const showToast = useShowToast()
    
   
   
+  // Check if this is a channel post (system account with YouTube embed or channel post)
+  const isChannelPost = post?.img?.includes('youtube.com/embed') || 
+                        post?.channelAddedBy || 
+                        ['Football', 'AlJazeera', 'NBCNews', 'SkySportsNews', 'SkyNews', 'Cartoonito', 
+                         'NatGeoKids', 'SciShowKids', 'JJAnimalTime', 'KidsArabic', 'NatGeoAnimals', 
+                         'MBCDrama', 'Fox11'].includes(postedBy?.username)
+  
+  const handleAvatarOrNameClick = (e) => {
+    e.preventDefault()
+    e.stopPropagation()
+    
+    // If it's a channel post, navigate to post page instead of profile
+    if (isChannelPost && post?._id) {
+      navigate(`/${postedBy?.username}/post/${post._id}`)
+    } else {
+      navigate(`/${postedBy?.username}`)
+    }
+  }
+
   const postContent = (
     <Flex gap={3}  mb="4" py={5}>
         
@@ -215,10 +234,8 @@ const showToast = useShowToast()
               src={postedBy?.profilePic} 
               name={postedBy?.name}
               loading="lazy"
-              onClick={(e) => {
-                e.preventDefault()
-                navigate(`/${postedBy?.username}`)
-              }}
+              cursor="pointer"
+              onClick={handleAvatarOrNameClick}
             />
            
             <Box w="1px" h="full" bg="gray.light" my="2"></Box>
@@ -263,10 +280,7 @@ const showToast = useShowToast()
         <Text 
           fontSize="sm" 
           fontWeight="bold" 
-          onClick={(e) => {
-            e.preventDefault()
-            navigate(`/${postedBy?.username}`)
-          }}
+          onClick={handleAvatarOrNameClick}
           cursor="pointer"
         >
          {postedBy?.name}

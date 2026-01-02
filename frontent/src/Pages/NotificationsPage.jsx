@@ -117,7 +117,7 @@ const NotificationsPage = () => {
         // Navigate based on notification type
         if (notification.type === 'follow') {
             navigate(`/${notification.from?.username || notification.from?.name || 'user'}`)
-        } else if (notification.type === 'comment' || notification.type === 'mention') {
+        } else if (notification.type === 'comment' || notification.type === 'mention' || notification.type === 'like') {
             if (notification.post && notification.post._id) {
                 // Get post owner from populated post
                 const postOwner = notification.post.postedBy?.username || notification.post.postedBy?.name || user?.username
@@ -184,6 +184,13 @@ const NotificationsPage = () => {
                 return `${fromName} commented on your post`
             case 'mention':
                 return `${fromName} mentioned you in a comment`
+            case 'like':
+                // Check if it's a comment like (has comment text) or post like
+                if (notification.comment) {
+                    return `${fromName} liked your comment`
+                } else {
+                    return `${fromName} liked your post`
+                }
             default:
                 return 'New notification'
         }
@@ -197,6 +204,8 @@ const NotificationsPage = () => {
                 return '💬'
             case 'mention':
                 return '@'
+            case 'like':
+                return '❤️'
             default:
                 return '🔔'
         }
