@@ -2,10 +2,12 @@ import React, { useState, useEffect, useContext } from 'react'
 import { Box, Flex, Text, Avatar, Button, VStack, Spinner, useColorModeValue, Grid, GridItem, SimpleGrid } from '@chakra-ui/react'
 import { Link as RouterLink } from 'react-router-dom'
 import { UserContext } from '../context/UserContext'
+import { PostContext } from '../context/PostContext'
 import useShowToast from '../hooks/useShowToast'
 
 const SuggestedChannels = ({ onUserFollowed }) => {
     const { user, setUser } = useContext(UserContext)
+    const { setFollowPost } = useContext(PostContext)
     const [footballAccount, setFootballAccount] = useState(null)
     const [channels, setChannels] = useState([])
     const [loading, setLoading] = useState(true)
@@ -114,6 +116,8 @@ const SuggestedChannels = ({ onUserFollowed }) => {
             const data = await res.json()
             
             if (res.ok) {
+                const wasFollowing = isFollowing
+                
                 // Update local state
                 setIsFollowing(!isFollowing)
                 
@@ -123,8 +127,22 @@ const SuggestedChannels = ({ onUserFollowed }) => {
                     localStorage.setItem('userInfo', JSON.stringify(data.current))
                 }
                 
+                // If UNFOLLOWING, remove Football posts from feed immediately
+                if (wasFollowing) {
+                    setFollowPost(prev => {
+                        // Remove all posts from Football account
+                        const filtered = prev.filter(p => {
+                            const postedById = p.postedBy?._id?.toString() || p.postedBy?.toString()
+                            const footballId = footballAccount._id?.toString()
+                            return postedById !== footballId
+                        })
+                        console.log(`🗑️ [SuggestedChannels] Removed ${prev.length - filtered.length} Football post(s) from feed`)
+                        return filtered
+                    })
+                }
+                
                 // If following (not unfollowing), auto-post and fetch matches
-                if (!isFollowing) {
+                if (!wasFollowing) {
                     const baseUrl = import.meta.env.PROD ? window.location.origin : "http://localhost:5000"
                     
                     // Step 1: Post immediately with whatever matches are available
@@ -136,7 +154,29 @@ const SuggestedChannels = ({ onUserFollowed }) => {
                         .then(res => res.json())
                         .then(postData => {
                             console.log('📬 Post result:', postData)
-                            if (postData.posted) {
+                            if (postData.posted && postData.post) {
+                                // Add post to feed immediately (fallback if socket doesn't work)
+                                setFollowPost(prev => {
+                                    // Check if post already exists
+                                    const exists = prev.some(p => {
+                                        const prevId = p._id?.toString()
+                                        const newId = postData.post._id?.toString()
+                                        return prevId === newId
+                                    })
+                                    if (exists) {
+                                        console.log('⚠️ [SuggestedChannels] Post already in feed, skipping')
+                                        return prev
+                                    }
+                                    // Add to top of feed
+                                    console.log('✅ [SuggestedChannels] Added Football post to feed immediately')
+                                    return [postData.post, ...prev]
+                                })
+                                
+                                // Also call onUserFollowed callback if provided
+                                if (onUserFollowed) {
+                                    onUserFollowed(footballAccount._id)
+                                }
+                                
                                 if (postData.noMatches) {
                                     // No matches available, start fetching in background
                                     console.log('⚽ No matches found, fetching from API...')
@@ -151,8 +191,31 @@ const SuggestedChannels = ({ onUserFollowed }) => {
                                     })
                                     .catch(err => console.log('Background fetch error:', err))
                                 }
-                            } else if (postData.alreadyExists) {
-                                console.log('ℹ️ Post already exists for today')
+                            } else if (postData.alreadyExists || postData.postId) {
+                                // Post already exists, fetch it and add to feed
+                                console.log('ℹ️ Post already exists for today, fetching and adding to feed...')
+                                const baseUrl = import.meta.env.PROD ? window.location.origin : "http://localhost:5000"
+                                
+                                // Fetch the existing post
+                                fetch(`${baseUrl}/api/post/getPost/${postData.postId}`, {
+                                    credentials: 'include'
+                                })
+                                .then(res => res.json())
+                                .then(postRes => {
+                                    if (postRes && postRes.post) {
+                                        setFollowPost(prev => {
+                                            const exists = prev.some(p => {
+                                                const prevId = p._id?.toString()
+                                                const newId = postRes.post._id?.toString()
+                                                return prevId === newId
+                                            })
+                                            if (exists) return prev
+                                            console.log('✅ [SuggestedChannels] Added existing Football post to feed')
+                                            return [postRes.post, ...prev]
+                                        })
+                                    }
+                                })
+                                .catch(err => console.error('Error fetching existing post:', err))
                             }
                         })
                         .catch(err => {
@@ -379,7 +442,7 @@ const SuggestedChannels = ({ onUserFollowed }) => {
                                             {channel.streams.length > 1 && (
                                                 <Text fontSize="xs" color={secondaryTextColor} textAlign="center" mt={1}>
                                                     Choose your language
-                                                </Text>
+                </Text>
                                             )}
                                         </VStack>
                                     </>

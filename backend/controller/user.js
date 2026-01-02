@@ -138,8 +138,37 @@ export const FollowAndUnfollow = async(req,res) => {
                console.error('Error deleting follow notification:', err)
            })
           
-           // Note: Football posts remain in database (global) but won't show in feed
-           // because feed filters by following list. This ensures other followers still see posts.
+           // If unfollowing Football account, emit postDeleted events for all Football posts
+           // This ensures the posts are removed from the user's feed immediately
+           if (userToModify.username === 'Football') {
+               try {
+                   const Post = (await import('../models/post.js')).default
+                   const { getIO, getUserSocketMap } = await import('../socket/socket.js')
+                   
+                   const footballPosts = await Post.find({
+                       postedBy: id,
+                       footballData: { $exists: true, $ne: null }
+                   }).select('_id')
+                   
+                   if (footballPosts.length > 0) {
+                       const io = getIO()
+                       if (io) {
+                           const userSocketMap = getUserSocketMap()
+                           const userSocketData = userSocketMap[req.user._id.toString()]
+                           
+                           if (userSocketData && userSocketData.socketId) {
+                               // Emit postDeleted for each Football post
+                               footballPosts.forEach(post => {
+                                   io.to(userSocketData.socketId).emit('postDeleted', { postId: post._id.toString() })
+                               })
+                               console.log(`🗑️ [FollowAndUnfollow] Emitted postDeleted for ${footballPosts.length} Football post(s) to user ${req.user.username}`)
+                           }
+                       }
+                   }
+               } catch (error) {
+                   console.error('❌ [FollowAndUnfollow] Error emitting postDeleted events:', error)
+               }
+           }
           
            const updatecurrent = await User.findById(req.user._id)
            const targetUser = await User.findById(id)

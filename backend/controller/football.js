@@ -1036,6 +1036,31 @@ export const manualPostTodayMatches = async (req, res) => {
             return res.status(500).json({ error: result.error })
         }
         
+        // If post was created, emit it directly to the user who triggered it (if authenticated)
+        // This ensures the post appears immediately in their feed after following
+        if (result.postId && req.user) {
+            try {
+                const post = await Post.findById(result.postId).populate("postedBy", "username profilePic name")
+                if (post) {
+                    const { getIO, getUserSocketMap } = await import('../socket/socket.js')
+                    const io = getIO()
+                    if (io) {
+                        const userSocketMap = getUserSocketMap()
+                        const userSocketData = userSocketMap[req.user._id.toString()]
+                        
+                        if (userSocketData && userSocketData.socketId) {
+                            io.to(userSocketData.socketId).emit("newPost", post)
+                            console.log(`✅ [manualPostTodayMatches] Emitted post directly to user ${req.user.username}`)
+                        } else {
+                            console.log(`⚠️ [manualPostTodayMatches] User ${req.user.username} not online, post will appear on next feed refresh`)
+                        }
+                    }
+                }
+            } catch (emitError) {
+                console.error('❌ [manualPostTodayMatches] Error emitting post to user:', emitError)
+            }
+        }
+        
         res.status(200).json({
             message: result.noMatches 
                 ? 'No live or upcoming matches in the next 24 hours'
@@ -1043,7 +1068,8 @@ export const manualPostTodayMatches = async (req, res) => {
             postId: result.postId,
             matchesPosted: result.matchesPosted || 0,
             posted: true,
-            noMatches: result.noMatches || false
+            noMatches: result.noMatches || false,
+            post: result.postId ? await Post.findById(result.postId).populate("postedBy", "username profilePic name") : null
         })
         
     } catch (error) {
