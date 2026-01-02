@@ -287,14 +287,11 @@ const SuggestedChannels = ({ onUserFollowed }) => {
                             >
                                 <VStack spacing={1}>
                                     <Avatar 
-                                        src={channel.logo}
+                                        name={channel.name}
                                         size="sm"
-                                        bg="white"
-                                        p={channel.id === 'aljazeera' ? 0.5 : 0}
-                                        onError={(e) => {
-                                            e.target.onerror = null
-                                            e.target.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(channel.name)}&background=random&color=fff&size=128`
-                                        }}
+                                        bg="blue.500"
+                                        color="white"
+                                        fontWeight="bold"
                                     />
                                     <Text fontSize="2xs" color={textColor} textAlign="center" noOfLines={1}>
                                         {channel.name.length > 10 ? channel.name.substring(0, 8) + '...' : channel.name}
@@ -323,14 +320,11 @@ const SuggestedChannels = ({ onUserFollowed }) => {
                                         {/* Channel Header */}
                                         <Flex align="center" gap={3} mb={3}>
                                             <Avatar 
-                                                src={channel.logo}
+                                                name={channel.name}
                                                 size="md"
-                                                bg="white"
-                                                p={channel.id === 'aljazeera' ? 1 : 0}
-                                                onError={(e) => {
-                                                    e.target.onerror = null
-                                                    e.target.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(channel.name)}&background=random&color=fff&size=128`
-                                                }}
+                                                bg="blue.500"
+                                                color="white"
+                                                fontWeight="bold"
                                             />
                                             <VStack align="start" spacing={0} flex={1}>
                                                 <Flex align="center" gap={1}>
