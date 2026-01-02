@@ -34,7 +34,7 @@ const NewsArticleSchema = mongoose.Schema({
 }, { timestamps: true })
 
 // Indexes for performance
-NewsArticleSchema.index({ articleId: 1 })
+// Note: articleId already has index from unique: true, so we don't duplicate it
 NewsArticleSchema.index({ publishedAt: -1 })
 NewsArticleSchema.index({ source: 1 })
 NewsArticleSchema.index({ category: 1 })

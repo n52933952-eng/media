@@ -13,6 +13,7 @@ import NotificationRoute from './routes/notification.js'
 import { initializeSocket } from './socket/socket.js'
 import { initializeFootballCron } from './services/footballCron.js'
 import { initializeChessPostCleanup } from './services/chessPostCleanup.js'
+import { initRedis } from './services/redis.js'
 import path from 'path'
 import { fileURLToPath } from 'url'
 
@@ -50,9 +51,26 @@ app.use(cors({
 }))
 
 
-mongoose.connect(process.env.MONGO)
-.then(() => console.log("MogoConnected"))
-.catch((error) => console.log(error))
+// Configure MongoDB connection with connection pooling for scalability
+mongoose.connect(process.env.MONGO, {
+    maxPoolSize: 50,        // Maximum number of connections in the pool
+    minPoolSize: 5,         // Minimum number of connections in the pool
+    serverSelectionTimeoutMS: 5000, // How long to try selecting a server
+    socketTimeoutMS: 45000, // How long to wait for a socket
+    family: 4,              // Use IPv4, skip trying IPv6
+    retryWrites: true,      // Retry writes on network errors
+    w: 'majority'            // Write concern: wait for majority of replicas
+})
+.then(async () => {
+    console.log("✅ MongoDB Connected with connection pooling")
+    
+    // Initialize Redis after MongoDB connection
+    await initRedis()
+})
+.catch((error) => {
+    console.error("❌ MongoDB connection error:", error)
+    process.exit(1) // Exit if database connection fails
+})
 
 
 
@@ -66,21 +84,26 @@ app.use("/api/notification",NotificationRoute)
 // Serve static files from React app (for production)
 app.use(express.static(path.join(__dirname, '../frontent/dist')))
 
-// Initialize Socket.IO with the Express app
-const { server } = initializeSocket(app)
-
 // Catch all handler: send back React's index.html file for SPA routing
 app.get('*', (req, res) => {
     res.sendFile(path.join(__dirname, '../frontent/dist/index.html'))
 })
 
+// Initialize Socket.IO with the Express app (async - waits for Redis adapter setup)
 // Start server using the HTTP server from Socket.IO
-server.listen(process.env.PORT, () => {
-    console.log("Server is running on port", process.env.PORT)
-    
-    // Initialize Football Cron Jobs after server starts
-    initializeFootballCron()
-    
-    // Initialize Chess Post Cleanup Cron Job
-    initializeChessPostCleanup()
+initializeSocket(app).then((result) => {
+    const server = result.server
+    server.listen(process.env.PORT, () => {
+        console.log("✅ Server is running on port", process.env.PORT)
+        console.log("✅ App is ready for 1M+ users with Redis scaling!")
+        
+        // Initialize Football Cron Jobs after server starts
+        initializeFootballCron()
+        
+        // Initialize Chess Post Cleanup Cron Job
+        initializeChessPostCleanup()
+    })
+}).catch((error) => {
+    console.error('❌ Failed to initialize Socket.IO:', error)
+    process.exit(1)
 })

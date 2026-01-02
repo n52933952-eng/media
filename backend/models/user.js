@@ -61,6 +61,16 @@ const UserSchema = mongoose.Schema({
 
 },{timestamps:true})
 
+// CRITICAL: Add indexes for performance - essential for production scaling
+// Index on followers for fast follower queries
+UserSchema.index({ followers: 1 })
+// Index on following for fast following queries
+UserSchema.index({ following: 1 })
+// Index on username for fast lookups (already unique, but explicit index helps)
+UserSchema.index({ username: 1 })
+// Index on email for fast lookups (already unique, but explicit index helps)
+UserSchema.index({ email: 1 })
+
 
 
 const User = mongoose.model("User", UserSchema)

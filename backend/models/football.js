@@ -87,7 +87,7 @@ const MatchSchema = mongoose.Schema({
 }, {timestamps: true})
 
 // Indexes for performance
-MatchSchema.index({ fixtureId: 1 })
+// Note: fixtureId already has index from unique: true, so we don't duplicate it
 MatchSchema.index({ 'fixture.date': -1 })
 MatchSchema.index({ 'fixture.status.short': 1 })
 MatchSchema.index({ 'league.id': 1 })
@@ -131,7 +131,8 @@ const LeagueSchema = mongoose.Schema({
 
 }, {timestamps: true})
 
-LeagueSchema.index({ leagueId: 1 })
+// Indexes for performance
+// Note: leagueId already has index from unique: true, so we don't duplicate it
 LeagueSchema.index({ season: -1 })
 
 const Match = mongoose.model("Match", MatchSchema)

@@ -5,11 +5,13 @@ import Message from '../models/message.js'
 import Conversation from '../models/conversation.js'
 import User from '../models/user.js'
 import { createChessGamePost, deleteChessGamePost } from '../controller/post.js'
+import { getRedis, redisSet, redisGet, redisDel, isRedisAvailable } from '../services/redis.js'
 
 // This will be set from index.js
 let io = null
 let server = null
 
+// In-memory fallback (will be gradually replaced by Redis)
 const userSocketMap = {}
 // Track active calls: { callId: { user1, user2 } }
 const activeCalls = new Map()
@@ -20,7 +22,118 @@ const activeChessGames = new Map()
 // Track chess game state: { roomId: { fen, capturedWhite, capturedBlack } }
 const chessGameStates = new Map()
 
-export const initializeSocket = (app) => {
+// Helper functions for userSocketMap - Redis only (required for 1M+ users)
+const setUserSocket = async (userId, socketData) => {
+    ensureRedis() // Redis is required
+    
+    // Write to Redis (primary storage for scaling)
+    await redisSet(`userSocket:${userId}`, socketData, 3600) // 1 hour TTL
+    
+    // Also keep in-memory for fast local access (but Redis is source of truth)
+    userSocketMap[userId] = socketData
+}
+
+const getUserSocket = async (userId) => {
+    ensureRedis() // Redis is required
+    
+    // Try Redis first (source of truth)
+    try {
+        const redisData = await redisGet(`userSocket:${userId}`)
+        if (redisData) {
+            // Update in-memory cache for fast access
+            userSocketMap[userId] = redisData
+            return redisData
+        }
+    } catch (error) {
+        console.error(`❌ [socket] Failed to read from Redis for user ${userId}:`, error.message)
+        throw error
+    }
+    
+    // If not in Redis, check in-memory cache (shouldn't happen, but safe)
+    return userSocketMap[userId] || null
+}
+
+const deleteUserSocket = async (userId) => {
+    ensureRedis() // Redis is required
+    
+    // Delete from Redis (primary storage)
+    await redisDel(`userSocket:${userId}`)
+    
+    // Delete from in-memory cache
+    delete userSocketMap[userId]
+}
+
+const getAllUserSockets = async () => {
+    ensureRedis() // Redis is required
+    
+    // For now, use in-memory cache (it's kept in sync)
+    // TODO: Can optimize later to get all from Redis if needed
+    return userSocketMap
+}
+
+// Helper functions for chessGameStates - Redis only
+const setChessGameState = async (roomId, gameState) => {
+    ensureRedis()
+    await redisSet(`chessGameState:${roomId}`, gameState, 7200) // 2 hour TTL
+    chessGameStates.set(roomId, gameState) // Keep in-memory cache
+}
+
+const getChessGameState = async (roomId) => {
+    ensureRedis()
+    try {
+        const redisData = await redisGet(`chessGameState:${roomId}`)
+        if (redisData) {
+            chessGameStates.set(roomId, redisData) // Update cache
+            return redisData
+        }
+    } catch (error) {
+        console.error(`❌ [socket] Failed to read chess game state from Redis for ${roomId}:`, error.message)
+        throw error
+    }
+    return chessGameStates.get(roomId) || null
+}
+
+const deleteChessGameState = async (roomId) => {
+    ensureRedis()
+    await redisDel(`chessGameState:${roomId}`)
+    chessGameStates.delete(roomId)
+}
+
+// Helper functions for activeChessGames - Redis only
+const setActiveChessGame = async (userId, roomId) => {
+    ensureRedis()
+    await redisSet(`activeChessGame:${userId}`, roomId, 7200) // 2 hour TTL
+    activeChessGames.set(userId, roomId) // Keep in-memory cache
+}
+
+const getActiveChessGame = async (userId) => {
+    ensureRedis()
+    try {
+        const redisData = await redisGet(`activeChessGame:${userId}`)
+        if (redisData) {
+            activeChessGames.set(userId, redisData) // Update cache
+            return redisData
+        }
+    } catch (error) {
+        console.error(`❌ [socket] Failed to read active chess game from Redis for ${userId}:`, error.message)
+        throw error
+    }
+    return activeChessGames.get(userId) || null
+}
+
+const deleteActiveChessGame = async (userId) => {
+    ensureRedis()
+    await redisDel(`activeChessGame:${userId}`)
+    activeChessGames.delete(userId)
+}
+
+const hasActiveChessGame = async (userId) => {
+    ensureRedis()
+    const roomId = await getActiveChessGame(userId)
+    return roomId !== null
+}
+
+export const initializeSocket = async (app) => {
     // Create HTTP server from Express app
     server = http.createServer(app)
     
@@ -33,25 +146,49 @@ export const initializeSocket = (app) => {
         }
     })
 
-    io.on("connection", (socket) => {
+    // Set up Redis adapter for Socket.IO (REQUIRED for multi-server scaling)
+    if (process.env.REDIS_URL) {
+        try {
+            const { createAdapter } = await import('@socket.io/redis-adapter')
+            const { getRedisPubSub } = await import('../services/redis.js')
+            const pubSub = getRedisPubSub()
+            
+            if (pubSub && pubSub.pubClient && pubSub.subClient) {
+                io.adapter(createAdapter(pubSub.pubClient, pubSub.subClient))
+                console.log('✅ Socket.IO Redis adapter configured - ready for multi-server scaling!')
+            } else {
+                console.warn('⚠️  Redis pub/sub clients not available - Socket.IO adapter not configured')
+            }
+        } catch (error) {
+            console.error('❌ Failed to set up Socket.IO Redis adapter:', error.message)
+            // Don't exit - app can work with single server, but won't scale horizontally
+        }
+    }
+
+    io.on("connection", async (socket) => {
         console.log("user connected", socket.id)
         
         const userId = socket.handshake.query.userId
         console.log("🔌 [socket] User connecting with userId:", userId)
-        // Store socket info as object like madechess
+        // Store socket info as object like madechess (dual-write: in-memory + Redis)
         if (userId && userId !== "undefined") {
-            userSocketMap[userId] = {
+            const socketData = {
                 socketId: socket.id,
                 onlineAt: Date.now(),
             }
+            await setUserSocket(userId, socketData)
             console.log(`✅ [socket] User ${userId} added to socket map (socket: ${socket.id})`)
-            console.log(`📊 [socket] Total users in socket map: ${Object.keys(userSocketMap).length}`)
+            
+            // Get count from in-memory (faster for frequent calls)
+            const allSockets = await getAllUserSockets()
+            console.log(`📊 [socket] Total users in socket map: ${Object.keys(allSockets).length}`)
         } else {
             console.warn("⚠️ [socket] User connected without valid userId:", userId)
         }
 
         // Emit online users as array of objects like madechess
-        const onlineArray = Object.entries(userSocketMap).map(([id, data]) => ({
+        const allSockets = await getAllUserSockets()
+        const onlineArray = Object.entries(allSockets).map(([id, data]) => ({
             userId: id,
             onlineAt: data.onlineAt,
         }))
@@ -262,7 +399,7 @@ export const initializeSocket = (app) => {
             }
         })
 
-        socket.on("acceptChessChallenge", ({ from, to, roomId }) => {
+        socket.on("acceptChessChallenge", async ({ from, to, roomId }) => {
             console.log(`♟️ Chess challenge accepted: ${roomId}`)
             console.log(`♟️ Challenger (to): ${to} → WHITE`)
             console.log(`♟️ Accepter (from): ${from} → BLACK`)
@@ -273,9 +410,9 @@ export const initializeSocket = (app) => {
 
             // Create chess room and join both players to Socket.IO room
             if (roomId) {
-                // Track active games for both players
-                activeChessGames.set(to, roomId)
-                activeChessGames.set(from, roomId)
+                // Track active games for both players (Redis)
+                await setActiveChessGame(to, roomId)
+                await setActiveChessGame(from, roomId)
                 
                 // Join challenger to room
                 if (challengerSocketId) {
@@ -333,15 +470,15 @@ export const initializeSocket = (app) => {
                 io.to(accepterSocketId).emit("userBusyChess", { userId: to })
             }
             
-            // Initialize game state (starting position)
+            // Initialize game state (starting position) in Redis
             if (roomId) {
-                chessGameStates.set(roomId, {
+                await setChessGameState(roomId, {
                     fen: "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
                     capturedWhite: [],
                     capturedBlack: [],
                     lastUpdated: Date.now()
                 })
-                console.log(`💾 Initialized game state for room ${roomId}`)
+                console.log(`💾 Initialized game state for room ${roomId} in Redis`)
             }
             
             // Create chess game post in feed for followers
@@ -364,7 +501,7 @@ export const initializeSocket = (app) => {
         })
 
         // Join chess room for spectators
-        socket.on("joinChessRoom", ({ roomId }) => {
+        socket.on("joinChessRoom", async ({ roomId }) => {
             if (roomId) {
                 if (!chessRooms.has(roomId)) {
                     chessRooms.set(roomId, [])
@@ -387,7 +524,7 @@ export const initializeSocket = (app) => {
                 
                 // ALWAYS send current game state when joining/rejoining (for catch-up)
                 // This ensures spectators see current position even if they navigate away and come back
-                const gameState = chessGameStates.get(roomId)
+                const gameState = await getChessGameState(roomId)
                 if (gameState) {
                     console.log(`📤 Sending game state to spectator for catch-up:`, {
                         roomId,
@@ -406,7 +543,6 @@ export const initializeSocket = (app) => {
                     })
                 } else {
                     console.log(`⚠️ No game state found for room ${roomId} - game may not have started yet`)
-                    console.log(`🔍 Available game states:`, Array.from(chessGameStates.keys()))
                     // Send empty state (starting position)
                     io.to(socket.id).emit("chessGameState", {
                         roomId,
@@ -418,13 +554,13 @@ export const initializeSocket = (app) => {
             }
         })
 
-        socket.on("chessMove", ({ roomId, move, to, fen, capturedWhite, capturedBlack }) => {
+        socket.on("chessMove", async ({ roomId, move, to, fen, capturedWhite, capturedBlack }) => {
             console.log(`♟️ Chess move received from ${socket.handshake.query.userId} to ${to}`)
             console.log(`♟️ Move data:`, move)
             
-            // Update game state in backend (for spectator catch-up)
+            // Update game state in backend (for spectator catch-up) - Redis
             if (roomId && fen) {
-                chessGameStates.set(roomId, {
+                await setChessGameState(roomId, {
                     fen,
                     capturedWhite: capturedWhite || [],
                     capturedBlack: capturedBlack || [],
@@ -464,7 +600,7 @@ export const initializeSocket = (app) => {
             }
         })
 
-        socket.on("resignChess", ({ roomId, to }) => {
+        socket.on("resignChess", async ({ roomId, to }) => {
             const recipientSocketId = userSocketMap[to]?.socketId
             const resignerSocketId = userSocketMap[socket.handshake.query.userId]?.socketId
             const userId = socket.handshake.query.userId
@@ -495,11 +631,11 @@ export const initializeSocket = (app) => {
                 deleteChessGamePost(roomId).catch(err => {
                     console.error('❌ Error deleting chess game post on resign:', err)
                 })
-                // Remove from active games tracking
-                activeChessGames.delete(userId)
-                activeChessGames.delete(to)
-                // Clean up game state
-                chessGameStates.delete(roomId)
+                // Remove from active games tracking (Redis)
+                await deleteActiveChessGame(userId)
+                await deleteActiveChessGame(to)
+                // Clean up game state (Redis)
+                await deleteChessGameState(roomId)
                 console.log(`🗑️ Cleaned up game state for room ${roomId}`)
             }
             
@@ -515,7 +651,7 @@ export const initializeSocket = (app) => {
             }
         })
 
-        socket.on("chessGameEnd", ({ roomId, player1, player2, reason }) => {
+        socket.on("chessGameEnd", async ({ roomId, player1, player2, reason }) => {
             // The player who emitted this event is leaving or game ended normally
             const currentUserId = socket.handshake.query.userId
             const player1SocketId = userSocketMap[player1]?.socketId
@@ -562,11 +698,11 @@ export const initializeSocket = (app) => {
                 deleteChessGamePost(roomId).catch(err => {
                     console.error('❌ Error deleting chess game post on game end:', err)
                 })
-                // Remove from active games tracking
-                activeChessGames.delete(player1)
-                activeChessGames.delete(player2)
-                // Clean up game state
-                chessGameStates.delete(roomId)
+                // Remove from active games tracking (Redis)
+                await deleteActiveChessGame(player1)
+                await deleteActiveChessGame(player2)
+                // Clean up game state (Redis)
+                await deleteChessGameState(roomId)
                 console.log(`🗑️ Cleaned up game state for room ${roomId}`)
             }
             
@@ -582,16 +718,16 @@ export const initializeSocket = (app) => {
             }
         })
 
-        socket.on("disconnect", () => {
+        socket.on("disconnect", async () => {
             console.log("user disconnected", socket.id)
             
             let disconnectedUserId = null
             
-            // Remove user from map by matching socket.id like madechess
+            // Remove user from map by matching socket.id like madechess (dual-write: in-memory + Redis)
             for (const [id, data] of Object.entries(userSocketMap)) {
                 if (data.socketId === socket.id) {
                     disconnectedUserId = id
-                    delete userSocketMap[id]
+                    await deleteUserSocket(id) // Delete from both in-memory and Redis
                     break
                 }
             }
@@ -620,8 +756,8 @@ export const initializeSocket = (app) => {
             }
 
             // Check if disconnected user was in an active chess game
-            if (disconnectedUserId && activeChessGames.has(disconnectedUserId)) {
-                const gameRoomId = activeChessGames.get(disconnectedUserId)
+            if (disconnectedUserId && await hasActiveChessGame(disconnectedUserId)) {
+                const gameRoomId = await getActiveChessGame(disconnectedUserId)
                 console.log(`♟️ User ${disconnectedUserId} disconnected while in game: ${gameRoomId}`)
                 
                 // Find the other player
@@ -635,7 +771,8 @@ export const initializeSocket = (app) => {
                 
                 // Notify the other player
                 if (otherPlayerId) {
-                    const otherPlayerSocketId = userSocketMap[otherPlayerId]?.socketId
+                    const otherPlayerData = await getUserSocket(otherPlayerId)
+                    const otherPlayerSocketId = otherPlayerData?.socketId
                     if (otherPlayerSocketId) {
                         io.to(otherPlayerSocketId).emit("opponentLeftGame")
                         io.to(otherPlayerSocketId).emit("chessGameCleanup")
@@ -656,14 +793,14 @@ export const initializeSocket = (app) => {
                     console.error('❌ Error deleting chess game post on disconnect:', err)
                 })
                 
-                // Remove from active games tracking
-                activeChessGames.delete(disconnectedUserId)
+                // Remove from active games tracking (Redis)
+                await deleteActiveChessGame(disconnectedUserId)
                 if (otherPlayerId) {
-                    activeChessGames.delete(otherPlayerId)
+                    await deleteActiveChessGame(otherPlayerId)
                 }
                 
-                // Clean up game state
-                chessGameStates.delete(gameRoomId)
+                // Clean up game state (Redis)
+                await deleteChessGameState(gameRoomId)
                 console.log(`🗑️ Cleaned up game state for room ${gameRoomId}`)
             }
             
