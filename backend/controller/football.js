@@ -944,6 +944,52 @@ export const autoPostTodayMatches = async () => {
 }
 
 // 10. Manual trigger to post today's matches (for testing)
+// Restore/create Football system account
+export const restoreFootballAccount = async (req, res) => {
+    try {
+        let footballAccount = await User.findOne({ username: 'Football' })
+        
+        if (!footballAccount) {
+            console.log('📦 Creating Football system account...')
+            footballAccount = new User({
+                name: 'Football Live',
+                username: 'Football',
+                email: 'football@system.app',
+                password: Math.random().toString(36),
+                bio: '⚽ Live football scores, fixtures & updates from top leagues worldwide 🏆',
+                profilePic: 'https://cdn-icons-png.flaticon.com/512/53/53283.png'
+            })
+            await footballAccount.save()
+            console.log('✅ Football system account created')
+            
+            return res.status(200).json({
+                message: 'Football account created successfully',
+                account: {
+                    _id: footballAccount._id,
+                    name: footballAccount.name,
+                    username: footballAccount.username,
+                    bio: footballAccount.bio,
+                    profilePic: footballAccount.profilePic
+                }
+            })
+        } else {
+            return res.status(200).json({
+                message: 'Football account already exists',
+                account: {
+                    _id: footballAccount._id,
+                    name: footballAccount.name,
+                    username: footballAccount.username,
+                    bio: footballAccount.bio,
+                    profilePic: footballAccount.profilePic
+                }
+            })
+        }
+    } catch (error) {
+        console.error('❌ Error restoring Football account:', error)
+        res.status(500).json({ error: error.message })
+    }
+}
+
 export const manualPostTodayMatches = async (req, res) => {
     try {
         console.log('⚽ [manualPostTodayMatches] Manual post trigger received')

@@ -124,6 +124,32 @@ initializeSocket(app).then((result) => {
         // Initialize Football Cron Jobs after server starts
         initializeFootballCron()
         
+        // Ensure Football account exists on startup
+        setTimeout(async () => {
+            try {
+                const User = (await import('./models/user.js')).default
+                let footballAccount = await User.findOne({ username: 'Football' })
+                
+                if (!footballAccount) {
+                    console.log('📦 Creating Football system account on startup...')
+                    footballAccount = new User({
+                        name: 'Football Live',
+                        username: 'Football',
+                        email: 'football@system.app',
+                        password: Math.random().toString(36),
+                        bio: '⚽ Live football scores, fixtures & updates from top leagues worldwide 🏆',
+                        profilePic: 'https://cdn-icons-png.flaticon.com/512/53/53283.png'
+                    })
+                    await footballAccount.save()
+                    console.log('✅ Football system account created on startup')
+                } else {
+                    console.log('✅ Football account already exists')
+                }
+            } catch (error) {
+                console.error('❌ Error checking Football account on startup:', error)
+            }
+        }, 2000) // Run 2 seconds after server starts
+        
         // Initialize Chess Post Cleanup Cron Job
         initializeChessPostCleanup()
     })
