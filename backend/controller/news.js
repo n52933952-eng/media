@@ -192,64 +192,73 @@ export const manualFetchNews = async (req, res) => {
     }
 }
 
-// 4. Create live stream post for Al Jazeera (like Football does)
+// 4. Create live stream post for any channel (dynamic)
 export const createLiveStreamPost = async (req, res) => {
     try {
-        console.log('📰 [createLiveStreamPost] Creating Al Jazeera live stream post...')
+        let { channelId, streamIndex = 0, lang } = req.query
         
-        // Import models
+        // Backward compatibility: if lang is provided, assume it's Al Jazeera
+        if (lang && !channelId) {
+            channelId = 'aljazeera'
+            streamIndex = lang === 'arabic' ? 1 : 0
+        }
+        
+        console.log(`📺 [createLiveStreamPost] Creating live stream post for channel: ${channelId}`)
+        
+        // Import models and config
         const User = (await import('../models/user.js')).default
         const Post = (await import('../models/post.js')).default
         const { getIO, getUserSocketMap } = await import('../socket/socket.js')
+        const { getChannelById } = await import('../config/channels.js')
         
-        // Find or create Al Jazeera account
-        let alJazeeraAccount = await User.findOne({ username: 'AlJazeera' })
+        // Get channel config
+        const channelConfig = getChannelById(channelId)
         
-        if (!alJazeeraAccount) {
-            console.log('📰 Creating Al Jazeera account...')
-            alJazeeraAccount = new User({
-                name: 'Al Jazeera English',
-                username: 'AlJazeera',
-                email: 'aljazeera@system.com',
+        if (!channelConfig) {
+            return res.status(400).json({ error: `Channel ${channelId} not found` })
+        }
+        
+        // Get stream config (default to first stream)
+        const streamConfig = channelConfig.streams[parseInt(streamIndex)] || channelConfig.streams[0]
+        
+        if (!streamConfig) {
+            return res.status(400).json({ error: 'Stream not found' })
+        }
+        
+        // Find or create channel account
+        let channelAccount = await User.findOne({ username: channelConfig.username })
+        
+        if (!channelAccount) {
+            console.log(`📺 Creating ${channelConfig.name} account...`)
+            channelAccount = new User({
+                name: channelConfig.name,
+                username: channelConfig.username,
+                email: `${channelConfig.username.toLowerCase()}@system.com`,
                 password: 'system_account',
-                profilePic: 'https://upload.wikimedia.org/wikipedia/en/thumb/f/f1/Al_Jazeera_English_logo.svg/1200px-Al_Jazeera_English_logo.svg.png',
-                bio: '🔴 Live news stream 24/7'
+                profilePic: channelConfig.logo,
+                bio: channelConfig.bio
             })
-            await alJazeeraAccount.save()
-            console.log('✅ Al Jazeera account created')
+            await channelAccount.save()
+            console.log(`✅ ${channelConfig.name} account created`)
         }
         
-        // Get language parameter (default to english)
-        const language = req.query.lang || 'english'
+        // Build YouTube embed URL
+        const streamUrl = `https://www.youtube.com/embed/${streamConfig.youtubeId}?autoplay=1&mute=0`
         
-        // YouTube URLs for both languages
-        const streamUrls = {
-            english: 'https://www.youtube.com/embed/gCNeDWCI0vo?autoplay=1&mute=0',
-            arabic: 'https://www.youtube.com/embed/bNyUyrR0PHo?autoplay=1&mute=0'
-        }
+        console.log(`📺 Creating ${channelConfig.name} ${streamConfig.language} live stream post...`)
         
-        const streamTexts = {
-            english: '🔴 Al Jazeera English - Live Stream\n\nWatch live news coverage 24/7',
-            arabic: '🔴 الجزيرة مباشر - البث المباشر\n\nتابع الأخبار العاجلة على مدار الساعة'
-        }
-        
-        const streamUrl = streamUrls[language] || streamUrls.english
-        const streamText = streamTexts[language] || streamTexts.english
-        
-        console.log(`📰 Creating ${language} live stream post...`)
-        
-        // Check if post already exists today for this language
+        // Check if post already exists today for this stream
         const todayStart = new Date()
         todayStart.setHours(0, 0, 0, 0)
         
         const existingPost = await Post.findOne({
-            postedBy: alJazeeraAccount._id,
+            postedBy: channelAccount._id,
             img: streamUrl,
             createdAt: { $gte: todayStart }
         })
         
         if (existingPost) {
-            console.log(`ℹ️ ${language} live stream post already exists today`)
+            console.log(`ℹ️ ${channelConfig.name} live stream post already exists today`)
             
             // Still emit to current user's socket
             await existingPost.populate("postedBy", "username profilePic name")
@@ -266,7 +275,7 @@ export const createLiveStreamPost = async (req, res) => {
             }
             
             return res.status(200).json({
-                message: `${language} live stream post already in feed`,
+                message: `${channelConfig.name} live stream post already in feed`,
                 postId: existingPost._id,
                 posted: false
             })
@@ -274,15 +283,15 @@ export const createLiveStreamPost = async (req, res) => {
         
         // Create live stream post
         const liveStreamPost = new Post({
-            postedBy: alJazeeraAccount._id,
-            text: streamText,
+            postedBy: channelAccount._id,
+            text: streamConfig.text,
             img: streamUrl
         })
         
         await liveStreamPost.save()
         await liveStreamPost.populate("postedBy", "username profilePic name")
         
-        console.log('✅ Created live stream post:', liveStreamPost._id)
+        console.log(`✅ Created live stream post: ${liveStreamPost._id}`)
         
         // Emit to current user via socket
         const io = getIO()
@@ -297,14 +306,26 @@ export const createLiveStreamPost = async (req, res) => {
         }
         
         res.status(200).json({
-            message: `${language} live stream post created successfully`,
+            message: `${channelConfig.name} live stream post created successfully`,
             postId: liveStreamPost._id,
             posted: true,
-            language: language
+            channel: channelConfig.name,
+            language: streamConfig.language
         })
         
     } catch (error) {
-        console.error('📰 [createLiveStreamPost] Error:', error)
+        console.error('📺 [createLiveStreamPost] Error:', error)
+        res.status(500).json({ error: error.message })
+    }
+}
+
+// 5. Get all available channels (for frontend)
+export const getChannels = async (req, res) => {
+    try {
+        const { LIVE_CHANNELS } = await import('../config/channels.js')
+        res.status(200).json({ channels: LIVE_CHANNELS })
+    } catch (error) {
+        console.error('📺 [getChannels] Error:', error)
         res.status(500).json({ error: error.message })
     }
 }

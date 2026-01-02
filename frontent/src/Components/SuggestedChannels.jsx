@@ -7,45 +7,92 @@ import useShowToast from '../hooks/useShowToast'
 const SuggestedChannels = ({ onUserFollowed }) => {
     const { user, setUser } = useContext(UserContext)
     const [footballAccount, setFootballAccount] = useState(null)
+    const [channels, setChannels] = useState([])
     const [loading, setLoading] = useState(true)
     const [followLoading, setFollowLoading] = useState(false)
     const [isFollowing, setIsFollowing] = useState(false)
+    const [streamLoading, setStreamLoading] = useState({})
     
     const showToast = useShowToast()
     
     const bgColor = useColorModeValue('white', '#1a1a1a')
+    const cardBg = useColorModeValue('white', '#252b3b')
     const borderColor = useColorModeValue('gray.200', '#2d2d2d')
     const textColor = useColorModeValue('gray.800', 'white')
     const secondaryTextColor = useColorModeValue('gray.600', 'gray.400')
     const hoverBg = useColorModeValue('gray.50', 'gray.700')
     
-    // Fetch Football channel account
+    // Fetch Football channel account and all live channels
     useEffect(() => {
-        const fetchFootballAccount = async () => {
+        const fetchData = async () => {
             try {
                 setLoading(true)
-                const res = await fetch(
-                    `${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/user/getUserPro/Football`,
+                const baseUrl = import.meta.env.PROD ? window.location.origin : "http://localhost:5000"
+                
+                // Fetch Football account
+                const footballRes = await fetch(
+                    `${baseUrl}/api/user/getUserPro/Football`,
                     { credentials: 'include' }
                 )
-                const data = await res.json()
+                const footballData = await footballRes.json()
                 
-                if (res.ok && data) {
-                    setFootballAccount(data)
+                if (footballRes.ok && footballData) {
+                    setFootballAccount(footballData)
                     // Check if user is already following
                     if (user?.following) {
-                        setIsFollowing(user.following.includes(data._id))
+                        setIsFollowing(user.following.includes(footballData._id))
                     }
                 }
+                
+                // Fetch all live channels
+                const channelsRes = await fetch(`${baseUrl}/api/news/channels`, {
+                    credentials: 'include'
+                })
+                const channelsData = await channelsRes.json()
+                
+                if (channelsRes.ok && channelsData.channels) {
+                    setChannels(channelsData.channels)
+                }
             } catch (error) {
-                console.error('Error fetching Football account:', error)
+                console.error('Error fetching data:', error)
             } finally {
                 setLoading(false)
             }
         }
         
-        fetchFootballAccount()
+        fetchData()
     }, [user])
+    
+    // Handle live stream button click
+    const handleStreamClick = async (channelId, streamIndex = 0) => {
+        const loadingKey = `${channelId}-${streamIndex}`
+        try {
+            setStreamLoading(prev => ({ ...prev, [loadingKey]: true }))
+            
+            const baseUrl = import.meta.env.PROD ? window.location.origin : "http://localhost:5000"
+            const res = await fetch(
+                `${baseUrl}/api/news/post/livestream?channelId=${channelId}&streamIndex=${streamIndex}`,
+                {
+                    method: 'POST',
+                    credentials: 'include'
+                }
+            )
+            const data = await res.json()
+            
+            if (res.ok) {
+                const channel = channels.find(c => c.id === channelId)
+                const stream = channel?.streams[streamIndex]
+                showToast('Success', `🔴 ${channel?.name} added to your feed!`, 'success')
+            } else {
+                showToast('Info', data.message || 'Already in feed', 'info')
+            }
+        } catch (error) {
+            console.error('Error creating stream post:', error)
+            showToast('Error', 'Failed to add live stream', 'error')
+        } finally {
+            setStreamLoading(prev => ({ ...prev, [loadingKey]: false }))
+        }
+    }
     
     // Handle follow/unfollow
     const handleFollowToggle = async () => {
@@ -211,96 +258,85 @@ const SuggestedChannels = ({ onUserFollowed }) => {
                 </VStack>
             ) : null}
             
-            {/* Al Jazeera News Channel */}
-            {!loading && (
-                <VStack spacing={3} align="stretch" mt={4}>
-                    <Flex
-                        align="center"
-                        justify="space-between"
-                        p={3}
-                        borderRadius="md"
-                        border="1px solid"
-                        borderColor={borderColor}
-                        _hover={{ bg: hoverBg }}
-                        transition="all 0.2s"
-                    >
-                        <RouterLink to="/news" style={{ flexGrow: 1 }}>
-                            <Flex align="center" gap={3}>
+            {/* Live Stream Channels */}
+            {!loading && channels.length > 0 && (
+                <VStack spacing={4} align="stretch" mt={4}>
+                    <Text fontSize="sm" fontWeight="bold" color={textColor} mb={2}>
+                        🔴 Live Channels
+                    </Text>
+                    
+                    {channels.map((channel) => (
+                        <Box
+                            key={channel.id}
+                            bg={cardBg}
+                            borderRadius="md"
+                            p={3}
+                            border="1px solid"
+                            borderColor={borderColor}
+                        >
+                            {/* Channel Header */}
+                            <Flex align="center" gap={3} mb={3}>
                                 <Avatar 
-                                    src="https://upload.wikimedia.org/wikipedia/en/thumb/f/f1/Al_Jazeera_English_logo.svg/1200px-Al_Jazeera_English_logo.svg.png"
+                                    src={channel.logo}
                                     size="md"
                                     bg="white"
-                                    p={1}
+                                    p={channel.id === 'aljazeera' ? 1 : 0}
                                 />
                                 <VStack align="start" spacing={0} flex={1}>
                                     <Flex align="center" gap={1}>
                                         <Text fontSize="sm" fontWeight="semibold" color={textColor}>
-                                            Al Jazeera
+                                            {channel.name}
                                         </Text>
-                                        <Text fontSize="lg">📰</Text>
+                                        <Text fontSize="lg">
+                                            {channel.category === 'news' ? '📰' : 
+                                             channel.category === 'kids' ? '🧒' : '🎬'}
+                                        </Text>
                                     </Flex>
                                     <Text fontSize="xs" color={secondaryTextColor} noOfLines={1}>
-                                        🔴 Live news 24/7
+                                        {channel.bio}
                                     </Text>
                                 </VStack>
                             </Flex>
-                        </RouterLink>
-                    </Flex>
-                    
-                    {/* Live Stream Buttons */}
-                    <Button
-                        onClick={async () => {
-                            try {
-                                const baseUrl = import.meta.env.PROD ? window.location.origin : "http://localhost:5000"
-                                const res = await fetch(`${baseUrl}/api/news/post/livestream?lang=english`, {
-                                    method: 'POST',
-                                    credentials: 'include'
-                                })
-                                const data = await res.json()
-                                if (res.ok) {
-                                    showToast('Success', '🔴 Al Jazeera English added to your feed!', 'success')
-                                } else {
-                                    showToast('Info', data.message || 'Already in feed', 'info')
-                                }
-                            } catch (error) {
-                                showToast('Error', 'Failed to add live stream', 'error')
-                            }
-                        }}
-                        colorScheme="red"
-                        size="sm"
-                        w="full"
-                    >
-                        🔴 Watch Live (English)
-                    </Button>
-                    
-                    <Button
-                        onClick={async () => {
-                            try {
-                                const baseUrl = import.meta.env.PROD ? window.location.origin : "http://localhost:5000"
-                                const res = await fetch(`${baseUrl}/api/news/post/livestream?lang=arabic`, {
-                                    method: 'POST',
-                                    credentials: 'include'
-                                })
-                                const data = await res.json()
-                                if (res.ok) {
-                                    showToast('Success', '🔴 الجزيرة مباشر added to your feed!', 'success')
-                                } else {
-                                    showToast('Info', data.message || 'Already in feed', 'info')
-                                }
-                            } catch (error) {
-                                showToast('Error', 'Failed to add live stream', 'error')
-                            }
-                        }}
-                        colorScheme="purple"
-                        size="sm"
-                        w="full"
-                    >
-                        🔴 Watch Live (العربية)
-                    </Button>
-                    
-                    <Text fontSize="xs" color={secondaryTextColor} textAlign="center">
-                        Choose your language
-                </Text>
+                            
+                            {/* Stream Buttons */}
+                            <VStack spacing={2} align="stretch">
+                                {channel.streams.map((stream, index) => {
+                                    const loadingKey = `${channel.id}-${index}`
+                                    const isLoading = streamLoading[loadingKey]
+                                    
+                                    // Map button colors
+                                    const colorMap = {
+                                        'red': 'red',
+                                        'blue': 'blue',
+                                        'purple': 'purple',
+                                        'green': 'green',
+                                        'orange': 'orange',
+                                        'teal': 'teal'
+                                    }
+                                    
+                                    return (
+                                        <Button
+                                            key={index}
+                                            onClick={() => handleStreamClick(channel.id, index)}
+                                            isLoading={isLoading}
+                                            colorScheme={colorMap[stream.buttonColor] || 'blue'}
+                                            size="sm"
+                                            w="full"
+                                            leftIcon={<Text>🔴</Text>}
+                                        >
+                                            Watch Live {stream.name && `(${stream.name})`}
+                                        </Button>
+                                    )
+                                })}
+                                
+                                {channel.streams.length > 1 && (
+                                    <Text fontSize="xs" color={secondaryTextColor} textAlign="center" mt={1}>
+                                        Choose your language
+                                    </Text>
+                                )}
+                            </VStack>
+                        </Box>
+                    ))}
                 </VStack>
             )}
         </Box>
