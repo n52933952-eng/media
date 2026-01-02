@@ -4,6 +4,7 @@ import User from '../models/user.js'
 import Post from '../models/post.js'
 import { getIO, getUserSocketMap } from '../socket/socket.js'
 import mongoose from 'mongoose'
+import { autoPostTodayMatches } from '../controller/football.js'
 
 // Football-Data.org API configuration
 const API_KEY = process.env.FOOTBALL_API_KEY || '5449eacc047c4b529267d309d166d09b'
@@ -404,6 +405,12 @@ export const initializeFootballCron = () => {
         await fetchTodayFixtures()
     })
     
+    // Job 5: Auto-create post for today's matches at 7 AM UTC (after fixtures are fetched at 6 AM)
+    cron.schedule('0 7 * * *', async () => {
+        console.log('📅 [CRON] Auto-creating post for today\'s matches...')
+        await autoPostTodayMatches()
+    })
+    
     // Job 3: Create football account if not exists (runs once on startup)
     setTimeout(async () => {
         await getFootballAccount()
@@ -413,11 +420,16 @@ export const initializeFootballCron = () => {
     setTimeout(async () => {
         console.log('⚽ [STARTUP] Fetching today\'s fixtures immediately...')
         await fetchTodayFixtures()
+        
+        // Also create post on startup if it doesn't exist for today
+        console.log('⚽ [STARTUP] Checking if post exists for today...')
+        await autoPostTodayMatches()
     }, 5000)
     
     console.log('✅ Football Cron Jobs initialized')
-    console.log('   - Live matches: Every 2 minutes (12pm-11pm UTC)')
+    console.log('   - Live matches: Every 2 minutes')
     console.log('   - Daily fixtures: 6 AM UTC')
+    console.log('   - Auto-post today\'s matches: 7 AM UTC')
     console.log('   - Startup fetch: Running in 5 seconds...')
 }
 
