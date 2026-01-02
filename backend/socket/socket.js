@@ -5,7 +5,9 @@ import Message from '../models/message.js'
 import Conversation from '../models/conversation.js'
 import User from '../models/user.js'
 import { createChessGamePost, deleteChessGamePost } from '../controller/post.js'
-import { getRedis, redisSet, redisGet, redisDel, isRedisAvailable, ensureRedis } from '../services/redis.js'
+import * as redisService from '../services/redis.js'
+// Use redisService namespace for all Redis functions to avoid import issues
+const { getRedis, isRedisAvailable } = redisService
 
 // This will be set from index.js
 let io = null
@@ -24,21 +26,21 @@ const chessGameStates = new Map()
 
 // Helper functions for userSocketMap - Redis only (required for 1M+ users)
 const setUserSocket = async (userId, socketData) => {
-    ensureRedis() // Redis is required
+    redisService.ensureRedis() // Redis is required
     
     // Write to Redis (primary storage for scaling)
-    await redisSet(`userSocket:${userId}`, socketData, 3600) // 1 hour TTL
+    await redisService.redisSet(`userSocket:${userId}`, socketData, 3600) // 1 hour TTL
     
     // Also keep in-memory for fast local access (but Redis is source of truth)
     userSocketMap[userId] = socketData
 }
 
 const getUserSocket = async (userId) => {
-    ensureRedis() // Redis is required
+    redisService.ensureRedis() // Redis is required
     
     // Try Redis first (source of truth)
     try {
-        const redisData = await redisGet(`userSocket:${userId}`)
+        const redisData = await redisService.redisGet(`userSocket:${userId}`)
         if (redisData) {
             // Update in-memory cache for fast access
             userSocketMap[userId] = redisData
@@ -54,17 +56,17 @@ const getUserSocket = async (userId) => {
 }
 
 const deleteUserSocket = async (userId) => {
-    ensureRedis() // Redis is required
+    redisService.ensureRedis() // Redis is required
     
     // Delete from Redis (primary storage)
-    await redisDel(`userSocket:${userId}`)
+    await redisService.redisDel(`userSocket:${userId}`)
     
     // Delete from in-memory cache
     delete userSocketMap[userId]
 }
 
 const getAllUserSockets = async () => {
-    ensureRedis() // Redis is required
+    redisService.ensureRedis() // Redis is required
     
     // For now, use in-memory cache (it's kept in sync)
     // TODO: Can optimize later to get all from Redis if needed
@@ -73,15 +75,15 @@ const getAllUserSockets = async () => {
 
 // Helper functions for chessGameStates - Redis only
 const setChessGameState = async (roomId, gameState) => {
-    ensureRedis()
-    await redisSet(`chessGameState:${roomId}`, gameState, 7200) // 2 hour TTL
+    redisService.ensureRedis()
+    await redisService.redisSet(`chessGameState:${roomId}`, gameState, 7200) // 2 hour TTL
     chessGameStates.set(roomId, gameState) // Keep in-memory cache
 }
 
 const getChessGameState = async (roomId) => {
-    ensureRedis()
+    redisService.ensureRedis()
     try {
-        const redisData = await redisGet(`chessGameState:${roomId}`)
+        const redisData = await redisService.redisGet(`chessGameState:${roomId}`)
         if (redisData) {
             chessGameStates.set(roomId, redisData) // Update cache
             return redisData
@@ -94,22 +96,22 @@ const getChessGameState = async (roomId) => {
 }
 
 const deleteChessGameState = async (roomId) => {
-    ensureRedis()
-    await redisDel(`chessGameState:${roomId}`)
+    redisService.ensureRedis()
+    await redisService.redisDel(`chessGameState:${roomId}`)
     chessGameStates.delete(roomId)
 }
 
 // Helper functions for activeChessGames - Redis only
 const setActiveChessGame = async (userId, roomId) => {
-    ensureRedis()
-    await redisSet(`activeChessGame:${userId}`, roomId, 7200) // 2 hour TTL
+    redisService.ensureRedis()
+    await redisService.redisSet(`activeChessGame:${userId}`, roomId, 7200) // 2 hour TTL
     activeChessGames.set(userId, roomId) // Keep in-memory cache
 }
 
 const getActiveChessGame = async (userId) => {
-    ensureRedis()
+    redisService.ensureRedis()
     try {
-        const redisData = await redisGet(`activeChessGame:${userId}`)
+        const redisData = await redisService.redisGet(`activeChessGame:${userId}`)
         if (redisData) {
             activeChessGames.set(userId, redisData) // Update cache
             return redisData
@@ -122,13 +124,13 @@ const getActiveChessGame = async (userId) => {
 }
 
 const deleteActiveChessGame = async (userId) => {
-    ensureRedis()
-    await redisDel(`activeChessGame:${userId}`)
+    redisService.ensureRedis()
+    await redisService.redisDel(`activeChessGame:${userId}`)
     activeChessGames.delete(userId)
 }
 
 const hasActiveChessGame = async (userId) => {
-    ensureRedis()
+    redisService.ensureRedis()
     const roomId = await getActiveChessGame(userId)
     return roomId !== null
 }
