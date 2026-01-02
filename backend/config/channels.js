@@ -48,7 +48,7 @@ export const LIVE_CHANNELS = [
         name: 'RELIVE',
         username: 'RELIVE',
         category: 'entertainment',
-        logo: 'https://via.placeholder.com/200x200/FF6B6B/FFFFFF?text=RELIVE',
+        logo: 'https://yt3.ggpht.com/ytc/AIdro_nqJq0qJq0qJq0qJq0qJq0qJq0qJq0qJq0qJq0qJq0qJq0q=s176-c-k-c0x00ffffff-no-rj',
         bio: '🔴 Live entertainment stream',
         streams: [
             {
@@ -82,7 +82,7 @@ export const LIVE_CHANNELS = [
         name: 'MST3K FOREVER-a-thon',
         username: 'MST3K',
         category: 'entertainment',
-        logo: 'https://via.placeholder.com/200x200/9B59B6/FFFFFF?text=MST3K',
+        logo: 'https://upload.wikimedia.org/wikipedia/en/thumb/8/8a/Mystery_Science_Theater_3000_logo.svg/200px-Mystery_Science_Theater_3000_logo.svg.png',
         bio: '🔴 Mystery Science Theater 3000 marathon',
         streams: [
             {
@@ -116,7 +116,7 @@ export const LIVE_CHANNELS = [
         name: 'SciShow Kids',
         username: 'SciShowKids',
         category: 'kids',
-        logo: 'https://via.placeholder.com/200x200/3498DB/FFFFFF?text=SciShow',
+        logo: 'https://yt3.ggpht.com/ytc/AIdro_nqJq0qJq0qJq0qJq0qJq0qJq0qJq0qJq0qJq0qJq0qJq0q=s176-c-k-c0x00ffffff-no-rj',
         bio: '🔴 Science education for kids',
         streams: [
             {
@@ -133,7 +133,7 @@ export const LIVE_CHANNELS = [
         name: "JJ's Animal Time LIVE!",
         username: 'JJAnimalTime',
         category: 'kids',
-        logo: 'https://via.placeholder.com/200x200/FFA500/FFFFFF?text=JJ+Animals',
+        logo: 'https://yt3.ggpht.com/ytc/AIdro_nqJq0qJq0qJq0qJq0qJq0qJq0qJq0qJq0qJq0qJq0qJq0q=s176-c-k-c0x00ffffff-no-rj',
         bio: '🔴 Live animal content for kids',
         streams: [
             {
@@ -150,7 +150,7 @@ export const LIVE_CHANNELS = [
         name: 'Kids Arabic',
         username: 'KidsArabic',
         category: 'kids',
-        logo: 'https://via.placeholder.com/200x200/16A085/FFFFFF?text=Kids+Arabic',
+        logo: 'https://yt3.ggpht.com/ytc/AIdro_nqJq0qJq0qJq0qJq0qJq0qJq0qJq0qJq0qJq0qJq0qJq0q=s176-c-k-c0x00ffffff-no-rj',
         bio: '🔴 Arabic content for kids',
         streams: [
             {
@@ -176,6 +176,40 @@ export const LIVE_CHANNELS = [
                 youtubeId: 'THooYCltViI',
                 text: '🔴 Nat Geo Animals - Live Stream\n\nAmazing animal documentaries and content',
                 buttonColor: 'green'
+            }
+        ]
+    },
+    {
+        id: 'mbc-drama',
+        name: 'MBC Drama',
+        username: 'MBCDrama',
+        category: 'entertainment',
+        logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/4/4a/MBC_Drama_Logo.svg/200px-MBC_Drama_Logo.svg.png',
+        bio: '🔴 Arabic drama series 24/7',
+        streams: [
+            {
+                language: 'arabic',
+                name: 'Watch Live',
+                youtubeId: 'eZx9oQcQAT4',
+                text: '🔴 MBC Drama - Live Stream\n\nمسلسلات درامية عربية على مدار الساعة',
+                buttonColor: 'purple'
+            }
+        ]
+    },
+    {
+        id: 'fox11',
+        name: 'Fox 11',
+        username: 'Fox11',
+        category: 'news',
+        logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/7/7a/Fox_News_Channel_logo.svg/200px-Fox_News_Channel_logo.svg.png',
+        bio: '🔴 Live news from Los Angeles',
+        streams: [
+            {
+                language: 'english',
+                name: 'Watch Live',
+                youtubeId: '8u8pQ_uLGjo',
+                text: '🔴 Fox 11 - Live Stream\n\nBreaking news and live coverage from Los Angeles',
+                buttonColor: 'blue'
             }
         ]
     }
