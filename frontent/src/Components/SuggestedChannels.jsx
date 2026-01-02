@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useContext } from 'react'
 import { Box, Flex, Text, Avatar, Button, VStack, Spinner, useColorModeValue, Grid, GridItem, SimpleGrid } from '@chakra-ui/react'
-import { Link as RouterLink } from 'react-router-dom'
+import { Link as RouterLink, useNavigate } from 'react-router-dom'
 import { UserContext } from '../context/UserContext'
 import { PostContext } from '../context/PostContext'
 import useShowToast from '../hooks/useShowToast'
@@ -8,7 +8,9 @@ import useShowToast from '../hooks/useShowToast'
 const SuggestedChannels = ({ onUserFollowed }) => {
     const { user, setUser } = useContext(UserContext)
     const { setFollowPost } = useContext(PostContext)
+    const navigate = useNavigate()
     const [footballAccount, setFootballAccount] = useState(null)
+    const [footballPostId, setFootballPostId] = useState(null) // Store latest Football post ID
     const [channels, setChannels] = useState([])
     const [loading, setLoading] = useState(true)
     const [followLoading, setFollowLoading] = useState(false)
@@ -45,6 +47,22 @@ const SuggestedChannels = ({ onUserFollowed }) => {
                     if (user?.following) {
                         setIsFollowing(user.following.includes(footballData._id))
                     }
+                    
+                    // Fetch latest Football post
+                    try {
+                        const postsRes = await fetch(
+                            `${baseUrl}/api/post/user/id/${footballData._id}?limit=1`,
+                            { credentials: 'include' }
+                        )
+                        const postsData = await postsRes.json()
+                        if (postsRes.ok && postsData.posts && postsData.posts.length > 0) {
+                            // Get the latest post (first one, sorted by date)
+                            const latestPost = postsData.posts[0]
+                            setFootballPostId(latestPost._id)
+                        }
+                    } catch (error) {
+                        console.error('Error fetching Football post:', error)
+                    }
                 }
                 
                 // Fetch all live channels
@@ -65,6 +83,48 @@ const SuggestedChannels = ({ onUserFollowed }) => {
         
         fetchData()
     }, [user])
+    
+    // Handle channel click - navigate to channel post page
+    const handleChannelClick = async (channel) => {
+        try {
+            const baseUrl = import.meta.env.PROD ? window.location.origin : "http://localhost:5000"
+            
+            // Find the latest post for this channel
+            // Channel posts are created by the channel's system account (username matches channel username)
+            const channelUsername = channel.username
+            
+            if (channelUsername) {
+                // Fetch user profile to get user ID
+                const userRes = await fetch(
+                    `${baseUrl}/api/user/getUserPro/${channelUsername}`,
+                    { credentials: 'include' }
+                )
+                const userData = await userRes.json()
+                
+                if (userRes.ok && userData?._id) {
+                    // Fetch latest post from this channel
+                    const postsRes = await fetch(
+                        `${baseUrl}/api/post/user/id/${userData._id}?limit=1`,
+                        { credentials: 'include' }
+                    )
+                    const postsData = await postsRes.json()
+                    
+                    if (postsRes.ok && postsData.posts && postsData.posts.length > 0) {
+                        const latestPost = postsData.posts[0]
+                        navigate(`/${channelUsername}/post/${latestPost._id}`)
+                    } else {
+                        // No post found, show message
+                        showToast('Info', 'No posts from this channel yet', 'info')
+                    }
+                } else {
+                    showToast('Error', 'Channel not found', 'error')
+                }
+            }
+        } catch (error) {
+            console.error('Error navigating to channel post:', error)
+            showToast('Error', 'Could not load channel post', 'error')
+        }
+    }
     
     // Handle live stream button click
     const handleStreamClick = async (channelId, streamIndex = 0) => {
@@ -274,31 +334,38 @@ const SuggestedChannels = ({ onUserFollowed }) => {
                         borderRadius="md"
                         border="1px solid"
                         borderColor={borderColor}
-                        _hover={{ bg: hoverBg }}
+                        _hover={{ bg: hoverBg, cursor: 'pointer' }}
                         transition="all 0.2s"
+                        onClick={() => {
+                            // Navigate to Football post page if post exists, otherwise to Football page
+                            if (footballPostId && footballAccount?.username) {
+                                navigate(`/${footballAccount.username}/post/${footballPostId}`)
+                            } else {
+                                navigate('/football')
+                            }
+                        }}
                     >
-                        <RouterLink to="/football" style={{ flexGrow: 1 }}>
-                            <Flex align="center" gap={3}>
-                                <Avatar 
-                                    src={footballAccount.profilePic || "https://cdn-icons-png.flaticon.com/512/53/53283.png"}
-                                    size="md"
-                                />
-                                <VStack align="start" spacing={0} flex={1}>
-                                    <Flex align="center" gap={1}>
-                                        <Text fontSize="sm" fontWeight="semibold" color={textColor}>
-                                            {footballAccount.name}
-                                        </Text>
-                                        <Text fontSize="lg">⚽</Text>
-                                    </Flex>
-                                    <Text fontSize="xs" color={secondaryTextColor} noOfLines={1}>
-                                        Live football scores & updates
+                        <Flex align="center" gap={3} flex={1}>
+                            <Avatar 
+                                src={footballAccount.profilePic || "https://cdn-icons-png.flaticon.com/512/53/53283.png"}
+                                size="md"
+                                cursor="pointer"
+                            />
+                            <VStack align="start" spacing={0} flex={1}>
+                                <Flex align="center" gap={1}>
+                                    <Text fontSize="sm" fontWeight="semibold" color={textColor}>
+                                        {footballAccount.name}
                                     </Text>
-                                    <Text fontSize="xs" color={secondaryTextColor} mt={1}>
-                                        {footballAccount.followers?.length || 0} followers
-                                    </Text>
-                                </VStack>
-                            </Flex>
-                        </RouterLink>
+                                    <Text fontSize="lg">⚽</Text>
+                                </Flex>
+                                <Text fontSize="xs" color={secondaryTextColor} noOfLines={1}>
+                                    Live football scores & updates
+                                </Text>
+                                <Text fontSize="xs" color={secondaryTextColor} mt={1}>
+                                    {footballAccount.followers?.length || 0} followers
+                                </Text>
+                            </VStack>
+                        </Flex>
                     </Flex>
                     
                     {/* Follow Button */}
@@ -336,8 +403,6 @@ const SuggestedChannels = ({ onUserFollowed }) => {
                         {channels.map((channel) => (
                             <Box
                                 key={channel.id}
-                                as="button"
-                                onClick={() => setExpandedChannel(expandedChannel === channel.id ? null : channel.id)}
                                 bg={expandedChannel === channel.id ? hoverBg : cardBg}
                                 borderRadius="md"
                                 p={2}
@@ -345,7 +410,6 @@ const SuggestedChannels = ({ onUserFollowed }) => {
                                 borderColor={expandedChannel === channel.id ? 'blue.400' : borderColor}
                                 _hover={{ bg: hoverBg, borderColor: 'blue.300' }}
                                 transition="all 0.2s"
-                                cursor="pointer"
                                 position="relative"
                             >
                                 <VStack spacing={1}>
@@ -355,8 +419,22 @@ const SuggestedChannels = ({ onUserFollowed }) => {
                                         bg="blue.500"
                                         color="white"
                                         fontWeight="bold"
+                                        cursor="pointer"
+                                        onClick={(e) => {
+                                            e.stopPropagation()
+                                            handleChannelClick(channel)
+                                        }}
+                                        _hover={{ transform: 'scale(1.1)' }}
+                                        transition="transform 0.2s"
                                     />
-                                    <Text fontSize="2xs" color={textColor} textAlign="center" noOfLines={1}>
+                                    <Text 
+                                        fontSize="2xs" 
+                                        color={textColor} 
+                                        textAlign="center" 
+                                        noOfLines={1}
+                                        cursor="pointer"
+                                        onClick={() => setExpandedChannel(expandedChannel === channel.id ? null : channel.id)}
+                                    >
                                         {channel.name.length > 10 ? channel.name.substring(0, 8) + '...' : channel.name}
                                     </Text>
                                 </VStack>
