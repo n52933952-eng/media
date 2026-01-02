@@ -142,17 +142,93 @@ if(!post) return
     <Text my={3}>{post?.text}</Text>
 
     <Box borderRadius={16} overflow={"hidden"} border={"1px solid"} borderColor={"gray.light"} my={3}>
-      {post?.img && (post.img.match(/\.(mp4|webm|ogg|mov)$/i) || post.img.includes('/video/upload/')) ? (
-        <Box
-          as="video"
-          src={post.img}
-          controls
-          w="full"
-          maxH="500px"
-        />
-      ) : (
-        <Image src={post?.img} w={"full"} objectFit="contain" maxH="500px" />
-      )}
+      {post?.img && (() => {
+        // Check if it's a YouTube embed URL (channel posts use this format)
+        const isYouTubeEmbed = post.img.includes('youtube.com/embed')
+        
+        if (isYouTubeEmbed) {
+          // Use the embed URL directly (already in correct format from backend)
+          return (
+            <Box
+              position="relative"
+              w="full"
+              h="0"
+              paddingBottom="56.25%" // 16:9 aspect ratio
+              bg="black"
+            >
+              <iframe
+                src={post.img} // Use URL directly (already includes autoplay=1&mute=0)
+                title="Live Stream"
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                allowFullScreen
+                style={{
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  width: '100%',
+                  height: '100%',
+                  border: 'none'
+                }}
+              />
+            </Box>
+          )
+        }
+        
+        // Check if it's a regular YouTube URL (youtu.be or watch format)
+        const isYouTube = post.img.includes('youtu.be') || post.img.includes('youtube.com/watch')
+        if (isYouTube) {
+          // Extract YouTube video ID and convert to embed format
+          let videoId = ''
+          if (post.img.includes('youtu.be/')) {
+            videoId = post.img.split('youtu.be/')[1]?.split('?')[0] || ''
+          } else if (post.img.includes('youtube.com/watch?v=')) {
+            videoId = post.img.split('v=')[1]?.split('&')[0] || ''
+          }
+          
+          if (videoId) {
+            return (
+              <Box
+                position="relative"
+                w="full"
+                h="0"
+                paddingBottom="56.25%"
+                bg="black"
+              >
+                <iframe
+                  src={`https://www.youtube.com/embed/${videoId}?autoplay=1&rel=0`}
+                  title="Live Stream"
+                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                  allowFullScreen
+                  style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    width: '100%',
+                    height: '100%',
+                    border: 'none'
+                  }}
+                />
+              </Box>
+            )
+          }
+        }
+        
+        // Check if it's a video file
+        if (post.img.match(/\.(mp4|webm|ogg|mov)$/i) || post.img.includes('/video/upload/')) {
+          return (
+            <Box
+              as="video"
+              src={post.img}
+              controls
+              w="full"
+              maxH="500px"
+            />
+          )
+        }
+        
+        // Default to image
+        return <Image src={post?.img} w={"full"} objectFit="contain" maxH="500px" />
+      })()}
     </Box>
 
 
