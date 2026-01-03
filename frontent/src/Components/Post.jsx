@@ -424,70 +424,7 @@ const showToast = useShowToast()
       </Flex>
     )}
     
-     {/* Match Reaction Post - Special Display */}
-     {post?.isMatchReaction && post?.matchReactionData ? (
-       <Box
-         bg={useColorModeValue('green.50', 'green.900')}
-         border="2px solid"
-         borderColor={useColorModeValue('green.300', 'green.600')}
-         borderRadius="lg"
-         p={4}
-         mb={3}
-       >
-         <Flex align="center" gap={2} mb={3}>
-           <Text fontSize="2xl">⚽</Text>
-           <Text fontSize="lg" fontWeight="bold" color={textColor}>
-             GOAL!
-           </Text>
-         </Flex>
-         
-         <VStack align="stretch" spacing={2}>
-           <Flex align="center" justify="space-between">
-             <Text fontSize="sm" fontWeight="bold" color={textColor}>
-               {post.matchReactionData.scorer}
-             </Text>
-             <Text fontSize="xs" color={secondaryTextColor}>
-               {post.matchReactionData.team}
-             </Text>
-           </Flex>
-           
-           <Flex align="center" justify="center" gap={3} py={2}>
-             <VStack spacing={0}>
-               <Text fontSize="xs" color={secondaryTextColor}>
-                 {post.matchReactionData.homeTeam}
-               </Text>
-               <Text fontSize="2xl" fontWeight="bold" color={textColor}>
-                 {post.matchReactionData.score?.home || 0}
-               </Text>
-             </VStack>
-             
-             <Text fontSize="xl" fontWeight="bold" color={secondaryTextColor}>
-               -
-             </Text>
-             
-             <VStack spacing={0}>
-               <Text fontSize="xs" color={secondaryTextColor}>
-                 {post.matchReactionData.awayTeam}
-               </Text>
-               <Text fontSize="2xl" fontWeight="bold" color={textColor}>
-                 {post.matchReactionData.score?.away || 0}
-               </Text>
-             </VStack>
-           </Flex>
-           
-           <Flex align="center" justify="space-between" pt={2} borderTop="1px solid" borderColor={borderColor}>
-             <Text fontSize="xs" color={secondaryTextColor}>
-               ⏱️ {post.matchReactionData.minute || '?'}'
-             </Text>
-             <Text fontSize="xs" color={secondaryTextColor}>
-               📺 Match Update
-             </Text>
-           </Flex>
-         </VStack>
-       </Box>
-     ) : (
-       <Text>{post.text}</Text>
-     )}
+     <Text>{post.text}</Text>
   
   {/* Football Match Cards - Visual Table */}
   {isFootballPost && matchesData.length > 0 && (
