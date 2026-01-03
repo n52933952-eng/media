@@ -215,14 +215,18 @@ const showToast = useShowToast()
     e.preventDefault()
     e.stopPropagation()
     
-    // If it's a channel post, navigate to post page instead of profile
-    if (isChannelPost && post?._id) {
+    // If it's Football channel, navigate to Football page
+    if (postedBy?.username === 'Football') {
+      navigate('/football')
+    } 
+    // If it's another channel post, navigate to post page instead of profile
+    else if (isChannelPost && post?._id) {
       navigate(`/${postedBy?.username}/post/${post._id}`)
     } else {
       navigate(`/${postedBy?.username}`)
     }
   }
-
+  
   const postContent = (
     <Flex gap={3}  mb="4" py={5}>
         
@@ -320,24 +324,30 @@ const showToast = useShowToast()
         const goalEvents = (match.events || []).filter(e => e.type === 'Goal')
         
         return (
-          <Box
-            key={index}
-            bg={cardBg}
-            borderRadius="lg"
-            border="1px solid"
-            borderColor={borderColor}
-            p={3}
-            _hover={{ shadow: 'md' }}
-            transition="all 0.2s"
-          >
-            {/* League Header */}
+        <Box
+          key={index}
+          bg={cardBg}
+          borderRadius="lg"
+          border="1px solid"
+          borderColor={borderColor}
+          p={3}
+          _hover={{ shadow: 'md' }}
+          transition="all 0.2s"
+          cursor="pointer"
+          onClick={() => {
+            if (post?._id && postedBy?.username) {
+              navigate(`/${postedBy.username}/post/${post._id}`)
+            }
+          }}
+        >
+          {/* League Header */}
             <Flex align="center" mb={3} pb={2} borderBottom="1px solid" borderColor={borderColor}>
-              {match.league?.logo && (
-                <Image src={match.league.logo} boxSize="16px" mr={2} alt={match.league.name} />
-              )}
-              <Text fontSize="xs" fontWeight="semibold" color={secondaryTextColor}>
-                {match.league?.name || 'Premier League'}
-              </Text>
+            {match.league?.logo && (
+              <Image src={match.league.logo} boxSize="16px" mr={2} alt={match.league.name} />
+            )}
+            <Text fontSize="xs" fontWeight="semibold" color={secondaryTextColor}>
+              {match.league?.name || 'Premier League'}
+            </Text>
               
               {/* Live/Status Badge */}
               {isLive && (
@@ -354,20 +364,20 @@ const showToast = useShowToast()
                   FT
                 </Text>
               )}
+          </Flex>
+          
+          {/* Match Details */}
+            <Flex align="center" justify="space-between" mb={2}>
+            {/* Home Team */}
+            <Flex align="center" flex={1} mr={2}>
+              {match.homeTeam?.logo && (
+                  <Image src={match.homeTeam.logo} boxSize="28px" mr={2} alt={match.homeTeam.name} />
+              )}
+                <Text fontSize="sm" fontWeight="bold" color={textColor} noOfLines={1}>
+                {match.homeTeam?.name || 'Home'}
+              </Text>
             </Flex>
             
-            {/* Match Details */}
-            <Flex align="center" justify="space-between" mb={2}>
-              {/* Home Team */}
-              <Flex align="center" flex={1} mr={2}>
-                {match.homeTeam?.logo && (
-                  <Image src={match.homeTeam.logo} boxSize="28px" mr={2} alt={match.homeTeam.name} />
-                )}
-                <Text fontSize="sm" fontWeight="bold" color={textColor} noOfLines={1}>
-                  {match.homeTeam?.name || 'Home'}
-                </Text>
-              </Flex>
-              
               {/* Score or Time */}
               <Flex align="center" justify="center" minW="80px" direction="column">
                 {hasScore ? (
@@ -383,22 +393,22 @@ const showToast = useShowToast()
                     </Text>
                   </Flex>
                 ) : (
-                  <Text fontSize="xs" fontWeight="bold" color={secondaryTextColor}>
-                    ⏰ {match.time}
-                  </Text>
+              <Text fontSize="xs" fontWeight="bold" color={secondaryTextColor}>
+                ⏰ {match.time}
+              </Text>
                 )}
-              </Flex>
-              
-              {/* Away Team */}
-              <Flex align="center" flex={1} ml={2} justify="flex-end">
-                <Text fontSize="sm" fontWeight="bold" color={textColor} noOfLines={1} textAlign="right">
-                  {match.awayTeam?.name || 'Away'}
-                </Text>
-                {match.awayTeam?.logo && (
-                  <Image src={match.awayTeam.logo} boxSize="28px" ml={2} alt={match.awayTeam.name} />
-                )}
-              </Flex>
             </Flex>
+            
+            {/* Away Team */}
+            <Flex align="center" flex={1} ml={2} justify="flex-end">
+                <Text fontSize="sm" fontWeight="bold" color={textColor} noOfLines={1} textAlign="right">
+                {match.awayTeam?.name || 'Away'}
+              </Text>
+              {match.awayTeam?.logo && (
+                  <Image src={match.awayTeam.logo} boxSize="28px" ml={2} alt={match.awayTeam.name} />
+              )}
+            </Flex>
+          </Flex>
             
             {/* Goal Events - Grouped by Team */}
             {goalEvents.length > 0 && (
@@ -433,7 +443,7 @@ const showToast = useShowToast()
                 </Grid>
               </Box>
             )}
-          </Box>
+        </Box>
         )
       })}
       
@@ -613,7 +623,7 @@ const showToast = useShowToast()
       </Box>
     )
   }
-  
+
   return (
     <Link to={`/${postedBy?.username}/post/${post._id}`}>
       {postContent}

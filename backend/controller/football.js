@@ -780,10 +780,16 @@ export const autoPostTodayMatches = async () => {
             console.log(`🗑️ [autoPostTodayMatches] Deleted ${deletedOldPosts.deletedCount} old football posts from previous days`)
         }
         
-        // Check if post exists for today
+        // Check if post exists for today (either with footballData OR text-only "no matches" post)
         const existingPost = await Post.findOne({
             postedBy: footballAccount._id,
-            footballData: { $exists: true, $ne: null },
+            $or: [
+                { footballData: { $exists: true, $ne: null } }, // Posts with match data
+                { 
+                    text: { $regex: /Football Live|No live matches/i }, // "No matches" posts
+                    footballData: { $exists: false } // No footballData
+                }
+            ],
             createdAt: { 
                 $gte: todayStart,
                 $lte: todayEnd
@@ -844,6 +850,27 @@ export const autoPostTodayMatches = async () => {
         console.log('⚽ [autoPostTodayMatches] Found matches:', matches.length)
         
         if (matches.length === 0) {
+            // Check if "no matches" post already exists for today (avoid duplicates)
+            const existingNoMatchesPost = await Post.findOne({
+                postedBy: footballAccount._id,
+                text: { $regex: /Football Live|No live matches/i },
+                footballData: { $exists: false },
+                createdAt: { 
+                    $gte: todayStart,
+                    $lte: todayEnd
+                }
+            })
+            
+            if (existingNoMatchesPost) {
+                console.log('✅ [autoPostTodayMatches] "No matches" post already exists for today, skipping...')
+                return { 
+                    success: true, 
+                    message: 'No matches post already exists for today', 
+                    postId: existingNoMatchesPost._id,
+                    noMatches: true
+                }
+            }
+            
             // No live matches found - create a post saying so
             const noMatchesPost = new Post({
                 postedBy: footballAccount._id,
