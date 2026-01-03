@@ -229,3 +229,5 @@ export const getChannelByUsername = (username) => {
 export const getChannelsByCategory = (category) => {
     return LIVE_CHANNELS.filter(channel => channel.category === category)
 }
+
+

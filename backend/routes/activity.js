@@ -7,3 +7,5 @@ const router = express.Router()
 router.get('/', protectRoute, getActivities)
 
 export default router
+
+

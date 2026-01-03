@@ -251,3 +251,5 @@ If backend serves frontend and you have 2 servers:
 - **Best Practice:** ONE frontend URL, multiple backend servers behind the scenes
 
 **Users should only see ONE URL!** The load balancer handles the rest automatically.
+
+

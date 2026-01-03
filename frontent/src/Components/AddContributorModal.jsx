@@ -285,3 +285,5 @@ const AddContributorModal = ({ isOpen, onClose, post, onContributorAdded }) => {
 }
 
 export default AddContributorModal
+
+

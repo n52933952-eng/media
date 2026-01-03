@@ -62,3 +62,5 @@ After starting the app, you should see:
 ---
 
 **That's it! Your app is now ready for 1M+ users!** 🚀
+
+

@@ -26,3 +26,5 @@ router.put('/read-all', protectRoute, markAllNotificationsAsRead)
 router.delete('/:notificationId', protectRoute, deleteNotification)
 
 export default router
+
+

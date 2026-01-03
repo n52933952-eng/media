@@ -242,3 +242,5 @@ Users → Custom Domain (thredtrain.com)
 3. Or use one URL (Server 2 as backup)
 
 **Both servers work - you just need to route traffic to both!**
+
+

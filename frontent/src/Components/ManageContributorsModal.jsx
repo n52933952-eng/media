@@ -180,3 +180,5 @@ const ManageContributorsModal = ({ isOpen, onClose, post, onContributorRemoved }
 }
 
 export default ManageContributorsModal
+
+

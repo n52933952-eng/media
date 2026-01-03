@@ -326,3 +326,5 @@ sudo certbot --nginx -d thredtrain.com -d www.thredtrain.com
 **Simplest:** Use one URL (Option 3 - no load balancing)
 
 **Choose based on your needs!**
+
+

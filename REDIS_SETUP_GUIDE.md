@@ -151,3 +151,5 @@ When deploying to production (Render, AWS, etc.):
 ---
 
 **Your app is now ready to scale to 1M+ users once Redis is configured!** 🚀
+
+

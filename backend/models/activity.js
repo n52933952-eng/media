@@ -33,3 +33,5 @@ ActivitySchema.index({ targetUser: 1, createdAt: -1 })
 const Activity = mongoose.model("Activity", ActivitySchema)
 
 export default Activity
+
+

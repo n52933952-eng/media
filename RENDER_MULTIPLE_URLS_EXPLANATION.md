@@ -230,3 +230,5 @@ You can:
 - ✅ Render may auto-load balance (check docs)
 
 **The important part:** Both servers share same MongoDB & Redis, so they work together!
+
+
