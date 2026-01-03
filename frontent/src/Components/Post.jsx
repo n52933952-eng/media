@@ -26,6 +26,8 @@ const showToast = useShowToast()
 
   const{user}=useContext(UserContext)
   const{followPost,setFollowPost}=useContext(PostContext)
+  const { isOpen: isAddContributorOpen, onOpen: onAddContributorOpen, onClose: onAddContributorClose } = useDisclosure()
+  const { isOpen: isManageContributorsOpen, onOpen: onManageContributorsOpen, onClose: onManageContributorsClose } = useDisclosure()
   
   // Color modes
   const bgColor = useColorModeValue('#f7f9fc', '#1a1d2e')
