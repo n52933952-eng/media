@@ -5,6 +5,25 @@ import User from '../models/user.js'
 // Create an activity and emit to followers
 export const createActivity = async (userId, type, options = {}) => {
     try {
+        // Delete activities older than 7 hours
+        const sevenHoursAgo = new Date(Date.now() - 7 * 60 * 60 * 1000)
+        await Activity.deleteMany({
+            userId: userId,
+            createdAt: { $lt: sevenHoursAgo }
+        })
+        
+        // Get current activity count for this user
+        const activityCount = await Activity.countDocuments({ userId: userId })
+        
+        // If user already has 8 activities, delete the oldest one
+        if (activityCount >= 8) {
+            const oldestActivity = await Activity.findOne({ userId: userId })
+                .sort({ createdAt: 1 }) // Oldest first
+            if (oldestActivity) {
+                await Activity.findByIdAndDelete(oldestActivity._id)
+            }
+        }
+        
         const activity = new Activity({
             userId: userId,
             type: type,
@@ -59,15 +78,19 @@ export const createActivity = async (userId, type, options = {}) => {
 export const getActivities = async (req, res) => {
     try {
         const userId = req.user._id
-        const limit = parseInt(req.query.limit) || 20
+        const limit = 8 // Always limit to 8 activities
 
         // Get user's following list
         const user = await User.findById(userId).select('following')
         const followingIds = user?.following?.map(f => f.toString()) || []
 
-        // Get activities from users they follow
+        // Only get activities from last 7 hours
+        const sevenHoursAgo = new Date(Date.now() - 7 * 60 * 60 * 1000)
+
+        // Get activities from users they follow (only recent ones, max 8)
         const activities = await Activity.find({
-            userId: { $in: followingIds }
+            userId: { $in: followingIds },
+            createdAt: { $gte: sevenHoursAgo } // Only activities from last 7 hours
         })
         .populate('userId', 'username name profilePic')
         .populate('targetUser', 'username name profilePic')
@@ -86,6 +109,40 @@ export const getActivities = async (req, res) => {
     } catch (error) {
         console.error('Error fetching activities:', error)
         res.status(500).json({ error: error.message })
+    }
+}
+
+// Cleanup old activities (older than 7 hours) - call this periodically
+export const cleanupOldActivities = async () => {
+    try {
+        const sevenHoursAgo = new Date(Date.now() - 7 * 60 * 60 * 1000)
+        const result = await Activity.deleteMany({
+            createdAt: { $lt: sevenHoursAgo }
+        })
+        
+        if (result.deletedCount > 0) {
+            console.log(`🧹 [cleanupOldActivities] Deleted ${result.deletedCount} old activities (older than 7 hours)`)
+        }
+        
+        // Also ensure each user has max 8 activities (delete oldest if more)
+        const usersWithActivities = await Activity.distinct('userId')
+        
+        for (const userId of usersWithActivities) {
+            const count = await Activity.countDocuments({ userId: userId })
+            if (count > 8) {
+                const activitiesToDelete = await Activity.find({ userId: userId })
+                    .sort({ createdAt: 1 }) // Oldest first
+                    .limit(count - 8) // Keep only 8 most recent
+                
+                const idsToDelete = activitiesToDelete.map(a => a._id)
+                if (idsToDelete.length > 0) {
+                    await Activity.deleteMany({ _id: { $in: idsToDelete } })
+                    console.log(`🧹 [cleanupOldActivities] Deleted ${idsToDelete.length} old activities for user ${userId} (kept 8 most recent)`)
+                }
+            }
+        }
+    } catch (error) {
+        console.error('Error cleaning up old activities:', error)
     }
 }
 

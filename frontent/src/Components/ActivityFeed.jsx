@@ -26,7 +26,12 @@ const ActivityFeed = () => {
                 )
                 const data = await res.json()
                 if (res.ok && data.activities) {
-                    setActivities(data.activities.slice(0, 5)) // Show only 5 most recent
+                    // Filter out activities older than 7 hours and limit to 8
+                    const sevenHoursAgo = new Date(Date.now() - 7 * 60 * 60 * 1000)
+                    const recentActivities = data.activities
+                        .filter(activity => new Date(activity.createdAt) >= sevenHoursAgo)
+                        .slice(0, 8) // Show only 8 most recent
+                    setActivities(recentActivities)
                 }
             } catch (error) {
                 console.error('Error fetching activities:', error)
@@ -44,8 +49,13 @@ const ActivityFeed = () => {
 
         const handleNewActivity = (activity) => {
             setActivities(prev => {
-                // Add new activity at the beginning, keep only 5
-                const updated = [activity, ...prev].slice(0, 5)
+                // Filter out activities older than 7 hours
+                const sevenHoursAgo = new Date(Date.now() - 7 * 60 * 60 * 1000)
+                const recentActivities = prev.filter(a => 
+                    new Date(a.createdAt) >= sevenHoursAgo
+                )
+                // Add new activity at the beginning, keep only 8
+                const updated = [activity, ...recentActivities].slice(0, 8)
                 return updated
             })
         }
@@ -138,20 +148,42 @@ const ActivityFeed = () => {
             mb={4} 
             border="1px solid" 
             borderColor={borderColor}
-            minH="200px"
-            maxH="400px"
-            overflowY="auto"
+            h="300px"
+            display="flex"
+            flexDirection="column"
         >
             <Text 
                 fontSize="sm" 
                 fontWeight="bold" 
                 color={textColor} 
                 mb={3}
+                flexShrink={0}
             >
                 🔔 Live Activity
             </Text>
             
-            <VStack spacing={2} align="stretch">
+            <VStack 
+                spacing={2} 
+                align="stretch"
+                flex={1}
+                overflowY="auto"
+                pr={1}
+                sx={{
+                    '&::-webkit-scrollbar': {
+                        width: '6px',
+                    },
+                    '&::-webkit-scrollbar-track': {
+                        background: 'transparent',
+                    },
+                    '&::-webkit-scrollbar-thumb': {
+                        background: useColorModeValue('gray.300', 'gray.600'),
+                        borderRadius: '3px',
+                    },
+                    '&::-webkit-scrollbar-thumb:hover': {
+                        background: useColorModeValue('gray.400', 'gray.500'),
+                    },
+                }}
+            >
                 {activities.map((activity, index) => (
                     <React.Fragment key={activity._id || index}>
                         <Flex

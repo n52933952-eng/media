@@ -14,6 +14,7 @@ import ActivityRoute from './routes/activity.js'
 import { initializeSocket } from './socket/socket.js'
 import { initializeFootballCron } from './services/footballCron.js'
 import { initializeChessPostCleanup } from './services/chessPostCleanup.js'
+import { initializeActivityCleanup } from './services/activityCleanup.js'
 import { initRedis, isRedisAvailable } from './services/redis.js'
 import path from 'path'
 import { fileURLToPath } from 'url'
@@ -154,6 +155,9 @@ initializeSocket(app).then((result) => {
         
         // Initialize Chess Post Cleanup Cron Job
         initializeChessPostCleanup()
+        
+        // Initialize Activity Cleanup Cron Job
+        initializeActivityCleanup()
     })
 }).catch((error) => {
     console.error('❌ Failed to initialize Socket.IO:', error)
