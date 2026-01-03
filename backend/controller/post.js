@@ -184,6 +184,8 @@ export const getPost = async(req,res) => {
     try{
 
         const post = await Post.findById(req.params.id)
+            .populate("postedBy", "username profilePic name")
+            .populate("contributors", "username profilePic name")
 
         if(!post){
             return res.status(500).json({message:"no post"})
@@ -500,6 +502,7 @@ export const getFeedPost = async(req,res) => {
         const postsPromises = followedUserIds.map(async (followedUserId) => {
             const userPosts = await Post.find({ postedBy: followedUserId })
                 .populate("postedBy", "-password")
+                .populate("contributors", "username profilePic name")
                 .sort({ createdAt: -1 })
                 .limit(postsPerUser) // Only get 3 most recent from each user
             return userPosts
@@ -510,6 +513,7 @@ export const getFeedPost = async(req,res) => {
             channelAddedBy: userId.toString() 
         })
             .populate("postedBy", "-password")
+            .populate("contributors", "username profilePic name")
             .sort({ createdAt: -1 })
             .limit(20) // Get all channel posts user added
         

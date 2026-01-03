@@ -17,7 +17,8 @@ import {Button,useColorModeValue,useDisclosure,
   Image,
   CloseButton,
   Flex,
-  Box
+  Box,
+  Checkbox
 } from "@chakra-ui/react";
 
 import { BsFileImageFill } from "react-icons/bs";
@@ -42,6 +43,7 @@ const CreatePost = () => {
     const[loading,setLoading]=useState(false)
     const[uploadProgress,setUploadProgress]=useState(0)
     const[isUploading,setIsUploading]=useState(false)
+    const[isCollaborative,setIsCollaborative]=useState(false)
 
 
 
@@ -176,6 +178,10 @@ const CreatePost = () => {
     const formData = new FormData()
     formData.append('postedBy', user._id)
     formData.append('text', postText)
+    if (isCollaborative) {
+      formData.append('isCollaborative', 'true')
+      formData.append('contributors', JSON.stringify([user._id])) // Include creator as first contributor
+    }
     
     if (image) {
       // Check if image is a File object (needs upload) or URL string
@@ -222,6 +228,7 @@ const CreatePost = () => {
               setImage(null)
               setImagePreview("")
               setUploadProgress(0)
+              setIsCollaborative(false)
               setLoading(false)
             } catch (error) {
               showToast("Error", "Failed to parse server response", "error")
@@ -284,6 +291,7 @@ const CreatePost = () => {
     setImage(null)
     setImagePreview("")
     setUploadProgress(0)
+    setIsCollaborative(false)
     setLoading(false)
   }
   catch(error){
@@ -337,6 +345,14 @@ const CreatePost = () => {
           
           
             <Text fontSize="sm" fontWeight="bold" textAlign="right" color="gray.500">{remaingChar}/{MAX_CHAR}</Text>
+         
+            <Checkbox 
+              mt={3} 
+              isChecked={isCollaborative}
+              onChange={(e) => setIsCollaborative(e.target.checked)}
+            >
+              <Text fontSize="sm">🤝 Make this a collaborative post (others can contribute)</Text>
+            </Checkbox>
          
             <Input  type="file" accept="image/*,video/*" hidden ref={imageInput} onChange={handleImageChange} />
 

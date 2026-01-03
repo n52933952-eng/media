@@ -312,6 +312,40 @@ const showToast = useShowToast()
    
   
     </Flex>
+    
+    {/* Collaborative Post Badge */}
+    {post?.isCollaborative && (
+      <Flex align="center" gap={2} mb={2} p={2} bg={useColorModeValue('blue.50', 'blue.900')} borderRadius="md">
+        <Text fontSize="xs">🤝</Text>
+        <Text fontSize="xs" color={secondaryTextColor}>
+          Collaborative Post
+        </Text>
+        {post?.contributors && Array.isArray(post.contributors) && post.contributors.length > 0 && (
+          <Flex align="center" gap={1} ml="auto">
+            <Text fontSize="xs" color={secondaryTextColor}>
+              Contributors:
+            </Text>
+            {post.contributors.slice(0, 3).map((contributor, idx) => (
+              <Avatar
+                key={contributor._id || contributor || idx}
+                src={contributor?.profilePic || contributor?.profilePic}
+                name={contributor?.name || contributor?.username || 'User'}
+                size="xs"
+                ml={-1}
+                border="2px solid"
+                borderColor={cardBg}
+              />
+            ))}
+            {post.contributors.length > 3 && (
+              <Text fontSize="xs" color={secondaryTextColor} ml={1}>
+                +{post.contributors.length - 3}
+              </Text>
+            )}
+          </Flex>
+        )}
+      </Flex>
+    )}
+    
      <Text>{post.text}</Text>
   
   {/* Football Match Cards - Visual Table */}
@@ -588,8 +622,72 @@ const showToast = useShowToast()
   )}
   
   
-  <Flex gap={3} my={1}>
+  <Flex gap={3} my={1} align="center">
     <Actions post={post}/>
+    
+    {/* Add Contributor Button for Collaborative Posts */}
+    {post?.isCollaborative && (
+      (user?._id === postedBy?._id || 
+       (post?.contributors && Array.isArray(post.contributors) && 
+        post.contributors.some(c => (c._id || c).toString() === user?._id?.toString()))) && (
+      <Button
+        size="xs"
+        variant="outline"
+        colorScheme="blue"
+        onClick={async () => {
+          // Simple prompt for now - can be enhanced with a proper modal later
+          const username = prompt('Enter username to add as contributor:')
+          if (username && username.trim()) {
+            try {
+              // First get user ID from username
+              const userRes = await fetch(
+                `${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/user/getUserPro/${username.trim()}`,
+                { credentials: 'include' }
+              )
+              const userData = await userRes.json()
+              
+              if (userRes.ok && userData?._id) {
+                // Add contributor
+                const res = await fetch(
+                  `${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/post/collaborative/${post._id}/contributor`,
+                  {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'include',
+                    body: JSON.stringify({ contributorId: userData._id })
+                  }
+                )
+                const data = await res.json()
+                
+                if (res.ok) {
+                  showToast('Success', `Added ${username} as contributor`, 'success')
+                  // Refresh post data
+                  const postRes = await fetch(
+                    `${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/post/${post._id}`,
+                    { credentials: 'include' }
+                  )
+                  const postData = await postRes.json()
+                  if (postRes.ok && postData) {
+                    // Update post in feed
+                    setFollowPost(prev => prev.map(p => p._id === post._id ? postData : p))
+                  }
+                } else {
+                  showToast('Error', data.message || 'Failed to add contributor', 'error')
+                }
+              } else {
+                showToast('Error', 'User not found', 'error')
+              }
+            } catch (error) {
+              console.error('Error adding contributor:', error)
+              showToast('Error', 'Failed to add contributor', 'error')
+            }
+          }
+        }}
+      >
+        + Add Contributor
+      </Button>
+      )
+    )}
   </Flex>
   
    </Flex>
