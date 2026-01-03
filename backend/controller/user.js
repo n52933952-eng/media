@@ -191,6 +191,14 @@ export const FollowAndUnfollow = async(req,res) => {
             createNotification(id, 'follow', req.user._id).catch(err => {
                 console.error('Error creating follow notification:', err)
             })
+            
+            // Create activity for activity feed
+            const { createActivity } = await import('./activity.js')
+            createActivity(req.user._id, 'follow', {
+                targetUser: id
+            }).catch(err => {
+                console.error('Error creating activity:', err)
+            })
 
            res.status(200).json({action:"follow",current:updatecurrent,target:targetUser})
          }

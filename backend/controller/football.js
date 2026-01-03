@@ -28,7 +28,7 @@ const SUPPORTED_LEAGUES = [
 ]
 
 // Helper: Fetch match details with events (scorers)
-const fetchMatchDetails = async (matchId) => {
+export const fetchMatchDetails = async (matchId) => {
     try {
         const headers = {}
         if (API_KEY) {

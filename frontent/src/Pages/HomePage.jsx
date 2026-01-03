@@ -8,6 +8,7 @@ import SuggestedUsers from '../Components/SuggestedUsers'
 import SuggestedChannels from '../Components/SuggestedChannels'
 import ChessChallenge from '../Components/ChessChallenge'
 import ChessNotification from '../Components/ChessNotification'
+import ActivityFeed from '../Components/ActivityFeed'
 
 
 
@@ -314,6 +315,7 @@ const HomePage = () => {
         pl={{ md: 6, lg: 4 }}
         pt={4}
       >
+        <ActivityFeed />
         <SuggestedUsers onUserFollowed={fetchUserPosts} />
       </Box>
     </Flex>

@@ -10,7 +10,7 @@ export const createPost = async(req,res) => {
 
     try{
   
-        const{postedBy,text}= req.body
+        const{postedBy,text,isCollaborative,contributors}= req.body
          
       let img = ''
 
@@ -61,7 +61,12 @@ export const createPost = async(req,res) => {
                img = result.secure_url
                
                try {
-                 const newPost = new Post({postedBy,text,img})
+                 const postData = {postedBy,text,img}
+                 if (isCollaborative) {
+                   postData.isCollaborative = true
+                   postData.contributors = contributors && Array.isArray(contributors) ? contributors : [postedBy]
+                 }
+                 const newPost = new Post(postData)
                  await newPost.save()
                  
                  // Populate postedBy for socket emission
@@ -84,16 +89,25 @@ export const createPost = async(req,res) => {
                        }
                      })
                      
-                     // Only emit to online followers (not all users)
-                     if (onlineFollowers.length > 0) {
-                       io.to(onlineFollowers).emit("newPost", newPost)
-                     }
-                   }
+                 // Only emit to online followers (not all users)
+                 if (onlineFollowers.length > 0) {
+                   io.to(onlineFollowers).emit("newPost", newPost)
                  }
-                 
-                 if (!res.headersSent) {
-                   res.status(200).json({message:"post created sufully", post: newPost})
-                 }
+               }
+               
+               // Create activity for activity feed
+               const { createActivity } = await import('./activity.js')
+               createActivity(postedBy, 'post', {
+                   postId: newPost._id,
+                   metadata: { text: text.substring(0, 50), hasImage: !!img }
+               }).catch(err => {
+                   console.error('Error creating activity:', err)
+               })
+             }
+             
+             if (!res.headersSent) {
+               res.status(200).json({message:"post created sufully", post: newPost})
+             }
                  resolve()
                } catch (error) {
                  console.error('Error creating post after upload:', error)
@@ -115,7 +129,12 @@ export const createPost = async(req,res) => {
        }
 
        // No file - create post immediately
-       const newPost = new Post({postedBy,text,img})
+       const postData = {postedBy,text,img}
+       if (isCollaborative) {
+         postData.isCollaborative = true
+         postData.contributors = contributors && Array.isArray(contributors) ? contributors : [postedBy]
+       }
+       const newPost = new Post(postData)
        await newPost.save()
        
        // Populate postedBy for socket emission
@@ -325,6 +344,16 @@ export const LikePost = async(req,res) => {
           })
       }
       
+      // Create activity for activity feed
+      const { createActivity } = await import('./activity.js')
+      createActivity(userId, 'like', {
+          postId: post._id,
+          targetUser: post.postedBy,
+          metadata: { postText: post.text?.substring(0, 50) || '' }
+      }).catch(err => {
+          console.error('Error creating activity:', err)
+      })
+      
       res.status(200).json({message:"post liked scfully"})
      }
 
@@ -385,6 +414,16 @@ export const ReplyPost = async(req,res) => {
                 console.error('Error creating comment notification:', err)
             })
         }
+        
+        // Create activity for activity feed
+        const { createActivity } = await import('./activity.js')
+        createActivity(userId, 'comment', {
+            postId: post._id,
+            targetUser: post.postedBy,
+            metadata: { commentText: text.substring(0, 50) }
+        }).catch(err => {
+            console.error('Error creating activity:', err)
+        })
         
         // 2. Check for @mentions in the comment text (e.g., @username)
         const mentionRegex = /@(\w+)/g
@@ -920,6 +959,60 @@ export const deleteChessGamePost = async (roomId) => {
     } catch (error) {
         console.error('Error deleting chess game post:', error)
         throw error
+    }
+}
+
+// Add contributor to collaborative post
+export const addContributorToPost = async (req, res) => {
+    try {
+        const { postId } = req.params
+        const { contributorId } = req.body
+        const userId = req.user._id
+
+        const post = await Post.findById(postId)
+        
+        if (!post) {
+            return res.status(400).json({ message: "Post not found" })
+        }
+
+        // Check if post is collaborative
+        if (!post.isCollaborative) {
+            return res.status(400).json({ message: "This post is not collaborative" })
+        }
+
+        // Check if user is already a contributor or is the original poster
+        const isContributor = post.contributors.some(c => c.toString() === userId.toString())
+        const isPoster = post.postedBy.toString() === userId.toString()
+
+        if (!isContributor && !isPoster) {
+            return res.status(403).json({ message: "You must be a contributor to add others" })
+        }
+
+        // Check if contributor exists
+        const contributor = await User.findById(contributorId)
+        if (!contributor) {
+            return res.status(400).json({ message: "Contributor not found" })
+        }
+
+        // Check if already a contributor
+        if (post.contributors.some(c => c.toString() === contributorId)) {
+            return res.status(400).json({ message: "User is already a contributor" })
+        }
+
+        // Add contributor
+        post.contributors.push(contributorId)
+        await post.save()
+
+        await post.populate("contributors", "username profilePic name")
+        await post.populate("postedBy", "username profilePic name")
+
+        res.status(200).json({
+            message: "Contributor added successfully",
+            post: post
+        })
+    } catch (error) {
+        console.log(error)
+        res.status(500).json(error)
     }
 }
 

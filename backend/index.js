@@ -10,6 +10,7 @@ import MessageRoute from './routes/message.js'
 import FootballRoute from './routes/football.js'
 import NewsRoute from './routes/news.js'
 import NotificationRoute from './routes/notification.js'
+import ActivityRoute from './routes/activity.js'
 import { initializeSocket } from './socket/socket.js'
 import { initializeFootballCron } from './services/footballCron.js'
 import { initializeChessPostCleanup } from './services/chessPostCleanup.js'
@@ -104,6 +105,7 @@ app.use("/api/message",MessageRoute)
 app.use("/api/football",FootballRoute)
 app.use("/api/news",NewsRoute)
 app.use("/api/notification",NotificationRoute)
+app.use("/api/activity",ActivityRoute)
 
 // Serve static files from React app (for production)
 app.use(express.static(path.join(__dirname, '../frontent/dist')))

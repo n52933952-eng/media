@@ -33,6 +33,34 @@ const PostSchema = mongoose.Schema({
         type:String // User ID who added this channel post (for tracking and deletion)
     },
 
+    // Collaborative posts - multiple users can contribute
+    isCollaborative: {
+        type: Boolean,
+        default: false
+    },
+    contributors: [{
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User"
+    }],
+
+    // Match reaction posts - auto-created when goals are scored
+    isMatchReaction: {
+        type: Boolean,
+        default: false
+    },
+    matchReactionData: {
+        matchId: String,
+        homeTeam: String,
+        awayTeam: String,
+        scorer: String,
+        team: String,
+        minute: Number,
+        score: {
+            home: Number,
+            away: Number
+        }
+    },
+
     likes:{
        type:[mongoose.Schema.Types.ObjectId],
        ref:"User",
