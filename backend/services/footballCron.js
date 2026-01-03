@@ -293,61 +293,83 @@ const fetchAndUpdateLiveMatches = async () => {
             // If a goal was scored, create a reaction post
             if (scoreChanged && (currentGoalsHome > previousGoalsHome || currentGoalsAway > previousGoalsAway)) {
                 try {
+                    const footballAccount = await getFootballAccount()
+                    if (!footballAccount) {
+                        console.log('  ⚠️ Football account not found, skipping reaction post')
+                        return
+                    }
+                    
+                    // Check if we already created a reaction post for this score (prevent duplicates)
+                    const existingReaction = await Post.findOne({
+                        postedBy: footballAccount._id,
+                        isMatchReaction: true,
+                        'matchReactionData.matchId': matchData.id.toString(),
+                        'matchReactionData.score.home': currentGoalsHome,
+                        'matchReactionData.score.away': currentGoalsAway,
+                        createdAt: { $gte: new Date(Date.now() - 5 * 60 * 1000) } // Within last 5 minutes
+                    })
+                    
+                    if (existingReaction) {
+                        console.log(`  ⚠️ Reaction post already exists for this goal (${currentGoalsHome}-${currentGoalsAway}), skipping...`)
+                        return
+                    }
+                    
                     // Fetch match events to get goal scorer info
-                    const matchEvents = await fetchMatchDetails(matchData.id)
-                    const goalEvents = matchEvents.filter(e => e.type === 'Goal')
+                    let latestGoal = null
+                    try {
+                        const matchEvents = await fetchMatchDetails(matchData.id)
+                        const goalEvents = matchEvents.filter(e => e.type === 'Goal')
+                        // Get the latest goal (most recent)
+                        latestGoal = goalEvents[goalEvents.length - 1]
+                    } catch (error) {
+                        console.log(`  ⚠️ Could not fetch goal details, creating generic reaction post`)
+                    }
                     
-                    // Get the latest goal (most recent)
-                    const latestGoal = goalEvents[goalEvents.length - 1]
+                    // Determine which team scored
+                    const homeScored = currentGoalsHome > previousGoalsHome
+                    const scorerTeam = homeScored ? updatedMatch.teams?.home?.name : updatedMatch.teams?.away?.name
+                    const goalMinute = latestGoal?.time || updatedMatch.fixture?.status?.elapsed || '?'
+                    const scorerName = latestGoal?.player || (homeScored ? updatedMatch.teams?.home?.name : updatedMatch.teams?.away?.name) + ' Goal'
                     
-                    if (latestGoal) {
-                        const footballAccount = await getFootballAccount()
-                        if (footballAccount) {
-                            // Determine which team scored
-                            const homeScored = currentGoalsHome > previousGoalsHome
-                            const scorerTeam = homeScored ? updatedMatch.teams?.home?.name : updatedMatch.teams?.away?.name
-                            
-                            // Create reaction post
-                            const reactionPost = new Post({
-                                postedBy: footballAccount._id,
-                                text: `⚽ GOAL! ${latestGoal.player || 'Unknown'}\n\n${updatedMatch.teams?.home?.name} ${currentGoalsHome} - ${currentGoalsAway} ${updatedMatch.teams?.away?.name}\n\n📺 ${updatedMatch.league?.name || 'Match'}\n⏱️ ${latestGoal.time || updatedMatch.fixture?.status?.elapsed || '?'}'`,
-                                isMatchReaction: true,
-                                matchReactionData: {
-                                    matchId: matchData.id.toString(),
-                                    homeTeam: updatedMatch.teams?.home?.name,
-                                    awayTeam: updatedMatch.teams?.away?.name,
-                                    scorer: latestGoal.player || 'Unknown',
-                                    team: scorerTeam,
-                                    minute: latestGoal.time || updatedMatch.fixture?.status?.elapsed || null,
-                                    score: {
-                                        home: currentGoalsHome,
-                                        away: currentGoalsAway
-                                    }
-                                }
-                            })
-                            
-                            await reactionPost.save()
-                            await reactionPost.populate("postedBy", "username profilePic name")
-                            
-                            console.log(`  🎉 Created goal reaction post for ${latestGoal.player} (${scorerTeam})`)
-                            
-                            // Emit to all Football followers
-                            const io = getIO()
-                            if (io) {
-                                const freshFootballAccount = await User.findById(footballAccount._id).select('followers')
-                                const followerIds = freshFootballAccount?.followers?.map(f => f.toString()) || []
-                                const socketMap = await getAllUserSockets()
-                                
-                                followerIds.forEach(followerId => {
-                                    const socketData = socketMap[followerId]
-                                    if (socketData && socketData.socketId) {
-                                        io.to(socketData.socketId).emit("newPost", reactionPost)
-                                    }
-                                })
-                                
-                                console.log(`  ✅ Emitted goal reaction post to ${followerIds.length} followers`)
+                    // Create reaction post
+                    const reactionPost = new Post({
+                        postedBy: footballAccount._id,
+                        text: `⚽ GOAL! ${scorerName}\n\n${updatedMatch.teams?.home?.name} ${currentGoalsHome} - ${currentGoalsAway} ${updatedMatch.teams?.away?.name}\n\n📺 ${updatedMatch.league?.name || 'Match'}\n⏱️ ${goalMinute}'`,
+                        isMatchReaction: true,
+                        matchReactionData: {
+                            matchId: matchData.id.toString(),
+                            homeTeam: updatedMatch.teams?.home?.name,
+                            awayTeam: updatedMatch.teams?.away?.name,
+                            scorer: scorerName,
+                            team: scorerTeam,
+                            minute: goalMinute,
+                            score: {
+                                home: currentGoalsHome,
+                                away: currentGoalsAway
                             }
                         }
+                    })
+                    
+                    await reactionPost.save()
+                    await reactionPost.populate("postedBy", "username profilePic name")
+                    
+                    console.log(`  🎉 Created goal reaction post for ${scorerName} (${scorerTeam}) at ${goalMinute}' - Score: ${currentGoalsHome}-${currentGoalsAway}`)
+                    
+                    // Emit to all Football followers
+                    const io = getIO()
+                    if (io) {
+                        const freshFootballAccount = await User.findById(footballAccount._id).select('followers')
+                        const followerIds = freshFootballAccount?.followers?.map(f => f.toString()) || []
+                        const socketMap = await getAllUserSockets()
+                        
+                        followerIds.forEach(followerId => {
+                            const socketData = socketMap[followerId]
+                            if (socketData && socketData.socketId) {
+                                io.to(socketData.socketId).emit("newPost", reactionPost)
+                            }
+                        })
+                        
+                        console.log(`  ✅ Emitted goal reaction post to ${followerIds.length} followers`)
                     }
                 } catch (error) {
                     console.error('  ❌ Error creating goal reaction post:', error)

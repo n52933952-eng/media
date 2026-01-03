@@ -24,6 +24,24 @@ const showToast = useShowToast()
 
  console.log({"postby":postedBy})
 
+  // Debug: Log collaborative post data
+  useEffect(() => {
+    if (post?.isCollaborative) {
+      console.log('🔵 Collaborative Post Data:', {
+        postId: post._id,
+        owner: post.postedBy,
+        contributors: post.contributors,
+        contributorsCount: post.contributors?.length,
+        contributorsData: post.contributors?.map(c => ({
+          id: c?._id || c,
+          name: c?.name,
+          username: c?.username,
+          profilePic: c?.profilePic
+        }))
+      })
+    }
+  }, [post?.isCollaborative, post?.contributors])
+
   const{user}=useContext(UserContext)
   const{followPost,setFollowPost}=useContext(PostContext)
   const { isOpen: isAddContributorOpen, onOpen: onAddContributorOpen, onClose: onAddContributorClose } = useDisclosure()
@@ -336,63 +354,140 @@ const showToast = useShowToast()
         <Text fontSize="xs" color={secondaryTextColor}>
           Collaborative Post
         </Text>
-        {post?.contributors && Array.isArray(post.contributors) && post.contributors.length > 0 && (
-          <Flex align="center" gap={1} ml="auto" flexWrap="wrap">
-            <Text fontSize="xs" color={secondaryTextColor}>
-              Contributors:
-            </Text>
-            {post.contributors.slice(0, 5).map((contributor, idx) => {
-              const contributorId = (contributor._id || contributor).toString()
-              const isOwner = contributorId === post.postedBy?._id?.toString()
-              const canRemove = (user?._id === post.postedBy?._id?.toString()) && !isOwner
-              
-              return (
-                <Tooltip key={contributor._id || contributor || idx} label={contributor?.name || contributor?.username || 'User'}>
-                  <Box position="relative" display="inline-block">
-                    <Avatar
-                      src={contributor?.profilePic}
-                      name={contributor?.name || contributor?.username || 'User'}
-                      size="xs"
-                      ml={-1}
-                      border="2px solid"
-                      borderColor={isOwner ? 'gold' : cardBg}
-                      cursor="pointer"
-                      onClick={(e) => {
-                        e.preventDefault()
-                        e.stopPropagation()
-                        navigate(`/${contributor?.username || contributor?.username}`)
-                      }}
-                      _hover={{ transform: 'scale(1.1)', zIndex: 10 }}
-                      transition="all 0.2s"
-                    />
-                    {isOwner && (
-                      <Box
-                        position="absolute"
-                        top="-2px"
-                        right="-2px"
-                        bg="gold"
-                        borderRadius="full"
-                        w="8px"
-                        h="8px"
-                        border="1px solid"
-                        borderColor={cardBg}
-                      />
-                    )}
-                  </Box>
-                </Tooltip>
-              )
-            })}
-            {post.contributors.length > 5 && (
-              <Text fontSize="xs" color={secondaryTextColor} ml={1}>
-                +{post.contributors.length - 5}
+        {post?.contributors && Array.isArray(post.contributors) && post.contributors.length > 0 && (() => {
+          // Filter out the owner from contributors list for display (owner is shown separately)
+          // Handle both cases: postedBy as object with _id, or as direct ID
+          const ownerId = postedBy?._id?.toString() || post.postedBy?._id?.toString() || post.postedBy?.toString() || postedBy?.toString()
+          const displayContributors = post.contributors.filter((contributor) => {
+            const contributorId = (contributor?._id || contributor)?.toString()
+            // Skip if this contributor is the owner
+            return contributorId && contributorId !== ownerId
+          }).slice(0, 5)
+          
+          // If no contributors after filtering (only owner), don't show contributors section
+          if (displayContributors.length === 0) return null
+          
+          return (
+            <Flex align="center" gap={1} ml="auto" flexWrap="wrap">
+              <Text fontSize="xs" color={secondaryTextColor}>
+                Contributors:
               </Text>
-            )}
-          </Flex>
-        )}
+              {displayContributors.map((contributor, idx) => {
+                // Ensure we have a proper contributor object with populated data
+                const contributorId = (contributor?._id || contributor)?.toString()
+                const contributorName = contributor?.name || contributor?.username || null
+                const contributorUsername = contributor?.username || null
+                const contributorProfilePic = contributor?.profilePic || null
+                
+                // Skip if we don't have enough data to display
+                if (!contributorName && !contributorUsername) {
+                  console.warn('Contributor missing name/username:', contributor)
+                  return null
+                }
+                
+                return (
+                  <Tooltip 
+                    key={contributorId || contributor?._id || idx} 
+                    label={contributorName || contributorUsername || 'Contributor'}
+                  >
+                    <Box position="relative" display="inline-block">
+                      <Avatar
+                        src={contributorProfilePic}
+                        name={contributorName || contributorUsername || 'C'}
+                        size="xs"
+                        ml={-1}
+                        border="2px solid"
+                        borderColor={cardBg}
+                        cursor="pointer"
+                        onClick={(e) => {
+                          e.preventDefault()
+                          e.stopPropagation()
+                          if (contributorUsername) {
+                            navigate(`/${contributorUsername}`)
+                          }
+                        }}
+                        _hover={{ transform: 'scale(1.1)', zIndex: 10 }}
+                        transition="all 0.2s"
+                      />
+                    </Box>
+                  </Tooltip>
+                )
+              })}
+              {post.contributors.length > displayContributors.length + 1 && (
+                <Text fontSize="xs" color={secondaryTextColor} ml={1}>
+                  +{post.contributors.length - displayContributors.length - 1}
+                </Text>
+              )}
+            </Flex>
+          )
+        })()}
       </Flex>
     )}
     
-     <Text>{post.text}</Text>
+     {/* Match Reaction Post - Special Display */}
+     {post?.isMatchReaction && post?.matchReactionData ? (
+       <Box
+         bg={useColorModeValue('green.50', 'green.900')}
+         border="2px solid"
+         borderColor={useColorModeValue('green.300', 'green.600')}
+         borderRadius="lg"
+         p={4}
+         mb={3}
+       >
+         <Flex align="center" gap={2} mb={3}>
+           <Text fontSize="2xl">⚽</Text>
+           <Text fontSize="lg" fontWeight="bold" color={textColor}>
+             GOAL!
+           </Text>
+         </Flex>
+         
+         <VStack align="stretch" spacing={2}>
+           <Flex align="center" justify="space-between">
+             <Text fontSize="sm" fontWeight="bold" color={textColor}>
+               {post.matchReactionData.scorer}
+             </Text>
+             <Text fontSize="xs" color={secondaryTextColor}>
+               {post.matchReactionData.team}
+             </Text>
+           </Flex>
+           
+           <Flex align="center" justify="center" gap={3} py={2}>
+             <VStack spacing={0}>
+               <Text fontSize="xs" color={secondaryTextColor}>
+                 {post.matchReactionData.homeTeam}
+               </Text>
+               <Text fontSize="2xl" fontWeight="bold" color={textColor}>
+                 {post.matchReactionData.score?.home || 0}
+               </Text>
+             </VStack>
+             
+             <Text fontSize="xl" fontWeight="bold" color={secondaryTextColor}>
+               -
+             </Text>
+             
+             <VStack spacing={0}>
+               <Text fontSize="xs" color={secondaryTextColor}>
+                 {post.matchReactionData.awayTeam}
+               </Text>
+               <Text fontSize="2xl" fontWeight="bold" color={textColor}>
+                 {post.matchReactionData.score?.away || 0}
+               </Text>
+             </VStack>
+           </Flex>
+           
+           <Flex align="center" justify="space-between" pt={2} borderTop="1px solid" borderColor={borderColor}>
+             <Text fontSize="xs" color={secondaryTextColor}>
+               ⏱️ {post.matchReactionData.minute || '?'}'
+             </Text>
+             <Text fontSize="xs" color={secondaryTextColor}>
+               📺 Match Update
+             </Text>
+           </Flex>
+         </VStack>
+       </Box>
+     ) : (
+       <Text>{post.text}</Text>
+     )}
   
   {/* Football Match Cards - Visual Table */}
   {isFootballPost && matchesData.length > 0 && (
