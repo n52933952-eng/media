@@ -188,18 +188,25 @@ const HomePage = () => {
       const { postId, matchData } = data
       console.log('⚽ Real-time match update received:', postId)
       
-      setFollowPost(prev => 
-        prev.map(post => {
-          if (post._id === postId) {
-            // Update the footballData with new match scores
-            return {
-              ...post,
-              footballData: JSON.stringify(matchData)
-            }
+      setFollowPost(prev => {
+        // Find the post that was updated
+        const updatedPost = prev.find(p => p._id === postId)
+        
+        if (updatedPost) {
+          // Update the post with new match data
+          const updated = {
+            ...updatedPost,
+            footballData: JSON.stringify(matchData)
           }
-          return post
-        })
-      )
+          
+          // Remove the old post and move updated one to the top
+          const filtered = prev.filter(p => p._id !== postId)
+          return [updated, ...filtered]
+        }
+        
+        // If post not found, just return previous state
+        return prev
+      })
     }
 
     socket.on('newPost', handleNewPost)
