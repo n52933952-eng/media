@@ -352,9 +352,19 @@ const fetchAndUpdateLiveMatches = async () => {
                                 }
                             }
                             
-                            // Update post in database
-                            todayPost.footballData = JSON.stringify(matchData)
+                            // Filter out finished matches (FT, AET, PEN) - only keep live matches
+                            const finishedStatuses = ['FT', 'AET', 'PEN', 'CANC', 'POSTP', 'SUSP']
+                            const liveMatchesOnly = matchData.filter(m => {
+                                const status = m.status?.short || m.status
+                                return !finishedStatuses.includes(status)
+                            })
+                            
+                            // Update post in database with only live matches
+                            todayPost.footballData = JSON.stringify(liveMatchesOnly)
                             await todayPost.save()
+                            
+                            // Update matchData for socket emission
+                            matchData = liveMatchesOnly
                             
                             // Emit socket event to update frontend
                             const io = getIO()
