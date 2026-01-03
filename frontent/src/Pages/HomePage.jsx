@@ -100,7 +100,12 @@ const HomePage = () => {
             return [...prev, ...newPosts]
           })
         } else {
-          setFollowPost(data.posts || [])
+          // Initial load: Remove duplicates from the response itself (in case backend returns duplicates)
+          const posts = data.posts || []
+          const uniquePosts = posts.filter((post, index, self) => 
+            index === self.findIndex(p => p._id?.toString() === post._id?.toString())
+          )
+          setFollowPost(uniquePosts)
         }
         setHasMore(data.hasMore || false)
       }
