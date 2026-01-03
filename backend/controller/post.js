@@ -578,7 +578,11 @@ export const getFeedPost = async(req,res) => {
             
             // If Football post is not in top, add it (even if it means returning more than 'limit' posts)
             if (!footballInTop && footballPostId) {
-                const footballPost = uniquePosts.find(p => p._id.toString() === footballPostId)
+                // Find Football post - it should be in uniquePosts, but if not, get it from footballPosts
+                let footballPost = uniquePosts.find(p => p._id.toString() === footballPostId)
+                if (!footballPost && footballPosts.length > 0) {
+                    footballPost = footballPosts[0]
+                }
                 if (footballPost) {
                     topPosts.push(footballPost)
                     // Re-sort to maintain chronological order
@@ -587,7 +591,14 @@ export const getFeedPost = async(req,res) => {
                         const dateB = new Date(b.createdAt).getTime()
                         return dateB - dateA
                     })
+                    console.log(`✅ [getFeedPost] Added Football post to first page: ${footballPostId}`)
+                } else {
+                    console.log(`⚠️ [getFeedPost] Football post ID exists but post not found: ${footballPostId}`)
                 }
+            } else if (footballInTop) {
+                console.log(`✅ [getFeedPost] Football post already in top posts: ${footballPostId}`)
+            } else if (!footballPostId) {
+                console.log(`ℹ️ [getFeedPost] No Football post found (followsFootball: ${followsFootball}, footballPosts.length: ${footballPosts.length})`)
             }
             
             // Add channel posts that aren't in top (limit to 3 to avoid overwhelming)
@@ -607,8 +618,11 @@ export const getFeedPost = async(req,res) => {
             }
             
             const totalCount = uniquePosts.length
-            // hasMore: true if there are more posts beyond what we're returning
-            const hasMore = uniquePosts.length > topPosts.length || (topPosts.length > limit)
+            // hasMore: true only if there are more unique posts beyond what we're returning
+            // We need to check if there are posts in uniquePosts that aren't in topPosts
+            const topPostIdsSet = new Set(topPosts.map(p => p._id.toString()))
+            const remainingPosts = uniquePosts.filter(p => !topPostIdsSet.has(p._id.toString()))
+            const hasMore = remainingPosts.length > 0
             
             return res.status(200).json({ 
                 posts: topPosts,
@@ -617,7 +631,7 @@ export const getFeedPost = async(req,res) => {
             })
         }
         
-        // For subsequent pages or if total posts <= limit: Normal pagination
+        // For subsequent pages: Normal pagination
         const totalCount = uniquePosts.length
         const paginatedPosts = uniquePosts.slice(skip, skip + limit)
         const hasMore = (skip + limit) < totalCount

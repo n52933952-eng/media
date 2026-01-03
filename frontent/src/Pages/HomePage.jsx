@@ -97,6 +97,13 @@ const HomePage = () => {
           setFollowPost(prev => {
             const existingIds = new Set(prev.map(p => p._id?.toString()))
             const newPosts = (data.posts || []).filter(p => !existingIds.has(p._id?.toString()))
+            
+            // If no new posts, set hasMore to false to stop infinite loading
+            if (newPosts.length === 0) {
+              setHasMore(false)
+              return prev
+            }
+            
             return [...prev, ...newPosts]
           })
         } else {
@@ -107,7 +114,7 @@ const HomePage = () => {
           )
           setFollowPost(uniquePosts)
         }
-        setHasMore(data.hasMore || false)
+        setHasMore(data.hasMore !== undefined ? data.hasMore : false)
       }
 
     }
