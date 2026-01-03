@@ -204,11 +204,31 @@ const fetchAndUpdateLiveMatches = async () => {
             
             if (result.success && result.data) {
                 // Filter for live matches (IN_PLAY, PAUSED, LIVE)
-                const liveMatches = result.data.filter(m => 
-                    m.status === 'IN_PLAY' || 
-                    m.status === 'PAUSED' ||
-                    m.status === 'LIVE'
-                )
+                // BUT exclude matches that are likely finished (have fullTime scores or are too old)
+                const liveMatches = result.data.filter(m => {
+                    // Must have live status
+                    const hasLiveStatus = m.status === 'IN_PLAY' || m.status === 'PAUSED' || m.status === 'LIVE'
+                    if (!hasLiveStatus) return false
+                    
+                    // Exclude if match has fullTime scores (means it's finished, API just hasn't updated status)
+                    const hasFullTimeScore = (m.score?.fullTime?.home !== null && m.score?.fullTime?.home !== undefined) ||
+                                           (m.score?.fullTime?.away !== null && m.score?.fullTime?.away !== undefined)
+                    if (hasFullTimeScore && m.status !== 'PAUSED') {
+                        // If it has fullTime score and not paused (half-time), it's likely finished
+                        // Check if match date is more than 2 hours ago
+                        const matchDate = new Date(m.utcDate)
+                        const now = new Date()
+                        const hoursAgo = (now - matchDate) / (1000 * 60 * 60)
+                        
+                        // If match started more than 2.5 hours ago, it's likely finished
+                        if (hoursAgo > 2.5) {
+                            console.log(`  ⚠️ Excluding likely finished match: ${m.homeTeam?.name} vs ${m.awayTeam?.name} (${hoursAgo.toFixed(1)}h ago, has fullTime score)`)
+                            return false
+                        }
+                    }
+                    
+                    return true
+                })
                 if (liveMatches.length > 0) {
                     console.log(`⚽ [fetchAndUpdateLiveMatches] Found ${liveMatches.length} live matches in ${league.name}`)
                     allLiveMatches.push(...liveMatches.map(m => ({ ...m, leagueInfo: league })))

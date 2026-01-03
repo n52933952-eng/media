@@ -878,7 +878,7 @@ export const autoPostTodayMatches = async () => {
         console.log('⚽ [autoPostTodayMatches] Searching for LIVE matches from:', todayStart, 'to:', later)
         
         // Search for ONLY live matches (currently happening)
-        const matches = await Match.find({
+        let matches = await Match.find({
             'fixture.date': { $gte: todayStart, $lte: later },
             'fixture.status.short': { 
                 $in: [
@@ -888,6 +888,20 @@ export const autoPostTodayMatches = async () => {
         })
         .sort({ 'fixture.status.short': -1, 'fixture.date': 1 }) // Live matches sorted by status
         .limit(10) // Show more live matches if available
+        
+        // Additional filter: Remove matches that are likely finished (started more than 2.5 hours ago)
+        // This catches cases where API says "LIVE" but match is actually finished
+        matches = matches.filter(match => {
+            const matchDate = new Date(match.fixture.date)
+            const hoursAgo = (now - matchDate) / (1000 * 60 * 60)
+            
+            // If match started more than 2.5 hours ago, exclude it (matches typically last 90-120 minutes)
+            if (hoursAgo > 2.5) {
+                console.log(`  ⚠️ [autoPostTodayMatches] Excluding old match: ${match.teams?.home?.name} vs ${match.teams?.away?.name} (${hoursAgo.toFixed(1)}h ago)`)
+                return false
+            }
+            return true
+        })
         
         console.log('⚽ [autoPostTodayMatches] Found matches:', matches.length)
         
