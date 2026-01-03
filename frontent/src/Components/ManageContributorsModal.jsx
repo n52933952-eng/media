@@ -18,7 +18,8 @@ import {
   Badge,
   Divider
 } from '@chakra-ui/react'
-import { MdPersonRemove, MdCrown } from "react-icons/md"
+import { MdPersonRemove } from "react-icons/md"
+import { FaCrown } from "react-icons/fa"
 import useShowToast from '../hooks/useShowToast'
 
 const ManageContributorsModal = ({ isOpen, onClose, post, onContributorRemoved }) => {
@@ -98,7 +99,7 @@ const ManageContributorsModal = ({ isOpen, onClose, post, onContributorRemoved }
                         </Text>
                         <Badge colorScheme="yellow" fontSize="xs">
                           <HStack spacing={1}>
-                            <MdCrown size={12} />
+                            <FaCrown size={10} />
                             <Text>Owner</Text>
                           </HStack>
                         </Badge>
