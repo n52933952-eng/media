@@ -517,20 +517,48 @@ export const getFeedPost = async(req,res) => {
             .sort({ createdAt: -1 })
             .limit(20) // Get all channel posts user added
         
+        // Get Football posts if user follows Football account
+        const footballAccount = await User.findOne({ username: 'Football' })
+        const followsFootball = footballAccount && following.some(id => id.toString() === footballAccount._id.toString())
+        const footballPostsPromise = followsFootball 
+            ? Post.find({ 
+                postedBy: footballAccount._id,
+                footballData: { $exists: true, $ne: null } // Only posts with match data
+            })
+                .populate("postedBy", "-password")
+                .populate("contributors", "username profilePic name")
+                .sort({ createdAt: -1 })
+                .limit(1) // Only get the latest Football post
+            : Promise.resolve([])
+        
         // Wait for all posts to be fetched
-        const [allPostsArrays, channelPosts] = await Promise.all([
+        const [allPostsArrays, channelPosts, footballPosts] = await Promise.all([
             Promise.all(postsPromises),
-            channelPostsPromise
+            channelPostsPromise,
+            footballPostsPromise
         ])
         
-        // Flatten array of arrays into single array and add channel posts
-        let allPosts = [...allPostsArrays.flat(), ...channelPosts]
+        // Flatten array of arrays into single array and add channel posts + football posts
+        let allPosts = [...allPostsArrays.flat(), ...channelPosts, ...footballPosts]
         
-        // Sort all posts by createdAt (newest first)
+        // Sort all posts: prioritize Football posts and channel posts, then by createdAt (newest first)
         allPosts.sort((a, b) => {
+            // Check if posts are Football or channel posts
+            const aIsFootball = a.postedBy?.username === 'Football' && a.footballData
+            const bIsFootball = b.postedBy?.username === 'Football' && b.footballData
+            const aIsChannel = a.channelAddedBy
+            const bIsChannel = b.channelAddedBy
+            
+            // Prioritize Football posts and channel posts
+            if (aIsFootball && !bIsFootball) return -1
+            if (!aIsFootball && bIsFootball) return 1
+            if (aIsChannel && !bIsChannel && !bIsFootball) return -1
+            if (!aIsChannel && bIsChannel && !aIsFootball) return 1
+            
+            // Otherwise sort by createdAt (newest first)
             const dateA = new Date(a.createdAt).getTime()
             const dateB = new Date(b.createdAt).getTime()
-            return dateB - dateA // Newest first
+            return dateB - dateA
         })
         
         // Paginate the combined results
