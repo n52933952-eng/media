@@ -207,7 +207,7 @@ const showToast = useShowToast()
   // Check if this is a channel post (system account with YouTube embed or channel post)
   const isChannelPost = post?.img?.includes('youtube.com/embed') || 
                         post?.channelAddedBy || 
-                        ['Football', 'AlJazeera', 'NBCNews', 'SkySportsNews', 'SkyNews', 'Cartoonito', 
+                        ['Football', 'AlJazeera', 'NBCNews', 'BeinSportsNews', 'SkyNews', 'Cartoonito', 
                          'NatGeoKids', 'SciShowKids', 'JJAnimalTime', 'KidsArabic', 'NatGeoAnimals', 
                          'MBCDrama', 'Fox11'].includes(postedBy?.username)
   

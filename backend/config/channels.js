@@ -44,18 +44,18 @@ export const LIVE_CHANNELS = [
         ]
     },
     {
-        id: 'sky-sports-news',
-        name: 'Sky Sports News',
-        username: 'SkySportsNews',
+        id: 'bein-sports-news',
+        name: 'beIN SPORTS الإخبارية',
+        username: 'BeinSportsNews',
         category: 'sports',
-        logo: 'https://via.placeholder.com/200x200/FF6B6B/FFFFFF?text=Sky+Sports',
+        logo: 'https://ui-avatars.com/api/?name=beIN+SPORTS&background=random&color=fff&size=128',
         bio: '🔴 Live sports news and updates',
         streams: [
             {
-                language: 'english',
+                language: 'arabic',
                 name: 'Watch Live',
-                youtubeId: 'c2AvvZYe7Jg',
-                text: '🔴 Sky Sports News - Live Stream\n\nLive sports news, scores, and updates',
+                youtubeId: '2lJZPT6OljI',
+                text: '🔴 beIN SPORTS الإخبارية - البث المباشر\n\nأخبار الرياضة المباشرة والتحديثات الحية',
                 buttonColor: 'red'
             }
         ]
