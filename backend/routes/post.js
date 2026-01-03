@@ -2,7 +2,7 @@ import express from 'express'
 
 const router = express.Router()
 
-import{LikeComent,ReplyToComment,createPost,getPost,deletePost,LikePost,ReplyPost,getFeedPost,getUserPosts,getUserPostsById,addContributorToPost} from '../controller/post.js'
+import{LikeComent,ReplyToComment,createPost,getPost,deletePost,LikePost,ReplyPost,getFeedPost,getUserPosts,getUserPostsById,addContributorToPost,removeContributorFromPost} from '../controller/post.js'
 import protectRoute from '../middlware/protectRoute.js'
 import upload from '../middlware/upload.js'
 
@@ -24,5 +24,6 @@ router.put("/reply-comment/:id", protectRoute, ReplyToComment)
 router.put("/likecoment/:postId/:replyId", protectRoute, LikeComent)
 
 router.put("/collaborative/:postId/contributor", protectRoute, addContributorToPost)
+router.delete("/collaborative/:postId/contributor/:contributorId", protectRoute, removeContributorFromPost)
 
 export default router

@@ -368,19 +368,23 @@ export const getUserProfile = async(req,res) => {
 // NEW: Search users for mention suggestions (like @username autocomplete)
 export const searchUsers = async(req, res) => {
     try {
-        const { search } = req.query  // Get search term from query params (?search=john)
+        const { search, q } = req.query  // Support both 'search' and 'q' params
+        const query = search || q
 
-        if (!search || search.trim() === "") {
+        if (!query || query.trim() === "") {
             return res.status(200).json([])  // Return empty array if no search term
         }
 
-        // Search users by username (case-insensitive, matches beginning of username)
-        // Returns users whose username starts with the search term
+        // Enhanced search: matches username OR name (case-insensitive, partial match)
+        const searchRegex = new RegExp(query.trim(), 'i')
         const users = await User.find({
-            username: { $regex: `^${search}`, $options: 'i' }  // ^ means starts with, 'i' means case-insensitive
+            $or: [
+                { username: searchRegex },
+                { name: searchRegex }
+            ]
         })
-        .select('username name profilePic')  // Only return needed fields
-        .limit(10)  // Limit to 10 suggestions
+        .select('username name profilePic bio')  // Include bio for better results
+        .limit(20)  // Increased limit for contributor search
 
         res.status(200).json(users)
     }

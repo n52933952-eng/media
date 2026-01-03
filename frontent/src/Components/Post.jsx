@@ -1,14 +1,17 @@
 import React,{useEffect,useState,useContext, memo} from 'react'
 import{Link} from 'react-router-dom'
-import{Flex,Avatar,Box,Text,Image,Button, VStack, HStack, Grid, GridItem, useColorModeValue} from '@chakra-ui/react'
+import{Flex,Avatar,Box,Text,Image,Button, VStack, HStack, Grid, GridItem, useColorModeValue, useDisclosure, Menu, MenuButton, MenuList, MenuItem, IconButton, Tooltip} from '@chakra-ui/react'
 import { HiOutlineDotsHorizontal } from "react-icons/hi";
+import { MdOutlineDeleteOutline, MdPersonRemove } from "react-icons/md";
+import { BsThreeDotsVertical } from "react-icons/bs";
 import Actions from '../Components/Actions'
 import useShowToast from '../hooks/useShowToast.js'
 import{useNavigate} from 'react-router-dom'
 import{formatDistanceToNow} from 'date-fns'
-import { MdOutlineDeleteOutline } from "react-icons/md";
 import{UserContext} from '../context/UserContext'
 import{PostContext} from '../context/PostContext'
+import AddContributorModal from './AddContributorModal'
+import ManageContributorsModal from './ManageContributorsModal'
 
 
 
@@ -321,24 +324,53 @@ const showToast = useShowToast()
           Collaborative Post
         </Text>
         {post?.contributors && Array.isArray(post.contributors) && post.contributors.length > 0 && (
-          <Flex align="center" gap={1} ml="auto">
+          <Flex align="center" gap={1} ml="auto" flexWrap="wrap">
             <Text fontSize="xs" color={secondaryTextColor}>
               Contributors:
             </Text>
-            {post.contributors.slice(0, 3).map((contributor, idx) => (
-              <Avatar
-                key={contributor._id || contributor || idx}
-                src={contributor?.profilePic || contributor?.profilePic}
-                name={contributor?.name || contributor?.username || 'User'}
-                size="xs"
-                ml={-1}
-                border="2px solid"
-                borderColor={cardBg}
-              />
-            ))}
-            {post.contributors.length > 3 && (
+            {post.contributors.slice(0, 5).map((contributor, idx) => {
+              const contributorId = (contributor._id || contributor).toString()
+              const isOwner = contributorId === post.postedBy?._id?.toString()
+              const canRemove = (user?._id === post.postedBy?._id?.toString()) && !isOwner
+              
+              return (
+                <Tooltip key={contributor._id || contributor || idx} label={contributor?.name || contributor?.username || 'User'}>
+                  <Box position="relative" display="inline-block">
+                    <Avatar
+                      src={contributor?.profilePic}
+                      name={contributor?.name || contributor?.username || 'User'}
+                      size="xs"
+                      ml={-1}
+                      border="2px solid"
+                      borderColor={isOwner ? 'gold' : cardBg}
+                      cursor="pointer"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        navigate(`/${contributor?.username || contributor?.username}`)
+                      }}
+                      _hover={{ transform: 'scale(1.1)', zIndex: 10 }}
+                      transition="all 0.2s"
+                    />
+                    {isOwner && (
+                      <Box
+                        position="absolute"
+                        top="-2px"
+                        right="-2px"
+                        bg="gold"
+                        borderRadius="full"
+                        w="8px"
+                        h="8px"
+                        border="1px solid"
+                        borderColor={cardBg}
+                      />
+                    )}
+                  </Box>
+                </Tooltip>
+              )
+            })}
+            {post.contributors.length > 5 && (
               <Text fontSize="xs" color={secondaryTextColor} ml={1}>
-                +{post.contributors.length - 3}
+                +{post.contributors.length - 5}
               </Text>
             )}
           </Flex>
@@ -625,69 +657,90 @@ const showToast = useShowToast()
   <Flex gap={3} my={1} align="center">
     <Actions post={post}/>
     
-    {/* Add Contributor Button for Collaborative Posts */}
+    {/* Collaborative Post Actions */}
     {post?.isCollaborative && (
       (user?._id === postedBy?._id || 
        (post?.contributors && Array.isArray(post.contributors) && 
         post.contributors.some(c => (c._id || c).toString() === user?._id?.toString()))) && (
-      <Button
-        size="xs"
-        variant="outline"
-        colorScheme="blue"
-        onClick={async () => {
-          // Simple prompt for now - can be enhanced with a proper modal later
-          const username = prompt('Enter username to add as contributor:')
-          if (username && username.trim()) {
-            try {
-              // First get user ID from username
-              const userRes = await fetch(
-                `${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/user/getUserPro/${username.trim()}`,
-                { credentials: 'include' }
-              )
-              const userData = await userRes.json()
-              
-              if (userRes.ok && userData?._id) {
-                // Add contributor
-                const res = await fetch(
-                  `${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/post/collaborative/${post._id}/contributor`,
-                  {
-                    method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
-                    credentials: 'include',
-                    body: JSON.stringify({ contributorId: userData._id })
-                  }
-                )
-                const data = await res.json()
-                
-                if (res.ok) {
-                  showToast('Success', `Added ${username} as contributor`, 'success')
-                  // Refresh post data
-                  const postRes = await fetch(
-                    `${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/post/${post._id}`,
-                    { credentials: 'include' }
-                  )
-                  const postData = await postRes.json()
-                  if (postRes.ok && postData) {
-                    // Update post in feed
-                    setFollowPost(prev => prev.map(p => p._id === post._id ? postData : p))
-                  }
-                } else {
-                  showToast('Error', data.message || 'Failed to add contributor', 'error')
-                }
-              } else {
-                showToast('Error', 'User not found', 'error')
-              }
-            } catch (error) {
-              console.error('Error adding contributor:', error)
-              showToast('Error', 'Failed to add contributor', 'error')
-            }
-          }
-        }}
-      >
-        + Add Contributor
-      </Button>
+      <HStack spacing={2}>
+        <Button
+          size="xs"
+          variant="outline"
+          colorScheme="blue"
+          onClick={onAddContributorOpen}
+        >
+          + Add Contributor
+        </Button>
+        
+        {/* Manage Contributors Menu (only for owner) */}
+        {user?._id === postedBy?._id && post?.contributors && post.contributors.length > 0 && (
+          <Menu>
+            <MenuButton
+              as={IconButton}
+              icon={<BsThreeDotsVertical />}
+              size="xs"
+              variant="ghost"
+              aria-label="Manage contributors"
+            />
+            <MenuList>
+              <MenuItem
+                icon={<MdPersonRemove />}
+                onClick={onManageContributorsOpen}
+              >
+                Manage Contributors
+              </MenuItem>
+            </MenuList>
+          </Menu>
+        )}
+      </HStack>
       )
     )}
+    
+    {/* Add Contributor Modal */}
+    <AddContributorModal
+      isOpen={isAddContributorOpen}
+      onClose={onAddContributorClose}
+      post={post}
+      onContributorAdded={async () => {
+        // Refresh post data
+        try {
+          const postRes = await fetch(
+            `${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/post/${post._id}`,
+            { credentials: 'include' }
+          )
+          const postData = await postRes.json()
+          if (postRes.ok && postData) {
+            // Update post in feed
+            setFollowPost(prev => prev.map(p => p._id === post._id ? postData : p))
+          }
+        } catch (error) {
+          console.error('Error refreshing post:', error)
+        }
+      }}
+    />
+    
+    {/* Manage Contributors Modal */}
+    <ManageContributorsModal
+      isOpen={isManageContributorsOpen}
+      onClose={onManageContributorsClose}
+      post={post}
+      onContributorRemoved={async () => {
+        // Refresh post data
+        try {
+          const postRes = await fetch(
+            `${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/post/${post._id}`,
+            { credentials: 'include' }
+          )
+          const postData = await postRes.json()
+          if (postRes.ok && postData) {
+            // Update post in feed
+            setFollowPost(prev => prev.map(p => p._id === post._id ? postData : p))
+          }
+        } catch (error) {
+          console.error('Error refreshing post:', error)
+        }
+      }}
+    />
   </Flex>
   
    </Flex>

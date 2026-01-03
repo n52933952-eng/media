@@ -1010,8 +1010,70 @@ export const addContributorToPost = async (req, res) => {
         await post.populate("contributors", "username profilePic name")
         await post.populate("postedBy", "username profilePic name")
 
+        // Notify the new contributor
+        try {
+            await createNotification(contributorId, 'collaboration', userId, {
+                postId: post._id,
+                postText: post.text?.substring(0, 50) || 'a collaborative post'
+            })
+        } catch (err) {
+            console.error('Error creating collaboration notification:', err)
+        }
+
         res.status(200).json({
             message: "Contributor added successfully",
+            post: post
+        })
+    } catch (error) {
+        console.log(error)
+        res.status(500).json(error)
+    }
+}
+
+// Remove contributor from collaborative post
+export const removeContributorFromPost = async(req, res) => {
+    try {
+        const { postId, contributorId } = req.params
+        const userId = req.user._id
+
+        const post = await Post.findById(postId)
+        if (!post) {
+            return res.status(404).json({ message: "Post not found" })
+        }
+
+        // Check if post is collaborative
+        if (!post.isCollaborative) {
+            return res.status(400).json({ message: "This post is not collaborative" })
+        }
+
+        // Only post owner can remove contributors
+        if (post.postedBy.toString() !== userId.toString()) {
+            return res.status(403).json({ message: "Only the post owner can remove contributors" })
+        }
+
+        // Cannot remove the post owner
+        if (contributorId === post.postedBy.toString()) {
+            return res.status(400).json({ message: "Cannot remove the post owner" })
+        }
+
+        // Check if contributor exists in the list
+        const contributorIndex = post.contributors.findIndex(
+            c => c.toString() === contributorId
+        )
+        
+        if (contributorIndex === -1) {
+            return res.status(400).json({ message: "Contributor not found in this post" })
+        }
+
+        // Remove contributor
+        post.contributors.splice(contributorIndex, 1)
+        await post.save()
+
+        await post.populate("contributors", "username profilePic name")
+        await post.populate("postedBy", "username profilePic name")
+
+        res.status(200).json({
+            message: "Contributor removed successfully",
             post: post
         })
     } catch (error) {

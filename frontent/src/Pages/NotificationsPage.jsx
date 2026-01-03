@@ -117,11 +117,14 @@ const NotificationsPage = () => {
         // Navigate based on notification type
         if (notification.type === 'follow') {
             navigate(`/${notification.from?.username || notification.from?.name || 'user'}`)
-        } else if (notification.type === 'comment' || notification.type === 'mention' || notification.type === 'like') {
+        } else if (notification.type === 'comment' || notification.type === 'mention' || notification.type === 'like' || notification.type === 'collaboration') {
             if (notification.post && notification.post._id) {
                 // Get post owner from populated post
                 const postOwner = notification.post.postedBy?.username || notification.post.postedBy?.name || user?.username
                 navigate(`/${postOwner}/post/${notification.post._id}`)
+            } else if (notification.metadata?.postId) {
+                // For collaboration notifications, navigate to the post
+                navigate(`/post/${notification.metadata.postId}`)
             }
         }
     }
@@ -175,6 +178,10 @@ const NotificationsPage = () => {
     }
 
     const getNotificationMessage = (notification) => {
+        if (notification.type === 'collaboration') {
+            const postText = notification.metadata?.postText || 'a collaborative post'
+            return `added you as a contributor to "${postText}"`
+        }
         const fromName = notification.from?.name || notification.from?.username || 'Someone'
         
         switch (notification.type) {
@@ -194,6 +201,9 @@ const NotificationsPage = () => {
                 } else {
                     return `${fromName} liked your post`
                 }
+            case 'collaboration':
+                const postText = notification.metadata?.postText || 'a collaborative post'
+                return `${fromName} added you as a contributor to "${postText}"`
             default:
                 return 'New notification'
         }
@@ -209,6 +219,8 @@ const NotificationsPage = () => {
                 return '@'
             case 'like':
                 return '❤️'
+            case 'collaboration':
+                return '🤝'
             default:
                 return '🔔'
         }
