@@ -160,7 +160,7 @@ const HomePage = () => {
 
     const handleNewPost = (newPost) => {
       console.log('📨 New post received via socket:', newPost._id)
-      // Add new post to the top of the feed
+      // Add new post to the top of the feed, maintaining "3 newest posts per user" rule
       setFollowPost(prev => {
         // Check if post already exists (prevent duplicates) - compare by _id string
         const exists = prev.some(p => {
@@ -172,8 +172,50 @@ const HomePage = () => {
           console.log('⚠️ [HomePage] Duplicate post detected, skipping:', newPost._id)
           return prev
         }
-        console.log('✅ [HomePage] Adding new post to feed:', newPost._id)
-        return [newPost, ...prev]
+        
+        // Get the author ID of the new post
+        const newPostAuthorId = newPost.postedBy?._id?.toString() || newPost.postedBy?.toString()
+        
+        if (!newPostAuthorId) {
+          console.log('⚠️ [HomePage] New post has no author, skipping:', newPost._id)
+          return prev
+        }
+        
+        // Filter out posts from the same author
+        const postsFromOtherAuthors = prev.filter(p => {
+          const postAuthorId = p.postedBy?._id?.toString() || p.postedBy?.toString()
+          return postAuthorId !== newPostAuthorId
+        })
+        
+        // Get posts from the same author (excluding the new one)
+        const postsFromSameAuthor = prev.filter(p => {
+          const postAuthorId = p.postedBy?._id?.toString() || p.postedBy?.toString()
+          return postAuthorId === newPostAuthorId
+        })
+        
+        // Sort same author posts by createdAt (newest first)
+        postsFromSameAuthor.sort((a, b) => {
+          const dateA = new Date(a.createdAt).getTime()
+          const dateB = new Date(b.createdAt).getTime()
+          return dateB - dateA
+        })
+        
+        // Keep only the 2 newest posts from same author (new post will be the 3rd)
+        // This maintains the "3 newest posts per user" rule
+        const keptSameAuthorPosts = postsFromSameAuthor.slice(0, 2)
+        
+        // Combine: new post + kept same author posts + other authors' posts
+        const updatedFeed = [newPost, ...keptSameAuthorPosts, ...postsFromOtherAuthors]
+        
+        // Sort all by createdAt (newest first) to maintain chronological order
+        updatedFeed.sort((a, b) => {
+          const dateA = new Date(a.createdAt).getTime()
+          const dateB = new Date(b.createdAt).getTime()
+          return dateB - dateA
+        })
+        
+        console.log(`✅ [HomePage] Added new post to feed (maintained 3 newest per user rule):`, newPost._id)
+        return updatedFeed
       })
     }
 
