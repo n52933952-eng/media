@@ -130,6 +130,14 @@ const PostSchema = mongoose.Schema({
 PostSchema.index({ postedBy: 1, createdAt: -1 })
 // Index on createdAt for sorting
 PostSchema.index({ createdAt: -1 })
+// Index on channelAddedBy for fast channel post queries
+PostSchema.index({ channelAddedBy: 1, createdAt: -1 })
+// Index on contributors for collaborative post queries
+PostSchema.index({ contributors: 1 })
+// Index on isCollaborative for filtering collaborative posts
+PostSchema.index({ isCollaborative: 1, createdAt: -1 })
+// Index on footballData for Football posts (sparse index - only for posts with footballData)
+PostSchema.index({ footballData: 1 }, { sparse: true })
 
 const Post = mongoose.model("Post",PostSchema)
 

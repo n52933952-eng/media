@@ -191,21 +191,23 @@ const HomePage = () => {
       
       setFollowPost(prev => {
         // Find the post that was updated
-        const updatedPost = prev.find(p => p._id === postId)
+        const postIndex = prev.findIndex(p => p._id?.toString() === postId?.toString())
         
-        if (updatedPost) {
+        if (postIndex !== -1) {
           // Update the post with new match data
           const updated = {
-            ...updatedPost,
-            footballData: JSON.stringify(matchData)
+            ...prev[postIndex],
+            footballData: JSON.stringify(matchData),
+            updatedAt: new Date() // Update timestamp for sorting
           }
           
           // Remove the old post and move updated one to the top
-          const filtered = prev.filter(p => p._id !== postId)
+          const filtered = prev.filter((p, idx) => idx !== postIndex)
           return [updated, ...filtered]
         }
         
-        // If post not found, just return previous state
+        // If post not found, just return previous state (don't add as new post)
+        console.log('⚠️ [HomePage] Football post not found in feed, skipping update')
         return prev
       })
     }

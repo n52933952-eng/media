@@ -381,8 +381,8 @@ const fetchAndUpdateLiveMatches = async () => {
                             
                             // Update post in database with only live matches
                             todayPost.footballData = JSON.stringify(liveMatchesOnly)
-                            // Update createdAt to move post to top of feed when score changes
-                            todayPost.createdAt = new Date()
+                            // Don't update createdAt - use updatedAt timestamp instead to avoid duplicate detection issues
+                            // The post will still move to top via socket update in frontend
                             await todayPost.save()
                             
                             // Update matchData for socket emission

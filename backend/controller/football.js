@@ -846,17 +846,20 @@ export const autoPostTodayMatches = async () => {
                         ['1H', '2H', 'HT', 'LIVE', 'ET', 'P', 'BT'].includes(match.status?.short)
                     )
                     
-                    // Check if post is older than 2 hours
-                    const postAge = new Date() - new Date(existingPost.createdAt)
-                    const twoHoursInMs = 2 * 60 * 60 * 1000
-                    const isPostOld = postAge > twoHoursInMs
+                    // Check if post was last updated more than 10 minutes ago (for refresh)
+                    // Use updatedAt instead of createdAt to avoid issues when createdAt is modified
+                    const lastUpdated = existingPost.updatedAt || existingPost.createdAt
+                    const postAge = new Date() - new Date(lastUpdated)
+                    const tenMinutesInMs = 10 * 60 * 1000
+                    const isPostStale = postAge > tenMinutesInMs
                     
-                    if (!hasLiveMatches || isPostOld) {
-                        // No live matches or post is old, delete it and create fresh one
-                        console.log(`🔄 [autoPostTodayMatches] Refreshing post with matches (hasLiveMatches: ${hasLiveMatches}, isOld: ${isPostOld})...`)
+                    // Only refresh if: no live matches OR post hasn't been updated in 10+ minutes
+                    if (!hasLiveMatches || isPostStale) {
+                        // No live matches or post is stale, delete it and create fresh one
+                        console.log(`🔄 [autoPostTodayMatches] Refreshing post with matches (hasLiveMatches: ${hasLiveMatches}, isStale: ${isPostStale})...`)
                         await Post.findByIdAndDelete(existingPost._id)
                     } else {
-                        // Post exists with live matches and is recent, skip creating new one
+                        // Post exists with live matches and was recently updated, skip creating new one
                         // Real-time updates will handle score changes
                         console.log('✅ [autoPostTodayMatches] Post already exists for today with live matches, skipping...')
                         return { success: true, message: 'Post already exists for today with live matches', postId: existingPost._id }
@@ -867,6 +870,27 @@ export const autoPostTodayMatches = async () => {
                     await Post.findByIdAndDelete(existingPost._id)
                 }
             }
+        }
+        
+        // Double-check: Make sure no post was created between our check and now (race condition prevention)
+        const doubleCheckPost = await Post.findOne({
+            postedBy: footballAccount._id,
+            $or: [
+                { footballData: { $exists: true, $ne: null } },
+                { 
+                    text: { $regex: /Football Live|No live matches/i },
+                    footballData: { $exists: false }
+                }
+            ],
+            createdAt: { 
+                $gte: todayStart,
+                $lte: todayEnd
+            }
+        })
+        
+        if (doubleCheckPost) {
+            console.log('✅ [autoPostTodayMatches] Post was created by another process, skipping duplicate creation')
+            return { success: true, message: 'Post already exists (double-check)', postId: doubleCheckPost._id }
         }
         
         console.log('✅ [autoPostTodayMatches] Creating new post for today...')

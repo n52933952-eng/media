@@ -66,10 +66,7 @@ const UserSchema = mongoose.Schema({
 UserSchema.index({ followers: 1 })
 // Index on following for fast following queries
 UserSchema.index({ following: 1 })
-// Index on username for fast lookups (already unique, but explicit index helps)
-UserSchema.index({ username: 1 })
-// Index on email for fast lookups (already unique, but explicit index helps)
-UserSchema.index({ email: 1 })
+// Note: username and email already have indexes from unique: true, no need to duplicate
 
 
 
