@@ -94,6 +94,29 @@ const SuggestedChannels = ({ onUserFollowed }) => {
             const channelUsername = channel.username
             
             if (channelUsername) {
+                // First, try to create/add a post from this channel (this will create the account if it doesn't exist)
+                // This ensures the channel account exists and has at least one post
+                try {
+                    const addPostRes = await fetch(
+                        `${baseUrl}/api/news/post/livestream?channelId=${channel.id}&streamIndex=0`,
+                        {
+                            method: 'POST',
+                            credentials: 'include'
+                        }
+                    )
+                    const addPostData = await addPostRes.json()
+                    
+                    if (addPostRes.ok && addPostData.postId) {
+                        // Post was created or already exists, navigate to it
+                        navigate(`/${channelUsername}/post/${addPostData.postId}`)
+                        return
+                    }
+                } catch (addError) {
+                    console.error('Error creating channel post:', addError)
+                    // Continue to try fetching existing posts
+                }
+                
+                // If post creation failed, try to fetch existing posts
                 // Fetch user profile to get user ID
                 const userRes = await fetch(
                     `${baseUrl}/api/user/getUserPro/${channelUsername}`,
@@ -113,11 +136,25 @@ const SuggestedChannels = ({ onUserFollowed }) => {
                         const latestPost = postsData.posts[0]
                         navigate(`/${channelUsername}/post/${latestPost._id}`)
                     } else {
-                        // No post found, show message
-                        showToast('Info', 'No posts from this channel yet', 'info')
+                        // No post found, try to create one
+                        showToast('Info', 'Creating channel post...', 'info')
+                        // Try one more time to create the post
+                        const createRes = await fetch(
+                            `${baseUrl}/api/news/post/livestream?channelId=${channel.id}&streamIndex=0`,
+                            {
+                                method: 'POST',
+                                credentials: 'include'
+                            }
+                        )
+                        const createData = await createRes.json()
+                        if (createRes.ok && createData.postId) {
+                            navigate(`/${channelUsername}/post/${createData.postId}`)
+                        } else {
+                            showToast('Info', 'No posts from this channel yet. Try adding a stream first.', 'info')
+                        }
                     }
                 } else {
-                    showToast('Error', 'Channel not found', 'error')
+                    showToast('Error', 'Channel account not found. Try adding a stream first.', 'error')
                 }
             }
         } catch (error) {
