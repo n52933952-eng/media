@@ -458,8 +458,8 @@ export const initializeFootballCron = () => {
         await autoPostTodayMatches()
     })
     
-    // Job 6: Refresh post every 2 hours to ensure users see latest live matches
-    cron.schedule('0 */2 * * *', async () => {
+    // Job 6: Refresh post every 10 minutes to ensure users see latest live matches
+    cron.schedule('*/10 * * * *', async () => {
         console.log('🔄 [CRON] Refreshing Football post with latest live matches...')
         await autoPostTodayMatches()
     })
