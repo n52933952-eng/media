@@ -1007,21 +1007,21 @@ export const autoPostTodayMatches = async () => {
         // Emit to followers
         try {
             const freshFootballAccount = await User.findById(footballAccount._id).select('followers')
-            const io = getIO()
+        const io = getIO()
             
             if (io && freshFootballAccount && freshFootballAccount.followers && freshFootballAccount.followers.length > 0) {
-                const userSocketMap = getUserSocketMap()
-                const onlineFollowers = []
-                
+            const userSocketMap = getUserSocketMap()
+            const onlineFollowers = []
+            
                 freshFootballAccount.followers.forEach(followerId => {
-                    const followerIdStr = followerId.toString()
-                    if (userSocketMap[followerIdStr]) {
-                        onlineFollowers.push(userSocketMap[followerIdStr].socketId)
-                    }
-                })
-                
-                if (onlineFollowers.length > 0) {
-                    io.to(onlineFollowers).emit("newPost", newPost)
+                const followerIdStr = followerId.toString()
+                if (userSocketMap[followerIdStr]) {
+                    onlineFollowers.push(userSocketMap[followerIdStr].socketId)
+                }
+            })
+            
+            if (onlineFollowers.length > 0) {
+                io.to(onlineFollowers).emit("newPost", newPost)
                     console.log(`✅ [autoPostTodayMatches] Emitted to ${onlineFollowers.length} online followers`)
                 }
             }
