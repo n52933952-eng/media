@@ -152,6 +152,7 @@ const SuggestedUsers = ({ onUserFollowed }) => {
       position="sticky"
       top="120px"
       bg={bgColor}
+      minH="400px"
       borderRadius="md"
       p={4}
       border="1px solid"
@@ -217,20 +218,14 @@ const SuggestedUsers = ({ onUserFollowed }) => {
           </Text>
 
           {loading ? (
-            <Flex direction="column" gap={3}>
-              {[0].map((idx) => (
-                <Flex key={idx} gap={2} alignItems="center">
-                  <Box>
-                    <Spinner size="sm" />
-                  </Box>
-                  <Box flex={1}>
-                    <Text fontSize="sm" color={textColor}>
-                      Loading...
-                    </Text>
-                  </Box>
-                </Flex>
-              ))}
-            </Flex>
+            <Box minH="300px" display="flex" alignItems="center" justifyContent="center">
+              <Flex direction="column" gap={3} alignItems="center">
+                <Spinner size="sm" />
+                <Text fontSize="sm" color={textColor}>
+                  Loading...
+                </Text>
+              </Flex>
+            </Box>
           ) : filteredSuggestedUsers.length > 0 ? (
             <Flex direction="column" gap={1}>
               {filteredSuggestedUsers.map((suggestedUser) => (

@@ -109,10 +109,19 @@ const ActivityFeed = () => {
 
     if (loading) {
         return (
-            <Box bg={cardBg} borderRadius="md" p={4} mb={4} border="1px solid" borderColor={borderColor}>
-                <Flex justifyContent="center">
-                    <Spinner size="sm" />
-                </Flex>
+            <Box 
+                bg={cardBg} 
+                borderRadius="md" 
+                p={4} 
+                mb={4} 
+                border="1px solid" 
+                borderColor={borderColor}
+                minH="200px"
+                display="flex"
+                alignItems="center"
+                justifyContent="center"
+            >
+                <Spinner size="sm" />
             </Box>
         )
     }
@@ -129,6 +138,7 @@ const ActivityFeed = () => {
             mb={4} 
             border="1px solid" 
             borderColor={borderColor}
+            minH="200px"
             maxH="400px"
             overflowY="auto"
         >

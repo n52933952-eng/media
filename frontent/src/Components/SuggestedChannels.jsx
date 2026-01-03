@@ -313,6 +313,7 @@ const SuggestedChannels = ({ onUserFollowed }) => {
             border="1px solid"
             borderColor={borderColor}
             maxW="280px"
+            minH="400px"
         >
             {/* Header */}
             <Text fontSize="sm" fontWeight="bold" mb={3} color={textColor}>
@@ -321,9 +322,9 @@ const SuggestedChannels = ({ onUserFollowed }) => {
             
             {/* Loading */}
             {loading ? (
-                <Flex justify="center" py={6}>
+                <Box minH="200px" display="flex" alignItems="center" justifyContent="center">
                     <Spinner size="sm" />
-                </Flex>
+                </Box>
             ) : footballAccount ? (
                 <VStack spacing={3} align="stretch">
                     {/* Football Channel */}
