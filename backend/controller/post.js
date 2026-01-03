@@ -490,81 +490,137 @@ export const getFeedPost = async(req,res) => {
         const limit = parseInt(req.query.limit) || 10 // Default to 10 posts per page
         const skip = parseInt(req.query.skip) || 0 // Skip for pagination
         
-        // OPTIMIZED: Fetch only the last 3 posts from each followed user
-        // This ensures diversity in feed and keeps it lightweight
-        // Also exclude current user's own posts
-        const postsPerUser = 3
-        
-        // Filter out current user from following list (in case they follow themselves)
-        const followedUserIds = following.filter(id => id.toString() !== userId.toString())
-        
-        // Get 3 most recent posts from each followed user (excluding current user)
-        const postsPromises = followedUserIds.map(async (followedUserId) => {
-            const userPosts = await Post.find({ postedBy: followedUserId })
-                .populate("postedBy", "-password")
-                .populate("contributors", "username profilePic name")
-                .sort({ createdAt: -1 })
-                .limit(postsPerUser) // Only get 3 most recent from each user
-            return userPosts
-        })
-        
-        // Also get channel posts that this user added
-        const channelPostsPromise = Post.find({ 
-            channelAddedBy: userId.toString() 
-        })
-            .populate("postedBy", "-password")
-            .populate("contributors", "username profilePic name")
-            .sort({ createdAt: -1 })
-            .limit(20) // Get all channel posts user added
-        
-        // Get Football posts if user follows Football account
+        // Get Football account and check if user follows it
         const footballAccount = await User.findOne({ username: 'Football' })
         const followsFootball = footballAccount && following.some(id => id.toString() === footballAccount._id.toString())
-        const footballPostsPromise = followsFootball 
-            ? Post.find({ 
-                postedBy: footballAccount._id,
-                footballData: { $exists: true, $ne: null } // Only posts with match data
+        
+        // Strategy: Always include Football and channel posts in first page, sorted with normal posts
+        // For first page (skip=0): Get normal posts + always include Football + channels
+        // For subsequent pages: Get normal posts only (Football and channels already shown on page 1)
+        
+        if (skip === 0) {
+            // FIRST PAGE: Always include Football + channels + normal posts, all sorted together
+            
+            // OPTIMIZED: Fetch only the last 3 posts from each followed user
+            const postsPerUser = 3
+            const followedUserIds = following.filter(id => id.toString() !== userId.toString())
+            
+            // Get 3 most recent posts from each followed user
+            const postsPromises = followedUserIds.map(async (followedUserId) => {
+                const userPosts = await Post.find({ postedBy: followedUserId })
+                    .populate("postedBy", "-password")
+                    .populate("contributors", "username profilePic name")
+                    .sort({ createdAt: -1 })
+                    .limit(postsPerUser)
+                return userPosts
+            })
+            
+            // Get channel posts that this user added
+            const channelPostsPromise = Post.find({ 
+                channelAddedBy: userId.toString() 
             })
                 .populate("postedBy", "-password")
                 .populate("contributors", "username profilePic name")
                 .sort({ createdAt: -1 })
-                .limit(1) // Only get the latest Football post
-            : Promise.resolve([])
-        
-        // Wait for all posts to be fetched
-        const [allPostsArrays, channelPosts, footballPosts] = await Promise.all([
-            Promise.all(postsPromises),
-            channelPostsPromise,
-            footballPostsPromise
-        ])
-        
-        // Flatten array of arrays into single array and add channel posts + football posts
-        let allPosts = [...allPostsArrays.flat(), ...channelPosts, ...footballPosts]
-        
-        // Sort all posts: prioritize Football posts and channel posts, then by createdAt (newest first)
-        allPosts.sort((a, b) => {
-            // Check if posts are Football or channel posts
-            const aIsFootball = a.postedBy?.username === 'Football' && a.footballData
-            const bIsFootball = b.postedBy?.username === 'Football' && b.footballData
-            const aIsChannel = a.channelAddedBy
-            const bIsChannel = b.channelAddedBy
+                .limit(20) // Get all channel posts user added
             
-            // Prioritize Football posts and channel posts
-            if (aIsFootball && !bIsFootball) return -1
-            if (!aIsFootball && bIsFootball) return 1
-            if (aIsChannel && !bIsChannel && !bIsFootball) return -1
-            if (!aIsChannel && bIsChannel && !aIsFootball) return 1
+            // Get Football post if user follows Football
+            const footballPostsPromise = followsFootball 
+                ? Post.find({ 
+                    postedBy: footballAccount._id,
+                    footballData: { $exists: true, $ne: null }
+                })
+                    .populate("postedBy", "-password")
+                    .populate("contributors", "username profilePic name")
+                    .sort({ createdAt: -1 })
+                    .limit(1)
+                : Promise.resolve([])
             
-            // Otherwise sort by createdAt (newest first)
-            const dateA = new Date(a.createdAt).getTime()
-            const dateB = new Date(b.createdAt).getTime()
-            return dateB - dateA
-        })
-        
-        // Paginate the combined results
-        const totalCount = allPosts.length
-        const paginatedPosts = allPosts.slice(skip, skip + limit)
-        const hasMore = (skip + limit) < totalCount
+            // Wait for all posts to be fetched
+            const [allPostsArrays, channelPosts, footballPosts] = await Promise.all([
+                Promise.all(postsPromises),
+                channelPostsPromise,
+                footballPostsPromise
+            ])
+            
+            // Combine all posts: normal posts + channels + football
+            let allPosts = [...allPostsArrays.flat(), ...channelPosts, ...footballPosts]
+            
+            // Sort all posts by createdAt (newest first) - Football and channels sorted WITH normal posts
+            allPosts.sort((a, b) => {
+                const dateA = new Date(a.createdAt).getTime()
+                const dateB = new Date(b.createdAt).getTime()
+                return dateB - dateA // Newest first
+            })
+            
+            // Remove duplicates
+            const uniquePosts = []
+            const seenPostIds = new Set()
+            for (const post of allPosts) {
+                const postId = post._id.toString()
+                if (!seenPostIds.has(postId)) {
+                    uniquePosts.push(post)
+                    seenPostIds.add(postId)
+                }
+            }
+            
+            // Paginate: Take first 'limit' posts (Football and channels are included if they're in top 'limit')
+            const totalCount = uniquePosts.length
+            const paginatedPosts = uniquePosts.slice(0, limit)
+            const hasMore = uniquePosts.length > limit
+            
+            return res.status(200).json({ 
+                posts: paginatedPosts,
+                hasMore,
+                totalCount
+            })
+        } else {
+            // SUBSEQUENT PAGES: Only get normal posts (Football and channels already shown on page 1)
+            const postsPerUser = 3
+            const followedUserIds = following.filter(id => id.toString() !== userId.toString())
+            
+            // Get more posts from followed users (skip already shown posts)
+            const postsPromises = followedUserIds.map(async (followedUserId) => {
+                const userPosts = await Post.find({ postedBy: followedUserId })
+                    .populate("postedBy", "-password")
+                    .populate("contributors", "username profilePic name")
+                    .sort({ createdAt: -1 })
+                    .limit(postsPerUser * 10) // Get more posts for pagination
+                return userPosts
+            })
+            
+            const allPostsArrays = await Promise.all(postsPromises)
+            let allPosts = allPostsArrays.flat()
+            
+            // Sort by createdAt
+            allPosts.sort((a, b) => {
+                const dateA = new Date(a.createdAt).getTime()
+                const dateB = new Date(b.createdAt).getTime()
+                return dateB - dateA
+            })
+            
+            // Remove duplicates
+            const uniquePosts = []
+            const seenPostIds = new Set()
+            for (const post of allPosts) {
+                const postId = post._id.toString()
+                if (!seenPostIds.has(postId)) {
+                    uniquePosts.push(post)
+                    seenPostIds.add(postId)
+                }
+            }
+            
+            // Paginate
+            const totalCount = uniquePosts.length
+            const paginatedPosts = uniquePosts.slice(skip, skip + limit)
+            const hasMore = (skip + limit) < totalCount
+            
+            return res.status(200).json({ 
+                posts: paginatedPosts,
+                hasMore,
+                totalCount
+            })
+        }
      
         return res.status(200).json({ 
             posts: paginatedPosts,
