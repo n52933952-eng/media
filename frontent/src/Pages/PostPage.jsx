@@ -158,32 +158,10 @@ if(!post) return
     <Flex>
     
     <Flex w="full" alignItems="center" gap={3}>
-      <Avatar 
-        src={userpro?.porfilePic} 
-        size="sm" 
-        bg="white" 
-        name={userpro?.username}
-        cursor={userpro?.username === 'Football' ? 'pointer' : 'default'}
-        onClick={() => {
-          if (userpro?.username === 'Football') {
-            navigate('/football')
-          }
-        }}
-      />
+      <Avatar src={userpro?.porfilePic} size="sm" bg="white" name={userpro?.username} />
      
       <Flex>
-        <Text 
-          fontSize="sm" 
-          fontWeight="bold"
-          cursor={userpro?.username === 'Football' ? 'pointer' : 'default'}
-          onClick={() => {
-            if (userpro?.username === 'Football') {
-              navigate('/football')
-            }
-          }}
-        >
-          {userpro?.username}
-        </Text>
+        <Text fontSize="sm" fontWeight="bold">{userpro?.username}</Text>
         <Image src="/verified.png" w={4} h={4} ml={4} />
       </Flex>
     
