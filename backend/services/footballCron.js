@@ -115,30 +115,7 @@ const fetchFromAPI = async (endpoint) => {
     }
 }
 
-// Get football system account
-const getFootballAccount = async () => {
-    try {
-        let footballAccount = await User.findOne({ username: 'Football' })
-        
-        if (!footballAccount) {
-            footballAccount = new User({
-                name: 'Football Live',
-                username: 'Football',
-                email: 'football@system.app',
-                password: Math.random().toString(36),
-                bio: '⚽ Live football scores, fixtures & updates from top leagues worldwide 🏆',
-                profilePic: 'https://cdn-icons-png.flaticon.com/512/53/53283.png'
-            })
-            await footballAccount.save()
-            console.log('✅ Football system account created')
-        }
-        
-        return footballAccount
-    } catch (error) {
-        console.error('❌ Error getting football account:', error)
-        return null
-    }
-}
+// getFootballAccount is imported from '../controller/football.js' - no need to redeclare
 
 // Auto-post match update
 const autoPostMatchUpdate = async (match, updateType) => {

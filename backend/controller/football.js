@@ -191,7 +191,7 @@ const convertMatchFormat = (matchData, leagueInfo) => {
 }
 
 // Helper: Get or create football system account
-const getFootballAccount = async () => {
+export const getFootballAccount = async () => {
     try {
         let footballAccount = await User.findOne({ username: 'Football' })
         
