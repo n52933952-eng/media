@@ -320,7 +320,18 @@ const showToast = useShowToast()
     
     {/* Collaborative Post Badge */}
     {post?.isCollaborative && (
-      <Flex align="center" gap={2} mb={2} p={2} bg={useColorModeValue('blue.50', 'blue.900')} borderRadius="md">
+      <Flex 
+        align="center" 
+        gap={2} 
+        mb={2} 
+        p={2} 
+        bg={useColorModeValue('blue.50', 'blue.900')} 
+        borderRadius="md"
+        onClick={(e) => {
+          e.preventDefault()
+          e.stopPropagation()
+        }}
+      >
         <Text fontSize="xs">🤝</Text>
         <Text fontSize="xs" color={secondaryTextColor}>
           Collaborative Post
@@ -347,6 +358,7 @@ const showToast = useShowToast()
                       borderColor={isOwner ? 'gold' : cardBg}
                       cursor="pointer"
                       onClick={(e) => {
+                        e.preventDefault()
                         e.stopPropagation()
                         navigate(`/${contributor?.username || contributor?.username}`)
                       }}
@@ -669,7 +681,11 @@ const showToast = useShowToast()
           size="xs"
           variant="outline"
           colorScheme="blue"
-          onClick={onAddContributorOpen}
+          onClick={(e) => {
+            e.preventDefault()
+            e.stopPropagation()
+            onAddContributorOpen()
+          }}
         >
           + Add Contributor
         </Button>
@@ -683,11 +699,19 @@ const showToast = useShowToast()
               size="xs"
               variant="ghost"
               aria-label="Manage contributors"
+              onClick={(e) => {
+                e.preventDefault()
+                e.stopPropagation()
+              }}
             />
             <MenuList>
               <MenuItem
                 icon={<MdPersonRemove />}
-                onClick={onManageContributorsOpen}
+                onClick={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  onManageContributorsOpen()
+                }}
               >
                 Manage Contributors
               </MenuItem>
