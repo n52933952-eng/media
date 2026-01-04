@@ -533,33 +533,12 @@ export const getFeedPost = async(req,res) => {
                 .limit(1)
             : Promise.resolve([])
         
-        // Debug logging
-        if (followsFootball) {
-            console.log(`⚽ [getFeedPost] User follows Football, fetching Football posts...`)
-            console.log(`⚽ [getFeedPost] Football account ID: ${footballAccount?._id}`)
-        } else {
-            console.log(`ℹ️ [getFeedPost] User does NOT follow Football (followsFootball: ${followsFootball})`)
-        }
-        
         // Wait for all posts to be fetched
         const [allPostsArrays, channelPosts, footballPosts] = await Promise.all([
             Promise.all(postsPromises),
             channelPostsPromise,
             footballPostsPromise
         ])
-        
-        // Debug logging for Football posts
-        if (followsFootball) {
-            console.log(`⚽ [getFeedPost] Found ${footballPosts.length} Football post(s)`)
-            if (footballPosts.length > 0) {
-                console.log(`⚽ [getFeedPost] Football post ID: ${footballPosts[0]._id}, has footballData: ${!!footballPosts[0].footballData}`)
-            } else {
-                console.log(`⚠️ [getFeedPost] No Football posts found in database!`)
-                // Check if there are ANY posts from Football account
-                const anyFootballPosts = await Post.find({ postedBy: footballAccount._id }).limit(1)
-                console.log(`ℹ️ [getFeedPost] Total posts from Football account: ${anyFootballPosts.length}`)
-            }
-        }
         
         // Combine all posts: normal posts + channels + football
         let allPosts = [...allPostsArrays.flat(), ...channelPosts, ...footballPosts]
@@ -612,14 +591,12 @@ export const getFeedPost = async(req,res) => {
                         const dateB = new Date(b.createdAt).getTime()
                         return dateB - dateA
                     })
-                    console.log(`✅ [getFeedPost] Added Football post to first page: ${footballPostId}`)
+                    // Football post added to top
                 } else {
-                    console.log(`⚠️ [getFeedPost] Football post ID exists but post not found: ${footballPostId}`)
+                    // Football post not found in uniquePosts
                 }
             } else if (footballInTop) {
-                console.log(`✅ [getFeedPost] Football post already in top posts: ${footballPostId}`)
-            } else if (!footballPostId) {
-                console.log(`ℹ️ [getFeedPost] No Football post found (followsFootball: ${followsFootball}, footballPosts.length: ${footballPosts.length})`)
+                // Football post already in top posts
             }
             
             // Add channel posts that aren't in top (limit to 3 to avoid overwhelming)

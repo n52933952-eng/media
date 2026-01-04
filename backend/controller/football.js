@@ -866,24 +866,29 @@ export const autoPostTodayMatches = async () => {
         }
         
         // Double-check: Make sure no post was created between our check and now (race condition prevention)
-        const doubleCheckPost = await Post.findOne({
-            postedBy: footballAccount._id,
-            $or: [
-                { footballData: { $exists: true, $ne: null } },
-                { 
-                    text: { $regex: /Football Live|No live matches/i },
-                    footballData: { $exists: false }
+        // Only do this if we didn't already delete a post above
+        if (!noMatchesPostToDelete || matches.length > 0) {
+            const doubleCheckPost = await Post.findOne({
+                postedBy: footballAccount._id,
+                $or: [
+                    { footballData: { $exists: true, $ne: null } },
+                    { 
+                        text: { $regex: /Football Live|No live matches/i },
+                        footballData: { $exists: false }
+                    }
+                ],
+                createdAt: { 
+                    $gte: todayStart,
+                    $lte: todayEnd
                 }
-            ],
-            createdAt: { 
-                $gte: todayStart,
-                $lte: todayEnd
+            })
+            
+            if (doubleCheckPost) {
+                console.log('✅ [autoPostTodayMatches] Post was created by another process, skipping duplicate creation')
+                return { success: true, message: 'Post already exists (double-check)', postId: doubleCheckPost._id }
             }
-        })
-        
-        if (doubleCheckPost) {
-            console.log('✅ [autoPostTodayMatches] Post was created by another process, skipping duplicate creation')
-            return { success: true, message: 'Post already exists (double-check)', postId: doubleCheckPost._id }
+        } else {
+            console.log('ℹ️ [autoPostTodayMatches] Skipping double-check (will create "no matches" post)')
         }
         
         console.log('✅ [autoPostTodayMatches] Creating new post for today...')
@@ -930,6 +935,7 @@ export const autoPostTodayMatches = async () => {
         }
         
         if (matches.length === 0) {
+            console.log('⚠️ [autoPostTodayMatches] No LIVE matches found - will create "no matches" post')
             // No live matches - check if "no matches" post already exists
             if (noMatchesPostToDelete) {
                 // We found one earlier, check its age
@@ -1061,10 +1067,20 @@ export const autoPostTodayMatches = async () => {
             footballData: JSON.stringify(matchData)
         })
         
+        console.log('📝 [autoPostTodayMatches] Creating post with', matches.length, 'live matches...')
         await newPost.save()
-        await newPost.populate("postedBy", "username profilePic name")
+        console.log('💾 [autoPostTodayMatches] Saved post to database:', newPost._id)
         
-        console.log('✅ [autoPostTodayMatches] Created post with matches:', newPost._id)
+        await newPost.populate("postedBy", "username profilePic name")
+        console.log('✅ [autoPostTodayMatches] Created post with matches:', newPost._id, 'postedBy:', newPost.postedBy?.username, 'hasFootballData:', !!newPost.footballData)
+        
+        // Verify post was actually saved
+        const verifyPost = await Post.findById(newPost._id)
+        if (verifyPost) {
+            console.log('✅ [autoPostTodayMatches] Verified: Post exists in database')
+        } else {
+            console.error('❌ [autoPostTodayMatches] ERROR: Post was NOT saved to database!')
+        }
         
         // Emit to followers
         try {
