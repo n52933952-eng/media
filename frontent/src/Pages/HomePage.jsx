@@ -79,7 +79,12 @@ const HomePage = () => {
     }
     
     try{
+      // Calculate skip: for loadMore, use current post count
+      // But we need to be careful - first page might have returned more than limit (due to Football/channels)
       const skip = loadMore ? followPost.length : 0
+      
+      console.log(`📥 [getFeedPost] Fetching posts: loadMore=${loadMore}, skip=${skip}, currentCount=${followPost.length}`)
+      
       const res = await fetch(`${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/post/feed/feedpost?limit=10&skip=${skip}`,{
         credentials:"include",
       })
@@ -98,8 +103,11 @@ const HomePage = () => {
             const existingIds = new Set(prev.map(p => p._id?.toString()))
             const newPosts = (data.posts || []).filter(p => !existingIds.has(p._id?.toString()))
             
+            console.log(`📥 [getFeedPost] LoadMore: received ${data.posts?.length || 0} posts, ${newPosts.length} new posts, current feed has ${prev.length} posts`)
+            
             // If no new posts, set hasMore to false to stop infinite loading
             if (newPosts.length === 0) {
+              console.log('⚠️ [getFeedPost] No new posts, stopping pagination')
               setHasMore(false)
               return prev
             }
@@ -112,9 +120,13 @@ const HomePage = () => {
           const uniquePosts = posts.filter((post, index, self) => 
             index === self.findIndex(p => p._id?.toString() === post._id?.toString())
           )
+          console.log(`📥 [getFeedPost] Initial load: received ${posts.length} posts, ${uniquePosts.length} unique posts`)
           setFollowPost(uniquePosts)
         }
-        setHasMore(data.hasMore !== undefined ? data.hasMore : false)
+        
+        const hasMoreValue = data.hasMore !== undefined ? data.hasMore : false
+        console.log(`📥 [getFeedPost] Setting hasMore to: ${hasMoreValue}, totalCount: ${data.totalCount || 'N/A'}`)
+        setHasMore(hasMoreValue)
       }
 
     }

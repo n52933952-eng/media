@@ -632,16 +632,17 @@ export const getFeedPost = async(req,res) => {
         }
         
         // For subsequent pages: Normal pagination
+        // But we need to account for the fact that first page might have included extra posts (Football/channels)
+        // So we need to recalculate skip based on what was actually returned on first page
+        
         const totalCount = uniquePosts.length
+        
+        // For subsequent pages, slice normally
         const paginatedPosts = uniquePosts.slice(skip, skip + limit)
         const hasMore = (skip + limit) < totalCount
         
-        return res.status(200).json({ 
-            posts: paginatedPosts,
-            hasMore,
-            totalCount
-        })
-     
+        console.log(`📄 [getFeedPost] Page ${Math.floor(skip / limit) + 1}: Returning ${paginatedPosts.length} posts (skip: ${skip}, limit: ${limit}, hasMore: ${hasMore}, totalCount: ${totalCount})`)
+        
         return res.status(200).json({ 
             posts: paginatedPosts,
             hasMore,
