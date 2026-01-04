@@ -6,89 +6,123 @@ import { getIO, getAllUserSockets } from '../socket/socket.js'
 import mongoose from 'mongoose'
 import { autoPostTodayMatches, getFootballAccount, fetchMatchDetails } from '../controller/football.js'
 
-// Football-Data.org API configuration
-const API_KEY = process.env.FOOTBALL_API_KEY || '5449eacc047c4b529267d309d166d09b'
-const API_BASE_URL = 'https://api.football-data.org/v4'
+// API-Football (RapidAPI) configuration
+const API_KEY = process.env.RAPIDAPI_KEY || process.env.FOOTBALL_API_KEY || ''
+const API_BASE_URL = 'https://api-football-v1.p.rapidapi.com/v3'
+const API_HOST = 'api-football-v1.p.rapidapi.com'
+const CURRENT_SEASON = 2024 // Update this yearly
 
-// Supported leagues and competitions (football-data.org uses codes)
+// Supported leagues and competitions (API-Football uses numeric IDs)
+// OPTIMIZED FOR FREE TIER (100 calls/day): Only 3 top leagues
 const SUPPORTED_LEAGUES = [
-    // Top Leagues
-    { code: 'PL', name: 'Premier League' },
-    { code: 'PD', name: 'La Liga' },
-    { code: 'SA', name: 'Serie A' },
-    { code: 'BL1', name: 'Bundesliga' },
-    { code: 'FL1', name: 'Ligue 1' },
+    // Top 3 Leagues Only (Free Tier Optimization)
+    { id: 39, name: 'Premier League' },      // Premier League
+    { id: 140, name: 'La Liga' },            // La Liga (Spanish)
+    { id: 135, name: 'Serie A' }             // Serie A (Italian)
     
-    // European Competitions
-    { code: 'CL', name: 'UEFA Champions League' },
-    { code: 'EC', name: 'UEFA European Championship' },
-    
-    // International
-    { code: 'WC', name: 'FIFA World Cup' }
+    // Removed for free tier optimization (can re-add when upgrading):
+    // { id: 78, name: 'Bundesliga' },          
+    // { id: 61, name: 'Ligue 1' },             
+    // { id: 2, name: 'UEFA Champions League' }, 
+    // { id: 4, name: 'UEFA European Championship' }, 
+    // { id: 1, name: 'FIFA World Cup' }
 ]
 
-// Helper: Convert football-data.org match format to our database format
+// Helper: Convert API-Football match format to our database format
 const convertMatchFormat = (matchData, leagueInfo) => {
+    // API-Football status mapping
+    // API-Football uses: NS (Not Started), 1H (First Half), HT (Half Time), 2H (Second Half), ET (Extra Time), P (Penalty), FT (Full Time), AET (After Extra Time), PEN (Penalties), BT (Break Time), SUSP (Suspended), INT (Interrupted), PST (Postponed), CANC (Cancelled), ABD (Abandoned), AW (Awarded), WO (Walkover)
+    const fixture = matchData.fixture || matchData
+    const status = fixture.status || {}
+    
+    // Map API-Football short status to our format
+    let statusShort = status.short || 'NS'
+    let statusLong = status.long || 'Not Started'
+    let elapsed = status.elapsed || null
+    
+    // Map status codes
     const statusMap = {
-        'SCHEDULED': { long: 'Not Started', short: 'NS', elapsed: null },
-        'TIMED': { long: 'Scheduled', short: 'NS', elapsed: null },
-        'IN_PLAY': { long: 'Live', short: '1H', elapsed: 45 },
-        'PAUSED': { long: 'Half Time', short: 'HT', elapsed: 45 },
-        'FINISHED': { long: 'Match Finished', short: 'FT', elapsed: 90 },
-        'POSTPONED': { long: 'Postponed', short: 'POSTP', elapsed: null },
-        'CANCELLED': { long: 'Cancelled', short: 'CANC', elapsed: null },
-        'SUSPENDED': { long: 'Suspended', short: 'SUSP', elapsed: null }
+        'NS': { long: 'Not Started', short: 'NS' },
+        '1H': { long: 'First Half', short: '1H' },
+        'HT': { long: 'Half Time', short: 'HT' },
+        '2H': { long: 'Second Half', short: '2H' },
+        'ET': { long: 'Extra Time', short: 'ET' },
+        'P': { long: 'Penalty', short: 'P' },
+        'FT': { long: 'Match Finished', short: 'FT' },
+        'AET': { long: 'After Extra Time', short: 'AET' },
+        'PEN': { long: 'Penalties', short: 'PEN' },
+        'BT': { long: 'Break Time', short: 'BT' },
+        'SUSP': { long: 'Suspended', short: 'SUSP' },
+        'INT': { long: 'Interrupted', short: 'INT' },
+        'PST': { long: 'Postponed', short: 'POSTP' },
+        'CANC': { long: 'Cancelled', short: 'CANC' },
+        'ABD': { long: 'Abandoned', short: 'ABD' },
+        'AW': { long: 'Awarded', short: 'AW' },
+        'WO': { long: 'Walkover', short: 'WO' }
     }
     
-    const status = statusMap[matchData.status] || statusMap['SCHEDULED']
+    const mappedStatus = statusMap[statusShort] || { long: statusLong, short: statusShort }
+    
+    const teams = matchData.teams || {}
+    const goals = matchData.goals || {}
+    const league = matchData.league || {}
     
     return {
-        fixtureId: matchData.id,
+        fixtureId: fixture.id,
         league: {
-            id: matchData.competition?.id || leagueInfo?.code || 'UNKNOWN',
-            name: matchData.competition?.name || leagueInfo?.name || 'Unknown League',
-            country: matchData.area?.name || 'Unknown',
-            logo: matchData.competition?.emblem || '',
-            flag: matchData.area?.flag || '',
-            season: matchData.season?.startDate ? new Date(matchData.season.startDate).getFullYear() : 2024
+            id: league.id || leagueInfo?.id || 0,
+            name: league.name || leagueInfo?.name || 'Unknown League',
+            country: league.country || 'Unknown',
+            logo: league.logo || '',
+            flag: league.flag || '',
+            season: league.season || CURRENT_SEASON
         },
         teams: {
             home: {
-                id: matchData.homeTeam?.id || 0,
-                name: matchData.homeTeam?.name || 'Unknown',
-                logo: matchData.homeTeam?.crest || ''
+                id: teams.home?.id || 0,
+                name: teams.home?.name || 'Unknown',
+                logo: teams.home?.logo || ''
             },
             away: {
-                id: matchData.awayTeam?.id || 0,
-                name: matchData.awayTeam?.name || 'Unknown',
-                logo: matchData.awayTeam?.crest || ''
+                id: teams.away?.id || 0,
+                name: teams.away?.name || 'Unknown',
+                logo: teams.away?.logo || ''
             }
         },
         fixture: {
-            date: new Date(matchData.utcDate),
-            venue: matchData.venue || '',
-            city: '',
-            status: status
+            date: new Date(fixture.date),
+            venue: fixture.venue?.name || '',
+            city: fixture.venue?.city || '',
+            status: {
+                long: mappedStatus.long,
+                short: mappedStatus.short,
+                elapsed: elapsed
+            }
         },
         goals: {
-            home: matchData.score?.fullTime?.home || matchData.score?.halfTime?.home || null,
-            away: matchData.score?.fullTime?.away || matchData.score?.halfTime?.away || null
+            home: goals.home || null,
+            away: goals.away || null
         },
+        events: matchData.events || [], // API-Football provides events (goals, cards, etc.)
         lastUpdated: new Date()
     }
 }
 
-// Helper: Fetch from Football-Data.org API
+// Helper: Fetch from API-Football (RapidAPI)
 const fetchFromAPI = async (endpoint) => {
     try {
-        const headers = {}
-        if (API_KEY) {
-            headers['X-Auth-Token'] = API_KEY
+        if (!API_KEY) {
+            console.error('⚠️ [fetchFromAPI] RAPIDAPI_KEY not set! Please set RAPIDAPI_KEY environment variable')
+            return { success: false, error: 'API key not configured' }
+        }
+        
+        const headers = {
+            'x-rapidapi-key': API_KEY,
+            'x-rapidapi-host': API_HOST
         }
         
         const fullUrl = `${API_BASE_URL}${endpoint}`
         console.log('⚽ [fetchFromAPI] Fetching:', fullUrl)
-        console.log('⚽ [fetchFromAPI] API Key present:', API_KEY ? 'Yes' : 'NO!')
         
         const response = await fetch(fullUrl, {
             method: 'GET',
@@ -97,16 +131,42 @@ const fetchFromAPI = async (endpoint) => {
         
         console.log('⚽ [fetchFromAPI] Response status:', response.status, response.statusText)
         
-        const data = await response.json()
-        console.log('⚽ [fetchFromAPI] Response data keys:', Object.keys(data))
+        // Log rate limit headers if available
+        const rateLimit = response.headers.get('x-ratelimit-requests-limit')
+        const rateRemaining = response.headers.get('x-ratelimit-requests-remaining')
+        const rateReset = response.headers.get('x-ratelimit-requests-reset')
         
-        if (response.ok && data.matches) {
-            console.log('⚽ [fetchFromAPI] Success! Found', data.matches.length, 'matches')
-            return { success: true, data: data.matches }
+        if (rateLimit && rateRemaining !== null) {
+            const remainingPercent = ((parseInt(rateRemaining) / parseInt(rateLimit)) * 100).toFixed(1)
+            console.log(`📊 [fetchFromAPI] Rate Limit: ${rateRemaining}/${rateLimit} (${remainingPercent}% remaining)`)
+            
+            // Warn if low on requests
+            if (parseInt(rateRemaining) < 10) {
+                console.warn(`⚠️ [fetchFromAPI] WARNING: Low on API requests! Only ${rateRemaining} remaining`)
+            }
+        }
+        
+        const data = await response.json()
+        
+        // Handle rate limit errors
+        if (response.status === 429) {
+            const errorMsg = data.message || 'Rate limit exceeded'
+            const waitTime = data.errors?.requests || 'unknown'
+            console.error(`🚫 [fetchFromAPI] RATE LIMIT HIT! ${errorMsg}. Wait time: ${waitTime}`)
+            console.error(`🚫 [fetchFromAPI] Rate limit details: Limit=${rateLimit}, Remaining=${rateRemaining}, Reset=${rateReset}`)
+            return { success: false, error: errorMsg, rateLimit: true }
+        }
+        
+        if (response.ok && data.response) {
+            // API-Football returns { response: [...], results: number, paging: {...} }
+            console.log('⚽ [fetchFromAPI] Success! Found', data.response.length, 'matches (results:', data.results, ')')
+            return { success: true, data: data.response, results: data.results }
         } else {
-            console.error('⚽ [fetchFromAPI] Error:', data.message || data.error || 'Unknown error')
-            console.error('⚽ [fetchFromAPI] Full error response:', JSON.stringify(data, null, 2))
-            return { success: false, error: data.message || data.error || 'Failed to fetch from API' }
+            console.error('⚽ [fetchFromAPI] Error:', data.message || data.errors || 'Unknown error')
+            if (data.errors) {
+                console.error('⚽ [fetchFromAPI] Error details:', JSON.stringify(data.errors, null, 2))
+            }
+            return { success: false, error: data.message || JSON.stringify(data.errors) || 'Failed to fetch from API' }
         }
     } catch (error) {
         console.error('⚽ [fetchFromAPI] Fetch Error:', error.message)
@@ -187,56 +247,38 @@ const fetchAndUpdateLiveMatches = async () => {
     try {
         console.log('⚽ [fetchAndUpdateLiveMatches] Fetching live matches...')
         
-        // Fetch matches from last 2 days to today + 1 day (to catch matches that started yesterday or today)
-        const yesterday = new Date()
-        yesterday.setDate(yesterday.getDate() - 1)
-        const tomorrow = new Date()
-        tomorrow.setDate(tomorrow.getDate() + 1)
+        // API-Football: Use live=all to get all live matches across all leagues
+        // This is more efficient than querying each league separately
+        const result = await fetchFromAPI('/fixtures?live=all')
         
-        const dateFrom = yesterday.toISOString().split('T')[0]
-        const dateTo = tomorrow.toISOString().split('T')[0]
+        if (result.rateLimit) {
+            console.warn('⚠️ [fetchAndUpdateLiveMatches] Rate limit hit, skipping this update')
+            return
+        }
+        
+        if (!result.success || !result.data) {
+            console.log('📭 [fetchAndUpdateLiveMatches] No live matches at the moment')
+            return
+        }
         
         let allLiveMatches = []
         
-        // Fetch matches from all leagues and filter for live ones
-        for (const league of SUPPORTED_LEAGUES) {
-            const result = await fetchFromAPI(`/competitions/${league.code}/matches?dateFrom=${dateFrom}&dateTo=${dateTo}`)
-            
-            if (result.success && result.data) {
-                // Filter for live matches (IN_PLAY, PAUSED, LIVE)
-                // BUT exclude matches that are likely finished (have fullTime scores or are too old)
-                const liveMatches = result.data.filter(m => {
-                    // Must have live status
-                    const hasLiveStatus = m.status === 'IN_PLAY' || m.status === 'PAUSED' || m.status === 'LIVE'
-                    if (!hasLiveStatus) return false
-                    
-                    // Exclude if match has fullTime scores (means it's finished, API just hasn't updated status)
-                    const hasFullTimeScore = (m.score?.fullTime?.home !== null && m.score?.fullTime?.home !== undefined) ||
-                                           (m.score?.fullTime?.away !== null && m.score?.fullTime?.away !== undefined)
-                    if (hasFullTimeScore && m.status !== 'PAUSED') {
-                        // If it has fullTime score and not paused (half-time), it's likely finished
-                        // Check if match date is more than 2 hours ago
-                        const matchDate = new Date(m.utcDate)
-                        const now = new Date()
-                        const hoursAgo = (now - matchDate) / (1000 * 60 * 60)
-                        
-                        // If match started more than 2.5 hours ago, it's likely finished
-                        if (hoursAgo > 2.5) {
-                            console.log(`  ⚠️ Excluding likely finished match: ${m.homeTeam?.name} vs ${m.awayTeam?.name} (${hoursAgo.toFixed(1)}h ago, has fullTime score)`)
-                            return false
-                        }
-                    }
-                    
-                    return true
-                })
-                if (liveMatches.length > 0) {
-                    console.log(`⚽ [fetchAndUpdateLiveMatches] Found ${liveMatches.length} live matches in ${league.name}`)
-                    allLiveMatches.push(...liveMatches.map(m => ({ ...m, leagueInfo: league })))
+        // Filter for matches from supported leagues
+        const supportedLeagueIds = SUPPORTED_LEAGUES.map(l => l.id)
+        const filteredMatches = result.data.filter(m => {
+            const leagueId = m.league?.id
+            return supportedLeagueIds.includes(leagueId)
+        })
+        
+        if (filteredMatches.length > 0) {
+            // Add league info to each match
+            filteredMatches.forEach(match => {
+                const leagueInfo = SUPPORTED_LEAGUES.find(l => l.id === match.league?.id)
+                if (leagueInfo) {
+                    allLiveMatches.push({ ...match, leagueInfo })
                 }
-            }
-            
-            // Small delay to avoid rate limiting
-            await new Promise(resolve => setTimeout(resolve, 1000))
+            })
+            console.log(`⚽ [fetchAndUpdateLiveMatches] Found ${allLiveMatches.length} live matches from supported leagues`)
         }
         
         if (allLiveMatches.length === 0) {
@@ -248,56 +290,18 @@ const fetchAndUpdateLiveMatches = async () => {
         
         for (const matchData of allLiveMatches) {
             // Get previous state
-            const previousMatch = await Match.findOne({ fixtureId: matchData.id })
+            const fixtureId = matchData.fixture?.id || matchData.id
+            const previousMatch = await Match.findOne({ fixtureId })
             
             const previousGoalsHome = previousMatch?.goals?.home || 0
             const previousGoalsAway = previousMatch?.goals?.away || 0
             
-            // Get current score - prioritize fullTime, fallback to halfTime, then live score
-            const currentGoalsHome = matchData.score?.fullTime?.home ?? 
-                                     matchData.score?.halfTime?.home ?? 
-                                     matchData.score?.regular?.home ??
-                                     matchData.score?.live?.home ?? 0
-            const currentGoalsAway = matchData.score?.fullTime?.away ?? 
-                                     matchData.score?.halfTime?.away ?? 
-                                     matchData.score?.regular?.away ??
-                                     matchData.score?.live?.away ?? 0
-            
-            // Fetch detailed match info to get accurate elapsed time
-            let detailedMatch = matchData
-            try {
-                const detailResult = await fetchFromAPI(`/matches/${matchData.id}`)
-                if (detailResult.success && detailResult.data) {
-                    detailedMatch = detailResult.data
-                    console.log(`  📊 [fetchAndUpdateLiveMatches] Fetched details for match ${matchData.id}, status: ${detailedMatch.status}, elapsed: ${detailedMatch.minute || 'N/A'}`)
-                }
-            } catch (error) {
-                console.log(`  ⚠️ [fetchAndUpdateLiveMatches] Could not fetch details for match ${matchData.id}, using basic data`)
-            }
+            // API-Football: Get current score from goals object
+            const currentGoalsHome = matchData.goals?.home ?? 0
+            const currentGoalsAway = matchData.goals?.away ?? 0
             
             // Convert and update match in database
-            const convertedMatch = convertMatchFormat(detailedMatch, matchData.leagueInfo)
-            
-            // Update with actual elapsed time if available
-            if (detailedMatch.minute) {
-                const elapsed = parseInt(detailedMatch.minute) || null
-                if (elapsed !== null) {
-                    // Determine status based on elapsed time
-                    if (elapsed <= 45) {
-                        convertedMatch.fixture.status.short = '1H'
-                        convertedMatch.fixture.status.elapsed = elapsed
-                    } else if (elapsed <= 90) {
-                        convertedMatch.fixture.status.short = '2H'
-                        convertedMatch.fixture.status.elapsed = elapsed
-                    } else if (elapsed === 45) {
-                        convertedMatch.fixture.status.short = 'HT'
-                        convertedMatch.fixture.status.elapsed = 45
-                    }
-                }
-            }
-            
-            convertedMatch.goals.home = currentGoalsHome
-            convertedMatch.goals.away = currentGoalsAway
+            const convertedMatch = convertMatchFormat(matchData, matchData.leagueInfo)
             
             const updatedMatch = await Match.findOneAndUpdate(
                 { fixtureId: convertedMatch.fixtureId },
@@ -352,11 +356,14 @@ const fetchAndUpdateLiveMatches = async () => {
                             console.error('Failed to parse football data:', e)
                         }
                         
-                        // Update the match in the post data
-                        const matchIndex = matchData.findIndex(m => 
-                            m.homeTeam?.name === updatedMatch.teams?.home?.name &&
-                            m.awayTeam?.name === updatedMatch.teams?.away?.name
-                        )
+                        // Update the match in the post data (find by team names)
+                        const matchIndex = matchData.findIndex(m => {
+                            const homeName1 = m.homeTeam?.name || m.homeTeam
+                            const awayName1 = m.awayTeam?.name || m.awayTeam
+                            const homeName2 = updatedMatch.teams?.home?.name
+                            const awayName2 = updatedMatch.teams?.away?.name
+                            return homeName1 === homeName2 && awayName1 === awayName2
+                        })
                         
                         if (matchIndex !== -1) {
                             matchData[matchIndex] = {
@@ -436,8 +443,15 @@ const fetchTodayFixtures = async () => {
         let totalFetched = 0
         
         for (const league of SUPPORTED_LEAGUES) {
-            console.log(`📅 [fetchTodayFixtures] Fetching fixtures for ${league.name} (${league.code})...`)
-            const result = await fetchFromAPI(`/competitions/${league.code}/matches?dateFrom=${today}&dateTo=${today}`)
+            console.log(`📅 [fetchTodayFixtures] Fetching fixtures for ${league.name} (ID: ${league.id})...`)
+            
+            // API-Football: /fixtures?league={id}&season={year}&date={date}
+            const result = await fetchFromAPI(`/fixtures?league=${league.id}&season=${CURRENT_SEASON}&date=${today}`)
+            
+            if (result.rateLimit) {
+                console.warn(`⚠️ [fetchTodayFixtures] Rate limit hit for ${league.name}, skipping remaining leagues`)
+                break
+            }
             
             console.log(`📅 [fetchTodayFixtures] League ${league.name} result:`, {
                 success: result.success,
@@ -457,7 +471,7 @@ const fetchTodayFixtures = async () => {
                 }
             }
             
-            // Small delay to avoid rate limiting (free tier: 10 requests/minute)
+            // Small delay to avoid rate limiting
             await new Promise(resolve => setTimeout(resolve, 7000)) // 7 seconds between requests
         }
         
@@ -472,11 +486,34 @@ const fetchTodayFixtures = async () => {
 export const initializeFootballCron = () => {
     console.log('⚽ Initializing Football Cron Jobs...')
     
-    // Job 1: Fetch live matches every 2 minutes (24/7)
-    cron.schedule('*/2 * * * *', async () => {
-        console.log('⚽ [CRON] Running live match update...')
+    // Job 1: Smart Polling - Only during match hours (OPTIMIZED FOR FREE TIER)
+    // Premier League, La Liga, Serie A match hours:
+    // - Weekends (Sat-Sun): 12:00-22:00 UTC (peak hours)
+    // - Weekdays: 18:00-22:00 UTC (evening matches)
+    // - Off-hours: Don't poll (or very rarely)
+    
+    // Weekend matches (Saturday & Sunday): Poll every 10 minutes during 12:00-22:00 UTC
+    // This gives us: 10 hours × 6 calls/hour = 60 calls for 2 days = ~30 calls/day average
+    cron.schedule('*/10 12-22 * * 6,0', async () => {
+        console.log('⚽ [CRON] Running live match update (weekend match hours: every 10 min)...')
         await fetchAndUpdateLiveMatches()
     })
+    
+    // Weekday evening matches (Mon-Fri): Poll every 15 minutes during 18:00-22:00 UTC
+    // This gives us: 4 hours × 4 calls/hour = 16 calls for 5 days = ~3 calls/day average
+    cron.schedule('*/15 18-22 * * 1-5', async () => {
+        console.log('⚽ [CRON] Running live match update (weekday evenings: every 15 min)...')
+        await fetchAndUpdateLiveMatches()
+    })
+    
+    // Off-hours check: Once per hour (just in case) during non-match hours
+    // This gives us: ~12 calls/day (when matches unlikely)
+    cron.schedule('0 0-11,23 * * *', async () => {
+        console.log('⚽ [CRON] Running live match update (off-hours check: hourly)...')
+        await fetchAndUpdateLiveMatches()
+    })
+    
+    // Total: ~45 calls/day (well under 100 free tier limit!)
     
     // Job 2: Fetch today's fixtures once at 6 AM UTC
     cron.schedule('0 6 * * *', async () => {
@@ -490,9 +527,10 @@ export const initializeFootballCron = () => {
         await autoPostTodayMatches()
     })
     
-    // Job 6: Refresh post every 10 minutes to ensure users see latest live matches
-    cron.schedule('*/10 * * * *', async () => {
-        console.log('🔄 [CRON] Refreshing Football post with latest live matches...')
+    // Job 6: Refresh post every 30 minutes (FREE TIER: matches live fetch interval)
+    // This reuses already-fetched data from database, no extra API calls
+    cron.schedule('*/30 * * * *', async () => {
+        console.log('🔄 [CRON] Refreshing Football post with latest live matches (from database)...')
         await autoPostTodayMatches()
     })
     
@@ -511,10 +549,15 @@ export const initializeFootballCron = () => {
         await autoPostTodayMatches()
     }, 5000)
     
-    console.log('✅ Football Cron Jobs initialized')
-    console.log('   - Live matches: Every 2 minutes')
-    console.log('   - Daily fixtures: 6 AM UTC')
-    console.log('   - Auto-post today\'s matches: 7 AM UTC')
-    console.log('   - Startup fetch: Running in 5 seconds...')
+    console.log('✅ Football Cron Jobs initialized (FREE TIER - SMART POLLING)')
+    console.log('   - Live matches: Smart polling during match hours only')
+    console.log('     • Weekends 12:00-22:00 UTC: Every 10 min (~30 calls/day)')
+    console.log('     • Weekdays 18:00-22:00 UTC: Every 15 min (~3 calls/day)')
+    console.log('     • Off-hours: Hourly check (~12 calls/day)')
+    console.log('   - Daily fixtures: 6 AM UTC (3 calls/day)')
+    console.log('   - Auto-post today\'s matches: 7 AM UTC (1 call)')
+    console.log('   - Post refresh: Every 30 minutes (from database, no API calls)')
+    console.log('   - Leagues: Premier League, La Liga, Serie A only')
+    console.log('   - Total: ~45-50 calls/day (well under 100 free tier limit!)')
 }
 
