@@ -313,86 +313,104 @@ const SuggestedChannels = ({ onUserFollowed }) => {
             border="1px solid"
             borderColor={borderColor}
             maxW="280px"
-            minH="400px"
+            h="400px"
+            display="flex"
+            flexDirection="column"
         >
             {/* Header */}
-            <Text fontSize="sm" fontWeight="bold" mb={3} color={textColor}>
+            <Text fontSize="sm" fontWeight="bold" mb={3} color={textColor} flexShrink={0}>
                 Suggested Channels
             </Text>
             
             {/* Loading */}
             {loading ? (
-                <Box minH="200px" display="flex" alignItems="center" justifyContent="center">
+                <Flex flex={1} alignItems="center" justifyContent="center">
                     <Spinner size="sm" />
-                </Box>
+                </Flex>
             ) : footballAccount ? (
-                <VStack spacing={3} align="stretch">
-                    {/* Football Channel */}
-                    <Flex
-                        align="center"
-                        justify="space-between"
-                        p={3}
-                        borderRadius="md"
-                        border="1px solid"
-                        borderColor={borderColor}
-                        _hover={{ bg: hoverBg, cursor: 'pointer' }}
-                        transition="all 0.2s"
-                        onClick={() => {
-                            // Navigate to Football post page if post exists, otherwise to Football page
-                            if (footballPostId && footballAccount?.username) {
-                                navigate(`/${footballAccount.username}/post/${footballPostId}`)
-                            } else {
-                                navigate('/football')
-                            }
-                        }}
-                    >
-                        <Flex align="center" gap={3} flex={1}>
-                            <Avatar 
-                                src={footballAccount.profilePic || "https://cdn-icons-png.flaticon.com/512/53/53283.png"}
-                                size="md"
-                                cursor="pointer"
-                            />
-                            <VStack align="start" spacing={0} flex={1}>
-                                <Flex align="center" gap={1}>
-                                    <Text fontSize="sm" fontWeight="semibold" color={textColor}>
-                                        {footballAccount.name}
+                <Box flex={1} overflowY="auto" pr={1}
+                    sx={{
+                        '&::-webkit-scrollbar': {
+                            width: '6px',
+                        },
+                        '&::-webkit-scrollbar-track': {
+                            background: 'transparent',
+                        },
+                        '&::-webkit-scrollbar-thumb': {
+                            background: useColorModeValue('gray.300', 'gray.600'),
+                            borderRadius: '3px',
+                        },
+                        '&::-webkit-scrollbar-thumb:hover': {
+                            background: useColorModeValue('gray.400', 'gray.500'),
+                        },
+                    }}
+                >
+                    <VStack spacing={3} align="stretch">
+                        {/* Football Channel */}
+                        <Flex
+                            align="center"
+                            justify="space-between"
+                            p={3}
+                            borderRadius="md"
+                            border="1px solid"
+                            borderColor={borderColor}
+                            _hover={{ bg: hoverBg, cursor: 'pointer' }}
+                            transition="all 0.2s"
+                            onClick={() => {
+                                // Navigate to Football post page if post exists, otherwise to Football page
+                                if (footballPostId && footballAccount?.username) {
+                                    navigate(`/${footballAccount.username}/post/${footballPostId}`)
+                                } else {
+                                    navigate('/football')
+                                }
+                            }}
+                        >
+                            <Flex align="center" gap={3} flex={1}>
+                                <Avatar 
+                                    src={footballAccount.profilePic || "https://cdn-icons-png.flaticon.com/512/53/53283.png"}
+                                    size="md"
+                                    cursor="pointer"
+                                />
+                                <VStack align="start" spacing={0} flex={1}>
+                                    <Flex align="center" gap={1}>
+                                        <Text fontSize="sm" fontWeight="semibold" color={textColor}>
+                                            {footballAccount.name}
+                                        </Text>
+                                        <Text fontSize="lg">⚽</Text>
+                                    </Flex>
+                                    <Text fontSize="xs" color={secondaryTextColor} noOfLines={1}>
+                                        Live football scores & updates
                                     </Text>
-                                    <Text fontSize="lg">⚽</Text>
-                                </Flex>
-                                <Text fontSize="xs" color={secondaryTextColor} noOfLines={1}>
-                                    Live football scores & updates
-                                </Text>
-                                <Text fontSize="xs" color={secondaryTextColor} mt={1}>
-                                    {footballAccount.followers?.length || 0} followers
-                                </Text>
-                            </VStack>
+                                    <Text fontSize="xs" color={secondaryTextColor} mt={1}>
+                                        {footballAccount.followers?.length || 0} followers
+                                    </Text>
+                                </VStack>
+                            </Flex>
                         </Flex>
-                    </Flex>
+                        
+                        {/* Follow Button */}
+                        <Button
+                            onClick={handleFollowToggle}
+                            isLoading={followLoading}
+                            colorScheme={isFollowing ? 'gray' : 'blue'}
+                            size="sm"
+                            w="full"
+                        >
+                            {isFollowing ? 'Following' : 'Follow'}
+                        </Button>
+                        
+                        {/* Info text */}
+                        {!isFollowing && (
+                            <Text fontSize="xs" color={secondaryTextColor} textAlign="center">
+                                Follow to see live match updates in your feed
+                            </Text>
+                        )}
+                        
+                    </VStack>
                     
-                    {/* Follow Button */}
-                    <Button
-                        onClick={handleFollowToggle}
-                        isLoading={followLoading}
-                        colorScheme={isFollowing ? 'gray' : 'blue'}
-                        size="sm"
-                        w="full"
-                    >
-                        {isFollowing ? 'Following' : 'Follow'}
-                    </Button>
-                    
-                    {/* Info text */}
-                    {!isFollowing && (
-                        <Text fontSize="xs" color={secondaryTextColor} textAlign="center">
-                            Follow to see live match updates in your feed
-                        </Text>
-                    )}
-                    
-                </VStack>
-            ) : null}
-            
-            {/* Live Stream Channels */}
-            {!loading && channels.length > 0 && (
-                <VStack spacing={4} align="stretch" mt={4}>
+                    {/* Live Stream Channels */}
+                    {channels.length > 0 && (
+                        <VStack spacing={4} align="stretch" mt={4}>
                     <Flex align="center" gap={2} mb={2}>
                         <Text fontSize="sm" fontWeight="bold" color={textColor}>
                             🔴 Live Channels
@@ -531,7 +549,15 @@ const SuggestedChannels = ({ onUserFollowed }) => {
                             })()}
                         </Box>
                     )}
-                </VStack>
+                        </VStack>
+                    )}
+                </Box>
+            ) : (
+                <Flex flex={1} alignItems="center" justifyContent="center">
+                    <Text fontSize="sm" color={secondaryTextColor} textAlign="center">
+                        No channels available
+                    </Text>
+                </Flex>
             )}
         </Box>
     )

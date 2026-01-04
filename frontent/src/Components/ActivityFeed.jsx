@@ -120,18 +120,36 @@ const ActivityFeed = () => {
     if (loading) {
         return (
             <Box 
+                position="sticky"
+                top="20px"
                 bg={cardBg} 
                 borderRadius="md" 
-                p={4} 
+                p={3} 
                 mb={4} 
                 border="1px solid" 
                 borderColor={borderColor}
-                minH="200px"
+                h="400px"
+                maxW="280px"
+                ml="auto"
                 display="flex"
-                alignItems="center"
-                justifyContent="center"
+                flexDirection="column"
             >
-                <Spinner size="sm" />
+                <Text 
+                    fontSize="sm" 
+                    fontWeight="bold" 
+                    color={textColor} 
+                    mb={3}
+                    flexShrink={0}
+                >
+                    🔔 Live Activity
+                </Text>
+                <Flex
+                    flex={1}
+                    alignItems="center"
+                    justifyContent="center"
+                >
+                    <Spinner size="sm" />
+                </Flex>
             </Box>
         )
     }
