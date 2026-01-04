@@ -313,20 +313,44 @@ const SuggestedChannels = ({ onUserFollowed }) => {
             border="1px solid"
             borderColor={borderColor}
             maxW="280px"
+            h="600px"
+            display="flex"
+            flexDirection="column"
         >
             {/* Header */}
-            <Text fontSize="sm" fontWeight="bold" mb={3} color={textColor}>
+            <Text fontSize="sm" fontWeight="bold" mb={3} color={textColor} flexShrink={0}>
                 Suggested Channels
             </Text>
             
-            {/* Loading */}
-            {loading ? (
-                <Box minH="200px" display="flex" alignItems="center" justifyContent="center">
-                    <Spinner size="sm" />
-                </Box>
-            ) : footballAccount ? (
-                <>
-                    <VStack spacing={3} align="stretch">
+            {/* Content Area - Scrollable */}
+            <Box
+                flex={1}
+                overflowY="auto"
+                pr={1}
+                sx={{
+                    '&::-webkit-scrollbar': {
+                        width: '6px',
+                    },
+                    '&::-webkit-scrollbar-track': {
+                        background: 'transparent',
+                    },
+                    '&::-webkit-scrollbar-thumb': {
+                        background: useColorModeValue('gray.300', 'gray.600'),
+                        borderRadius: '3px',
+                    },
+                    '&::-webkit-scrollbar-thumb:hover': {
+                        background: useColorModeValue('gray.400', 'gray.500'),
+                    },
+                }}
+            >
+                {/* Loading */}
+                {loading ? (
+                    <Box minH="400px" display="flex" alignItems="center" justifyContent="center">
+                        <Spinner size="sm" />
+                    </Box>
+                ) : footballAccount ? (
+                    <>
+                        <VStack spacing={3} align="stretch">
                         {/* Football Channel */}
                         <Flex
                             align="center"
@@ -531,8 +555,9 @@ const SuggestedChannels = ({ onUserFollowed }) => {
                             )}
                         </VStack>
                     )}
-                </>
-            ) : null}
+                    </>
+                ) : null}
+            </Box>
         </Box>
     )
 }
