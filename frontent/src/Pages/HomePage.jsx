@@ -95,11 +95,11 @@ const HomePage = () => {
             index === self.findIndex(p => p._id === post._id)
           )
           
-          // Sort by createdAt (newest first) - same logic as feed
+          // Sort by updatedAt (or createdAt if no updatedAt) - matches backend sorting logic
           unique.sort((a, b) => {
-            const dateA = new Date(a.createdAt).getTime()
-            const dateB = new Date(b.createdAt).getTime()
-            return dateB - dateA
+            const dateA = new Date(a.updatedAt || a.createdAt).getTime()
+            const dateB = new Date(b.updatedAt || b.createdAt).getTime()
+            return dateB - dateA // Newest first
           })
           
           // Update ref with new count
@@ -278,11 +278,12 @@ const HomePage = () => {
         // Combine: new post + kept same author posts + other authors' posts
         const updatedFeed = [newPost, ...keptSameAuthorPosts, ...postsFromOtherAuthors]
         
-        // Sort all by createdAt (newest first) to maintain chronological order
+        // Sort all by updatedAt (or createdAt if no updatedAt) - matches backend sorting logic
+        // This ensures Football posts with updated timestamps appear at the top
         updatedFeed.sort((a, b) => {
-          const dateA = new Date(a.createdAt).getTime()
-          const dateB = new Date(b.createdAt).getTime()
-          return dateB - dateA
+          const dateA = new Date(a.updatedAt || a.createdAt).getTime()
+          const dateB = new Date(b.updatedAt || b.createdAt).getTime()
+          return dateB - dateA // Newest first
         })
         
         // Update ref with new count

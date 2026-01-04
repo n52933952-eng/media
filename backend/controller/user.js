@@ -179,6 +179,36 @@ export const FollowAndUnfollow = async(req,res) => {
             await User.findByIdAndUpdate(req.user._id,{$push:{following:id}})
             await User.findByIdAndUpdate(id,{$push:{followers:req.user._id}})
            
+            // If following Football account, update the Football post's updatedAt to now
+            // This ensures it appears at the top of the feed when user follows
+            if (userToModify.username === 'Football') {
+                try {
+                    const Post = (await import('../models/post.js')).default
+                    // Get the latest Football post (today's post)
+                    const todayStart = new Date()
+                    todayStart.setHours(0, 0, 0, 0)
+                    const todayEnd = new Date(todayStart)
+                    todayEnd.setHours(23, 59, 59, 999)
+                    
+                    const latestFootballPost = await Post.findOne({
+                        postedBy: id,
+                        createdAt: { 
+                            $gte: todayStart,
+                            $lte: todayEnd
+                        }
+                    }).sort({ createdAt: -1 })
+                    
+                    if (latestFootballPost) {
+                        // Update updatedAt to now so it appears at top of feed
+                        latestFootballPost.updatedAt = new Date()
+                        await latestFootballPost.save()
+                        console.log(`⚽ [FollowAndUnfollow] Updated Football post ${latestFootballPost._id} updatedAt to now for user ${req.user.username}`)
+                    }
+                } catch (error) {
+                    console.error('❌ [FollowAndUnfollow] Error updating Football post:', error)
+                }
+            }
+           
             // Note: Football posts are global and remain in database.
             // Feed already filters by following list, so user will see Football posts in feed.
             // Frontend triggers post creation when following Football (in SuggestedChannels.jsx)
