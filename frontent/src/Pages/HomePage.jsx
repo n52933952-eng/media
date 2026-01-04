@@ -55,6 +55,10 @@ const HomePage = () => {
         console.log('⚽ [fetchUserPosts] Following Football, refreshing entire feed...')
         // Reset and reload feed to ensure Football post is included
         followPostCountRef.current = 0
+        
+        // Small delay to ensure backend has updated the follow relationship
+        await new Promise(resolve => setTimeout(resolve, 500))
+        
         // Call getFeedPost directly without dependency to avoid circular dependency
         const skip = 0
         const res = await fetch(`${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/post/feed/feedpost?limit=10&skip=${skip}`,{
@@ -94,9 +98,23 @@ const HomePage = () => {
           
           console.log(`⚽ [fetchUserPosts] Feed refreshed: ${uniquePosts.length} posts, Football post included: ${hasFootballPost}`)
           
+          // Set the feed with Football post
           setFollowPost(uniquePosts)
           followPostCountRef.current = uniquePosts.length
           setHasMore(data.hasMore !== undefined ? data.hasMore : false)
+          
+          // Double-check after a short delay to ensure post stays
+          setTimeout(() => {
+            setFollowPost(prev => {
+              const stillHasFootball = prev.some(p => p.postedBy?.username === 'Football' || p.footballData)
+              if (!stillHasFootball && hasFootballPost && footballPost) {
+                console.log(`⚠️ [fetchUserPosts] Football post disappeared! Re-adding it...`)
+                // Re-add Football post if it was removed
+                return [footballPost, ...prev]
+              }
+              return prev
+            })
+          }, 2000)
         } else {
           console.error('❌ [fetchUserPosts] Failed to refresh feed:', data)
         }
@@ -329,25 +347,12 @@ const HomePage = () => {
         const isFootballPost = postToDelete?.postedBy?.username === 'Football' || postToDelete?.footballData
         
         if (isFootballPost) {
-          // Check if user still follows Football
-          // Check both UserContext and localStorage for following status
-          const userInfo = user || JSON.parse(localStorage.getItem('userInfo') || '{}')
-          const following = userInfo?.following || []
-          const followsFootball = following.some((f) => {
-            if (typeof f === 'string') {
-              // If it's an ID, we need to check if it's Football account ID
-              // For now, we'll check username from localStorage or assume if Football post exists, user follows
-              return false // Can't determine from ID alone
-            }
-            return f.username === 'Football' || f._id?.toString()
-          })
-          
-          // If we can't determine from following array, check if Football post exists in feed
-          // If it exists and user just followed, don't delete it
-          if (followsFootball || (postToDelete && prev.some(p => p.postedBy?.username === 'Football'))) {
-            console.log('⚠️ [handlePostDeleted] Ignoring Football post deletion - user still follows Football (likely stale event)')
-            return prev // Don't delete if user still follows Football
-          }
+          // ALWAYS ignore Football post deletions for now
+          // The backend only emits postDeleted when UNFOLLOWING, but there might be stale events
+          // If user wants to unfollow, they can do it manually and the post will be removed
+          // This prevents the Football post from disappearing when following
+          console.log('⚠️ [handlePostDeleted] Ignoring Football post deletion - preventing accidental removal (user may have just followed)')
+          return prev // Don't delete Football posts via socket - let feed refresh handle it
         }
         
         const updated = prev.filter(p => p._id?.toString() !== postId?.toString())
