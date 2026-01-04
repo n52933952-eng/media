@@ -25,6 +25,7 @@ const HomePage = () => {
   const observerTarget = useRef(null) // For infinite scroll
   const isLoadingRef = useRef(false) // Prevent duplicate requests
   const hasLoadedRef = useRef(false) // Track if initial load happened
+  const followPostCountRef = useRef(0) // Track current post count for pagination
 
 
 
@@ -79,11 +80,10 @@ const HomePage = () => {
     }
     
     try{
-      // Calculate skip: for loadMore, use current post count
-      // But we need to be careful - first page might have returned more than limit (due to Football/channels)
-      const skip = loadMore ? followPost.length : 0
+      // Calculate skip: for loadMore, use ref value (always up-to-date)
+      const skip = loadMore ? followPostCountRef.current : 0
       
-      console.log(`📥 [getFeedPost] Fetching posts: loadMore=${loadMore}, skip=${skip}, currentCount=${followPost.length}`)
+      console.log(`📥 [getFeedPost] Fetching posts: loadMore=${loadMore}, skip=${skip}, currentCount=${followPostCountRef.current}`)
       
       const res = await fetch(`${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/post/feed/feedpost?limit=10&skip=${skip}`,{
         credentials:"include",
@@ -112,7 +112,10 @@ const HomePage = () => {
               return prev
             }
             
-            return [...prev, ...newPosts]
+            const updated = [...prev, ...newPosts]
+            // Update ref with new count
+            followPostCountRef.current = updated.length
+            return updated
           })
         } else {
           // Initial load: Remove duplicates from the response itself (in case backend returns duplicates)
@@ -122,6 +125,8 @@ const HomePage = () => {
           )
           console.log(`📥 [getFeedPost] Initial load: received ${posts.length} posts, ${uniquePosts.length} unique posts`)
           setFollowPost(uniquePosts)
+          // Update ref with initial count
+          followPostCountRef.current = uniquePosts.length
         }
         
         const hasMoreValue = data.hasMore !== undefined ? data.hasMore : false
@@ -233,6 +238,9 @@ const HomePage = () => {
           return dateB - dateA
         })
         
+        // Update ref with new count
+        followPostCountRef.current = updatedFeed.length
+        
         console.log(`✅ [HomePage] Added new post to feed (maintained 3 newest per user rule):`, newPost._id)
         return updatedFeed
       })
@@ -240,7 +248,11 @@ const HomePage = () => {
 
     const handlePostDeleted = ({ postId }) => {
       console.log('🗑️ Post deleted via socket:', postId)
-      setFollowPost(prev => prev.filter(p => p._id !== postId))
+      setFollowPost(prev => {
+        const updated = prev.filter(p => p._id !== postId)
+        followPostCountRef.current = updated.length
+        return updated
+      })
     }
 
     const handlePostUpdated = (updatedPost) => {
