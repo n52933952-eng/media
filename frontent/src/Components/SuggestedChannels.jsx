@@ -313,7 +313,6 @@ const SuggestedChannels = ({ onUserFollowed }) => {
             border="1px solid"
             borderColor={borderColor}
             maxW="280px"
-            minH="400px"
         >
             {/* Header */}
             <Text fontSize="sm" fontWeight="bold" mb={3} color={textColor}>
