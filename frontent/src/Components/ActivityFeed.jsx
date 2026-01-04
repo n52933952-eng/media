@@ -146,8 +146,7 @@ const ActivityFeed = () => {
             mb={4} 
             border="1px solid" 
             borderColor={borderColor}
-            minH="200px"
-            maxH="600px"
+            h="400px"
             maxW="280px"
             ml="auto"
             display="flex"
@@ -168,7 +167,6 @@ const ActivityFeed = () => {
                     flex={1}
                     alignItems="center"
                     justifyContent="center"
-                    minH="150px"
                 >
                     <Text 
                         fontSize="sm" 
