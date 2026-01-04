@@ -26,11 +26,11 @@ const ActivityFeed = () => {
                 )
                 const data = await res.json()
                 if (res.ok && data.activities) {
-                    // Filter out activities older than 7 hours and limit to 8
+                    // Filter out activities older than 7 hours and limit to 20
                     const sevenHoursAgo = new Date(Date.now() - 7 * 60 * 60 * 1000)
                     const recentActivities = data.activities
                         .filter(activity => new Date(activity.createdAt) >= sevenHoursAgo)
-                        .slice(0, 8) // Show only 8 most recent
+                        .slice(0, 20) // Show only 20 most recent
                     setActivities(recentActivities)
                 }
             } catch (error) {
@@ -54,8 +54,8 @@ const ActivityFeed = () => {
                 const recentActivities = prev.filter(a => 
                     new Date(a.createdAt) >= sevenHoursAgo
                 )
-                // Add new activity at the beginning, keep only 8
-                const updated = [activity, ...recentActivities].slice(0, 8)
+                // Add new activity at the beginning, keep only 20
+                const updated = [activity, ...recentActivities].slice(0, 20)
                 return updated
             })
         }
@@ -136,19 +136,20 @@ const ActivityFeed = () => {
         )
     }
 
-    if (activities.length === 0) {
-        return null // Don't show if no activities
-    }
-
     return (
         <Box 
+            position="sticky"
+            top="20px"
             bg={cardBg} 
             borderRadius="md" 
             p={3} 
             mb={4} 
             border="1px solid" 
             borderColor={borderColor}
-            h="300px"
+            minH="200px"
+            maxH="600px"
+            maxW="280px"
+            ml="auto"
             display="flex"
             flexDirection="column"
         >
@@ -162,68 +163,85 @@ const ActivityFeed = () => {
                 🔔 Live Activity
             </Text>
             
-            <VStack 
-                spacing={2} 
-                align="stretch"
-                flex={1}
-                overflowY="auto"
-                pr={1}
-                sx={{
-                    '&::-webkit-scrollbar': {
-                        width: '6px',
-                    },
-                    '&::-webkit-scrollbar-track': {
-                        background: 'transparent',
-                    },
-                    '&::-webkit-scrollbar-thumb': {
-                        background: useColorModeValue('gray.300', 'gray.600'),
-                        borderRadius: '3px',
-                    },
-                    '&::-webkit-scrollbar-thumb:hover': {
-                        background: useColorModeValue('gray.400', 'gray.500'),
-                    },
-                }}
-            >
-                {activities.map((activity, index) => (
-                    <React.Fragment key={activity._id || index}>
-                        <Flex
-                            align="center"
-                            gap={2}
-                            p={2}
-                            borderRadius="md"
-                            _hover={{ bg: useColorModeValue('gray.50', 'gray.700') }}
-                            cursor="pointer"
-                            onClick={() => handleActivityClick(activity)}
-                            transition="all 0.2s"
-                        >
-                            <Text fontSize="sm">{getActivityIcon(activity.type)}</Text>
-                            <Avatar
-                                src={activity.userId?.profilePic}
-                                name={activity.userId?.name || activity.userId?.username}
-                                size="xs"
-                            />
-                            <Flex direction="column" flex={1} minW={0}>
-                                <Text 
-                                    fontSize="xs" 
-                                    color={textColor}
-                                    noOfLines={1}
-                                >
-                                    {getActivityText(activity)}
-                                </Text>
-                                <Text 
-                                    fontSize="2xs" 
-                                    color={secondaryTextColor}
-                                >
-                                    {formatDistanceToNow(new Date(activity.createdAt), { addSuffix: true })}
-                                </Text>
+            {activities.length === 0 ? (
+                <Flex
+                    flex={1}
+                    alignItems="center"
+                    justifyContent="center"
+                    minH="150px"
+                >
+                    <Text 
+                        fontSize="sm" 
+                        color={secondaryTextColor}
+                        textAlign="center"
+                    >
+                        No activity
+                    </Text>
+                </Flex>
+            ) : (
+                <VStack 
+                    spacing={2} 
+                    align="stretch"
+                    flex={1}
+                    overflowY="auto"
+                    pr={1}
+                    sx={{
+                        '&::-webkit-scrollbar': {
+                            width: '6px',
+                        },
+                        '&::-webkit-scrollbar-track': {
+                            background: 'transparent',
+                        },
+                        '&::-webkit-scrollbar-thumb': {
+                            background: useColorModeValue('gray.300', 'gray.600'),
+                            borderRadius: '3px',
+                        },
+                        '&::-webkit-scrollbar-thumb:hover': {
+                            background: useColorModeValue('gray.400', 'gray.500'),
+                        },
+                    }}
+                >
+                    {activities.map((activity, index) => (
+                        <React.Fragment key={activity._id || index}>
+                            <Flex
+                                align="center"
+                                gap={2}
+                                p={2}
+                                borderRadius="md"
+                                _hover={{ bg: useColorModeValue('gray.50', 'gray.700') }}
+                                cursor="pointer"
+                                onClick={() => handleActivityClick(activity)}
+                                transition="all 0.2s"
+                            >
+                                <Text fontSize="sm">{getActivityIcon(activity.type)}</Text>
+                                <Avatar
+                                    src={activity.userId?.profilePic}
+                                    name={activity.userId?.name || activity.userId?.username}
+                                    size="xs"
+                                />
+                                <Flex direction="column" flex={1} minW={0}>
+                                    <Text 
+                                        fontSize="xs" 
+                                        color={textColor}
+                                        noOfLines={1}
+                                    >
+                                        {getActivityText(activity)}
+                                    </Text>
+                                    <Text 
+                                        fontSize="2xs" 
+                                        color={secondaryTextColor}
+                                    >
+                                        {formatDistanceToNow(new Date(activity.createdAt), { addSuffix: true })}
+                                    </Text>
+                                </Flex>
                             </Flex>
-                        </Flex>
-                        {index < activities.length - 1 && (
-                            <Divider borderColor={borderColor} />
-                        )}
-                    </React.Fragment>
-                ))}
-            </VStack>
+                            {index < activities.length - 1 && (
+                                <Divider borderColor={borderColor} />
+                            )}
+                        </React.Fragment>
+                    ))}
+                </VStack>
+            )}
         </Box>
     )
 }

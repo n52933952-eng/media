@@ -150,7 +150,7 @@ const SuggestedUsers = ({ onUserFollowed }) => {
   return (
     <Box
       position="sticky"
-      top="120px"
+      top="640px"
       bg={bgColor}
       minH="400px"
       borderRadius="md"

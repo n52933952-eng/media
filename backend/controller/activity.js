@@ -15,8 +15,8 @@ export const createActivity = async (userId, type, options = {}) => {
         // Get current activity count for this user
         const activityCount = await Activity.countDocuments({ userId: userId })
         
-        // If user already has 8 activities, delete the oldest one
-        if (activityCount >= 8) {
+        // If user already has 20 activities, delete the oldest one
+        if (activityCount >= 20) {
             const oldestActivity = await Activity.findOne({ userId: userId })
                 .sort({ createdAt: 1 }) // Oldest first
             if (oldestActivity) {
@@ -78,7 +78,7 @@ export const createActivity = async (userId, type, options = {}) => {
 export const getActivities = async (req, res) => {
     try {
         const userId = req.user._id
-        const limit = 8 // Always limit to 8 activities
+        const limit = 20 // Always limit to 20 activities
 
         // Get user's following list
         const user = await User.findById(userId).select('following')
@@ -124,20 +124,20 @@ export const cleanupOldActivities = async () => {
             console.log(`🧹 [cleanupOldActivities] Deleted ${result.deletedCount} old activities (older than 7 hours)`)
         }
         
-        // Also ensure each user has max 8 activities (delete oldest if more)
+        // Also ensure each user has max 20 activities (delete oldest if more)
         const usersWithActivities = await Activity.distinct('userId')
         
         for (const userId of usersWithActivities) {
             const count = await Activity.countDocuments({ userId: userId })
-            if (count > 8) {
+            if (count > 20) {
                 const activitiesToDelete = await Activity.find({ userId: userId })
                     .sort({ createdAt: 1 }) // Oldest first
-                    .limit(count - 8) // Keep only 8 most recent
+                    .limit(count - 20) // Keep only 20 most recent
                 
                 const idsToDelete = activitiesToDelete.map(a => a._id)
                 if (idsToDelete.length > 0) {
                     await Activity.deleteMany({ _id: { $in: idsToDelete } })
-                    console.log(`🧹 [cleanupOldActivities] Deleted ${idsToDelete.length} old activities for user ${userId} (kept 8 most recent)`)
+                    console.log(`🧹 [cleanupOldActivities] Deleted ${idsToDelete.length} old activities for user ${userId} (kept 20 most recent)`)
                 }
             }
         }
