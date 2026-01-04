@@ -469,16 +469,17 @@ export const ReplyPost = async(req,res) => {
 export const getFeedPost = async(req,res) => {
     try{
         const userId = req.user._id 
-        const user = await User.findById(userId)
+        // Fetch user fresh from database to ensure we have latest following array
+        const user = await User.findById(userId).select('following')
 
         if(!user){
             return res.status(400).json({error:"no user"})
         }
 
-        const following = user.following 
+        const following = user.following || []
         
         // If user follows no one, return empty feed
-        if (!following || following.length === 0) {
+        if (following.length === 0) {
             return res.status(200).json({ 
                 posts: [],
                 hasMore: false,
@@ -491,8 +492,11 @@ export const getFeedPost = async(req,res) => {
         const skip = parseInt(req.query.skip) || 0 // Skip for pagination
         
         // Get Football account and check if user follows it
-        const footballAccount = await User.findOne({ username: 'Football' })
-        const followsFootball = footballAccount && following.some(id => id.toString() === footballAccount._id.toString())
+        const footballAccount = await User.findOne({ username: 'Football' }).select('_id')
+        // Check if user follows Football - convert all to strings for reliable comparison
+        const followsFootball = footballAccount && following.some(followId => {
+            return followId.toString() === footballAccount._id.toString()
+        })
         
         // Strategy: Always include Football and channel posts in first page, sorted with normal posts
         // For first page (skip=0): Get normal posts + always include Football + channels
@@ -523,15 +527,16 @@ export const getFeedPost = async(req,res) => {
         
         // Get Football post if user follows Football
         // Get the latest post from Football account (works for both live matches and "no matches" posts)
-        const footballPostsPromise = followsFootball 
-            ? Post.find({ 
+        let footballPostsPromise = Promise.resolve([])
+        if (followsFootball && footballAccount) {
+            footballPostsPromise = Post.find({ 
                 postedBy: footballAccount._id
             })
                 .populate("postedBy", "-password")
                 .populate("contributors", "username profilePic name")
                 .sort({ createdAt: -1 })
                 .limit(1)
-            : Promise.resolve([])
+        }
         
         // Wait for all posts to be fetched
         const [allPostsArrays, channelPosts, footballPosts] = await Promise.all([

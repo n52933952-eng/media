@@ -866,29 +866,25 @@ export const autoPostTodayMatches = async () => {
         }
         
         // Double-check: Make sure no post was created between our check and now (race condition prevention)
-        // Only do this if we didn't already delete a post above
-        if (!noMatchesPostToDelete || matches.length > 0) {
-            const doubleCheckPost = await Post.findOne({
-                postedBy: footballAccount._id,
-                $or: [
-                    { footballData: { $exists: true, $ne: null } },
-                    { 
-                        text: { $regex: /Football Live|No live matches/i },
-                        footballData: { $exists: false }
-                    }
-                ],
-                createdAt: { 
-                    $gte: todayStart,
-                    $lte: todayEnd
+        // Only do this if we didn't already delete a "no matches" post above (we'll check for matches first)
+        const doubleCheckPost = await Post.findOne({
+            postedBy: footballAccount._id,
+            $or: [
+                { footballData: { $exists: true, $ne: null } },
+                { 
+                    text: { $regex: /Football Live|No live matches/i },
+                    footballData: { $exists: false }
                 }
-            })
-            
-            if (doubleCheckPost) {
-                console.log('✅ [autoPostTodayMatches] Post was created by another process, skipping duplicate creation')
-                return { success: true, message: 'Post already exists (double-check)', postId: doubleCheckPost._id }
+            ],
+            createdAt: { 
+                $gte: todayStart,
+                $lte: todayEnd
             }
-        } else {
-            console.log('ℹ️ [autoPostTodayMatches] Skipping double-check (will create "no matches" post)')
+        })
+        
+        if (doubleCheckPost) {
+            console.log('✅ [autoPostTodayMatches] Post was created by another process, skipping duplicate creation')
+            return { success: true, message: 'Post already exists (double-check)', postId: doubleCheckPost._id }
         }
         
         console.log('✅ [autoPostTodayMatches] Creating new post for today...')

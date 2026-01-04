@@ -296,18 +296,6 @@ const HomePage = () => {
     const handlePostDeleted = ({ postId }) => {
       console.log('🗑️ Post deleted via socket:', postId)
       setFollowPost(prev => {
-        // Check if this is a Football post being deleted
-        const postToDelete = prev.find(p => p._id?.toString() === postId?.toString())
-        const isFootballPost = postToDelete?.postedBy?.username === 'Football' || postToDelete?.footballData || postToDelete?.text?.includes('Football Live')
-        
-        if (isFootballPost) {
-          // ALWAYS ignore Football post deletions via socket
-          // The backend only emits postDeleted when UNFOLLOWING, but there might be stale events
-          // If user wants to unfollow, they can do it manually and the post will be removed via feed refresh
-          console.log('⚠️ [handlePostDeleted] Ignoring Football post deletion - preventing accidental removal')
-          return prev // Don't delete Football posts via socket
-        }
-        
         const updated = prev.filter(p => p._id?.toString() !== postId?.toString())
         followPostCountRef.current = updated.length
         console.log(`🗑️ [handlePostDeleted] Removed post ${postId}, feed now has ${updated.length} posts`)

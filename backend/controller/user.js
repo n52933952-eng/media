@@ -145,9 +145,9 @@ export const FollowAndUnfollow = async(req,res) => {
                    const Post = (await import('../models/post.js')).default
                    const { getIO, getUserSocketMap } = await import('../socket/socket.js')
                    
+                   // Get ALL Football posts (including "no matches" posts)
                    const footballPosts = await Post.find({
-                       postedBy: id,
-                       footballData: { $exists: true, $ne: null }
+                       postedBy: id
                    }).select('_id')
                    
                    if (footballPosts.length > 0) {
