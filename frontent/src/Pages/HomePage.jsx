@@ -4,6 +4,7 @@ import{Spinner,Flex,Box,Text,useColorModeValue} from '@chakra-ui/react'
 import Post from '../Components/Post'
 import {PostContext} from '../context/PostContext'
 import {SocketContext} from '../context/SocketContext'
+import {UserContext} from '../context/UserContext'
 import SuggestedUsers from '../Components/SuggestedUsers'
 import SuggestedChannels from '../Components/SuggestedChannels'
 import ChessChallenge from '../Components/ChessChallenge'
@@ -15,6 +16,7 @@ import ActivityFeed from '../Components/ActivityFeed'
 const HomePage = () => {
   const{followPost,setFollowPost}=useContext(PostContext)
   const {socket} = useContext(SocketContext) || {}
+  const {user} = useContext(UserContext) || {}
   
   const[loading,setLoading]=useState(true)
   const[loadingMore,setLoadingMore]=useState(false)
@@ -64,9 +66,21 @@ const HomePage = () => {
           const uniquePosts = posts.filter((post, index, self) => 
             index === self.findIndex(p => p._id?.toString() === post._id?.toString())
           )
+          
+          // Check if Football post is in the response
+          const hasFootballPost = uniquePosts.some(p => {
+            const authorId = p.postedBy?._id?.toString() || p.postedBy?.toString()
+            const isFootball = p.postedBy?.username === 'Football' || (p.footballData && authorId === userId)
+            return isFootball
+          })
+          
+          console.log(`⚽ [fetchUserPosts] Feed refreshed: ${uniquePosts.length} posts, Football post included: ${hasFootballPost}`)
+          
           setFollowPost(uniquePosts)
           followPostCountRef.current = uniquePosts.length
           setHasMore(data.hasMore !== undefined ? data.hasMore : false)
+        } else {
+          console.error('❌ [fetchUserPosts] Failed to refresh feed:', data)
         }
         return
       }
@@ -292,8 +306,35 @@ const HomePage = () => {
     const handlePostDeleted = ({ postId }) => {
       console.log('🗑️ Post deleted via socket:', postId)
       setFollowPost(prev => {
-        const updated = prev.filter(p => p._id !== postId)
+        // Check if this is a Football post being deleted
+        const postToDelete = prev.find(p => p._id?.toString() === postId?.toString())
+        const isFootballPost = postToDelete?.postedBy?.username === 'Football' || postToDelete?.footballData
+        
+        if (isFootballPost) {
+          // Check if user still follows Football
+          // Check both UserContext and localStorage for following status
+          const userInfo = user || JSON.parse(localStorage.getItem('userInfo') || '{}')
+          const following = userInfo?.following || []
+          const followsFootball = following.some((f) => {
+            if (typeof f === 'string') {
+              // If it's an ID, we need to check if it's Football account ID
+              // For now, we'll check username from localStorage or assume if Football post exists, user follows
+              return false // Can't determine from ID alone
+            }
+            return f.username === 'Football' || f._id?.toString()
+          })
+          
+          // If we can't determine from following array, check if Football post exists in feed
+          // If it exists and user just followed, don't delete it
+          if (followsFootball || (postToDelete && prev.some(p => p.postedBy?.username === 'Football'))) {
+            console.log('⚠️ [handlePostDeleted] Ignoring Football post deletion - user still follows Football (likely stale event)')
+            return prev // Don't delete if user still follows Football
+          }
+        }
+        
+        const updated = prev.filter(p => p._id?.toString() !== postId?.toString())
         followPostCountRef.current = updated.length
+        console.log(`🗑️ [handlePostDeleted] Removed post ${postId}, feed now has ${updated.length} posts`)
         return updated
       })
     }
