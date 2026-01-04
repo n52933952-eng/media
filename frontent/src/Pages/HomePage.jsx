@@ -296,6 +296,33 @@ const HomePage = () => {
     const handlePostDeleted = ({ postId }) => {
       console.log('🗑️ Post deleted via socket:', postId)
       setFollowPost(prev => {
+        // Check if this is a Football post
+        const postToDelete = prev.find(p => p._id?.toString() === postId?.toString())
+        const isFootballPost = postToDelete?.postedBy?.username === 'Football' || postToDelete?.footballData || postToDelete?.text?.includes('Football Live')
+        
+        if (isFootballPost) {
+          // Check if user still follows Football
+          const userInfo = user || JSON.parse(localStorage.getItem('userInfo') || '{}')
+          const followsFootball = userInfo?.following?.some(f => {
+            if (typeof f === 'object' && f.username) {
+              return f.username === 'Football'
+            }
+            return false
+          }) || false
+          
+          // Only remove if user doesn't follow Football (unfollow action)
+          if (!followsFootball) {
+            console.log('✅ [handlePostDeleted] Removing Football post - user unfollowed Football')
+            const updated = prev.filter(p => p._id?.toString() !== postId?.toString())
+            followPostCountRef.current = updated.length
+            return updated
+          } else {
+            console.log('⚠️ [handlePostDeleted] Ignoring Football post deletion - user still follows Football')
+            return prev
+          }
+        }
+        
+        // For non-Football posts, always remove
         const updated = prev.filter(p => p._id?.toString() !== postId?.toString())
         followPostCountRef.current = updated.length
         console.log(`🗑️ [handlePostDeleted] Removed post ${postId}, feed now has ${updated.length} posts`)

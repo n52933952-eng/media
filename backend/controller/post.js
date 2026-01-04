@@ -545,104 +545,69 @@ export const getFeedPost = async(req,res) => {
             footballPostsPromise
         ])
         
-        // Combine all posts: normal posts + channels + football
-        let allPosts = [...allPostsArrays.flat(), ...channelPosts, ...footballPosts]
+        // SIMPLE APPROACH: Get 12 newest posts from followed users, then add Football and channels separately
+        // Combine only normal posts (from followed users) - NOT including Football or channels
+        let allNormalPosts = allPostsArrays.flat()
         
-        // Sort all posts by createdAt (newest first) - Football and channels sorted WITH normal posts
-        allPosts.sort((a, b) => {
+        // Sort normal posts by createdAt (newest first)
+        allNormalPosts.sort((a, b) => {
             const dateA = new Date(a.createdAt).getTime()
             const dateB = new Date(b.createdAt).getTime()
             return dateB - dateA // Newest first
         })
         
-        // Remove duplicates
-        const uniquePosts = []
+        // Remove duplicates from normal posts
+        const uniqueNormalPosts = []
         const seenPostIds = new Set()
-        for (const post of allPosts) {
+        for (const post of allNormalPosts) {
             const postId = post._id.toString()
             if (!seenPostIds.has(postId)) {
-                uniquePosts.push(post)
+                uniqueNormalPosts.push(post)
                 seenPostIds.add(postId)
             }
         }
         
-        // For first page: Ensure Football and channels are always included
+        // For first page (skip=0): Get 12 newest normal posts, then add Football and channels at top
         if (skip === 0) {
-            const footballPostId = footballPosts.length > 0 ? footballPosts[0]._id.toString() : null
+            // Get top 12 normal posts
+            const topNormalPosts = uniqueNormalPosts.slice(0, 12)
             
-            // Get top 'limit' posts (sorted by time)
-            let topPosts = uniquePosts.slice(0, limit)
-            const topPostIds = new Set(topPosts.map(p => p._id.toString()))
+            // Build final feed: Football first, then channels, then 12 normal posts
+            const finalPosts = []
             
-            // Check if Football post is in top posts
-            const footballInTop = footballPostId && topPostIds.has(footballPostId)
-            
-            // Check which channel posts are in top posts
-            const channelsInTop = channelPosts.filter(p => topPostIds.has(p._id.toString()))
-            const channelsNotInTop = channelPosts.filter(p => !topPostIds.has(p._id.toString()))
-            
-            // If Football post is not in top, add it (even if it means returning more than 'limit' posts)
-            if (!footballInTop && footballPostId) {
-                // Find Football post - it should be in uniquePosts, but if not, get it from footballPosts
-                let footballPost = uniquePosts.find(p => p._id.toString() === footballPostId)
-                if (!footballPost && footballPosts.length > 0) {
-                    footballPost = footballPosts[0]
-                }
-                if (footballPost) {
-                    topPosts.push(footballPost)
-                    // Re-sort to maintain chronological order
-                    topPosts.sort((a, b) => {
-                        const dateA = new Date(a.createdAt).getTime()
-                        const dateB = new Date(b.createdAt).getTime()
-                        return dateB - dateA
-                    })
-                    // Football post added to top
-                } else {
-                    // Football post not found in uniquePosts
-                }
-            } else if (footballInTop) {
-                // Football post already in top posts
+            // Add Football post at the TOP (if user follows Football)
+            if (footballPosts.length > 0) {
+                finalPosts.push(footballPosts[0])
             }
             
-            // Add channel posts that aren't in top (limit to 3 to avoid overwhelming)
-            if (channelsNotInTop.length > 0) {
-                const channelsToAdd = channelsNotInTop.slice(0, 3)
-                channelsToAdd.forEach(channelPost => {
-                    if (!topPostIds.has(channelPost._id.toString())) {
-                        topPosts.push(channelPost)
-                    }
-                })
-                // Re-sort after adding channels
-                topPosts.sort((a, b) => {
-                    const dateA = new Date(a.createdAt).getTime()
-                    const dateB = new Date(b.createdAt).getTime()
-                    return dateB - dateA
-                })
-            }
+            // Add channel posts (up to 3 most recent, sorted by createdAt)
+            const sortedChannels = [...channelPosts].sort((a, b) => {
+                const dateA = new Date(a.createdAt).getTime()
+                const dateB = new Date(b.createdAt).getTime()
+                return dateB - dateA
+            })
+            finalPosts.push(...sortedChannels.slice(0, 3))
             
-            const totalCount = uniquePosts.length
-            // hasMore: true only if there are more unique posts beyond what we're returning
-            // We need to check if there are posts in uniquePosts that aren't in topPosts
-            const topPostIdsSet = new Set(topPosts.map(p => p._id.toString()))
-            const remainingPosts = uniquePosts.filter(p => !topPostIdsSet.has(p._id.toString()))
-            const hasMore = remainingPosts.length > 0
+            // Add the 12 normal posts
+            finalPosts.push(...topNormalPosts)
+            
+            // Calculate hasMore: true if there are more than 12 normal posts
+            const hasMore = uniqueNormalPosts.length > 12
             
             return res.status(200).json({ 
-                posts: topPosts,
+                posts: finalPosts,
                 hasMore,
-                totalCount
+                totalCount: uniqueNormalPosts.length
             })
         }
         
-        // For subsequent pages: Normal pagination
-        // But we need to account for the fact that first page might have included extra posts (Football/channels)
-        // So we need to recalculate skip based on what was actually returned on first page
-        
-        const totalCount = uniquePosts.length
-        
-        // For subsequent pages, slice normally
-        const paginatedPosts = uniquePosts.slice(skip, skip + limit)
-        const hasMore = (skip + limit) < totalCount
+        // For subsequent pages: Just return normal posts (no Football or channels)
+        // Skip the first 12 posts (already shown on page 1)
+        const startIndex = skip
+        const endIndex = startIndex + limit
+        const paginatedPosts = uniqueNormalPosts.slice(startIndex, endIndex)
+        const hasMore = endIndex < uniqueNormalPosts.length
+        const totalCount = uniqueNormalPosts.length
         
         console.log(`📄 [getFeedPost] Page ${Math.floor(skip / limit) + 1}: Returning ${paginatedPosts.length} posts (skip: ${skip}, limit: ${limit}, hasMore: ${hasMore}, totalCount: ${totalCount})`)
         
