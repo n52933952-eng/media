@@ -53,7 +53,21 @@ const HomePage = () => {
         console.log('⚽ [fetchUserPosts] Following Football, refreshing entire feed...')
         // Reset and reload feed to ensure Football post is included
         followPostCountRef.current = 0
-        getFeedPost(false) // Reload feed from scratch
+        // Call getFeedPost directly without dependency to avoid circular dependency
+        const skip = 0
+        const res = await fetch(`${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/post/feed/feedpost?limit=10&skip=${skip}`,{
+          credentials:"include",
+        })
+        const data = await res.json()
+        if (res.ok && data.posts) {
+          const posts = data.posts || []
+          const uniquePosts = posts.filter((post, index, self) => 
+            index === self.findIndex(p => p._id?.toString() === post._id?.toString())
+          )
+          setFollowPost(uniquePosts)
+          followPostCountRef.current = uniquePosts.length
+          setHasMore(data.hasMore !== undefined ? data.hasMore : false)
+        }
         return
       }
       
@@ -94,7 +108,7 @@ const HomePage = () => {
       // Silently fail - don't show error for background fetch
       console.error('Error fetching user posts:', error)
     }
-  }, [setFollowPost, getFeedPost])
+  }, [setFollowPost])
 
   const getFeedPost = useCallback(async(loadMore = false) => {
     // Prevent duplicate requests
