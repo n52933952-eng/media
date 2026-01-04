@@ -339,7 +339,7 @@ const HomePage = () => {
 
     // Handle real-time football match updates
     const handleFootballMatchUpdate = (data) => {
-      const { postId, matchData } = data
+      const { postId, matchData, updatedAt } = data
       console.log('⚽ Real-time match update received:', postId)
       
       setFollowPost(prev => {
@@ -351,12 +351,23 @@ const HomePage = () => {
           const updated = {
             ...prev[postIndex],
             footballData: JSON.stringify(matchData),
-            updatedAt: new Date() // Update timestamp for sorting
+            updatedAt: updatedAt ? new Date(updatedAt) : new Date(), // Use server timestamp or current time
+            createdAt: prev[postIndex].createdAt // Keep original createdAt for chronological sorting
           }
           
-          // Remove the old post and move updated one to the top
+          // Remove the old post
           const filtered = prev.filter((p, idx) => idx !== postIndex)
-          return [updated, ...filtered]
+          
+          // Add updated post, then sort all posts by updatedAt (or createdAt) - newest first
+          // This ensures Football post moves to top when scores update
+          const combined = [updated, ...filtered]
+          combined.sort((a, b) => {
+            const dateA = new Date(a.updatedAt || a.createdAt).getTime()
+            const dateB = new Date(b.updatedAt || b.createdAt).getTime()
+            return dateB - dateA // Newest first
+          })
+          
+          return combined
         }
         
         // If post not found, just return previous state (don't add as new post)

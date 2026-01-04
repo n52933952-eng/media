@@ -545,8 +545,14 @@ export const getFeedPost = async(req,res) => {
             footballPostsPromise
         ])
         
-        // SIMPLE APPROACH: Get 12 newest posts from followed users, then add Football and channels separately
-        // Combine only normal posts (from followed users) - NOT including Football or channels
+        // SIMPLE APPROACH: 
+        // 1. Get 3 newest posts from each followed user
+        // 2. Combine with Football and channel posts
+        // 3. Sort ALL together by createdAt (newest first)
+        // 4. First page: Football + Channels + 12 normal posts (all sorted together)
+        // 5. Subsequent pages: Only normal posts
+        
+        // Separate normal posts from Football and channels
         let allNormalPosts = allPostsArrays.flat()
         
         // Sort normal posts by createdAt (newest first)
@@ -567,42 +573,39 @@ export const getFeedPost = async(req,res) => {
             }
         }
         
-        // For first page (skip=0): Get 12 newest normal posts, then add Football and channels at top
+        // For first page (skip=0): Football + Channels + 12 normal posts (all sorted together)
         if (skip === 0) {
             // Get top 12 normal posts
             const topNormalPosts = uniqueNormalPosts.slice(0, 12)
             
-            // Build final feed: Football first, then channels, then 12 normal posts
-            const finalPosts = []
-            
-            // Add Football post at the TOP (if user follows Football)
+            // Combine: Football + Channels + 12 normal posts
+            const combinedPosts = []
             if (footballPosts.length > 0) {
-                finalPosts.push(footballPosts[0])
+                combinedPosts.push(footballPosts[0])
             }
+            combinedPosts.push(...channelPosts)
+            combinedPosts.push(...topNormalPosts)
             
-            // Add channel posts (up to 3 most recent, sorted by createdAt)
-            const sortedChannels = [...channelPosts].sort((a, b) => {
-                const dateA = new Date(a.createdAt).getTime()
-                const dateB = new Date(b.createdAt).getTime()
-                return dateB - dateA
+            // Sort ALL together by updatedAt (or createdAt if no updatedAt) - this makes the feed dynamic!
+            // Football post will move to top when scores update (updatedAt changes)
+            combinedPosts.sort((a, b) => {
+                const dateA = new Date(a.updatedAt || a.createdAt).getTime()
+                const dateB = new Date(b.updatedAt || b.createdAt).getTime()
+                return dateB - dateA // Newest first
             })
-            finalPosts.push(...sortedChannels.slice(0, 3))
-            
-            // Add the 12 normal posts
-            finalPosts.push(...topNormalPosts)
             
             // Calculate hasMore: true if there are more than 12 normal posts
             const hasMore = uniqueNormalPosts.length > 12
             
             return res.status(200).json({ 
-                posts: finalPosts,
+                posts: combinedPosts,
                 hasMore,
                 totalCount: uniqueNormalPosts.length
             })
         }
         
-        // For subsequent pages: Just return normal posts (no Football or channels)
-        // Skip the first 12 posts (already shown on page 1)
+        // For subsequent pages: Only return normal posts (no Football or channels)
+        // Skip the first 12 normal posts (already shown on page 1)
         const startIndex = skip
         const endIndex = startIndex + limit
         const paginatedPosts = uniqueNormalPosts.slice(startIndex, endIndex)
