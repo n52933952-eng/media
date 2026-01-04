@@ -32,6 +32,31 @@ const HomePage = () => {
   // Fetch last 3 posts from a specific user (when they're followed)
   const fetchUserPosts = useCallback(async (userId) => {
     try {
+      // First, check if this is the Football account by fetching user profile
+      // The getUserPro endpoint accepts both username and userId
+      let isFootballAccount = false
+      try {
+        const userRes = await fetch(
+          `${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/user/getUserPro/${userId}`,
+          { credentials: "include" }
+        )
+        const userData = await userRes.json()
+        if (userRes.ok && userData.username === 'Football') {
+          isFootballAccount = true
+        }
+      } catch (e) {
+        console.error('Error checking if Football account:', e)
+      }
+      
+      // If following Football account, refresh the entire feed to ensure Football post is included
+      if (isFootballAccount) {
+        console.log('⚽ [fetchUserPosts] Following Football, refreshing entire feed...')
+        // Reset and reload feed to ensure Football post is included
+        followPostCountRef.current = 0
+        getFeedPost(false) // Reload feed from scratch
+        return
+      }
+      
       const res = await fetch(
         `${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/post/user/id/${userId}?limit=3`,
         {
@@ -59,13 +84,17 @@ const HomePage = () => {
             return dateB - dateA
           })
           
+          // Update ref with new count
+          followPostCountRef.current = unique.length
+          
           return unique
         })
       }
     } catch (error) {
       // Silently fail - don't show error for background fetch
+      console.error('Error fetching user posts:', error)
     }
-  }, [setFollowPost])
+  }, [setFollowPost, getFeedPost])
 
   const getFeedPost = useCallback(async(loadMore = false) => {
     // Prevent duplicate requests
