@@ -533,12 +533,33 @@ export const getFeedPost = async(req,res) => {
                 .limit(1)
             : Promise.resolve([])
         
+        // Debug logging
+        if (followsFootball) {
+            console.log(`⚽ [getFeedPost] User follows Football, fetching Football posts...`)
+            console.log(`⚽ [getFeedPost] Football account ID: ${footballAccount?._id}`)
+        } else {
+            console.log(`ℹ️ [getFeedPost] User does NOT follow Football (followsFootball: ${followsFootball})`)
+        }
+        
         // Wait for all posts to be fetched
         const [allPostsArrays, channelPosts, footballPosts] = await Promise.all([
             Promise.all(postsPromises),
             channelPostsPromise,
             footballPostsPromise
         ])
+        
+        // Debug logging for Football posts
+        if (followsFootball) {
+            console.log(`⚽ [getFeedPost] Found ${footballPosts.length} Football post(s)`)
+            if (footballPosts.length > 0) {
+                console.log(`⚽ [getFeedPost] Football post ID: ${footballPosts[0]._id}, has footballData: ${!!footballPosts[0].footballData}`)
+            } else {
+                console.log(`⚠️ [getFeedPost] No Football posts found in database!`)
+                // Check if there are ANY posts from Football account
+                const anyFootballPosts = await Post.find({ postedBy: footballAccount._id }).limit(1)
+                console.log(`ℹ️ [getFeedPost] Total posts from Football account: ${anyFootballPosts.length}`)
+            }
+        }
         
         // Combine all posts: normal posts + channels + football
         let allPosts = [...allPostsArrays.flat(), ...channelPosts, ...footballPosts]

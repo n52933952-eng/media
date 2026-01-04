@@ -70,9 +70,27 @@ const HomePage = () => {
           // Check if Football post is in the response
           const hasFootballPost = uniquePosts.some(p => {
             const authorId = p.postedBy?._id?.toString() || p.postedBy?.toString()
-            const isFootball = p.postedBy?.username === 'Football' || (p.footballData && authorId === userId)
+            const isFootball = p.postedBy?.username === 'Football' || p.footballData
             return isFootball
           })
+          
+          // Log details about Football post
+          const footballPost = uniquePosts.find(p => p.postedBy?.username === 'Football' || p.footballData)
+          if (footballPost) {
+            console.log(`⚽ [fetchUserPosts] Football post found:`, {
+              id: footballPost._id,
+              username: footballPost.postedBy?.username,
+              hasFootballData: !!footballPost.footballData,
+              createdAt: footballPost.createdAt
+            })
+          } else {
+            console.log(`⚠️ [fetchUserPosts] Football post NOT in feed response!`)
+            console.log(`📋 [fetchUserPosts] Posts in response:`, uniquePosts.map(p => ({
+              id: p._id,
+              username: p.postedBy?.username,
+              hasFootballData: !!p.footballData
+            })))
+          }
           
           console.log(`⚽ [fetchUserPosts] Feed refreshed: ${uniquePosts.length} posts, Football post included: ${hasFootballPost}`)
           
