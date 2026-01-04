@@ -533,6 +533,8 @@ const SuggestedChannels = ({ onUserFollowed }) => {
                     )}
                 </>
             ) : null}
+        </Box>
+    )
 }
 
 export default SuggestedChannels
