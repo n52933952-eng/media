@@ -814,30 +814,23 @@ export const autoPostTodayMatches = async () => {
             }
         })
         
+        // Track if we found a "no matches" post (needed later when checking for live matches)
+        let noMatchesPostToDelete = null
+        
         // If post exists for today, check if it needs refresh
         if (existingPost) {
             // Check if it's a "no matches" post (no footballData)
             const isNoMatchesPost = !existingPost.footballData || existingPost.footballData === null || existingPost.footballData === ''
             
             if (isNoMatchesPost) {
-                // For "no matches" posts, only refresh if older than 6 hours (to avoid too many duplicates)
-                const postAge = new Date() - new Date(existingPost.createdAt)
-                const sixHoursInMs = 6 * 60 * 60 * 1000
-                const isPostOld = postAge > sixHoursInMs
-                
-                if (isPostOld) {
-                    console.log(`🔄 [autoPostTodayMatches] "No matches" post is old (${(postAge / (60 * 60 * 1000)).toFixed(1)}h), refreshing...`)
-                    await Post.findByIdAndDelete(existingPost._id)
-                } else {
-                    // "No matches" post exists and is recent, skip creating new one
-                    console.log('✅ [autoPostTodayMatches] "No matches" post already exists for today, skipping...')
-                    return { 
-                        success: true, 
-                        message: 'No matches post already exists for today', 
-                        postId: existingPost._id,
-                        noMatches: true
-                    }
-                }
+                // For "no matches" posts: We'll check if there are live matches below
+                // If there ARE live matches, we need to replace the "no matches" post
+                // If there are NO live matches, we'll check the age and decide
+                noMatchesPostToDelete = existingPost
+                console.log(`🔄 [autoPostTodayMatches] Found "no matches" post, will check for live matches...`)
+                // Don't return yet - continue to check for live matches below
+                // If matches found, we'll delete this post and create new one
+                // If no matches, we'll check age and decide
             } else {
                 // Post has match data - check if it needs refresh
                 try {
@@ -929,25 +922,56 @@ export const autoPostTodayMatches = async () => {
         
         console.log('⚽ [autoPostTodayMatches] Found matches:', matches.length)
         
+        // If we found a "no matches" post earlier AND now we have live matches, delete it
+        if (noMatchesPostToDelete && matches.length > 0) {
+            console.log(`🔄 [autoPostTodayMatches] Live matches started! Deleting "no matches" post to create new post with matches...`)
+            await Post.findByIdAndDelete(noMatchesPostToDelete._id)
+            noMatchesPostToDelete = null // Clear it so we don't check again below
+        }
+        
         if (matches.length === 0) {
-            // Check if "no matches" post already exists for today (avoid duplicates)
-            const existingNoMatchesPost = await Post.findOne({
-                postedBy: footballAccount._id,
-                text: { $regex: /Football Live|No live matches/i },
-                footballData: { $exists: false },
-                createdAt: { 
-                    $gte: todayStart,
-                    $lte: todayEnd
+            // No live matches - check if "no matches" post already exists
+            if (noMatchesPostToDelete) {
+                // We found one earlier, check its age
+                const postAge = new Date() - new Date(noMatchesPostToDelete.createdAt)
+                const sixHoursInMs = 6 * 60 * 60 * 1000
+                const isPostOld = postAge > sixHoursInMs
+                
+                if (isPostOld) {
+                    // Post is old, delete it and create fresh one
+                    console.log(`🔄 [autoPostTodayMatches] "No matches" post is old (${(postAge / (60 * 60 * 1000)).toFixed(1)}h), refreshing...`)
+                    await Post.findByIdAndDelete(noMatchesPostToDelete._id)
+                    // Continue to create new "no matches" post below
+                } else {
+                    // Post is recent, keep it
+                    console.log('✅ [autoPostTodayMatches] "No matches" post already exists for today (recent), skipping...')
+                    return { 
+                        success: true, 
+                        message: 'No matches post already exists for today', 
+                        postId: noMatchesPostToDelete._id,
+                        noMatches: true
+                    }
                 }
-            })
-            
-            if (existingNoMatchesPost) {
-                console.log('✅ [autoPostTodayMatches] "No matches" post already exists for today, skipping...')
-                return { 
-                    success: true, 
-                    message: 'No matches post already exists for today', 
-                    postId: existingNoMatchesPost._id,
-                    noMatches: true
+            } else {
+                // Double-check if any "no matches" post exists
+                const existingNoMatchesPost = await Post.findOne({
+                    postedBy: footballAccount._id,
+                    text: { $regex: /Football Live|No live matches/i },
+                    footballData: { $exists: false },
+                    createdAt: { 
+                        $gte: todayStart,
+                        $lte: todayEnd
+                    }
+                })
+                
+                if (existingNoMatchesPost) {
+                    console.log('✅ [autoPostTodayMatches] "No matches" post already exists for today, skipping...')
+                    return { 
+                        success: true, 
+                        message: 'No matches post already exists for today', 
+                        postId: existingNoMatchesPost._id,
+                        noMatches: true
+                    }
                 }
             }
             

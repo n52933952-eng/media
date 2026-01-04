@@ -522,10 +522,10 @@ export const getFeedPost = async(req,res) => {
             .limit(20) // Get all channel posts user added
         
         // Get Football post if user follows Football
+        // Get the latest post from Football account (works for both live matches and "no matches" posts)
         const footballPostsPromise = followsFootball 
             ? Post.find({ 
-                postedBy: footballAccount._id,
-                footballData: { $exists: true, $ne: null }
+                postedBy: footballAccount._id
             })
                 .populate("postedBy", "-password")
                 .populate("contributors", "username profilePic name")
