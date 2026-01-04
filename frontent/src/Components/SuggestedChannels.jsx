@@ -326,7 +326,8 @@ const SuggestedChannels = ({ onUserFollowed }) => {
                     <Spinner size="sm" />
                 </Box>
             ) : footballAccount ? (
-                <VStack spacing={3} align="stretch">
+                <>
+                    <VStack spacing={3} align="stretch">
                         {/* Football Channel */}
                         <Flex
                             align="center"
@@ -386,7 +387,6 @@ const SuggestedChannels = ({ onUserFollowed }) => {
                                 Follow to see live match updates in your feed
                             </Text>
                         )}
-                        
                     </VStack>
                     
                     {/* Live Stream Channels */}
@@ -532,7 +532,7 @@ const SuggestedChannels = ({ onUserFollowed }) => {
                             )}
                         </VStack>
                     )}
-                </VStack>
+                </>
             ) : null}
 }
 
