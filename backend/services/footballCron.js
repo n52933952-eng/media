@@ -221,9 +221,9 @@ const fetchAndUpdateLiveMatches = async () => {
     try {
         console.log('⚽ [fetchAndUpdateLiveMatches] Fetching live matches...')
         
-        // TheSportsDB: Get today's events and filter for live matches
+        // TheSportsDB: Get today's events filtered by Soccer, then filter for live matches
         const today = new Date().toISOString().split('T')[0] // YYYY-MM-DD
-        const result = await fetchFromAPI(`eventsday.php?d=${today}`)
+        const result = await fetchFromAPI(`eventsday.php?d=${today}&s=Soccer`)
         
         if (result.rateLimit) {
             console.warn('⚠️ [fetchAndUpdateLiveMatches] Rate limit hit, skipping this update')
@@ -431,8 +431,8 @@ const fetchTodayFixtures = async () => {
         console.log('📅 [fetchTodayFixtures] Today\'s date:', today)
         console.log('📅 [fetchTodayFixtures] Supported leagues:', SUPPORTED_LEAGUES)
         
-        // TheSportsDB: Get all events for today (single API call)
-        const result = await fetchFromAPI(`eventsday.php?d=${today}`)
+        // TheSportsDB: Get all events for today, filtered by Soccer (single API call)
+        const result = await fetchFromAPI(`eventsday.php?d=${today}&s=Soccer`)
         
         if (result.rateLimit) {
             console.warn(`⚠️ [fetchTodayFixtures] Rate limit hit, skipping`)

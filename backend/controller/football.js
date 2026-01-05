@@ -732,8 +732,8 @@ export const manualFetchFixtures = async (req, res) => {
             const dateStr = datesToFetch[i]
             console.log(`⚽ [manualFetchFixtures] [${i + 1}/${datesToFetch.length}] Fetching events for ${dateStr}...`)
             
-            // TheSportsDB: eventsday.php?d=YYYY-MM-DD
-            const endpoint = `eventsday.php?d=${dateStr}`
+            // TheSportsDB: eventsday.php?d=YYYY-MM-DD&s=Soccer (filter by sport)
+            const endpoint = `eventsday.php?d=${dateStr}&s=Soccer`
             const result = await fetchFromAPI(endpoint)
             
             if (result.rateLimit) {
@@ -967,9 +967,9 @@ export const autoPostTodayMatches = async () => {
         console.log('✅ [autoPostTodayMatches] Creating new post for today...')
         
         // Get today's matches: ONLY LIVE matches (currently happening)
-        // TheSportsDB: Get today's events and filter for live matches
+        // TheSportsDB: Get today's events filtered by Soccer, then filter for live matches
         const today = new Date().toISOString().split('T')[0] // YYYY-MM-DD
-        const result = await fetchFromAPI(`eventsday.php?d=${today}`)
+        const result = await fetchFromAPI(`eventsday.php?d=${today}&s=Soccer`)
         
         // If API call successful, save matches to database
         if (result.success && result.data) {
