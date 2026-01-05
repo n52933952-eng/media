@@ -22,10 +22,12 @@ import {
     GridItem
 } from '@chakra-ui/react'
 import { UserContext } from '../context/UserContext'
+import { SocketContext } from '../context/SocketContext'
 import useShowToast from '../hooks/useShowToast'
 
 const FootballPage = () => {
     const { user } = useContext(UserContext)
+    const { socket } = useContext(SocketContext) || {}
     const [liveMatches, setLiveMatches] = useState([])
     const [upcomingMatches, setUpcomingMatches] = useState([])
     const [finishedMatches, setFinishedMatches] = useState([])
@@ -68,79 +70,101 @@ const FootballPage = () => {
         }
     }, [user])
     
-    // Fetch matches
-    useEffect(() => {
-        const fetchMatches = async () => {
-            try {
+    // Fetch matches function (can be called manually or via socket)
+    const fetchMatches = async (silent = false) => {
+        try {
+            if (!silent) {
                 console.log('⚽ [FootballPage] Starting to fetch matches...')
                 setLoading(true)
-                
-                const baseUrl = import.meta.env.PROD ? window.location.origin : "http://localhost:5000"
-                
-                // Fetch live matches (today - includes IN_PLAY, PAUSED status)
-                console.log('⚽ [FootballPage] Fetching live matches (today)...')
-                const today = new Date().toISOString().split('T')[0]
-                const liveRes = await fetch(
-                    `${baseUrl}/api/football/matches?status=live&date=${today}`,
-                    { credentials: 'include' }
-                )
-                const liveData = await liveRes.json()
-                console.log('⚽ [FootballPage] Live matches response:', { status: liveRes.status, ok: liveRes.ok, data: liveData })
-                
-                // Fetch upcoming matches (next 7 days - no date filter, backend handles it)
-                console.log('⚽ [FootballPage] Fetching upcoming matches (next 7 days)')
-                const upcomingRes = await fetch(
-                    `${baseUrl}/api/football/matches?status=upcoming`,
-                    { credentials: 'include' }
-                )
-                const upcomingData = await upcomingRes.json()
-                console.log('⚽ [FootballPage] Upcoming matches response:', { status: upcomingRes.status, ok: upcomingRes.ok, data: upcomingData })
-                
-                // Fetch finished matches (last 3 days - no date filter, backend handles it)
-                console.log('⚽ [FootballPage] Fetching finished matches (last 3 days)')
-                const finishedRes = await fetch(
-                    `${baseUrl}/api/football/matches?status=finished`,
-                    { credentials: 'include' }
-                )
-                const finishedData = await finishedRes.json()
-                console.log('⚽ [FootballPage] Finished matches response:', { status: finishedRes.status, ok: finishedRes.ok, data: finishedData })
-                
-                if (liveRes.ok) {
-                    console.log('⚽ [FootballPage] Setting live matches:', liveData.matches?.length || 0)
-                    setLiveMatches(liveData.matches || [])
-                } else {
-                    console.error('⚽ [FootballPage] Live matches request failed:', liveData)
-                }
-                
-                if (upcomingRes.ok) {
-                    console.log('⚽ [FootballPage] Setting upcoming matches:', upcomingData.matches?.length || 0)
-                    setUpcomingMatches(upcomingData.matches || [])
-                } else {
-                    console.error('⚽ [FootballPage] Upcoming matches request failed:', upcomingData)
-                }
-                
-                if (finishedRes.ok) {
-                    console.log('⚽ [FootballPage] Setting finished matches:', finishedData.matches?.length || 0)
-                    setFinishedMatches(finishedData.matches || [])
-                } else {
-                    console.error('⚽ [FootballPage] Finished matches request failed:', finishedData)
-                }
-                
-            } catch (error) {
-                console.error('⚽ [FootballPage] Error fetching matches:', error)
+            }
+            
+            const baseUrl = import.meta.env.PROD ? window.location.origin : "http://localhost:5000"
+            
+            // Fetch live matches (today - includes IN_PLAY, PAUSED status)
+            if (!silent) console.log('⚽ [FootballPage] Fetching live matches (today)...')
+            const today = new Date().toISOString().split('T')[0]
+            const liveRes = await fetch(
+                `${baseUrl}/api/football/matches?status=live&date=${today}`,
+                { credentials: 'include' }
+            )
+            const liveData = await liveRes.json()
+            if (!silent) console.log('⚽ [FootballPage] Live matches response:', { status: liveRes.status, ok: liveRes.ok, data: liveData })
+            
+            // Fetch upcoming matches (next 7 days - no date filter, backend handles it)
+            if (!silent) console.log('⚽ [FootballPage] Fetching upcoming matches (next 7 days)')
+            const upcomingRes = await fetch(
+                `${baseUrl}/api/football/matches?status=upcoming`,
+                { credentials: 'include' }
+            )
+            const upcomingData = await upcomingRes.json()
+            if (!silent) console.log('⚽ [FootballPage] Upcoming matches response:', { status: upcomingRes.status, ok: upcomingRes.ok, data: upcomingData })
+            
+            // Fetch finished matches (last 3 days - no date filter, backend handles it)
+            if (!silent) console.log('⚽ [FootballPage] Fetching finished matches (last 3 days)')
+            const finishedRes = await fetch(
+                `${baseUrl}/api/football/matches?status=finished`,
+                { credentials: 'include' }
+            )
+            const finishedData = await finishedRes.json()
+            if (!silent) console.log('⚽ [FootballPage] Finished matches response:', { status: finishedRes.status, ok: finishedRes.ok, data: finishedData })
+            
+            if (liveRes.ok) {
+                if (!silent) console.log('⚽ [FootballPage] Setting live matches:', liveData.matches?.length || 0)
+                setLiveMatches(liveData.matches || [])
+            } else {
+                console.error('⚽ [FootballPage] Live matches request failed:', liveData)
+            }
+            
+            if (upcomingRes.ok) {
+                if (!silent) console.log('⚽ [FootballPage] Setting upcoming matches:', upcomingData.matches?.length || 0)
+                setUpcomingMatches(upcomingData.matches || [])
+            } else {
+                console.error('⚽ [FootballPage] Upcoming matches request failed:', upcomingData)
+            }
+            
+            if (finishedRes.ok) {
+                if (!silent) console.log('⚽ [FootballPage] Setting finished matches:', finishedData.matches?.length || 0)
+                setFinishedMatches(finishedData.matches || [])
+            } else {
+                console.error('⚽ [FootballPage] Finished matches request failed:', finishedData)
+            }
+            
+        } catch (error) {
+            console.error('⚽ [FootballPage] Error fetching matches:', error)
+            if (!silent) {
                 showToast('Error', 'Failed to load matches', 'error')
-            } finally {
+            }
+        } finally {
+            if (!silent) {
                 setLoading(false)
                 console.log('⚽ [FootballPage] Finished fetching matches')
             }
         }
-        
+    }
+    
+    // Initial fetch on mount (only once)
+    useEffect(() => {
         fetchMatches()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [])
+    
+    // Listen for real-time match updates via socket (NO RELOADING!)
+    useEffect(() => {
+        if (!socket) return
         
-        // Refresh every 2 minutes for live updates
-        const interval = setInterval(fetchMatches, 120000)
-        return () => clearInterval(interval)
-    }, [showToast])
+        const handleFootballMatchUpdate = (data) => {
+            console.log('⚽ [FootballPage] Real-time match update received via socket, refreshing matches silently...')
+            // Silently refresh matches (no loading spinner, no toast)
+            fetchMatches(true)
+        }
+        
+        socket.on('footballMatchUpdate', handleFootballMatchUpdate)
+        
+        return () => {
+            socket.off('footballMatchUpdate', handleFootballMatchUpdate)
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [socket])
     
     // Follow/Unfollow Football account
     const handleFollowToggle = async () => {
@@ -208,12 +232,12 @@ const FootballPage = () => {
             if (res.ok) {
                 showToast(
                     'Success',
-                    `Fetched ${data.totalFetched} matches from ${data.leaguesFetched} leagues! Refreshing...`,
+                    `Fetched ${data.totalFetched} matches from ${data.leaguesFetched} leagues!`,
                     'success'
                 )
-                // Refresh matches without page reload
+                // Refresh matches silently (no page reload!)
                 setTimeout(() => {
-                    window.location.reload()
+                    fetchMatches(true)
                 }, 1000)
             } else {
                 console.error('⚽ [FootballPage] Error response:', data)
@@ -352,6 +376,84 @@ const FootballPage = () => {
                 </GridItem>
             </Grid>
             
+            {/* Scorers, Cards, Substitutions - ONLY for finished matches */}
+            {match.fixture?.status?.short === 'FT' && match.events && match.events.length > 0 && (
+                <Box mt={4} pt={4} borderTop="1px solid" borderColor={borderColor}>
+                    <Text fontSize="xs" color={secondaryTextColor} mb={2} fontWeight="semibold">
+                        MATCH EVENTS
+                    </Text>
+                    <VStack align="stretch" spacing={1}>
+                        {match.events
+                            .filter(e => e.type === 'Goal')
+                            .map((event, idx) => (
+                                <Flex key={idx} justify="space-between" align="center" fontSize="xs">
+                                    <HStack spacing={1}>
+                                        <Text color={textColor} fontWeight="medium">
+                                            ⚽ {event.player}
+                                        </Text>
+                                        <Text color={secondaryTextColor}>
+                                            ({event.time}')
+                                        </Text>
+                                    </HStack>
+                                    <Text color={secondaryTextColor} fontSize="xs">
+                                        {event.team}
+                                    </Text>
+                                </Flex>
+                            ))}
+                        {match.events
+                            .filter(e => e.type === 'Card')
+                            .map((event, idx) => (
+                                <Flex key={`card-${idx}`} justify="space-between" align="center" fontSize="xs">
+                                    <HStack spacing={1}>
+                                        <Text color={event.detail === 'Red Card' ? 'red.400' : 'yellow.400'} fontWeight="medium">
+                                            {event.detail === 'Red Card' ? '🟥' : '🟨'} {event.player}
+                                        </Text>
+                                        <Text color={secondaryTextColor}>
+                                            ({event.time}')
+                                        </Text>
+                                    </HStack>
+                                    <Text color={secondaryTextColor} fontSize="xs">
+                                        {event.team}
+                                    </Text>
+                                </Flex>
+                            ))}
+                        {match.events
+                            .filter(e => e.type === 'Substitution')
+                            .slice(0, 3) // Show max 3 substitutions
+                            .map((event, idx) => (
+                                <Flex key={`sub-${idx}`} justify="space-between" align="center" fontSize="xs">
+                                    <HStack spacing={1}>
+                                        <Text color={textColor} fontWeight="medium">
+                                            🔄 {event.player}
+                                        </Text>
+                                        {event.playerOut && (
+                                            <Text color={secondaryTextColor} fontSize="xs">
+                                                (for {event.playerOut})
+                                            </Text>
+                                        )}
+                                        <Text color={secondaryTextColor}>
+                                            ({event.time}')
+                                        </Text>
+                                    </HStack>
+                                    <Text color={secondaryTextColor} fontSize="xs">
+                                        {event.team}
+                                    </Text>
+                                </Flex>
+                            ))}
+                    </VStack>
+                </Box>
+            )}
+        </Box>
+    )
+                            <Image src={match.teams.away.logo} boxSize="30px" mr={2} />
+                        )}
+                        <Text fontSize="md" fontWeight="semibold" color={textColor}>
+                            {match.teams?.away?.name}
+                        </Text>
+                    </Flex>
+                </GridItem>
+            </Grid>
+            
             {/* Match status */}
             {showStatus && match.fixture?.status?.short === 'FT' && (
                 <Text mt={2} fontSize="sm" color={secondaryTextColor} textAlign="center">
@@ -359,37 +461,107 @@ const FootballPage = () => {
                 </Text>
             )}
             
-            {/* Goal Events - Styled like Google */}
-            {match.events && match.events.filter(e => e.type === 'Goal').length > 0 && (
+            {/* Scorers, Cards, Substitutions - ONLY for finished matches (FT) */}
+            {match.fixture?.status?.short === 'FT' && match.events && match.events.length > 0 && (
                 <Box mt={3} pt={3} borderTop="1px solid" borderColor={borderColor}>
-                    <Grid templateColumns="1fr auto 1fr" gap={3} fontSize="sm">
-                        {/* Home Team Goals */}
-                        <GridItem textAlign="right">
-                            {match.events
-                                .filter(event => event.type === 'Goal' && (event.team?.name || event.team) === match.teams?.home?.name)
-                                .map((event, idx) => (
-                                    <Text key={idx} color={textColor} mb={1.5}>
-                                        {event.player?.name || event.player} {event.time?.elapsed || event.time}'{event.detail?.includes('Penalty') ? ' (P)' : ''}
-                                    </Text>
-                                ))}
-                        </GridItem>
-                        
-                        {/* Goal Icon Center */}
-                        <GridItem display="flex" alignItems="flex-start" justifyContent="center" pt={0.5}>
-                            <Text color={secondaryTextColor} fontSize="lg">⚽</Text>
-                        </GridItem>
-                        
-                        {/* Away Team Goals */}
-                        <GridItem textAlign="left">
-                            {match.events
-                                .filter(event => event.type === 'Goal' && (event.team?.name || event.team) === match.teams?.away?.name)
-                                .map((event, idx) => (
-                                    <Text key={idx} color={textColor} mb={1.5}>
-                                        {event.player?.name || event.player} {event.time?.elapsed || event.time}'{event.detail?.includes('Penalty') ? ' (P)' : ''}
-                                    </Text>
-                                ))}
-                        </GridItem>
-                    </Grid>
+                    {/* Goals/Scorers */}
+                    {match.events.filter(e => e.type === 'Goal').length > 0 && (
+                        <>
+                            <Text fontSize="xs" color={secondaryTextColor} mb={2} fontWeight="semibold">
+                                GOALS
+                            </Text>
+                            <Grid templateColumns="1fr auto 1fr" gap={3} fontSize="sm" mb={3}>
+                                {/* Home Team Goals */}
+                                <GridItem textAlign="right">
+                                    {match.events
+                                        .filter(event => event.type === 'Goal' && event.team === match.teams?.home?.name)
+                                        .map((event, idx) => (
+                                            <Text key={idx} color={textColor} mb={1.5}>
+                                                {event.player} {event.time}'{event.detail?.includes('Penalty') ? ' (P)' : ''}
+                                            </Text>
+                                        ))}
+                                </GridItem>
+                                
+                                {/* Goal Icon Center */}
+                                <GridItem display="flex" alignItems="flex-start" justifyContent="center" pt={0.5}>
+                                    <Text color={secondaryTextColor} fontSize="lg">⚽</Text>
+                                </GridItem>
+                                
+                                {/* Away Team Goals */}
+                                <GridItem textAlign="left">
+                                    {match.events
+                                        .filter(event => event.type === 'Goal' && event.team === match.teams?.away?.name)
+                                        .map((event, idx) => (
+                                            <Text key={idx} color={textColor} mb={1.5}>
+                                                {event.player} {event.time}'{event.detail?.includes('Penalty') ? ' (P)' : ''}
+                                            </Text>
+                                        ))}
+                                </GridItem>
+                            </Grid>
+                        </>
+                    )}
+                    
+                    {/* Cards */}
+                    {match.events.filter(e => e.type === 'Card').length > 0 && (
+                        <>
+                            <Text fontSize="xs" color={secondaryTextColor} mb={2} mt={3} fontWeight="semibold">
+                                CARDS
+                            </Text>
+                            <VStack align="stretch" spacing={1} fontSize="xs">
+                                {match.events
+                                    .filter(e => e.type === 'Card')
+                                    .map((event, idx) => (
+                                        <Flex key={`card-${idx}`} justify="space-between" align="center">
+                                            <HStack spacing={1}>
+                                                <Text color={event.detail === 'Red Card' ? 'red.400' : 'yellow.400'} fontWeight="medium">
+                                                    {event.detail === 'Red Card' ? '🟥' : '🟨'} {event.player}
+                                                </Text>
+                                                <Text color={secondaryTextColor}>
+                                                    ({event.time}')
+                                                </Text>
+                                            </HStack>
+                                            <Text color={secondaryTextColor} fontSize="xs">
+                                                {event.team}
+                                            </Text>
+                                        </Flex>
+                                    ))}
+                            </VStack>
+                        </>
+                    )}
+                    
+                    {/* Substitutions (show max 5) */}
+                    {match.events.filter(e => e.type === 'Substitution').length > 0 && (
+                        <>
+                            <Text fontSize="xs" color={secondaryTextColor} mb={2} mt={3} fontWeight="semibold">
+                                SUBSTITUTIONS
+                            </Text>
+                            <VStack align="stretch" spacing={1} fontSize="xs">
+                                {match.events
+                                    .filter(e => e.type === 'Substitution')
+                                    .slice(0, 5)
+                                    .map((event, idx) => (
+                                        <Flex key={`sub-${idx}`} justify="space-between" align="center">
+                                            <HStack spacing={1}>
+                                                <Text color={textColor} fontWeight="medium">
+                                                    🔄 {event.player}
+                                                </Text>
+                                                {event.playerOut && (
+                                                    <Text color={secondaryTextColor} fontSize="xs">
+                                                        (for {event.playerOut})
+                                                    </Text>
+                                                )}
+                                                <Text color={secondaryTextColor}>
+                                                    ({event.time}')
+                                                </Text>
+                                            </HStack>
+                                            <Text color={secondaryTextColor} fontSize="xs">
+                                                {event.team}
+                                            </Text>
+                                        </Flex>
+                                    ))}
+                            </VStack>
+                        </>
+                    )}
                 </Box>
             )}
         </Box>

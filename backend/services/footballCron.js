@@ -291,8 +291,40 @@ const fetchAndUpdateLiveMatches = async () => {
             const currentGoalsHome = matchData.intHomeScore !== null ? parseInt(matchData.intHomeScore) : 0
             const currentGoalsAway = matchData.intAwayScore !== null ? parseInt(matchData.intAwayScore) : 0
             
+            // For live matches: Get better elapsed time from lookupevent.php (but don't fetch timeline/scorers)
+            let betterElapsedTime = null
+            try {
+                const apiKey = getAPIKey()
+                const eventUrl = `${API_BASE_URL}/${apiKey}/lookupevent.php?id=${fixtureId}`
+                const eventResponse = await fetch(eventUrl)
+                
+                if (eventResponse.ok) {
+                    const eventData = await eventResponse.json()
+                    if (eventData.event) {
+                        const matchInfo = Array.isArray(eventData.event) ? eventData.event[0] : eventData.event
+                        const statusStr = matchInfo.strStatus || ''
+                        if (statusStr.includes('Live') || statusStr.includes('1H') || statusStr.includes('2H')) {
+                            const timeMatch = statusStr.match(/(\d+)\s*'/i)
+                            if (timeMatch) {
+                                betterElapsedTime = parseInt(timeMatch[1])
+                            }
+                        }
+                    }
+                }
+            } catch (error) {
+                console.log(`  ⚠️ Could not fetch better elapsed time for match ${fixtureId}:`, error.message)
+            }
+            
             // Convert and update match in database
             const convertedMatch = convertMatchFormat(matchData, matchData.leagueInfo)
+            
+            // Use better elapsed time if available
+            if (betterElapsedTime !== null) {
+                convertedMatch.fixture.status.elapsed = betterElapsedTime
+            }
+            
+            // IMPORTANT: Don't fetch timeline/scorers for live matches (only for finished)
+            convertedMatch.events = [] // Live matches should have empty events array
             
             const updatedMatch = await Match.findOneAndUpdate(
                 { fixtureId: convertedMatch.fixtureId },

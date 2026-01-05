@@ -18,73 +18,118 @@ const SUPPORTED_LEAGUES = [
     { id: 4332, name: 'Serie A', country: 'Italy', searchNames: ['serie a', 'italian serie a'] }
 ]
 
-// Helper: Fetch match details with events (scorers) - TheSportsDB
-export const fetchMatchDetails = async (matchId) => {
+// Helper: Fetch match details with events (scorers, cards, substitutions) - TheSportsDB
+// Only fetch for finished matches (not live)
+export const fetchMatchDetails = async (matchId, includeTimeline = true) => {
     try {
         const apiKey = getAPIKey()
         console.log(`  🔍 Fetching match details for ID: ${matchId}`)
         
-        // TheSportsDB: Lookup event and timeline
+        // TheSportsDB: Lookup event for better elapsed time and status
         const eventUrl = `${API_BASE_URL}/${apiKey}/lookupevent.php?id=${matchId}`
-        const timelineUrl = `${API_BASE_URL}/${apiKey}/lookuptimeline.php?id=${matchId}`
         
-        const [eventResponse, timelineResponse] = await Promise.all([
-            fetch(eventUrl),
-            fetch(timelineUrl)
-        ])
+        const eventResponse = await fetch(eventUrl)
         
         if (!eventResponse.ok) {
             console.error(`  ❌ Failed to fetch match ${matchId}:`, eventResponse.status, eventResponse.statusText)
             if (eventResponse.status === 429) {
                 console.error(`  🚫 Rate limit exceeded for match ${matchId}`)
             }
-            return []
+            return { events: [], elapsedTime: null }
         }
         
         const eventData = await eventResponse.json()
-        let timelineData = null
-        
-        if (timelineResponse.ok) {
-            timelineData = await timelineResponse.json()
-        }
         
         if (!eventData.event || eventData.event.length === 0) {
             console.log(`  ⚠️ No match data found for ID: ${matchId}`)
-            return []
+            return { events: [], elapsedTime: null }
+        }
+        
+        const matchInfo = Array.isArray(eventData.event) ? eventData.event[0] : eventData.event
+        
+        // Extract better elapsed time from event data
+        let elapsedTime = null
+        const statusStr = matchInfo.strStatus || ''
+        if (statusStr.includes('Live') || statusStr.includes('1H') || statusStr.includes('2H')) {
+            const timeMatch = statusStr.match(/(\d+)\s*'/i)
+            if (timeMatch) {
+                elapsedTime = parseInt(timeMatch[1])
+            }
         }
         
         const events = []
         
-        // TheSportsDB timeline contains events (goals, cards, etc.)
-        if (timelineData && timelineData.event) {
-            const goalEvents = timelineData.event.filter(e => 
-                e.strEvent?.includes('Goal') || e.strEvent?.toLowerCase().includes('goal')
-            )
+        // Only fetch timeline for finished matches (to get scorers, cards, substitutions)
+        if (includeTimeline && (statusStr.includes('Finished') || statusStr === 'FT')) {
+            const timelineUrl = `${API_BASE_URL}/${apiKey}/lookuptimeline.php?id=${matchId}`
+            const timelineResponse = await fetch(timelineUrl)
             
-            console.log(`  ⚽ Found ${goalEvents.length} goals in match`)
-            
-            // Convert to our format
-            goalEvents.forEach(event => {
-                const timeMatch = event.strTime?.match(/(\d+)/)
-                events.push({
-                    time: timeMatch ? parseInt(timeMatch[1]) : 0,
-                    type: 'Goal',
-                    detail: event.strEvent || 'Normal Goal',
-                    player: event.strPlayer || 'Unknown',
-                    team: event.strTeam || 'Unknown Team'
-                })
-            })
-            
-            events.forEach(event => {
-                console.log(`    ✅ ${event.player} (${event.team}) ${event.time}'`)
-            })
+            if (timelineResponse.ok) {
+                const timelineData = await timelineResponse.json()
+                
+                // TheSportsDB timeline contains all events (goals, cards, substitutions, etc.)
+                if (timelineData && timelineData.event) {
+                    const allEvents = Array.isArray(timelineData.event) ? timelineData.event : [timelineData.event]
+                    
+                    allEvents.forEach(event => {
+                        const eventType = event.strEvent || ''
+                        const timeMatch = event.strTime?.match(/(\d+)/)
+                        const time = timeMatch ? parseInt(timeMatch[1]) : 0
+                        
+                        // Categorize events
+                        if (eventType.toLowerCase().includes('goal')) {
+                            events.push({
+                                time: time,
+                                type: 'Goal',
+                                detail: eventType || 'Normal Goal',
+                                player: event.strPlayer || 'Unknown',
+                                team: event.strTeam || 'Unknown Team'
+                            })
+                        } else if (eventType.toLowerCase().includes('yellow card')) {
+                            events.push({
+                                time: time,
+                                type: 'Card',
+                                detail: 'Yellow Card',
+                                player: event.strPlayer || 'Unknown',
+                                team: event.strTeam || 'Unknown Team'
+                            })
+                        } else if (eventType.toLowerCase().includes('red card')) {
+                            events.push({
+                                time: time,
+                                type: 'Card',
+                                detail: 'Red Card',
+                                player: event.strPlayer || 'Unknown',
+                                team: event.strTeam || 'Unknown Team'
+                            })
+                        } else if (eventType.toLowerCase().includes('subst')) {
+                            events.push({
+                                time: time,
+                                type: 'Substitution',
+                                detail: eventType || 'Substitution',
+                                player: event.strPlayer || 'Unknown',
+                                team: event.strTeam || 'Unknown Team',
+                                playerOut: event.strPlayerOut || null
+                            })
+                        }
+                    })
+                    
+                    const goals = events.filter(e => e.type === 'Goal')
+                    const cards = events.filter(e => e.type === 'Card')
+                    const subs = events.filter(e => e.type === 'Substitution')
+                    
+                    console.log(`  ⚽ Found ${goals.length} goals, ${cards.length} cards, ${subs.length} substitutions`)
+                }
+            }
         }
         
-        return events
+        // Sort events by time
+        events.sort((a, b) => a.time - b.time)
+        
+        return { events, elapsedTime }
     } catch (error) {
         console.error(`  ❌ Error fetching match ${matchId}:`, error.message)
         console.error(`  ❌ Stack:`, error.stack)
-        return []
+        return { events: [], elapsedTime: null }
     }
 }
 
@@ -497,11 +542,31 @@ export const getMatches = async (req, res) => {
         // Sort: upcoming matches ascending (closest first), finished/live matches descending (most recent first)
         const sortOrder = status === 'upcoming' ? 1 : -1
         
-        const matches = await Match.find(query)
+        let matches = await Match.find(query)
             .sort({ 'fixture.date': sortOrder })
             .limit(50)
         
         console.log('⚽ [getMatches] Found matches:', matches.length)
+        
+        // For finished matches: Fetch timeline data (scorers, cards, substitutions) if not already fetched
+        if (status === 'finished') {
+            for (const match of matches) {
+                // Only fetch if events array is empty or missing
+                if (!match.events || match.events.length === 0) {
+                    try {
+                        const matchDetails = await fetchMatchDetails(match.fixtureId, true)
+                        if (matchDetails && matchDetails.events && matchDetails.events.length > 0) {
+                            match.events = matchDetails.events
+                            // Save updated match to database
+                            await Match.findByIdAndUpdate(match._id, { events: matchDetails.events })
+                            console.log(`  ✅ Fetched ${matchDetails.events.length} events for finished match ${match.fixtureId}`)
+                        }
+                    } catch (error) {
+                        console.log(`  ⚠️ Could not fetch timeline for match ${match.fixtureId}:`, error.message)
+                    }
+                }
+            }
+        }
         
         // Group matches by league to see what we have
         const matchesByLeague = {}
@@ -790,6 +855,27 @@ export const manualFetchFixtures = async (req, res) => {
                     
                     if (leagueInfo) {
                         const convertedMatch = convertMatchFormat(eventData, leagueInfo)
+                        
+                        // For finished matches: Fetch timeline data (scorers, cards, substitutions)
+                        // For live/upcoming: Don't fetch timeline (empty events array)
+                        const isFinished = convertedMatch.fixture?.status?.short === 'FT' || 
+                                          eventData.strStatus?.includes('Finished')
+                        
+                        if (isFinished) {
+                            try {
+                                // Fetch timeline data for finished matches (scorers, cards, substitutions)
+                                const matchDetails = await fetchMatchDetails(convertedMatch.fixtureId, true)
+                                if (matchDetails && matchDetails.events) {
+                                    convertedMatch.events = matchDetails.events
+                                    console.log(`  ✅ Fetched ${matchDetails.events.length} events for finished match ${convertedMatch.fixtureId}`)
+                                }
+                            } catch (error) {
+                                console.log(`  ⚠️ Could not fetch timeline for match ${convertedMatch.fixtureId}:`, error.message)
+                            }
+                        } else {
+                            // Live/upcoming matches: no events (don't show scorers for live matches)
+                            convertedMatch.events = []
+                        }
                         
                         await Match.findOneAndUpdate(
                             { fixtureId: convertedMatch.fixtureId },
