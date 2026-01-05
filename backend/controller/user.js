@@ -204,6 +204,47 @@ export const FollowAndUnfollow = async(req,res) => {
                         await latestFootballPost.save()
                         console.log(`⚽ [FollowAndUnfollow] Updated Football post ${latestFootballPost._id} updatedAt to now for user ${req.user.username}`)
                     }
+                    
+                    // Automatically fetch matches if database is empty (run in background, don't wait)
+                    // This ensures users see matches immediately after following
+                    const Match = (await import('../models/football.js')).Match
+                    const matchCount = await Match.countDocuments({})
+                    
+                    if (matchCount === 0) {
+                        console.log(`⚽ [FollowAndUnfollow] Database is empty, automatically fetching matches for user ${req.user.username}...`)
+                        // Run in background - don't wait for it to complete
+                        // Create a simple wrapper that calls the fetch logic directly
+                        setImmediate(async () => {
+                            try {
+                                const { manualFetchFixtures } = await import('./football.js')
+                                // Create minimal req/res objects
+                                const mockReq = { method: 'POST', url: '/api/football/fetch/manual' }
+                                const mockRes = {
+                                    status: (code) => ({
+                                        json: (data) => {
+                                            if (code === 200) {
+                                                console.log(`✅ [FollowAndUnfollow] Auto-fetched ${data.totalFetched} matches`)
+                                            } else {
+                                                console.error(`❌ [FollowAndUnfollow] Auto-fetch failed:`, data)
+                                            }
+                                        }
+                                    }),
+                                    json: (data) => {
+                                        if (data.error) {
+                                            console.error(`❌ [FollowAndUnfollow] Auto-fetch error:`, data.error)
+                                        } else if (data.totalFetched !== undefined) {
+                                            console.log(`✅ [FollowAndUnfollow] Auto-fetched ${data.totalFetched} matches`)
+                                        }
+                                    }
+                                }
+                                await manualFetchFixtures(mockReq, mockRes)
+                            } catch (err) {
+                                console.error('❌ [FollowAndUnfollow] Error auto-fetching matches:', err)
+                            }
+                        })
+                    } else {
+                        console.log(`⚽ [FollowAndUnfollow] Database already has ${matchCount} matches, skipping auto-fetch`)
+                    }
                 } catch (error) {
                     console.error('❌ [FollowAndUnfollow] Error updating Football post:', error)
                 }
