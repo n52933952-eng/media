@@ -11,10 +11,11 @@ const CURRENT_SEASON = '2024-2025' // Format: YYYY-YYYY
 
 // Supported leagues and competitions (TheSportsDB league IDs)
 // Premier League = 4328, La Liga = 4335, Serie A = 4332
+// We'll match by both ID and name for flexibility
 const SUPPORTED_LEAGUES = [
-    { id: 4328, name: 'Premier League', country: 'England' },
-    { id: 4335, name: 'La Liga', country: 'Spain' },
-    { id: 4332, name: 'Serie A', country: 'Italy' }
+    { id: 4328, name: 'Premier League', country: 'England', searchNames: ['premier league', 'english premier league', 'epl'] },
+    { id: 4335, name: 'La Liga', country: 'Spain', searchNames: ['la liga', 'spanish la liga', 'primera division'] },
+    { id: 4332, name: 'Serie A', country: 'Italy', searchNames: ['serie a', 'italian serie a'] }
 ]
 
 // Helper: Fetch match details with events (scorers) - TheSportsDB
@@ -688,7 +689,6 @@ export const manualFetchFixtures = async (req, res) => {
         console.log('⚽ [manualFetchFixtures] Manual trigger received')
         
         const today = new Date()
-        const todayStr = today.toISOString().split('T')[0]
         
         // Fetch for past 3 days (for finished matches) and next 7 days (for upcoming)
         const startDate = new Date(today)
@@ -704,70 +704,97 @@ export const manualFetchFixtures = async (req, res) => {
         console.log('   - Past 3 days (finished matches)')
         console.log('   - Today (live/upcoming/finished)')
         console.log('   - Next 7 days (upcoming matches)')
-        console.log('⚽ [manualFetchFixtures] Total leagues to fetch:', SUPPORTED_LEAGUES.length)
+        console.log('⚽ [manualFetchFixtures] Using TheSportsDB API (eventsday.php for each date)')
+        
+        // TheSportsDB: Loop through each date and fetch events for that day
+        const supportedLeagueIds = SUPPORTED_LEAGUES.map(l => l.id.toString())
+        const supportedLeagueNames = SUPPORTED_LEAGUES.flatMap(l => [l.name.toLowerCase(), ...(l.searchNames || [])])
         
         let totalFetched = 0
         const results = []
-        let leagueIndex = 0
+        const dateResults = {}
         
-        // Fetch for all leagues with date range
-        for (const league of SUPPORTED_LEAGUES) {
-            leagueIndex++
-            console.log(`⚽ [manualFetchFixtures] [${leagueIndex}/${SUPPORTED_LEAGUES.length}] Fetching ${league.name} (ID: ${league.id})...`)
+        // Generate array of dates to fetch
+        const datesToFetch = []
+        const currentDate = new Date(startDate)
+        while (currentDate <= endDate) {
+            datesToFetch.push(new Date(currentDate).toISOString().split('T')[0])
+            currentDate.setDate(currentDate.getDate() + 1)
+        }
+        
+        console.log(`⚽ [manualFetchFixtures] Fetching ${datesToFetch.length} dates...`)
+        
+        // Fetch events for each date (with rate limit protection)
+        for (let i = 0; i < datesToFetch.length; i++) {
+            const dateStr = datesToFetch[i]
+            console.log(`⚽ [manualFetchFixtures] [${i + 1}/${datesToFetch.length}] Fetching events for ${dateStr}...`)
             
-            // API-Football: /fixtures?league={id}&season={year}&from={date}&to={date}
-            const endpoint = `/fixtures?league=${league.id}&season=${CURRENT_SEASON}&from=${startDateStr}&to=${endDateStr}`
+            // TheSportsDB: eventsday.php?d=YYYY-MM-DD
+            const endpoint = `eventsday.php?d=${dateStr}`
             const result = await fetchFromAPI(endpoint)
             
             if (result.rateLimit) {
-                console.warn(`🚫 [manualFetchFixtures] Rate limit hit for ${league.name}, stopping fetch`)
-                results.push({
-                    league: league.name,
-                    id: league.id,
-                    matches: 0,
-                    error: 'Rate limit exceeded'
-                })
+                console.warn(`🚫 [manualFetchFixtures] Rate limit hit on date ${dateStr}, stopping fetch`)
                 break
             }
             
             if (result.success && result.data && result.data.length > 0) {
-                console.log(`✅ [manualFetchFixtures] Found ${result.data.length} matches for ${league.name}`)
+                // Filter for supported leagues (by ID or name)
+                const filteredEvents = result.data.filter(event => {
+                    const leagueId = event.idLeague?.toString()
+                    const leagueName = (event.strLeague || '').toLowerCase()
+                    const isSupportedById = supportedLeagueIds.includes(leagueId)
+                    const isSupportedByName = supportedLeagueNames.some(name => leagueName.includes(name))
+                    return isSupportedById || isSupportedByName
+                })
                 
-                for (const matchData of result.data) {
-                    // Convert to our format
-                    const convertedMatch = convertMatchFormat(matchData, league)
+                console.log(`  ✅ Found ${filteredEvents.length} matches from supported leagues on ${dateStr}`)
+                
+                // Save each match to database
+                for (const eventData of filteredEvents) {
+                    const leagueInfo = SUPPORTED_LEAGUES.find(l => {
+                        const leagueId = eventData.idLeague?.toString()
+                        const leagueName = (eventData.strLeague || '').toLowerCase()
+                        return l.id.toString() === leagueId || 
+                               l.name.toLowerCase() === leagueName ||
+                               (l.searchNames || []).some(name => leagueName.includes(name))
+                    })
                     
-                    await Match.findOneAndUpdate(
-                        { fixtureId: convertedMatch.fixtureId },
-                        convertedMatch,
-                        { upsert: true, new: true }
-                    )
-                    totalFetched++
+                    if (leagueInfo) {
+                        const convertedMatch = convertMatchFormat(eventData, leagueInfo)
+                        
+                        await Match.findOneAndUpdate(
+                            { fixtureId: convertedMatch.fixtureId },
+                            convertedMatch,
+                            { upsert: true, new: true }
+                        )
+                        totalFetched++
+                        
+                        // Track by league
+                        const leagueName = leagueInfo.name
+                        if (!dateResults[leagueName]) {
+                            dateResults[leagueName] = 0
+                        }
+                        dateResults[leagueName]++
+                    }
                 }
-                
-                results.push({
-                    league: league.name,
-                    id: league.id,
-                    matches: result.data.length
-                })
             } else {
-                console.log(`⚠️ [manualFetchFixtures] No matches found for ${league.name}`)
-                if (result.error) {
-                    console.error(`❌ [manualFetchFixtures] Error for ${league.name}:`, result.error)
-                }
-                results.push({
-                    league: league.name,
-                    id: league.id,
-                    matches: 0,
-                    error: result.error || 'No matches'
-                })
+                console.log(`  📭 No events found for ${dateStr}`)
             }
             
-            // Small delay to avoid rate limiting
-            if (leagueIndex < SUPPORTED_LEAGUES.length) {
-                console.log(`⏳ [manualFetchFixtures] Waiting 7 seconds before next league...`)
-                await new Promise(resolve => setTimeout(resolve, 7000))
+            // Rate limit protection: Wait 2 seconds between requests (30 req/min = 1 req per 2 sec)
+            if (i < datesToFetch.length - 1) {
+                await new Promise(resolve => setTimeout(resolve, 2000))
             }
+        }
+        
+        // Format results
+        for (const league of SUPPORTED_LEAGUES) {
+            results.push({
+                league: league.name,
+                id: league.id,
+                matches: dateResults[league.name] || 0
+            })
         }
         
         console.log(`✅ [manualFetchFixtures] COMPLETE! Total matches fetched: ${totalFetched}`)
