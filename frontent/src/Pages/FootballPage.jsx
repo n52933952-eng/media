@@ -184,18 +184,26 @@ const FootballPage = () => {
     // Fetch all matches from all leagues (manual trigger)
     const handleFetchAllMatches = async () => {
         try {
+            console.log('⚽ [FootballPage] Load All Leagues button clicked!')
             setFetchingMatches(true)
             showToast('Info', 'Fetching matches from all leagues... This will take ~40 seconds', 'info')
             
-            const res = await fetch(
-                `${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/football/fetch/manual`,
-                {
-                    method: 'POST',
-                    credentials: 'include'
+            const baseUrl = import.meta.env.PROD ? window.location.origin : "http://localhost:5000"
+            const url = `${baseUrl}/api/football/fetch/manual`
+            console.log('⚽ [FootballPage] Fetching from:', url)
+            
+            const res = await fetch(url, {
+                method: 'POST',
+                credentials: 'include',
+                headers: {
+                    'Content-Type': 'application/json'
                 }
-            )
+            })
+            
+            console.log('⚽ [FootballPage] Response status:', res.status, res.statusText)
             
             const data = await res.json()
+            console.log('⚽ [FootballPage] Response data:', data)
             
             if (res.ok) {
                 showToast(
@@ -208,11 +216,12 @@ const FootballPage = () => {
                     window.location.reload()
                 }, 1000)
             } else {
+                console.error('⚽ [FootballPage] Error response:', data)
                 showToast('Error', data.error || 'Failed to fetch matches', 'error')
             }
         } catch (error) {
-            console.error('Error fetching matches:', error)
-            showToast('Error', 'Failed to fetch matches', 'error')
+            console.error('⚽ [FootballPage] Error fetching matches:', error)
+            showToast('Error', `Failed to fetch matches: ${error.message}`, 'error')
         } finally {
             setFetchingMatches(false)
         }

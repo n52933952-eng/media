@@ -686,7 +686,10 @@ export const getSupportedLeagues = async (req, res) => {
 // 8. Manual trigger to fetch fixtures (for testing)
 export const manualFetchFixtures = async (req, res) => {
     try {
+        console.log('⚽ [manualFetchFixtures] ========== MANUAL FETCH TRIGGERED ==========')
         console.log('⚽ [manualFetchFixtures] Manual trigger received')
+        console.log('⚽ [manualFetchFixtures] Request method:', req.method)
+        console.log('⚽ [manualFetchFixtures] Request URL:', req.url)
         
         const today = new Date()
         
