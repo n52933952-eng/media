@@ -175,6 +175,20 @@ const convertMatchFormat = (eventData, leagueInfo) => {
         awayScore = eventData.intAwayScore !== null ? parseInt(eventData.intAwayScore) : null
     }
     
+    // Extract year from season string (e.g., "2024-2025" -> 2024, "2025-2026" -> 2025)
+    let seasonYear = null
+    if (eventData.strSeason) {
+        const yearMatch = eventData.strSeason.match(/^(\d{4})/)
+        if (yearMatch) {
+            seasonYear = parseInt(yearMatch[1])
+        }
+    }
+    // Fallback: extract from CURRENT_SEASON or use current year
+    if (!seasonYear) {
+        const currentYearMatch = CURRENT_SEASON.match(/^(\d{4})/)
+        seasonYear = currentYearMatch ? parseInt(currentYearMatch[1]) : new Date().getFullYear()
+    }
+    
     return {
         fixtureId: eventData.idEvent || eventData.idEvent,
         league: {
@@ -183,7 +197,7 @@ const convertMatchFormat = (eventData, leagueInfo) => {
             country: eventData.strCountry || leagueInfo?.country || 'Unknown',
             logo: eventData.strBadge || '',
             flag: '',
-            season: eventData.strSeason || CURRENT_SEASON
+            season: seasonYear
         },
         teams: {
             home: {
