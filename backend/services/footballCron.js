@@ -14,10 +14,11 @@ const CURRENT_SEASON = '2024-2025' // Format: YYYY-YYYY
 
 // Supported leagues and competitions (TheSportsDB league IDs)
 // Premier League = 4328, La Liga = 4335, Serie A = 4332
+// We'll match by both ID and name for flexibility
 const SUPPORTED_LEAGUES = [
-    { id: 4328, name: 'Premier League', country: 'England' },      // Premier League
-    { id: 4335, name: 'La Liga', country: 'Spain' },                // La Liga (Spanish)
-    { id: 4332, name: 'Serie A', country: 'Italy' }                 // Serie A (Italian)
+    { id: 4328, name: 'Premier League', country: 'England', searchNames: ['premier league', 'english premier league', 'epl'] },
+    { id: 4335, name: 'La Liga', country: 'Spain', searchNames: ['la liga', 'spanish la liga', 'primera division'] },
+    { id: 4332, name: 'Serie A', country: 'Italy', searchNames: ['serie a', 'italian serie a'] }
 ]
 
 // Helper: Convert TheSportsDB match format to our database format
@@ -236,12 +237,27 @@ const fetchAndUpdateLiveMatches = async () => {
         
         let allLiveMatches = []
         
-        // Filter for matches from supported leagues and live status
+        // Filter for matches from supported leagues and live status (by ID or name)
         const supportedLeagueIds = SUPPORTED_LEAGUES.map(l => l.id.toString())
+        const supportedLeagueNames = SUPPORTED_LEAGUES.flatMap(l => [l.name.toLowerCase(), ...(l.searchNames || [])])
+        
+        // Debug: Log all league IDs found
+        const allLeagueIds = result.data.map(e => e.idLeague).filter(Boolean)
+        console.log(`📊 [fetchAndUpdateLiveMatches] League IDs found in events:`, [...new Set(allLeagueIds)])
+        console.log(`📊 [fetchAndUpdateLiveMatches] Looking for league IDs:`, supportedLeagueIds)
+        
         const filteredMatches = result.data.filter(event => {
             const leagueId = event.idLeague?.toString()
-            const isSupported = supportedLeagueIds.includes(leagueId)
+            const leagueName = (event.strLeague || '').toLowerCase()
+            const isSupportedById = supportedLeagueIds.includes(leagueId)
+            const isSupportedByName = supportedLeagueNames.some(name => leagueName.includes(name))
+            const isSupported = isSupportedById || isSupportedByName
             const isLive = event.strStatus?.includes('Live') || event.strStatus?.includes('1H') || event.strStatus?.includes('2H')
+            
+            if (event.idLeague) {
+                console.log(`  📋 Event: ${event.strEvent || 'Unknown'} - League: ${event.strLeague || 'Unknown'} (ID: ${leagueId}), Status: ${event.strStatus}, Supported: ${isSupported}, Live: ${isLive}`)
+            }
+            
             return isSupported && isLive
         })
         
@@ -428,11 +444,30 @@ const fetchTodayFixtures = async () => {
             return
         }
         
-        // Filter for supported leagues
+        // Filter for supported leagues (by ID or name)
         const supportedLeagueIds = SUPPORTED_LEAGUES.map(l => l.id.toString())
+        const supportedLeagueNames = SUPPORTED_LEAGUES.flatMap(l => [l.name.toLowerCase(), ...(l.searchNames || [])])
+        
+        // Debug: Log all league IDs and names found
+        const allLeagueIds = result.data.map(e => e.idLeague).filter(Boolean)
+        const allLeagueNames = result.data.map(e => e.strLeague?.toLowerCase()).filter(Boolean)
+        console.log(`📊 [fetchTodayFixtures] League IDs found in events:`, [...new Set(allLeagueIds)])
+        console.log(`📊 [fetchTodayFixtures] League names found:`, [...new Set(allLeagueNames)])
+        console.log(`📊 [fetchTodayFixtures] Looking for league IDs:`, supportedLeagueIds)
+        console.log(`📊 [fetchTodayFixtures] Looking for league names:`, supportedLeagueNames)
+        
         const filteredEvents = result.data.filter(event => {
             const leagueId = event.idLeague?.toString()
-            return supportedLeagueIds.includes(leagueId)
+            const leagueName = (event.strLeague || '').toLowerCase()
+            const isSupportedById = supportedLeagueIds.includes(leagueId)
+            const isSupportedByName = supportedLeagueNames.some(name => leagueName.includes(name))
+            const isSupported = isSupportedById || isSupportedByName
+            
+            if (event.idLeague) {
+                console.log(`  📋 Event: ${event.strEvent || 'Unknown'} - League: ${event.strLeague || 'Unknown'} (ID: ${leagueId}), Supported: ${isSupported}`)
+            }
+            
+            return isSupported
         })
         
         console.log(`📅 [fetchTodayFixtures] Found ${filteredEvents.length} events from supported leagues`)
