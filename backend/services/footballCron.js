@@ -415,39 +415,41 @@ const fetchTodayFixtures = async () => {
         console.log('📅 [fetchTodayFixtures] Today\'s date:', today)
         console.log('📅 [fetchTodayFixtures] Supported leagues:', SUPPORTED_LEAGUES)
         
+        // TheSportsDB: Get all events for today (single API call)
+        const result = await fetchFromAPI(`eventsday.php?d=${today}`)
+        
+        if (result.rateLimit) {
+            console.warn(`⚠️ [fetchTodayFixtures] Rate limit hit, skipping`)
+            return
+        }
+        
+        if (!result.success || !result.data) {
+            console.log('📅 [fetchTodayFixtures] No events found for today')
+            return
+        }
+        
+        // Filter for supported leagues
+        const supportedLeagueIds = SUPPORTED_LEAGUES.map(l => l.id.toString())
+        const filteredEvents = result.data.filter(event => {
+            const leagueId = event.idLeague?.toString()
+            return supportedLeagueIds.includes(leagueId)
+        })
+        
+        console.log(`📅 [fetchTodayFixtures] Found ${filteredEvents.length} events from supported leagues`)
+        
         let totalFetched = 0
         
-        for (const league of SUPPORTED_LEAGUES) {
-            console.log(`📅 [fetchTodayFixtures] Fetching fixtures for ${league.name} (ID: ${league.id})...`)
-            
-            // TheSportsDB: eventsday.php?d=YYYY-MM-DD (single call for all leagues)
-            const result = await fetchFromAPI(`/fixtures?league=${league.id}&season=${CURRENT_SEASON}&date=${today}`)
-            
-            if (result.rateLimit) {
-                console.warn(`⚠️ [fetchTodayFixtures] Rate limit hit for ${league.name}, skipping remaining leagues`)
-                break
+        for (const eventData of filteredEvents) {
+            const leagueInfo = SUPPORTED_LEAGUES.find(l => l.id.toString() === eventData.idLeague?.toString())
+            if (leagueInfo) {
+                const convertedMatch = convertMatchFormat(eventData, leagueInfo)
+                await Match.findOneAndUpdate(
+                    { fixtureId: convertedMatch.fixtureId },
+                    convertedMatch,
+                    { upsert: true, new: true }
+                )
+                totalFetched++
             }
-            
-            console.log(`📅 [fetchTodayFixtures] League ${league.name} result:`, {
-                success: result.success,
-                matchesFound: result.data?.length || 0,
-                error: result.error
-            })
-            
-            if (result.success && result.data && result.data.length > 0) {
-                for (const matchData of result.data) {
-                    const convertedMatch = convertMatchFormat(matchData, league)
-                    await Match.findOneAndUpdate(
-                        { fixtureId: convertedMatch.fixtureId },
-                        convertedMatch,
-                        { upsert: true, new: true }
-                    )
-                    totalFetched++
-                }
-            }
-            
-            // Small delay to avoid rate limiting
-            await new Promise(resolve => setTimeout(resolve, 7000)) // 7 seconds between requests
         }
         
         console.log(`✅ Fetched ${totalFetched} fixtures for today`)
