@@ -742,6 +742,14 @@ export const manualFetchFixtures = async (req, res) => {
             }
             
             if (result.success && result.data && result.data.length > 0) {
+                // Debug: Log all leagues found for this date
+                const allLeaguesFound = result.data.map(e => ({
+                    id: e.idLeague,
+                    name: e.strLeague,
+                    event: e.strEvent
+                }))
+                console.log(`  📊 [${dateStr}] All leagues found:`, allLeaguesFound.map(l => `${l.name} (ID: ${l.id})`).join(', '))
+                
                 // Filter for supported leagues (by ID or name)
                 const filteredEvents = result.data.filter(event => {
                     const leagueId = event.idLeague?.toString()
@@ -752,6 +760,9 @@ export const manualFetchFixtures = async (req, res) => {
                 })
                 
                 console.log(`  ✅ Found ${filteredEvents.length} matches from supported leagues on ${dateStr}`)
+                if (filteredEvents.length === 0 && result.data.length > 0) {
+                    console.log(`  ⚠️ [${dateStr}] No supported leagues found, but ${result.data.length} events exist`)
+                }
                 
                 // Save each match to database
                 for (const eventData of filteredEvents) {
