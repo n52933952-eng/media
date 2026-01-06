@@ -9,6 +9,9 @@ router.post("/signup", SignUp)
 router.post("/login",LoginUser)
 router.post("/logout",LogOut)
 router.post("/follow/:id",protectRoute,FollowAndUnfollow)
+
+// IMPORTANT: More specific routes should come before less specific ones
+// Put getUserPro before other routes that might conflict
 router.get("/getUserPro/:query",protectRoute,getUserProfile)
 
 router.put("/update/:id",protectRoute,upload.single('file'),UpdateUser)

@@ -100,6 +100,7 @@ app.get('/health', async (req, res) => {
     }
 })
 
+// API routes - must be registered before static files and catch-all
 app.use("/api/user",UserRoute)
 app.use("/api/post",PostRoute)
 app.use("/api/message",MessageRoute)
@@ -108,11 +109,21 @@ app.use("/api/news",NewsRoute)
 app.use("/api/notification",NotificationRoute)
 app.use("/api/activity",ActivityRoute)
 
+// 404 handler for API routes (before static files and catch-all)
+app.use('/api/*', (req, res) => {
+    console.log(`[404] API route not found: ${req.method} ${req.originalUrl}`)
+    res.status(404).json({ error: 'API route not found', path: req.originalUrl })
+})
+
 // Serve static files from React app (for production)
 app.use(express.static(path.join(__dirname, '../frontent/dist')))
 
-// Catch all handler: send back React's index.html file for SPA routing
+// Catch all handler: send back React's index.html file for SPA routing (only for non-API routes)
 app.get('*', (req, res) => {
+    // Don't catch API routes - they should have been handled above
+    if (req.path.startsWith('/api/')) {
+        return res.status(404).json({ error: 'API route not found', path: req.originalUrl })
+    }
     res.sendFile(path.join(__dirname, '../frontent/dist/index.html'))
 })
 

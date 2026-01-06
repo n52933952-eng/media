@@ -413,27 +413,36 @@ export const UpdateUser = async(req,res) => {
 
 export const getUserProfile = async(req,res) => {
 
-
     try{
-
         const{query}= req.params 
+
+        // Debug logging
+        if (import.meta.env?.DEV || process.env.NODE_ENV !== 'production') {
+            console.log(`[getUserProfile] Request received for query: ${query}`)
+        }
 
         // Validate query parameter
         if (!query || query.trim() === '') {
             return res.status(400).json({error:"Invalid user identifier"})
         }
 
+        // Trim the query to remove any whitespace
+        const trimmedQuery = query.trim()
+
         let user 
 
-        if(mongoose.Types.ObjectId.isValid(query)){
-         user = await User.findOne({_id:query}).select('-password')
+        if(mongoose.Types.ObjectId.isValid(trimmedQuery)){
+         user = await User.findOne({_id:trimmedQuery}).select('-password')
 
         }else{
-          user = await User.findOne({username:query}).select('-password')
+          user = await User.findOne({username:trimmedQuery}).select('-password')
         }
 
       if(!user){
-        // Return 404 instead of 400 for not found (more semantically correct)
+        // Return 404 for not found
+        if (import.meta.env?.DEV || process.env.NODE_ENV !== 'production') {
+            console.log(`[getUserProfile] User not found for query: ${trimmedQuery}`)
+        }
         return res.status(404).json({error:"User not found"})
       }
 

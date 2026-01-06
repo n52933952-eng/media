@@ -97,6 +97,9 @@ const ChessChallenge = () => {
             const onlineAvailableUsers = allUsers.filter(u => {
                 // Safety check for onlineUsers
                 if (!onlineUsers || !Array.isArray(onlineUsers)) {
+                    if (import.meta.env.DEV) {
+                        console.warn('⚠️ [ChessChallenge] onlineUsers is not an array:', onlineUsers)
+                    }
                     return false
                 }
                 
@@ -108,18 +111,35 @@ const ChessChallenge = () => {
                     return false
                 }
                 
+                // Check if user is online - onlineUsers is array of {userId, onlineAt}
                 const isOnline = onlineUsers.some(online => {
-                    const onlineUserId = online.userId?.toString()
+                    // Handle both object format {userId: "...", onlineAt: "..."} and direct string format
+                    let onlineUserId = null
+                    if (typeof online === 'object' && online !== null) {
+                        onlineUserId = online.userId?.toString() || online.toString()
+                    } else {
+                        onlineUserId = online?.toString()
+                    }
                     return onlineUserId === userIdStr
                 })
+                
                 const isNotSelf = userIdStr !== currentUserIdStr
-                const isNotBusy = !busyUsers.some(busyId => busyId?.toString() === userIdStr)
+                const isNotBusy = !busyUsers.some(busyId => {
+                    const busyIdStr = busyId?.toString()
+                    return busyIdStr === userIdStr
+                })
+                
+                if (import.meta.env.DEV && isOnline && isNotSelf) {
+                    console.log(`✅ [ChessChallenge] User ${u.username} (${userIdStr}) is online and available`)
+                }
                 
                 return isOnline && isNotSelf && isNotBusy
             })
             
             if (import.meta.env.DEV) {
                 console.log(`♟️ [ChessChallenge] Found ${onlineAvailableUsers.length} online available users out of ${allUsers.length} total connections`)
+                console.log(`♟️ [ChessChallenge] Online users from socket:`, onlineUsers)
+                console.log(`♟️ [ChessChallenge] All fetched users:`, allUsers.map(u => ({ id: u._id?.toString(), username: u.username })))
             }
             
             setAvailableUsers(onlineAvailableUsers)
