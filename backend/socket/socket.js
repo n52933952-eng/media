@@ -214,20 +214,31 @@ export const initializeSocket = async (app) => {
             await setUserSocket(userId, socketData)
             console.log(`✅ [socket] User ${userId} added to socket map (socket: ${socket.id})`)
             
-            // Get count from in-memory (faster for frequent calls)
+            // Small delay to ensure Redis has the data before fetching
+            await new Promise(resolve => setTimeout(resolve, 50))
+            
+            // Get count from Redis (source of truth)
             const allSockets = await getAllUserSockets()
             console.log(`📊 [socket] Total users in socket map: ${Object.keys(allSockets).length}`)
+            
+            // Emit online users as array of objects like madechess
+            const onlineArray = Object.entries(allSockets).map(([id, data]) => ({
+                userId: id,
+                onlineAt: data.onlineAt,
+            }))
+            console.log(`📤 [socket] Emitting getOnlineUser with ${onlineArray.length} users:`, onlineArray.map(u => u.userId))
+            io.emit("getOnlineUser", onlineArray)
         } else {
             console.warn("⚠️ [socket] User connected without valid userId:", userId)
+            
+            // Still emit online users even if this user doesn't have a valid userId
+            const allSockets = await getAllUserSockets()
+            const onlineArray = Object.entries(allSockets).map(([id, data]) => ({
+                userId: id,
+                onlineAt: data.onlineAt,
+            }))
+            io.emit("getOnlineUser", onlineArray)
         }
-
-        // Emit online users as array of objects like madechess
-        const allSockets = await getAllUserSockets()
-        const onlineArray = Object.entries(allSockets).map(([id, data]) => ({
-            userId: id,
-            onlineAt: data.onlineAt,
-        }))
-        io.emit("getOnlineUser", onlineArray)
 
         // Helper function to check if user is busy
         const isUserBusy = async (userId) => {
@@ -766,8 +777,9 @@ export const initializeSocket = async (app) => {
             
             let disconnectedUserId = null
             
-            // Remove user from map by matching socket.id like madechess (dual-write: in-memory + Redis)
-            for (const [id, data] of Object.entries(userSocketMap)) {
+            // Remove user from map by matching socket.id - check Redis first (source of truth)
+            const allSockets = await getAllUserSockets()
+            for (const [id, data] of Object.entries(allSockets)) {
                 if (data.socketId === socket.id) {
                     disconnectedUserId = id
                     await deleteUserSocket(id) // Delete from both in-memory and Redis
@@ -787,7 +799,7 @@ export const initializeSocket = async (app) => {
                         await deleteActiveCall(callId)
                         // Notify the other user
                         const otherUserId = callData.user1 === disconnectedUserId ? callData.user2 : callData.user1
-                        const otherUserData = userSocketMap[otherUserId]
+                        const otherUserData = await getUserSocket(otherUserId)
                         
                         // Clear inCall status for the other user too
                         User.findByIdAndUpdate(otherUserId, { inCall: false }).catch(err => console.log('Error clearing other user inCall status:', err))
@@ -868,11 +880,13 @@ export const initializeSocket = async (app) => {
                 }
             }
 
-            // Emit updated online list as array of objects
-            const updatedOnlineArray = Object.entries(userSocketMap).map(([id, data]) => ({
+            // Emit updated online list as array of objects - get from Redis (source of truth)
+            const remainingSockets = await getAllUserSockets()
+            const updatedOnlineArray = Object.entries(remainingSockets).map(([id, data]) => ({
                 userId: id,
                 onlineAt: data.onlineAt,
             }))
+            console.log(`📤 [socket] Emitting getOnlineUser after disconnect with ${updatedOnlineArray.length} users`)
             io.emit("getOnlineUser", updatedOnlineArray)
         })
     })
