@@ -48,30 +48,50 @@ const ChessChallenge = () => {
             const baseUrl = import.meta.env.PROD ? window.location.origin : "http://localhost:5000"
             
             // Get unique user IDs from both followers and following
+            // Filter out null, undefined, and empty strings
             const allConnectionIds = [
                 ...(user.following || []),
                 ...(user.followers || [])
-            ]
+            ].filter(id => id && id.toString().trim() !== '')
             
-            // Remove duplicates
-            const uniqueIds = [...new Set(allConnectionIds)]
+            // Remove duplicates and convert to strings for consistency
+            const uniqueIds = [...new Set(allConnectionIds.map(id => id.toString()))]
             
-            // Fetch all users in parallel
+            if (uniqueIds.length === 0) {
+                setAvailableUsers([])
+                return
+            }
+            
+            // Fetch all users in parallel with better error handling
             const userPromises = uniqueIds.map(async (userId) => {
                 try {
                     const res = await fetch(`${baseUrl}/api/user/getUserPro/${userId}`, {
                         credentials: 'include'
                     })
+                    
                     if (res.ok) {
-                        return await res.json()
+                        const userData = await res.json()
+                        // Validate that we got actual user data
+                        if (userData && userData._id) {
+                            return userData
+                        }
+                    } else {
+                        // Log non-ok responses but don't throw
+                        const errorData = await res.json().catch(() => ({}))
+                        if (import.meta.env.DEV) {
+                            console.warn(`⚠️ [ChessChallenge] Failed to fetch user ${userId}:`, res.status, errorData.error || 'Unknown error')
+                        }
                     }
                 } catch (err) {
-                    console.error('Error fetching user:', err)
+                    // Silently handle errors for individual users
+                    if (import.meta.env.DEV) {
+                        console.warn(`⚠️ [ChessChallenge] Error fetching user ${userId}:`, err.message)
+                    }
                 }
                 return null
             })
             
-            const allUsers = (await Promise.all(userPromises)).filter(u => u !== null)
+            const allUsers = (await Promise.all(userPromises)).filter(u => u !== null && u._id)
             
             // Filter to only online users who are not busy
             const onlineAvailableUsers = allUsers.filter(u => {
@@ -80,12 +100,27 @@ const ChessChallenge = () => {
                     return false
                 }
                 
-                const isOnline = onlineUsers.some(online => online.userId === u._id)
-                const isNotSelf = u._id !== user._id
-                const isNotBusy = !busyUsers.includes(u._id)
+                // Convert both to strings for comparison
+                const userIdStr = u._id?.toString()
+                const currentUserIdStr = user._id?.toString()
+                
+                if (!userIdStr || !currentUserIdStr) {
+                    return false
+                }
+                
+                const isOnline = onlineUsers.some(online => {
+                    const onlineUserId = online.userId?.toString()
+                    return onlineUserId === userIdStr
+                })
+                const isNotSelf = userIdStr !== currentUserIdStr
+                const isNotBusy = !busyUsers.some(busyId => busyId?.toString() === userIdStr)
                 
                 return isOnline && isNotSelf && isNotBusy
             })
+            
+            if (import.meta.env.DEV) {
+                console.log(`♟️ [ChessChallenge] Found ${onlineAvailableUsers.length} online available users out of ${allUsers.length} total connections`)
+            }
             
             setAvailableUsers(onlineAvailableUsers)
         } catch (error) {

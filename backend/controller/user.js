@@ -418,6 +418,11 @@ export const getUserProfile = async(req,res) => {
 
         const{query}= req.params 
 
+        // Validate query parameter
+        if (!query || query.trim() === '') {
+            return res.status(400).json({error:"Invalid user identifier"})
+        }
+
         let user 
 
         if(mongoose.Types.ObjectId.isValid(query)){
@@ -428,15 +433,16 @@ export const getUserProfile = async(req,res) => {
         }
 
       if(!user){
-        return res.status(400).json({error:"no user"})
+        // Return 404 instead of 400 for not found (more semantically correct)
+        return res.status(404).json({error:"User not found"})
       }
 
       res.status(200).json(user)
 
     }
     catch(error){
-      console.log(error)
-        res.status(500).json(error)
+      console.error('Error in getUserProfile:', error)
+        res.status(500).json({error: error.message || "Internal server error"})
     }
 }
 
