@@ -96,26 +96,48 @@ const getAllUserSockets = async () => {
                 break
             }
             
-            const result = await client.scan(cursor, {
-                MATCH: 'userSocket:*',
-                COUNT: 100 // Process 100 keys at a time
-            })
-            cursor = result.cursor
-            
-            // Fetch all values for these keys
-            if (result.keys && result.keys.length > 0) {
-                const values = await client.mGet(result.keys)
-                result.keys.forEach((key, index) => {
-                    if (values[index]) {
-                        try {
-                            const userId = key.replace('userSocket:', '')
-                            const socketData = JSON.parse(values[index])
-                            allSockets[userId] = socketData
-                        } catch (e) {
-                            console.error(`❌ Failed to parse socket data for ${key}:`, e)
-                        }
-                    }
+            try {
+                const result = await client.scan(cursor, {
+                    MATCH: 'userSocket:*',
+                    COUNT: 100 // Process 100 keys at a time
                 })
+                
+                // Redis client v4+ returns [nextCursor, keys] array format
+                // Redis client v3 returns {cursor, keys} object format
+                let nextCursor, keys
+                if (Array.isArray(result)) {
+                    // v4+ format: [cursor, keys]
+                    nextCursor = result[0]
+                    keys = result[1] || []
+                } else if (result && typeof result === 'object') {
+                    // v3 format: {cursor, keys}
+                    nextCursor = result.cursor
+                    keys = result.keys || []
+                } else {
+                    console.error('❌ [getAllUserSockets] Unexpected SCAN result format:', result)
+                    break
+                }
+                
+                cursor = nextCursor.toString()
+                
+                // Fetch all values for these keys
+                if (keys && keys.length > 0) {
+                    const values = await client.mGet(keys)
+                    keys.forEach((key, index) => {
+                        if (values[index]) {
+                            try {
+                                const userId = key.replace('userSocket:', '')
+                                const socketData = JSON.parse(values[index])
+                                allSockets[userId] = socketData
+                            } catch (e) {
+                                console.error(`❌ Failed to parse socket data for ${key}:`, e)
+                            }
+                        }
+                    })
+                }
+            } catch (scanError) {
+                console.error('❌ [getAllUserSockets] SCAN error:', scanError.message)
+                break
             }
         } while (cursor !== '0')
         
@@ -190,6 +212,162 @@ const hasActiveChessGame = async (userId) => {
     redisService.ensureRedis()
     const roomId = await getActiveChessGame(userId)
     return roomId !== null
+}
+
+// Helper functions for activeCalls - Redis only
+const setActiveCall = async (callId, callData) => {
+    redisService.ensureRedis()
+    await redisService.redisSet(`activeCall:${callId}`, callData, 3600) // 1 hour TTL
+}
+
+const getActiveCall = async (callId) => {
+    redisService.ensureRedis()
+    try {
+        return await redisService.redisGet(`activeCall:${callId}`)
+    } catch (error) {
+        console.error(`❌ [socket] Failed to read active call from Redis for ${callId}:`, error.message)
+        return null
+    }
+}
+
+const deleteActiveCall = async (callId) => {
+    redisService.ensureRedis()
+    await redisService.redisDel(`activeCall:${callId}`)
+}
+
+const getAllActiveCalls = async () => {
+    redisService.ensureRedis()
+    try {
+        const client = redisService.getRedis()
+        const allCalls = {}
+        let cursor = '0'
+        let scanCount = 0
+        const maxIterations = 100
+        
+        do {
+            scanCount++
+            if (scanCount > maxIterations) {
+                console.error('❌ [getAllActiveCalls] Max iterations reached, breaking loop')
+                break
+            }
+            
+            const result = await client.scan(cursor, {
+                MATCH: 'activeCall:*',
+                COUNT: 100
+            })
+            
+            // Handle both array [cursor, keys] and object {cursor, keys} formats
+            let nextCursor, keys
+            if (Array.isArray(result)) {
+                nextCursor = result[0]
+                keys = result[1] || []
+            } else if (result && typeof result === 'object') {
+                nextCursor = result.cursor
+                keys = result.keys || []
+            } else {
+                break
+            }
+            
+            cursor = nextCursor.toString()
+            
+            if (keys && keys.length > 0) {
+                const values = await client.mGet(keys)
+                keys.forEach((key, index) => {
+                    if (values[index]) {
+                        try {
+                            const callId = key.replace('activeCall:', '')
+                            allCalls[callId] = JSON.parse(values[index])
+                        } catch (e) {
+                            console.error(`❌ Failed to parse call data for ${key}:`, e)
+                        }
+                    }
+                })
+            }
+        } while (cursor !== '0')
+        
+        return allCalls
+    } catch (error) {
+        console.error('❌ [getAllActiveCalls] Failed to get all active calls from Redis:', error.message)
+        return {}
+    }
+}
+
+// Helper functions for chessRooms - Redis only
+const setChessRoom = async (roomId, room) => {
+    redisService.ensureRedis()
+    await redisService.redisSet(`chessRoom:${roomId}`, room, 7200) // 2 hour TTL
+}
+
+const getChessRoom = async (roomId) => {
+    redisService.ensureRedis()
+    try {
+        return await redisService.redisGet(`chessRoom:${roomId}`)
+    } catch (error) {
+        console.error(`❌ [socket] Failed to read chess room from Redis for ${roomId}:`, error.message)
+        return null
+    }
+}
+
+const deleteChessRoom = async (roomId) => {
+    redisService.ensureRedis()
+    await redisService.redisDel(`chessRoom:${roomId}`)
+}
+
+const getAllChessRooms = async () => {
+    redisService.ensureRedis()
+    try {
+        const client = redisService.getRedis()
+        const allRooms = {}
+        let cursor = '0'
+        let scanCount = 0
+        const maxIterations = 100
+        
+        do {
+            scanCount++
+            if (scanCount > maxIterations) {
+                console.error('❌ [getAllChessRooms] Max iterations reached, breaking loop')
+                break
+            }
+            
+            const result = await client.scan(cursor, {
+                MATCH: 'chessRoom:*',
+                COUNT: 100
+            })
+            
+            // Handle both array [cursor, keys] and object {cursor, keys} formats
+            let nextCursor, keys
+            if (Array.isArray(result)) {
+                nextCursor = result[0]
+                keys = result[1] || []
+            } else if (result && typeof result === 'object') {
+                nextCursor = result.cursor
+                keys = result.keys || []
+            } else {
+                break
+            }
+            
+            cursor = nextCursor.toString()
+            
+            if (keys && keys.length > 0) {
+                const values = await client.mGet(keys)
+                keys.forEach((key, index) => {
+                    if (values[index]) {
+                        try {
+                            const roomId = key.replace('chessRoom:', '')
+                            allRooms[roomId] = JSON.parse(values[index])
+                        } catch (e) {
+                            console.error(`❌ Failed to parse chess room data for ${key}:`, e)
+                        }
+                    }
+                })
+            }
+        } while (cursor !== '0')
+        
+        return allRooms
+    } catch (error) {
+        console.error('❌ [getAllChessRooms] Failed to get all chess rooms from Redis:', error.message)
+        return {}
+    }
 }
 
 export const initializeSocket = async (app) => {
