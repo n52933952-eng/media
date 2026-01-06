@@ -52,14 +52,27 @@ const ChessChallenge = () => {
             const allConnectionIds = [
                 ...(user.following || []),
                 ...(user.followers || [])
-            ].filter(id => id && id.toString().trim() !== '')
+            ].filter(id => {
+                // Validate MongoDB ObjectId format (24 hex characters)
+                const idStr = id?.toString().trim()
+                if (!idStr || idStr.length !== 24) return false
+                // Check if it's a valid hex string
+                return /^[0-9a-fA-F]{24}$/.test(idStr)
+            })
             
             // Remove duplicates and convert to strings for consistency
             const uniqueIds = [...new Set(allConnectionIds.map(id => id.toString()))]
             
             if (uniqueIds.length === 0) {
+                if (import.meta.env.DEV) {
+                    console.log('♟️ [ChessChallenge] No valid user IDs found in following/followers')
+                }
                 setAvailableUsers([])
                 return
+            }
+            
+            if (import.meta.env.DEV) {
+                console.log(`♟️ [ChessChallenge] Fetching ${uniqueIds.length} users for online check`)
             }
             
             // Fetch all users in parallel with better error handling

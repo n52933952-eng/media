@@ -78,49 +78,61 @@ const getAllUserSockets = async () => {
     redisService.ensureRedis() // Redis is required
     
     try {
+        console.log('🔍 [getAllUserSockets] Starting Redis SCAN...')
         // Get all user socket keys from Redis using SCAN (efficient for large datasets)
         const client = redisService.getRedis()
         const allSockets = {}
         let cursor = '0'
+        let scanCount = 0
         
         do {
+            scanCount++
+            console.log(`🔍 [getAllUserSockets] SCAN iteration ${scanCount}, cursor: ${cursor}`)
             const result = await client.scan(cursor, {
                 MATCH: 'userSocket:*',
                 COUNT: 100 // Process 100 keys at a time
             })
+            console.log(`🔍 [getAllUserSockets] SCAN result: cursor=${result.cursor}, keys found=${result.keys?.length || 0}`)
             cursor = result.cursor
             
             // Fetch all values for these keys
             if (result.keys && result.keys.length > 0) {
+                console.log(`🔍 [getAllUserSockets] Fetching values for ${result.keys.length} keys...`)
                 const values = await client.mGet(result.keys)
+                console.log(`🔍 [getAllUserSockets] Got ${values?.length || 0} values`)
                 result.keys.forEach((key, index) => {
                     if (values[index]) {
                         try {
                             const userId = key.replace('userSocket:', '')
                             const socketData = JSON.parse(values[index])
                             allSockets[userId] = socketData
+                            console.log(`✅ [getAllUserSockets] Added user ${userId} to result`)
                         } catch (e) {
                             console.error(`❌ Failed to parse socket data for ${key}:`, e)
                         }
+                    } else {
+                        console.warn(`⚠️ [getAllUserSockets] No value for key ${key}`)
                     }
                 })
             }
         } while (cursor !== '0')
         
+        console.log(`✅ [getAllUserSockets] SCAN complete. Found ${Object.keys(allSockets).length} users`)
+        
         // Update in-memory cache for fast local access
         Object.assign(userSocketMap, allSockets)
         
         if (Object.keys(allSockets).length === 0) {
-            console.warn('⚠️ [socket] getAllUserSockets returned empty - checking in-memory cache')
-            console.log('⚠️ [socket] In-memory userSocketMap has:', Object.keys(userSocketMap).length, 'users')
+            console.warn('⚠️ [getAllUserSockets] Redis returned empty - checking in-memory cache')
+            console.log('⚠️ [getAllUserSockets] In-memory userSocketMap has:', Object.keys(userSocketMap).length, 'users')
         }
         
         return allSockets
     } catch (error) {
-        console.error('❌ [socket] Failed to get all user sockets from Redis:', error.message)
-        console.error('❌ [socket] Error stack:', error.stack)
+        console.error('❌ [getAllUserSockets] Failed to get all user sockets from Redis:', error.message)
+        console.error('❌ [getAllUserSockets] Error stack:', error.stack)
         // Fallback to in-memory cache
-        console.log('⚠️ [socket] Falling back to in-memory cache with', Object.keys(userSocketMap).length, 'users')
+        console.log('⚠️ [getAllUserSockets] Falling back to in-memory cache with', Object.keys(userSocketMap).length, 'users')
         return userSocketMap
     }
 }
@@ -242,14 +254,29 @@ export const initializeSocket = async (app) => {
         
         try {
             console.log(`🔍 [socket] Fetching all user sockets from Redis...`)
-            // Get all sockets from Redis (source of truth)
-            const allSockets = await getAllUserSockets()
+            // Get all sockets from Redis (source of truth) with timeout
+            const allSocketsPromise = getAllUserSockets()
+            const timeoutPromise = new Promise((_, reject) => 
+                setTimeout(() => reject(new Error('getAllUserSockets timeout after 5s')), 5000)
+            )
+            
+            const allSockets = await Promise.race([allSocketsPromise, timeoutPromise])
             const socketCount = Object.keys(allSockets).length
             console.log(`📊 [socket] Total users in socket map: ${socketCount}`)
             
             if (socketCount === 0) {
                 console.warn('⚠️ [socket] No users found in Redis, checking in-memory cache...')
                 console.log('⚠️ [socket] In-memory userSocketMap:', Object.keys(userSocketMap))
+                // Use in-memory as fallback if Redis is empty
+                const fallbackArray = Object.entries(userSocketMap).map(([id, data]) => ({
+                    userId: id,
+                    onlineAt: data.onlineAt,
+                }))
+                if (fallbackArray.length > 0) {
+                    console.log(`⚠️ [socket] Using in-memory fallback with ${fallbackArray.length} users`)
+                    io.emit("getOnlineUser", fallbackArray)
+                    return
+                }
             }
             
             // Emit online users as array of objects like madechess
@@ -261,7 +288,7 @@ export const initializeSocket = async (app) => {
             io.emit("getOnlineUser", onlineArray)
             console.log(`✅ [socket] getOnlineUser event emitted successfully`)
         } catch (error) {
-            console.error('❌ [socket] Error emitting getOnlineUser:', error)
+            console.error('❌ [socket] Error emitting getOnlineUser:', error.message)
             console.error('❌ [socket] Error stack:', error.stack)
             // Fallback: emit from in-memory cache
             try {
