@@ -13,14 +13,18 @@ const { getRedis, isRedisAvailable } = redisService
 let io = null
 let server = null
 
-// In-memory fallback (will be gradually replaced by Redis)
-const userSocketMap = {}
-// Track active calls: { callId: { user1, user2 } } - NOW IN REDIS
-// Track chess game rooms: { roomId: [socketId1, socketId2, ...] } - NOW IN REDIS
-// Track active chess games: { userId: roomId } - to know which game a user is in
-const activeChessGames = new Map()
-// Track chess game state: { roomId: { fen, capturedWhite, capturedBlack } }
-const chessGameStates = new Map()
+    // In-memory fallback (will be gradually replaced by Redis)
+    const userSocketMap = {}
+    // Track active calls: { callId: { user1, user2 } } - NOW IN REDIS
+    // Track chess game rooms: { roomId: [socketId1, socketId2, ...] } - NOW IN REDIS
+    // Track active chess games: { userId: roomId } - to know which game a user is in
+    const activeChessGames = new Map()
+    // Track chess game state: { roomId: { fen, capturedWhite, capturedBlack } }
+    const chessGameStates = new Map()
+    
+    // Prevent infinite loops - track if we're already emitting online users
+    let isEmittingOnlineUsers = false
+    let emitOnlineUsersTimeout = null
 
 // Helper functions for userSocketMap - Redis only (required for 1M+ users)
 const setUserSocket = async (userId, socketData) => {
@@ -78,61 +82,50 @@ const getAllUserSockets = async () => {
     redisService.ensureRedis() // Redis is required
     
     try {
-        console.log('🔍 [getAllUserSockets] Starting Redis SCAN...')
         // Get all user socket keys from Redis using SCAN (efficient for large datasets)
         const client = redisService.getRedis()
         const allSockets = {}
         let cursor = '0'
         let scanCount = 0
+        const maxIterations = 100 // Prevent infinite loops
         
         do {
             scanCount++
-            console.log(`🔍 [getAllUserSockets] SCAN iteration ${scanCount}, cursor: ${cursor}`)
+            if (scanCount > maxIterations) {
+                console.error('❌ [getAllUserSockets] Max iterations reached, breaking loop')
+                break
+            }
+            
             const result = await client.scan(cursor, {
                 MATCH: 'userSocket:*',
                 COUNT: 100 // Process 100 keys at a time
             })
-            console.log(`🔍 [getAllUserSockets] SCAN result: cursor=${result.cursor}, keys found=${result.keys?.length || 0}`)
             cursor = result.cursor
             
             // Fetch all values for these keys
             if (result.keys && result.keys.length > 0) {
-                console.log(`🔍 [getAllUserSockets] Fetching values for ${result.keys.length} keys...`)
                 const values = await client.mGet(result.keys)
-                console.log(`🔍 [getAllUserSockets] Got ${values?.length || 0} values`)
                 result.keys.forEach((key, index) => {
                     if (values[index]) {
                         try {
                             const userId = key.replace('userSocket:', '')
                             const socketData = JSON.parse(values[index])
                             allSockets[userId] = socketData
-                            console.log(`✅ [getAllUserSockets] Added user ${userId} to result`)
                         } catch (e) {
                             console.error(`❌ Failed to parse socket data for ${key}:`, e)
                         }
-                    } else {
-                        console.warn(`⚠️ [getAllUserSockets] No value for key ${key}`)
                     }
                 })
             }
         } while (cursor !== '0')
         
-        console.log(`✅ [getAllUserSockets] SCAN complete. Found ${Object.keys(allSockets).length} users`)
-        
         // Update in-memory cache for fast local access
         Object.assign(userSocketMap, allSockets)
-        
-        if (Object.keys(allSockets).length === 0) {
-            console.warn('⚠️ [getAllUserSockets] Redis returned empty - checking in-memory cache')
-            console.log('⚠️ [getAllUserSockets] In-memory userSocketMap has:', Object.keys(userSocketMap).length, 'users')
-        }
         
         return allSockets
     } catch (error) {
         console.error('❌ [getAllUserSockets] Failed to get all user sockets from Redis:', error.message)
-        console.error('❌ [getAllUserSockets] Error stack:', error.stack)
         // Fallback to in-memory cache
-        console.log('⚠️ [getAllUserSockets] Falling back to in-memory cache with', Object.keys(userSocketMap).length, 'users')
         return userSocketMap
     }
 }
@@ -249,59 +242,71 @@ export const initializeSocket = async (app) => {
         }
         
         // Emit online users to ALL clients after ANY connection (with or without userId)
-        // Small delay to ensure Redis has the data before fetching
-        await new Promise(resolve => setTimeout(resolve, 200))
-        
-        try {
-            console.log(`🔍 [socket] Fetching all user sockets from Redis...`)
-            // Get all sockets from Redis (source of truth) with timeout
-            const allSocketsPromise = getAllUserSockets()
-            const timeoutPromise = new Promise((_, reject) => 
-                setTimeout(() => reject(new Error('getAllUserSockets timeout after 5s')), 5000)
-            )
-            
-            const allSockets = await Promise.race([allSocketsPromise, timeoutPromise])
-            const socketCount = Object.keys(allSockets).length
-            console.log(`📊 [socket] Total users in socket map: ${socketCount}`)
-            
-            if (socketCount === 0) {
-                console.warn('⚠️ [socket] No users found in Redis, checking in-memory cache...')
-                console.log('⚠️ [socket] In-memory userSocketMap:', Object.keys(userSocketMap))
-                // Use in-memory as fallback if Redis is empty
-                const fallbackArray = Object.entries(userSocketMap).map(([id, data]) => ({
-                    userId: id,
-                    onlineAt: data.onlineAt,
-                }))
-                if (fallbackArray.length > 0) {
-                    console.log(`⚠️ [socket] Using in-memory fallback with ${fallbackArray.length} users`)
-                    io.emit("getOnlineUser", fallbackArray)
-                    return
-                }
-            }
-            
-            // Emit online users as array of objects like madechess
-            const onlineArray = Object.entries(allSockets).map(([id, data]) => ({
-                userId: id,
-                onlineAt: data.onlineAt,
-            }))
-            console.log(`📤 [socket] Emitting getOnlineUser with ${onlineArray.length} users:`, onlineArray.map(u => u.userId))
-            io.emit("getOnlineUser", onlineArray)
-            console.log(`✅ [socket] getOnlineUser event emitted successfully`)
-        } catch (error) {
-            console.error('❌ [socket] Error emitting getOnlineUser:', error.message)
-            console.error('❌ [socket] Error stack:', error.stack)
-            // Fallback: emit from in-memory cache
-            try {
-                const fallbackArray = Object.entries(userSocketMap).map(([id, data]) => ({
-                    userId: id,
-                    onlineAt: data.onlineAt,
-                }))
-                console.log(`⚠️ [socket] Emitting from in-memory fallback with ${fallbackArray.length} users`)
-                io.emit("getOnlineUser", fallbackArray)
-            } catch (fallbackError) {
-                console.error('❌ [socket] Fallback emit also failed:', fallbackError)
-            }
+        // Use debouncing to prevent infinite loops - only emit once every 500ms
+        if (emitOnlineUsersTimeout) {
+            clearTimeout(emitOnlineUsersTimeout)
         }
+        
+        emitOnlineUsersTimeout = setTimeout(async () => {
+            // Prevent concurrent emissions
+            if (isEmittingOnlineUsers) {
+                console.log('⚠️ [socket] Already emitting online users, skipping...')
+                return
+            }
+            
+            isEmittingOnlineUsers = true
+            
+            try {
+                // Small delay to ensure Redis has the data before fetching
+                await new Promise(resolve => setTimeout(resolve, 100))
+                
+                // Get all sockets from Redis (source of truth) with timeout
+                const allSocketsPromise = getAllUserSockets()
+                const timeoutPromise = new Promise((_, reject) => 
+                    setTimeout(() => reject(new Error('getAllUserSockets timeout after 3s')), 3000)
+                )
+                
+                const allSockets = await Promise.race([allSocketsPromise, timeoutPromise])
+                const socketCount = Object.keys(allSockets).length
+                
+                if (socketCount === 0) {
+                    // Use in-memory as fallback if Redis is empty
+                    const fallbackArray = Object.entries(userSocketMap).map(([id, data]) => ({
+                        userId: id,
+                        onlineAt: data.onlineAt,
+                    }))
+                    if (fallbackArray.length > 0) {
+                        io.emit("getOnlineUser", fallbackArray)
+                        isEmittingOnlineUsers = false
+                        return
+                    }
+                }
+                
+                // Emit online users as array of objects like madechess
+                const onlineArray = Object.entries(allSockets).map(([id, data]) => ({
+                    userId: id,
+                    onlineAt: data.onlineAt,
+                }))
+                if (onlineArray.length > 0) {
+                    io.emit("getOnlineUser", onlineArray)
+                }
+            } catch (error) {
+                console.error('❌ [socket] Error emitting getOnlineUser:', error.message)
+                // Fallback: emit from in-memory cache
+                try {
+                    const fallbackArray = Object.entries(userSocketMap).map(([id, data]) => ({
+                        userId: id,
+                        onlineAt: data.onlineAt,
+                    }))
+                    console.log(`⚠️ [socket] Emitting from in-memory fallback with ${fallbackArray.length} users`)
+                    io.emit("getOnlineUser", fallbackArray)
+                } catch (fallbackError) {
+                    console.error('❌ [socket] Fallback emit also failed:', fallbackError)
+                }
+            } finally {
+                isEmittingOnlineUsers = false
+            }
+        }, 500) // Debounce: wait 500ms before emitting to prevent spam
 
         // Helper function to check if user is busy
         const isUserBusy = async (userId) => {
