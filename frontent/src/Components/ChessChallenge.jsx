@@ -195,6 +195,8 @@ const ChessChallenge = () => {
                 transition="all 0.2s"
                 cursor="pointer"
                 onClick={handleOpenModal}
+                maxW="280px"
+                w="100%"
             >
                 {/* Chess Image - Square */}
                 <Box

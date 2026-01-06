@@ -24,6 +24,7 @@ import {
 import { UserContext } from '../context/UserContext'
 import { SocketContext } from '../context/SocketContext'
 import useShowToast from '../hooks/useShowToast'
+import FootballIcon from '../Components/FootballIcon'
 
 const FootballPage = () => {
     const { user } = useContext(UserContext)
@@ -451,10 +452,7 @@ const FootballPage = () => {
             {/* Header */}
             <Flex align="center" justify="space-between" mb={6}>
                 <HStack spacing={3}>
-                    <Image
-                        src="https://cdn-icons-png.flaticon.com/512/53/53283.png"
-                        boxSize="40px"
-                    />
+                    <FootballIcon size="40px" />
                     <VStack align="start" spacing={0}>
                         <Heading size="lg">Football Live</Heading>
                         <Text fontSize="sm" color={secondaryTextColor}>

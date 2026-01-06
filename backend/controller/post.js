@@ -1158,6 +1158,74 @@ export const removeContributorFromPost = async(req, res) => {
     }
 }
 
+// Get all comments/replies made by a specific user
+export const getUserComments = async(req,res) => {
+    try {
+        const { username } = req.params
+        const { limit = 20, skip = 0 } = req.query
+        
+        // Find user by username
+        const user = await User.findOne({ username })
+        if (!user) {
+            return res.status(404).json({ error: "User not found" })
+        }
+        
+        const userId = user._id
+        const limitNum = parseInt(limit)
+        const skipNum = parseInt(skip)
+        
+        // Find all posts that have replies from this user
+        const posts = await Post.find({
+            "replies.userId": userId
+        })
+        .populate('postedBy', 'name username profilePic')
+        .sort({ createdAt: -1 })
+        .limit(1000) // Get a large batch, then filter
+        
+        // Extract all comments made by this user from all posts
+        const allComments = []
+        posts.forEach(post => {
+            post.replies.forEach(reply => {
+                if (reply.userId.toString() === userId.toString()) {
+                    allComments.push({
+                        _id: reply._id,
+                        text: reply.text,
+                        userId: reply.userId,
+                        username: reply.username,
+                        userProfilePic: reply.userProfilePic,
+                        date: reply.date,
+                        parentReplyId: reply.parentReplyId,
+                        likes: reply.likes || [],
+                        post: {
+                            _id: post._id,
+                            text: post.text,
+                            img: post.img,
+                            postedBy: post.postedBy,
+                            createdAt: post.createdAt
+                        }
+                    })
+                }
+            })
+        })
+        
+        // Sort by date (newest first)
+        allComments.sort((a, b) => new Date(b.date) - new Date(a.date))
+        
+        // Apply pagination
+        const paginatedComments = allComments.slice(skipNum, skipNum + limitNum)
+        const hasMore = allComments.length > skipNum + limitNum
+        
+        res.status(200).json({
+            comments: paginatedComments,
+            total: allComments.length,
+            hasMore
+        })
+    } catch (error) {
+        console.error('Error fetching user comments:', error)
+        res.status(500).json({ error: error.message })
+    }
+}
+
 export const LikeComent = async(req,res) => {
 
     try{

@@ -126,10 +126,22 @@ const SuggestedUsers = ({ onUserFollowed }) => {
 
   // Filter out already followed users AND system accounts (Football, and all channel accounts)
   // Check both string and ObjectId comparison
+  // Complete list of all channel accounts to exclude (matches backend)
   const channelUsernames = [
-    'Football', 'AlJazeera', 'NBCNews', 'BeinSportsNews', 'SkyNews', 
-    'Cartoonito', 'NatGeoKids', 'SciShowKids', 'JJAnimalTime', 
-    'KidsArabic', 'NatGeoAnimals', 'MBCDrama', 'Fox11'
+    'Football',           // System account
+    'AlJazeera',         // News channel
+    'NBCNews',           // News channel
+    'BeinSportsNews',    // Sports news channel
+    'SkyNews',           // News channel
+    'SkySportsNews',     // Sports news channel (additional)
+    'Cartoonito',        // Kids channel
+    'NatGeoKids',        // Kids channel
+    'SciShowKids',       // Kids channel
+    'JJAnimalTime',      // Kids channel
+    'KidsArabic',        // Kids channel
+    'NatGeoAnimals',     // Kids channel
+    'MBCDrama',          // Entertainment channel
+    'Fox11'              // News channel
   ]
   
   const filteredSuggestedUsers = suggestedUsers.filter(suggestedUser => {

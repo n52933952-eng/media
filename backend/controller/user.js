@@ -5,6 +5,7 @@ import GenerateToken from '../utils/GenerateToken.js'
 import mongoose from 'mongoose'
 import { v2 as cloudinary } from 'cloudinary'
 import { Readable } from 'stream'
+import { LIVE_CHANNELS } from '../config/channels.js'
 
 
 
@@ -287,7 +288,7 @@ export const UpdateUser = async(req,res) => {
 
     try{
  
-        const{name,email,password,bio,username,country}= req.body
+        const{name,email,password,bio,username,country,instagram}= req.body
         const userId = req.user._id 
 
         let user = await User.findById(userId)
@@ -339,6 +340,7 @@ export const UpdateUser = async(req,res) => {
                 user.profilePic = profilePic || user.profilePic 
                 user.bio = bio || user.bio
                 user.country = country !== undefined ? country : user.country
+                user.instagram = instagram !== undefined ? instagram : user.instagram
 
                 user = await user.save()
 
@@ -351,7 +353,8 @@ export const UpdateUser = async(req,res) => {
                     email: user.email,
                     bio: user.bio,
                     profilePic: user.profilePic,
-                    country: user.country
+                    country: user.country,
+                    instagram: user.instagram
                   })
                 }
                 resolve()
@@ -381,6 +384,7 @@ export const UpdateUser = async(req,res) => {
       user.profilePic = profilePic || user.profilePic 
       user.bio = bio || user.bio
       user.country = country !== undefined ? country : user.country
+      user.instagram = instagram !== undefined ? instagram : user.instagram
 
       user = await user.save()
 
@@ -392,7 +396,8 @@ export const UpdateUser = async(req,res) => {
         email: user.email,
         bio: user.bio,
         profilePic: user.profilePic,
-        country: user.country
+        country: user.country,
+        instagram: user.instagram
       })
     }
     catch(error){
@@ -489,11 +494,22 @@ export const getSuggestedUsers = async(req, res) => {
         const excludeIds = [new mongoose.Types.ObjectId(userId)] // Exclude current user
         const followingIdsStrings = new Set() // For fast lookup
         
-        // Exclude Football system account from suggestions
-        const footballAccount = await User.findOne({ username: 'Football' }).select('_id')
-        if (footballAccount) {
-            excludeIds.push(new mongoose.Types.ObjectId(footballAccount._id))
-        }
+        // Exclude Football system account and ALL channel accounts from suggestions
+        // Get all channel usernames from config + Football system account + any additional channels
+        const channelUsernames = [
+            'Football', // System account (not in LIVE_CHANNELS)
+            ...LIVE_CHANNELS.map(channel => channel.username), // All channel accounts from config
+            'SkySportsNews' // Additional channel (if exists in database but not in config)
+        ]
+        
+        // Find all channel accounts and exclude them
+        const channelAccounts = await User.find({ 
+            username: { $in: channelUsernames } 
+        }).select('_id')
+        
+        channelAccounts.forEach(account => {
+            excludeIds.push(new mongoose.Types.ObjectId(account._id))
+        })
         
         if (currentUser.following && currentUser.following.length > 0) {
             currentUser.following.forEach(id => {

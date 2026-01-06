@@ -15,10 +15,8 @@ let server = null
 
 // In-memory fallback (will be gradually replaced by Redis)
 const userSocketMap = {}
-// Track active calls: { callId: { user1, user2 } }
-const activeCalls = new Map()
-// Track chess game rooms: { roomId: [socketId1, socketId2, ...] }
-const chessRooms = new Map()
+// Track active calls: { callId: { user1, user2 } } - NOW IN REDIS
+// Track chess game rooms: { roomId: [socketId1, socketId2, ...] } - NOW IN REDIS
 // Track active chess games: { userId: roomId } - to know which game a user is in
 const activeChessGames = new Map()
 // Track chess game state: { roomId: { fen, capturedWhite, capturedBlack } }
@@ -68,9 +66,44 @@ const deleteUserSocket = async (userId) => {
 const getAllUserSockets = async () => {
     redisService.ensureRedis() // Redis is required
     
-    // For now, use in-memory cache (it's kept in sync)
-    // TODO: Can optimize later to get all from Redis if needed
-    return userSocketMap
+    try {
+        // Get all user socket keys from Redis using SCAN (efficient for large datasets)
+        const client = redisService.getRedis()
+        const allSockets = {}
+        let cursor = '0'
+        
+        do {
+            const result = await client.scan(cursor, {
+                MATCH: 'userSocket:*',
+                COUNT: 100 // Process 100 keys at a time
+            })
+            cursor = result.cursor
+            
+            // Fetch all values for these keys
+            if (result.keys.length > 0) {
+                const values = await client.mGet(result.keys)
+                result.keys.forEach((key, index) => {
+                    if (values[index]) {
+                        try {
+                            const userId = key.replace('userSocket:', '')
+                            allSockets[userId] = JSON.parse(values[index])
+                        } catch (e) {
+                            console.error(`❌ Failed to parse socket data for ${key}:`, e)
+                        }
+                    }
+                })
+            }
+        } while (cursor !== '0')
+        
+        // Update in-memory cache for fast local access
+        Object.assign(userSocketMap, allSockets)
+        
+        return allSockets
+    } catch (error) {
+        console.error('❌ [socket] Failed to get all user sockets from Redis:', error.message)
+        // Fallback to in-memory cache
+        return userSocketMap
+    }
 }
 
 // Helper functions for chessGameStates - Redis only
@@ -197,8 +230,9 @@ export const initializeSocket = async (app) => {
         io.emit("getOnlineUser", onlineArray)
 
         // Helper function to check if user is busy
-        const isUserBusy = (userId) => {
-            for (const [callId, callData] of activeCalls.entries()) {
+        const isUserBusy = async (userId) => {
+            const allActiveCalls = await getAllActiveCalls()
+            for (const [callId, callData] of Object.entries(allActiveCalls)) {
                 if (callData.user1 === userId || callData.user2 === userId) {
                     return true
                 }
@@ -207,16 +241,18 @@ export const initializeSocket = async (app) => {
         }
 
         // WebRTC: Handle call user - emit to both receiver AND sender like madechess
-        socket.on("callUser", ({ userToCall, signalData, from, name, callType = 'video' }) => {
+        socket.on("callUser", async ({ userToCall, signalData, from, name, callType = 'video' }) => {
             // Check if either user is already in a call
-            if (isUserBusy(userToCall) || isUserBusy(from)) {
+            const userToCallBusy = await isUserBusy(userToCall)
+            const fromBusy = await isUserBusy(from)
+            if (userToCallBusy || fromBusy) {
                 // Notify sender that the call cannot be made (user is busy)
                 const senderData = userSocketMap[from]
                 const senderSocketId = senderData?.socketId
                 if (senderSocketId) {
                     io.to(senderSocketId).emit("callBusyError", { 
                         message: "User is currently in a call",
-                        busyUserId: isUserBusy(userToCall) ? userToCall : from
+                        busyUserId: userToCallBusy ? userToCall : from
                     })
                 }
                 return
@@ -248,9 +284,9 @@ export const initializeSocket = async (app) => {
                 })
             }
 
-            // Mark both users as busy
+            // Mark both users as busy - Store in Redis
             const callId = `${from}-${userToCall}`
-            activeCalls.set(callId, { user1: from, user2: userToCall })
+            await setActiveCall(callId, { user1: from, user2: userToCall })
             
             // Update database - mark users as in call (persistent across refreshes)
             User.findByIdAndUpdate(from, { inCall: true }).catch(err => console.log('Error updating caller inCall status:', err))
@@ -279,20 +315,22 @@ export const initializeSocket = async (app) => {
         })
 
         // WebRTC: Handle cancel call - match madechess implementation
-        socket.on("cancelCall", ({ conversationId, sender }) => {
+        socket.on("cancelCall", async ({ conversationId, sender }) => {
             const receiverData = userSocketMap[conversationId]
             const receiverSocketId = receiverData?.socketId
 
             const senderData = userSocketMap[sender]
             const senderSocketId = senderData?.socketId
 
-            // Remove from active calls - try both possible call IDs
+            // Remove from active calls - try both possible call IDs - Delete from Redis
             const callId1 = `${sender}-${conversationId}`
             const callId2 = `${conversationId}-${sender}`
-            if (activeCalls.has(callId1)) {
-                activeCalls.delete(callId1)
-            } else if (activeCalls.has(callId2)) {
-                activeCalls.delete(callId2)
+            const call1 = await getActiveCall(callId1)
+            const call2 = await getActiveCall(callId2)
+            if (call1) {
+                await deleteActiveCall(callId1)
+            } else if (call2) {
+                await deleteActiveCall(callId2)
             }
 
             // Update database - mark users as NOT in call
@@ -505,14 +543,17 @@ export const initializeSocket = async (app) => {
         // Join chess room for spectators
         socket.on("joinChessRoom", async ({ roomId }) => {
             if (roomId) {
-                if (!chessRooms.has(roomId)) {
-                    chessRooms.set(roomId, [])
+                // Get or create chess room from Redis
+                let room = await getChessRoom(roomId)
+                if (!room) {
+                    room = []
+                    await setChessRoom(roomId, room)
                 }
-                const room = chessRooms.get(roomId)
                 const wasAlreadyInRoom = room.includes(socket.id)
                 
                 if (!wasAlreadyInRoom) {
                     room.push(socket.id)
+                    await setChessRoom(roomId, room) // Update in Redis
                 }
                 
                 // Always join the Socket.IO room (even if already tracked)
@@ -739,9 +780,11 @@ export const initializeSocket = async (app) => {
                 // Clear inCall status in database for disconnected user
                 User.findByIdAndUpdate(disconnectedUserId, { inCall: false }).catch(err => console.log('Error clearing inCall status on disconnect:', err))
                 
-                for (const [callId, callData] of activeCalls.entries()) {
+                // Get all active calls from Redis
+                const allActiveCalls = await getAllActiveCalls()
+                for (const [callId, callData] of Object.entries(allActiveCalls)) {
                     if (callData.user1 === disconnectedUserId || callData.user2 === disconnectedUserId) {
-                        activeCalls.delete(callId)
+                        await deleteActiveCall(callId)
                         // Notify the other user
                         const otherUserId = callData.user1 === disconnectedUserId ? callData.user2 : callData.user1
                         const otherUserData = userSocketMap[otherUserId]
@@ -807,15 +850,20 @@ export const initializeSocket = async (app) => {
             }
             
             // Remove socket from chess rooms
-            for (const [roomId, room] of chessRooms.entries()) {
+            // Get all chess rooms from Redis
+            const allChessRooms = await getAllChessRooms()
+            for (const [roomId, room] of Object.entries(allChessRooms)) {
                 const index = room.indexOf(socket.id)
                 if (index !== -1) {
                     room.splice(index, 1)
                     console.log(`👁️ Removed socket ${socket.id} from chess room ${roomId}`)
                     // Clean up empty rooms
                     if (room.length === 0) {
-                        chessRooms.delete(roomId)
+                        await deleteChessRoom(roomId)
                         console.log(`🗑️ Deleted empty chess room: ${roomId}`)
+                    } else {
+                        // Update room in Redis
+                        await setChessRoom(roomId, room)
                     }
                 }
             }

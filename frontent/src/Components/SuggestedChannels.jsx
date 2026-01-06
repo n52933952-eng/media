@@ -1,9 +1,10 @@
-import React, { useState, useEffect, useContext } from 'react'
+import React, { useState, useEffect, useContext, useRef } from 'react'
 import { Box, Flex, Text, Avatar, Button, VStack, Spinner, useColorModeValue, Grid, GridItem, SimpleGrid } from '@chakra-ui/react'
 import { Link as RouterLink, useNavigate } from 'react-router-dom'
 import { UserContext } from '../context/UserContext'
 import { PostContext } from '../context/PostContext'
 import useShowToast from '../hooks/useShowToast'
+import FootballIcon from './FootballIcon'
 
 const SuggestedChannels = ({ onUserFollowed }) => {
     const { user, setUser } = useContext(UserContext)
@@ -17,6 +18,7 @@ const SuggestedChannels = ({ onUserFollowed }) => {
     const [isFollowing, setIsFollowing] = useState(false)
     const [streamLoading, setStreamLoading] = useState({})
     const [expandedChannel, setExpandedChannel] = useState(null) // Track which channel is expanded
+    const expandedChannelRef = useRef(null) // Ref for scrolling to expanded channel details
     
     const showToast = useShowToast()
     
@@ -146,6 +148,9 @@ const SuggestedChannels = ({ onUserFollowed }) => {
                 const channel = channels.find(c => c.id === channelId)
                 const stream = channel?.streams[streamIndex]
                 showToast('Success', `🔴 ${channel?.name} added to your feed!`, 'success')
+                
+                // Scroll to top of page to see the new post in feed
+                window.scrollTo({ top: 0, behavior: 'smooth' })
             } else {
                 showToast('Info', data.message || 'Already in feed', 'info')
             }
@@ -156,6 +161,19 @@ const SuggestedChannels = ({ onUserFollowed }) => {
             setStreamLoading(prev => ({ ...prev, [loadingKey]: false }))
         }
     }
+    
+    // Auto-scroll to expanded channel details when a channel is clicked
+    useEffect(() => {
+        if (expandedChannel && expandedChannelRef.current) {
+            // Small delay to ensure the expanded section is rendered
+            setTimeout(() => {
+                expandedChannelRef.current?.scrollIntoView({ 
+                    behavior: 'smooth', 
+                    block: 'nearest' 
+                })
+            }, 100)
+        }
+    }, [expandedChannel])
     
     // Handle follow/unfollow
     const handleFollowToggle = async () => {
@@ -338,26 +356,18 @@ const SuggestedChannels = ({ onUserFollowed }) => {
                             _hover={{ bg: hoverBg, cursor: 'pointer' }}
                             transition="all 0.2s"
                             onClick={() => {
-                                // Navigate to Football post page if post exists, otherwise to Football page
-                                if (footballPostId && footballAccount?.username) {
-                                    navigate(`/${footballAccount.username}/post/${footballPostId}`)
-                                } else {
-                                    navigate('/football')
-                                }
+                                // Always navigate to Football page
+                                navigate('/football')
                             }}
                         >
                             <Flex align="center" gap={3} flex={1}>
-                                <Avatar 
-                                    src={footballAccount.profilePic || "https://cdn-icons-png.flaticon.com/512/53/53283.png"}
-                                    size="md"
-                                    cursor="pointer"
-                                />
+                                <FootballIcon size="48px" />
                                 <VStack align="start" spacing={0} flex={1}>
                                     <Flex align="center" gap={1}>
                                         <Text fontSize="sm" fontWeight="semibold" color={textColor}>
                                             {footballAccount.name}
                                         </Text>
-                                        <Text fontSize="lg">⚽</Text>
+                                        <Text fontSize="lg" color="white" filter="drop-shadow(0 0 1px rgba(0,0,0,0.5))">⚽</Text>
                                     </Flex>
                                     <Text fontSize="xs" color={secondaryTextColor} noOfLines={1}>
                                         Live football scores & updates
@@ -446,6 +456,7 @@ const SuggestedChannels = ({ onUserFollowed }) => {
                             {/* Expanded Channel Details */}
                             {expandedChannel && (
                                 <Box
+                                    ref={expandedChannelRef}
                                     bg={cardBg}
                                     borderRadius="md"
                                     p={3}

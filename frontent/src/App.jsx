@@ -26,6 +26,12 @@ const AppContent = () => {
   
   const isHomePage = location.pathname === "/home"
   const isMessagesPage = location.pathname === "/messages"
+  // Check if current path is a user page (e.g., /username, but not /username/post/123 or other routes)
+  const pathParts = location.pathname.split('/').filter(Boolean)
+  const isUserPage = pathParts.length === 1 && 
+                     !['sign', 'update', 'football', 'news', 'notifications', 'chess', 'home', 'messages'].includes(pathParts[0])
+  // Check if it's the current user's own page
+  const isOwnUserPage = isUserPage && user && pathParts[0] === user.username
 
   return (
     <>
@@ -37,22 +43,27 @@ const AppContent = () => {
         <Header/>
       </Container>
       
+      {/* Logout button - always visible, fixed position */}
+      {user && <LogOutButton/>}
+      
       {/* Content container - full width for messages, centered at 620px for other pages */}
       {isMessagesPage ? (
-        <Box 
-          w="100%"
-          h="calc(100vh - 100px)"
-          position="fixed"
-          top="80px"
-          left="0"
-          right="0"
-          bg={useColorModeValue('white', '#101010')}
-          zIndex={1}
-        >
-          <Routes>
-            <Route path="/messages" element={user ? <MessagesPage/> : <Navigate to="/" />} />
-          </Routes>
-        </Box>
+        <>
+          <Box 
+            w="100%"
+            h="calc(100vh - 80px)"
+            position="fixed"
+            top="80px"
+            left="0"
+            right="0"
+            bg={useColorModeValue('white', '#101010')}
+            zIndex={1}
+          >
+            <Routes>
+              <Route path="/messages" element={user ? <MessagesPage/> : <Navigate to="/" />} />
+            </Routes>
+          </Box>
+        </>
       ) : (
         <>
           {/* HomePage needs wider container for 3-column layout (Football | Feed | Suggested Users) */}
@@ -61,8 +72,6 @@ const AppContent = () => {
               <Routes>
                 <Route path="/home" element={user ? <HomePage/> : <Navigate to="/" />} />
               </Routes>
-              {user && <LogOutButton/>}
-              {user && <CreatePost/>}
             </Container>
           ) : (
             <Container maxW="620px" px={{ base: 4, md: 6 }}>
@@ -77,8 +86,7 @@ const AppContent = () => {
                 <Route path="/chess/:opponentId" element={user ? <ChessGamePage /> : <Navigate to="/" />} />
                 <Route path="/:username/post/:id" element={<PostPage/>}/>
               </Routes>
-              {user && <LogOutButton/>}
-              {user && <CreatePost/>}
+              {user && isOwnUserPage && <CreatePost/>}
             </Container>
           )}
         </>

@@ -49,10 +49,16 @@ const LogOutButton = () => {
   
     return (
    
-     <Button  position="fixed" top="30px" right="30px" size="sm"  onClick={handleLogout}>
-     <IoIosLogOut size={24}/>
-   
-    </Button>
+     <Button  
+       position="fixed" 
+       top="20px" 
+       right="30px" 
+       size="sm" 
+       onClick={handleLogout}
+       zIndex={1001}
+     >
+       <IoIosLogOut size={24}/>
+     </Button>
   )
 }
 

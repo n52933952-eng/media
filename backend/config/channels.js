@@ -37,7 +37,7 @@ export const LIVE_CHANNELS = [
             {
                 language: 'english',
                 name: 'Watch Live',
-                youtubeId: 'DL5ko1lz5VI',
+                youtubeId: 'OwGEPRfRWu0',
                 text: '🔴 NBC News NOW - Live Stream\n\nBreaking news and live coverage',
                 buttonColor: 'blue'
             }
@@ -71,7 +71,7 @@ export const LIVE_CHANNELS = [
             {
                 language: 'english',
                 name: 'Watch Live',
-                youtubeId: 'L84qL_x_Xao',
+                youtubeId: 'YDvsBbKfLPA',
                 text: '🔴 Sky News - Live Stream\n\nBreaking news and live coverage from the UK',
                 buttonColor: 'blue'
             }

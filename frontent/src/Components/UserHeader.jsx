@@ -1,5 +1,5 @@
 import React,{useContext,useState,useEffect} from 'react'
-import{Button,VStack,Box,Avatar,Text,Flex,Menu,MenuItem,Portal,MenuList,MenuButton} from '@chakra-ui/react'
+import{Button,VStack,Box,Avatar,Text,Flex,Menu,MenuItem,Portal,MenuList,MenuButton,Input,useColorModeValue} from '@chakra-ui/react'
 import { FaSquareInstagram } from "react-icons/fa6";
 import { FaRegCopy } from "react-icons/fa";
 import{useToast} from '@chakra-ui/toast'
@@ -7,11 +7,11 @@ import{UserContext} from '../context/UserContext'
 import {Link} from 'react-router-dom'
 import useShowToast from '../hooks/useShowToast.js'
 
-const UserHeader = ({users}) => {
+const UserHeader = ({users, activeTab, setActiveTab}) => {
    
     const toast =useToast()
     
-   
+    
      const{user,setUser}=useContext(UserContext)
      
      const currentUser = user
@@ -25,11 +25,76 @@ const UserHeader = ({users}) => {
   console.log({"followers":following})
   
   const showToast=useShowToast()
+  
+  // Update instagramUrl when users prop changes
+  useEffect(() => {
+    setInstagramUrl(users?.instagram || "")
+  }, [users?.instagram])
+  
+  // Handle Instagram URL save
+  const handleSaveInstagram = async () => {
+    if (!currentUser || currentUser._id !== users?._id) return
+    
+    setSavingInstagram(true)
+    try {
+      const res = await fetch(`${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/user/update/${currentUser._id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        credentials: 'include',
+        body: JSON.stringify({
+          instagram: instagramUrl.trim()
+        })
+      })
+      
+      const data = await res.json()
+      
+      if (res.ok) {
+        // Update local user state
+        if (data.instagram !== undefined) {
+          setUser({ ...currentUser, instagram: data.instagram })
+          localStorage.setItem('userInfo', JSON.stringify({ ...currentUser, instagram: data.instagram }))
+        }
+        // Update users prop (for immediate UI update)
+        users.instagram = instagramUrl.trim()
+        setShowInstagramInput(false)
+        showToast('Success', 'Instagram URL saved!', 'success')
+      } else {
+        showToast('Error', data.error || 'Failed to save Instagram URL', 'error')
+      }
+    } catch (error) {
+      console.error('Error saving Instagram URL:', error)
+      showToast('Error', 'Failed to save Instagram URL', 'error')
+    } finally {
+      setSavingInstagram(false)
+    }
+  }
+  
+  // Handle Instagram link click
+  const handleInstagramClick = (e) => {
+    if (!users?.instagram) return
+    e.preventDefault()
+    
+    // Ensure URL has https://
+    let url = users.instagram.trim()
+    if (!url.startsWith('http://') && !url.startsWith('https://')) {
+      url = 'https://' + url
+    }
+    
+    window.open(url, '_blank', 'noopener,noreferrer')
+  }
     
  
     
     
       const[updating,setUpdating]=useState(false)
+    const[showInstagramInput,setShowInstagramInput]=useState(false)
+    const[instagramUrl,setInstagramUrl]=useState(users?.instagram || "")
+    const[savingInstagram,setSavingInstagram]=useState(false)
+    
+    const inputBg = useColorModeValue('white', 'gray.700')
+    const borderColor = useColorModeValue('gray.200', 'gray.600')
 
 
     
@@ -118,7 +183,6 @@ const UserHeader = ({users}) => {
        
        <Flex gap={2} alignItems="center">
         <Text fontSize="sm">{users?.username}</Text>
-        <Text fontSize="xs" bg="gray.dark" color="gray.light" p={1} borderRadius="full">thrades.net</Text>
        </Flex>
        
         </Box>
@@ -160,19 +224,36 @@ const UserHeader = ({users}) => {
     <Flex alignItems="center" gap={2}>
         <Text color="gray.light">{users?.followers?.length} followers</Text>
         <Box w={"1"} h="1" bg="gray.light" borderRadius="full"></Box>
-        <Link>instgram.com</Link>
+        {users?.instagram ? (
+          <Text 
+            as="a" 
+            href={users.instagram} 
+            onClick={handleInstagramClick}
+            color="blue.400"
+            cursor="pointer"
+            _hover={{ textDecoration: 'underline' }}
+          >
+            {users.instagram.replace(/^https?:\/\//, '').replace(/^www\./, '')}
+          </Text>
+        ) : (
+          <Text color="gray.light">instgram.com</Text>
+        )}
     </Flex>
     
     
     <Flex>
+      {/* Instagram Icon - Only show on own profile */}
+      {currentUser?._id === users?._id && (
+        <Box className="icon-container" position="relative">
+          <FaSquareInstagram 
+            size={24} 
+            cursor="pointer" 
+            onClick={() => setShowInstagramInput(!showInstagramInput)}
+          />
+        </Box>
+      )}
       
-       <Box className="icon-container">
-        <FaSquareInstagram size={24} cursor="pointer" />
-       </Box>
-
-      
-     
-       <Box className="icon-container">
+      <Box className="icon-container">
           <Menu>
             <MenuButton>
             <FaRegCopy size={24} cursor="pointer" />
@@ -190,6 +271,39 @@ const UserHeader = ({users}) => {
   
   
    </Flex>
+   
+   {/* Instagram Input - Only show on own profile when icon is clicked */}
+   {currentUser?._id === users?._id && showInstagramInput && (
+     <Box mt={2} p={3} bg={inputBg} borderRadius="md" border="1px solid" borderColor={borderColor}>
+       <Flex gap={2} alignItems="center">
+         <Input
+           placeholder="Enter Instagram URL (e.g., instagram.com/username)"
+           value={instagramUrl}
+           onChange={(e) => setInstagramUrl(e.target.value)}
+           size="sm"
+           bg={useColorModeValue('white', 'gray.800')}
+         />
+         <Button
+           size="sm"
+           colorScheme="blue"
+           onClick={handleSaveInstagram}
+           isLoading={savingInstagram}
+         >
+           Save
+         </Button>
+         <Button
+           size="sm"
+           variant="ghost"
+           onClick={() => {
+             setShowInstagramInput(false)
+             setInstagramUrl(users?.instagram || "")
+           }}
+         >
+           Cancel
+         </Button>
+       </Flex>
+     </Box>
+   )}
   
   
  
@@ -202,13 +316,25 @@ const UserHeader = ({users}) => {
 
   <Flex w="full">
 
-  <Flex flex="1" borderBottom="1.5px solid white" pb={3} cursor="pinter">
-    <Text>threads</Text>
+  <Flex 
+    flex="1" 
+    borderBottom={activeTab === 'posts' ? "1.5px solid white" : "1.5px solid gray"} 
+    pb={3} 
+    cursor="pointer"
+    onClick={() => setActiveTab('posts')}
+  >
+    <Text color={activeTab === 'posts' ? 'white' : 'gray.500'}>posts</Text>
   </Flex>
 
 
- <Flex flex="1" borderBottom="1.5px solid gray" pb={3} cursor="pinter">
-    <Text>Replies</Text>
+ <Flex 
+    flex="1" 
+    borderBottom={activeTab === 'replies' ? "1.5px solid white" : "1.5px solid gray"} 
+    pb={3} 
+    cursor="pointer"
+    onClick={() => setActiveTab('replies')}
+  >
+    <Text color={activeTab === 'replies' ? 'white' : 'gray.500'}>Replies</Text>
  </Flex>
 
 

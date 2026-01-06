@@ -12,6 +12,7 @@ import{UserContext} from '../context/UserContext'
 import{PostContext} from '../context/PostContext'
 import AddContributorModal from './AddContributorModal'
 import ManageContributorsModal from './ManageContributorsModal'
+import FootballIcon from './FootballIcon'
 
 
 
@@ -256,14 +257,20 @@ const showToast = useShowToast()
         
         <Flex flexDirection="column" alignItems="center">
            
-            <Avatar 
-              size="md" 
-              src={postedBy?.profilePic} 
-              name={postedBy?.name}
-              loading="lazy"
-              cursor="pointer"
-              onClick={handleAvatarOrNameClick}
-            />
+            {postedBy?.username === 'Football' ? (
+              <Box onClick={handleAvatarOrNameClick} cursor="pointer">
+                <FootballIcon size="48px" />
+              </Box>
+            ) : (
+              <Avatar 
+                size="md" 
+                src={postedBy?.profilePic} 
+                name={postedBy?.name}
+                loading="lazy"
+                cursor="pointer"
+                onClick={handleAvatarOrNameClick}
+              />
+            )}
            
             <Box w="1px" h="full" bg="gray.light" my="2"></Box>
        
@@ -539,7 +546,7 @@ const showToast = useShowToast()
                   
                   {/* Goal Icon Center */}
                   <GridItem display="flex" alignItems="flex-start" justifyContent="center">
-                    <Text color={secondaryTextColor}>⚽</Text>
+                    <Text color="white" filter="drop-shadow(0 0 1px rgba(0,0,0,0.5))">⚽</Text>
                   </GridItem>
                   
                   {/* Away Team Goals */}

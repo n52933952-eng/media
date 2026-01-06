@@ -26,6 +26,7 @@ import useShowToast from '../hooks/useShowToast.js'
 import { compressVideo, needsCompression } from '../utils/videoCompress'
 
 import{UserContext} from '../context/UserContext'
+import{PostContext} from '../context/PostContext'
 
 
 const MAX_CHAR = 500
@@ -34,6 +35,7 @@ const MAX_CHAR = 500
 const CreatePost = () => {
  
    const{user}=useContext(UserContext)
+   const{setFollowPost}=useContext(PostContext)
    
    const{isOpen,onOpen,onClose}=useDisclosure()
    
@@ -219,6 +221,31 @@ const CreatePost = () => {
                 return
               }
 
+              // Immediately add the new post to the top of the feed (simple state update)
+              if (data.post && setFollowPost) {
+                // Populate the post with user data if not already populated
+                const newPost = {
+                  ...data.post,
+                  postedBy: data.post.postedBy || {
+                    _id: user._id,
+                    username: user.username,
+                    name: user.name,
+                    profilePic: user.profilePic
+                  }
+                }
+                
+                // Simple: just add to the top
+                setFollowPost(prev => {
+                  // Check if post already exists (prevent duplicates)
+                  const exists = prev.some(p => p._id?.toString() === newPost._id?.toString())
+                  if (exists) {
+                    return prev
+                  }
+                  // Add new post at the top
+                  return [newPost, ...prev]
+                })
+              }
+
               showToast("Success", "Post created successfully", "success")
               onClose()
               setPostText("")
@@ -280,6 +307,31 @@ const CreatePost = () => {
       showToast("Error", data.error, "error")
       setLoading(false)
       return
+    }
+
+    // Immediately add the new post to the top of the feed (simple state update)
+    if (data.post && setFollowPost) {
+      // Populate the post with user data if not already populated
+      const newPost = {
+        ...data.post,
+        postedBy: data.post.postedBy || {
+          _id: user._id,
+          username: user.username,
+          name: user.name,
+          profilePic: user.profilePic
+        }
+      }
+      
+      // Simple: just add to the top
+      setFollowPost(prev => {
+        // Check if post already exists (prevent duplicates)
+        const exists = prev.some(p => p._id?.toString() === newPost._id?.toString())
+        if (exists) {
+          return prev
+        }
+        // Add new post at the top
+        return [newPost, ...prev]
+      })
     }
 
     showToast("Success", "Post created successfully", "success")

@@ -57,6 +57,11 @@ const UserSchema = mongoose.Schema({
     country:{
         type:String,
         default:""
+    },
+
+    instagram:{
+        type:String,
+        default:""
     }
 
 },{timestamps:true})
