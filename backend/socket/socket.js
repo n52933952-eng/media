@@ -26,11 +26,22 @@ const chessGameStates = new Map()
 const setUserSocket = async (userId, socketData) => {
     redisService.ensureRedis() // Redis is required
     
-    // Write to Redis (primary storage for scaling)
-    await redisService.redisSet(`userSocket:${userId}`, socketData, 3600) // 1 hour TTL
-    
-    // Also keep in-memory for fast local access (but Redis is source of truth)
-    userSocketMap[userId] = socketData
+    try {
+        // Write to Redis (primary storage for scaling)
+        const success = await redisService.redisSet(`userSocket:${userId}`, socketData, 3600) // 1 hour TTL
+        if (!success) {
+            console.error(`❌ [socket] Failed to write user socket to Redis for ${userId}`)
+        } else {
+            console.log(`✅ [socket] User socket written to Redis for ${userId}`)
+        }
+        
+        // Also keep in-memory for fast local access (but Redis is source of truth)
+        userSocketMap[userId] = socketData
+    } catch (error) {
+        console.error(`❌ [socket] Error setting user socket for ${userId}:`, error.message)
+        // Still update in-memory as fallback
+        userSocketMap[userId] = socketData
+    }
 }
 
 const getUserSocket = async (userId) => {
@@ -80,13 +91,14 @@ const getAllUserSockets = async () => {
             cursor = result.cursor
             
             // Fetch all values for these keys
-            if (result.keys.length > 0) {
+            if (result.keys && result.keys.length > 0) {
                 const values = await client.mGet(result.keys)
                 result.keys.forEach((key, index) => {
                     if (values[index]) {
                         try {
                             const userId = key.replace('userSocket:', '')
-                            allSockets[userId] = JSON.parse(values[index])
+                            const socketData = JSON.parse(values[index])
+                            allSockets[userId] = socketData
                         } catch (e) {
                             console.error(`❌ Failed to parse socket data for ${key}:`, e)
                         }
@@ -98,10 +110,17 @@ const getAllUserSockets = async () => {
         // Update in-memory cache for fast local access
         Object.assign(userSocketMap, allSockets)
         
+        if (Object.keys(allSockets).length === 0) {
+            console.warn('⚠️ [socket] getAllUserSockets returned empty - checking in-memory cache')
+            console.log('⚠️ [socket] In-memory userSocketMap has:', Object.keys(userSocketMap).length, 'users')
+        }
+        
         return allSockets
     } catch (error) {
         console.error('❌ [socket] Failed to get all user sockets from Redis:', error.message)
+        console.error('❌ [socket] Error stack:', error.stack)
         // Fallback to in-memory cache
+        console.log('⚠️ [socket] Falling back to in-memory cache with', Object.keys(userSocketMap).length, 'users')
         return userSocketMap
     }
 }
@@ -213,13 +232,25 @@ export const initializeSocket = async (app) => {
             }
             await setUserSocket(userId, socketData)
             console.log(`✅ [socket] User ${userId} added to socket map (socket: ${socket.id})`)
-            
-            // Small delay to ensure Redis has the data before fetching
-            await new Promise(resolve => setTimeout(resolve, 50))
-            
-            // Get count from Redis (source of truth)
+        } else {
+            console.warn("⚠️ [socket] User connected without valid userId:", userId)
+        }
+        
+        // Emit online users to ALL clients after ANY connection (with or without userId)
+        // Small delay to ensure Redis has the data before fetching
+        await new Promise(resolve => setTimeout(resolve, 200))
+        
+        try {
+            console.log(`🔍 [socket] Fetching all user sockets from Redis...`)
+            // Get all sockets from Redis (source of truth)
             const allSockets = await getAllUserSockets()
-            console.log(`📊 [socket] Total users in socket map: ${Object.keys(allSockets).length}`)
+            const socketCount = Object.keys(allSockets).length
+            console.log(`📊 [socket] Total users in socket map: ${socketCount}`)
+            
+            if (socketCount === 0) {
+                console.warn('⚠️ [socket] No users found in Redis, checking in-memory cache...')
+                console.log('⚠️ [socket] In-memory userSocketMap:', Object.keys(userSocketMap))
+            }
             
             // Emit online users as array of objects like madechess
             const onlineArray = Object.entries(allSockets).map(([id, data]) => ({
@@ -228,16 +259,21 @@ export const initializeSocket = async (app) => {
             }))
             console.log(`📤 [socket] Emitting getOnlineUser with ${onlineArray.length} users:`, onlineArray.map(u => u.userId))
             io.emit("getOnlineUser", onlineArray)
-        } else {
-            console.warn("⚠️ [socket] User connected without valid userId:", userId)
-            
-            // Still emit online users even if this user doesn't have a valid userId
-            const allSockets = await getAllUserSockets()
-            const onlineArray = Object.entries(allSockets).map(([id, data]) => ({
-                userId: id,
-                onlineAt: data.onlineAt,
-            }))
-            io.emit("getOnlineUser", onlineArray)
+            console.log(`✅ [socket] getOnlineUser event emitted successfully`)
+        } catch (error) {
+            console.error('❌ [socket] Error emitting getOnlineUser:', error)
+            console.error('❌ [socket] Error stack:', error.stack)
+            // Fallback: emit from in-memory cache
+            try {
+                const fallbackArray = Object.entries(userSocketMap).map(([id, data]) => ({
+                    userId: id,
+                    onlineAt: data.onlineAt,
+                }))
+                console.log(`⚠️ [socket] Emitting from in-memory fallback with ${fallbackArray.length} users`)
+                io.emit("getOnlineUser", fallbackArray)
+            } catch (fallbackError) {
+                console.error('❌ [socket] Fallback emit also failed:', fallbackError)
+            }
         }
 
         // Helper function to check if user is busy
