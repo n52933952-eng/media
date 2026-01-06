@@ -47,6 +47,23 @@ const ChessChallenge = () => {
             setLoading(true)
             const baseUrl = import.meta.env.PROD ? window.location.origin : "http://localhost:5000"
             
+            // First, fetch all users who are currently in active chess games
+            try {
+                const busyRes = await fetch(`${baseUrl}/api/user/busyChessUsers`, {
+                    credentials: 'include'
+                })
+                if (busyRes.ok) {
+                    const { busyUserIds } = await busyRes.json()
+                    // Update busy users state with IDs from Redis
+                    setBusyUsers(busyUserIds || [])
+                    if (import.meta.env.DEV) {
+                        console.log('♟️ [ChessChallenge] Found busy users from Redis:', busyUserIds)
+                    }
+                }
+            } catch (err) {
+                console.warn('⚠️ [ChessChallenge] Failed to fetch busy users:', err)
+            }
+            
             // Get unique user IDs from both followers and following
             // Filter out null, undefined, and empty strings
             const allConnectionIds = [

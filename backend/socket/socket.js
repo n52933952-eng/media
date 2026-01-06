@@ -760,16 +760,10 @@ export const initializeSocket = async (app) => {
                 console.log(`⚠️ Accepter ${from} not found in socket map`)
             }
 
-            // Broadcast busy status - TARGETED to specific users only (not all users)
-            // This is critical for scalability - don't broadcast to 1M users!
-            if (challengerSocketId) {
-                io.to(challengerSocketId).emit("userBusyChess", { userId: from })
-                io.to(challengerSocketId).emit("userBusyChess", { userId: to })
-            }
-            if (accepterSocketId) {
-                io.to(accepterSocketId).emit("userBusyChess", { userId: from })
-                io.to(accepterSocketId).emit("userBusyChess", { userId: to })
-            }
+            // Broadcast busy status to ALL online users so they know these users are in a game
+            // This allows the chess challenge modal to filter out busy users
+            io.emit("userBusyChess", { userId: from })
+            io.emit("userBusyChess", { userId: to })
             
             // Initialize game state (starting position) in Redis
             if (roomId) {
@@ -950,12 +944,12 @@ export const initializeSocket = async (app) => {
             // Make users available again - TARGETED to specific users only (not all users)
             // This is critical for scalability - don't broadcast to 1M users!
             if (resignerSocketId) {
-                io.to(resignerSocketId).emit("userAvailableChess", { userId })
-                io.to(resignerSocketId).emit("userAvailableChess", { userId: to })
+                // Broadcast to all users that these players are now available
+                io.emit("userAvailableChess", { userId })
+                io.emit("userAvailableChess", { userId: to })
             }
             if (recipientSocketId) {
-                io.to(recipientSocketId).emit("userAvailableChess", { userId })
-                io.to(recipientSocketId).emit("userAvailableChess", { userId: to })
+                // Already broadcast above, but keep this for consistency
             }
         })
 
@@ -1019,12 +1013,12 @@ export const initializeSocket = async (app) => {
             // Make users available again - TARGETED to specific users only (not all users)
             // This is critical for scalability - don't broadcast to 1M users!
             if (player1SocketId) {
-                io.to(player1SocketId).emit("userAvailableChess", { userId: player1 })
-                io.to(player1SocketId).emit("userAvailableChess", { userId: player2 })
+                // Broadcast to all users that these players are now available
+                io.emit("userAvailableChess", { userId: player1 })
+                io.emit("userAvailableChess", { userId: player2 })
             }
             if (player2SocketId) {
-                io.to(player2SocketId).emit("userAvailableChess", { userId: player1 })
-                io.to(player2SocketId).emit("userAvailableChess", { userId: player2 })
+                // Already broadcast above, but keep this for consistency
             }
         })
 

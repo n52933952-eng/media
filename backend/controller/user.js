@@ -6,6 +6,7 @@ import mongoose from 'mongoose'
 import { v2 as cloudinary } from 'cloudinary'
 import { Readable } from 'stream'
 import { LIVE_CHANNELS } from '../config/channels.js'
+import * as redisService from '../services/redis.js'
 
 
 
@@ -624,6 +625,58 @@ export const getSuggestedUsers = async(req, res) => {
     catch(error) {
         console.error('Error in getSuggestedUsers:', error)
         res.status(500).json({ error: error.message || "Failed to get suggested users" })
+    }
+}
+
+// Get all users who are currently in active chess games
+export const getBusyChessUsers = async (req, res) => {
+    try {
+        redisService.ensureRedis()
+        const client = redisService.getRedis()
+        const busyUserIds = []
+        let cursor = '0'
+        let scanCount = 0
+        const maxIterations = 100
+        
+        do {
+            scanCount++
+            if (scanCount > maxIterations) {
+                console.error('❌ [getBusyChessUsers] Max iterations reached, breaking loop')
+                break
+            }
+            
+            const result = await client.scan(cursor, {
+                MATCH: 'activeChessGame:*',
+                COUNT: 100
+            })
+            
+            // Handle both array [cursor, keys] and object {cursor, keys} formats
+            let nextCursor, keys
+            if (Array.isArray(result)) {
+                nextCursor = result[0]
+                keys = result[1] || []
+            } else if (result && typeof result === 'object') {
+                nextCursor = result.cursor
+                keys = result.keys || []
+            } else {
+                break
+            }
+            
+            cursor = nextCursor.toString()
+            
+            // Extract user IDs from keys (format: activeChessGame:userId)
+            keys.forEach(key => {
+                const userId = key.replace('activeChessGame:', '')
+                if (userId) {
+                    busyUserIds.push(userId)
+                }
+            })
+        } while (cursor !== '0')
+        
+        res.status(200).json({ busyUserIds })
+    } catch (error) {
+        console.error('Error in getBusyChessUsers:', error)
+        res.status(500).json({ error: error.message || "Failed to get busy chess users" })
     }
 }
 
