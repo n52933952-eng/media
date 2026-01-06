@@ -85,7 +85,7 @@ export const sendMessaeg = async(req,res) => {
                   })
                 }
                   
-                const recipentSockedId = getRecipientSockedId(recipientId)
+                const recipentSockedId = await getRecipientSockedId(recipientId)
                 const io = getIO()
 
                 if(recipentSockedId && recipientId && io){
@@ -192,7 +192,7 @@ if (newMessage.replyTo) {
   })
 }
   
-const recipentSockedId = getRecipientSockedId(recipientId)
+const recipentSockedId = await getRecipientSockedId(recipientId)
 const io = getIO() // Get io instance
 
 if(recipentSockedId && recipientId && io){

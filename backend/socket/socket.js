@@ -258,7 +258,7 @@ export const initializeSocket = async (app) => {
             const fromBusy = await isUserBusy(from)
             if (userToCallBusy || fromBusy) {
                 // Notify sender that the call cannot be made (user is busy)
-                const senderData = userSocketMap[from]
+                const senderData = await getUserSocket(from)
                 const senderSocketId = senderData?.socketId
                 if (senderSocketId) {
                     io.to(senderSocketId).emit("callBusyError", { 
@@ -269,10 +269,11 @@ export const initializeSocket = async (app) => {
                 return
             }
 
-            const receiverData = userSocketMap[userToCall]
+            // Get socket data from Redis (source of truth)
+            const receiverData = await getUserSocket(userToCall)
             const receiverSocketId = receiverData?.socketId
 
-            const senderData = userSocketMap[from]
+            const senderData = await getUserSocket(from)
             const senderSocketId = senderData?.socketId
 
             if (receiverSocketId) {
@@ -307,8 +308,8 @@ export const initializeSocket = async (app) => {
         })
 
         // WebRTC: Handle answer call
-        socket.on("answerCall", (data) => {
-            const callerData = userSocketMap[data.to]
+        socket.on("answerCall", async (data) => {
+            const callerData = await getUserSocket(data.to)
             const callerSocketId = callerData?.socketId
             if (callerSocketId) {
                 io.to(callerSocketId).emit("callAccepted", data.signal)
@@ -317,8 +318,8 @@ export const initializeSocket = async (app) => {
         })
 
         // WebRTC: Handle ICE candidate
-        socket.on("iceCandidate", ({ userToCall, candidate, from }) => {
-            const receiverData = userSocketMap[userToCall]
+        socket.on("iceCandidate", async ({ userToCall, candidate, from }) => {
+            const receiverData = await getUserSocket(userToCall)
             const receiverSocketId = receiverData?.socketId
             if (receiverSocketId) {
                 io.to(receiverSocketId).emit("iceCandidate", { candidate, from })
@@ -327,10 +328,10 @@ export const initializeSocket = async (app) => {
 
         // WebRTC: Handle cancel call - match madechess implementation
         socket.on("cancelCall", async ({ conversationId, sender }) => {
-            const receiverData = userSocketMap[conversationId]
+            const receiverData = await getUserSocket(conversationId)
             const receiverSocketId = receiverData?.socketId
 
-            const senderData = userSocketMap[sender]
+            const senderData = await getUserSocket(sender)
             const senderSocketId = senderData?.socketId
 
             // Remove from active calls - try both possible call IDs - Delete from Redis
@@ -380,7 +381,7 @@ export const initializeSocket = async (app) => {
                 )
                 
                 // Emit to the sender (the userId is the sender of the messages)
-                const senderData = userSocketMap[userId]
+                const senderData = await getUserSocket(userId)
                 const senderSocketId = senderData?.socketId
                 if (senderSocketId) {
                     io.to(senderSocketId).emit("messagesSeen", { conversationId })
@@ -388,7 +389,7 @@ export const initializeSocket = async (app) => {
                 
                 // Also emit to the current user who marked messages as seen (to update their count)
                 if (currentUserId && currentUserId !== userId) {
-                    const currentUserData = userSocketMap[currentUserId]
+                    const currentUserData = await getUserSocket(currentUserId)
                     const currentUserSocketId = currentUserData?.socketId
                     if (currentUserSocketId) {
                         io.to(currentUserSocketId).emit("messagesSeen", { conversationId })
@@ -419,8 +420,8 @@ export const initializeSocket = async (app) => {
         })
 
         // Typing indicator - user started typing
-        socket.on("typingStart", ({ from, to, conversationId }) => {
-            const recipientData = userSocketMap[to]
+        socket.on("typingStart", async ({ from, to, conversationId }) => {
+            const recipientData = await getUserSocket(to)
             const recipientSocketId = recipientData?.socketId
             if (recipientSocketId) {
                 io.to(recipientSocketId).emit("userTyping", { userId: from, conversationId, isTyping: true })
@@ -428,8 +429,8 @@ export const initializeSocket = async (app) => {
         })
 
         // Typing indicator - user stopped typing
-        socket.on("typingStop", ({ from, to, conversationId }) => {
-            const recipientData = userSocketMap[to]
+        socket.on("typingStop", async ({ from, to, conversationId }) => {
+            const recipientData = await getUserSocket(to)
             const recipientSocketId = recipientData?.socketId
             if (recipientSocketId) {
                 io.to(recipientSocketId).emit("userTyping", { userId: from, conversationId, isTyping: false })
@@ -437,9 +438,10 @@ export const initializeSocket = async (app) => {
         })
 
         // Chess Challenge Events
-        socket.on("chessChallenge", ({ from, to, fromName, fromUsername, fromProfilePic }) => {
+        socket.on("chessChallenge", async ({ from, to, fromName, fromUsername, fromProfilePic }) => {
             console.log(`♟️ Chess challenge from ${from} to ${to}`)
-            const recipientSocketId = userSocketMap[to]?.socketId
+            const recipientData = await getUserSocket(to)
+            const recipientSocketId = recipientData?.socketId
             if (recipientSocketId) {
                 io.to(recipientSocketId).emit("chessChallenge", {
                     from,
@@ -456,8 +458,10 @@ export const initializeSocket = async (app) => {
             console.log(`♟️ Accepter (from): ${from} → BLACK`)
             
             // Determine colors (challenger is white, accepter is black)
-            const challengerSocketId = userSocketMap[to]?.socketId
-            const accepterSocketId = userSocketMap[from]?.socketId
+            const challengerData = await getUserSocket(to)
+            const challengerSocketId = challengerData?.socketId
+            const accepterData = await getUserSocket(from)
+            const accepterSocketId = accepterData?.socketId
 
             // Create chess room and join both players to Socket.IO room
             if (roomId) {
@@ -543,9 +547,10 @@ export const initializeSocket = async (app) => {
             }, 500) // Delay to ensure all socket connections are registered in userSocketMap
         })
 
-        socket.on("declineChessChallenge", ({ from, to }) => {
+        socket.on("declineChessChallenge", async ({ from, to }) => {
             console.log(`♟️ Chess challenge declined by ${from}`)
-            const challengerSocketId = userSocketMap[to]?.socketId
+            const challengerData = await getUserSocket(to)
+            const challengerSocketId = challengerData?.socketId
             if (challengerSocketId) {
                 io.to(challengerSocketId).emit("chessDeclined", { from })
             }
@@ -630,7 +635,8 @@ export const initializeSocket = async (app) => {
             }
             
             // Emit to the opponent (specific user)
-            const recipientSocketId = userSocketMap[to]?.socketId
+            const recipientData = await getUserSocket(to)
+            const recipientSocketId = recipientData?.socketId
             if (recipientSocketId) {
                 console.log(`♟️ Forwarding move to ${to} (socket: ${recipientSocketId})`)
                 // Send move in same format as madechess: { move: moveObject }
@@ -655,8 +661,10 @@ export const initializeSocket = async (app) => {
         })
 
         socket.on("resignChess", async ({ roomId, to }) => {
-            const recipientSocketId = userSocketMap[to]?.socketId
-            const resignerSocketId = userSocketMap[socket.handshake.query.userId]?.socketId
+            const recipientData = await getUserSocket(to)
+            const recipientSocketId = recipientData?.socketId
+            const resignerData = await getUserSocket(socket.handshake.query.userId)
+            const resignerSocketId = resignerData?.socketId
             const userId = socket.handshake.query.userId
             
             if (recipientSocketId) {
@@ -708,8 +716,10 @@ export const initializeSocket = async (app) => {
         socket.on("chessGameEnd", async ({ roomId, player1, player2, reason }) => {
             // The player who emitted this event is leaving or game ended normally
             const currentUserId = socket.handshake.query.userId
-            const player1SocketId = userSocketMap[player1]?.socketId
-            const player2SocketId = userSocketMap[player2]?.socketId
+            const player1Data = await getUserSocket(player1)
+            const player1SocketId = player1Data?.socketId
+            const player2Data = await getUserSocket(player2)
+            const player2SocketId = player2Data?.socketId
             
             // Determine which player left and who the other player is
             const leavingPlayerSocketId = currentUserId === player1 ? player1SocketId : player2SocketId
@@ -894,8 +904,8 @@ export const initializeSocket = async (app) => {
     return { io, server }
 }
 
-export const getRecipientSockedId = (recipientId) => {
-    const userData = userSocketMap[recipientId]
+export const getRecipientSockedId = async (recipientId) => {
+    const userData = await getUserSocket(recipientId)
     return userData ? userData.socketId : null
 }
 
