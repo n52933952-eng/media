@@ -107,22 +107,16 @@ const SuggestedUsers = ({ onUserFollowed }) => {
     }
   }, [user?._id, fetchSuggestedUsers, fetchFootballAccount])
 
-  // Remove user from suggestions immediately when followed
+  // Remove user from suggestions immediately when followed (no page refresh needed)
   const handleUserFollowed = (followedUserId) => {
     setSuggestedUsers(prev => prev.filter(u => u._id !== followedUserId))
+    // Also remove from search results if it's there
+    setSearchResults(prev => prev.filter(u => u._id !== followedUserId))
   }
 
-  // Refresh suggestions when user follows/unfollows (triggered by SuggestedUser component)
-  useEffect(() => {
-    if (user?._id && user?.following !== undefined) {
-      // Delay to ensure backend database has been updated
-      const timer = setTimeout(() => {
-        fetchSuggestedUsers()
-      }, 1000) // Reduced delay - backend is fast
-      return () => clearTimeout(timer)
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.following?.length]) // Refresh when following list changes
+  // REMOVED: Auto-refresh on following change - causes page refresh and jumping
+  // The handleUserFollowed function above already removes the user immediately
+  // No need to refetch the entire list
 
   // Filter out already followed users AND system accounts (Football, and all channel accounts)
   // Check both string and ObjectId comparison
@@ -171,6 +165,8 @@ const SuggestedUsers = ({ onUserFollowed }) => {
       borderColor={borderColor}
       maxW="280px"
       ml="auto"
+      transition="all 0.2s ease"
+      willChange="auto"
     >
       {/* Search Input */}
       <InputGroup mb={4}>
@@ -196,28 +192,32 @@ const SuggestedUsers = ({ onUserFollowed }) => {
               <Spinner size="sm" />
             </Flex>
           ) : searchResults.length > 0 ? (
-            <Flex direction="column" gap={2}>
-              {searchResults
-                .filter(searchUser => {
-                  // Filter out channel accounts from search results too
-                  if (channelUsernames.includes(searchUser.username)) {
-                    return false
-                  }
-                  return !user?.following?.includes(searchUser._id)
-                })
-                .map((searchUser) => (
-                  <SuggestedUser 
-                    key={searchUser._id} 
-                    user={searchUser}
-                    onFollowed={handleUserFollowed}
-                    onUserFollowed={onUserFollowed}
-                  />
-                ))}
-            </Flex>
+            <Box minH="200px" transition="height 0.2s ease">
+              <Flex direction="column" gap={2}>
+                {searchResults
+                  .filter(searchUser => {
+                    // Filter out channel accounts from search results too
+                    if (channelUsernames.includes(searchUser.username)) {
+                      return false
+                    }
+                    return !user?.following?.includes(searchUser._id)
+                  })
+                  .map((searchUser) => (
+                    <SuggestedUser 
+                      key={searchUser._id} 
+                      user={searchUser}
+                      onFollowed={handleUserFollowed}
+                      onUserFollowed={onUserFollowed}
+                    />
+                  ))}
+              </Flex>
+            </Box>
           ) : (
-            <Text fontSize="sm" color={textColor}>
-              No users found
-            </Text>
+            <Box minH="100px" display="flex" alignItems="center">
+              <Text fontSize="sm" color={textColor}>
+                No users found
+              </Text>
+            </Box>
           )}
         </Box>
       )}
@@ -239,20 +239,24 @@ const SuggestedUsers = ({ onUserFollowed }) => {
               </Flex>
             </Box>
           ) : filteredSuggestedUsers.length > 0 ? (
-            <Flex direction="column" gap={1}>
-              {filteredSuggestedUsers.map((suggestedUser) => (
-                <SuggestedUser 
-                  key={suggestedUser._id} 
-                  user={suggestedUser}
-                  onFollowed={handleUserFollowed}
-                  onUserFollowed={onUserFollowed}
-                />
-              ))}
-            </Flex>
+            <Box minH="200px" transition="height 0.2s ease">
+              <Flex direction="column" gap={1}>
+                {filteredSuggestedUsers.map((suggestedUser) => (
+                  <SuggestedUser 
+                    key={suggestedUser._id} 
+                    user={suggestedUser}
+                    onFollowed={handleUserFollowed}
+                    onUserFollowed={onUserFollowed}
+                  />
+                ))}
+              </Flex>
+            </Box>
           ) : (
-            <Text fontSize="sm" color={textColor}>
-              No suggestions available
-            </Text>
+            <Box minH="200px" display="flex" alignItems="center">
+              <Text fontSize="sm" color={textColor}>
+                No suggestions available
+              </Text>
+            </Box>
           )}
         </Box>
       )}

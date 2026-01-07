@@ -92,14 +92,21 @@ const SuggestedUser = ({ user, onFollowed, onUserFollowed }) => {
   }
 
   return (
-    <Flex gap={2} justifyContent="space-between" alignItems="center" mb={3}>
-      <Flex gap={2} as={Link} to={`/${user.username}`} flex={1}>
-        <Avatar src={user.profilePic} name={user.name || user.username} size="sm" />
-        <Box>
-          <Text fontSize="sm" fontWeight="bold">
+    <Flex 
+      gap={2} 
+      justifyContent="space-between" 
+      alignItems="center" 
+      mb={3}
+      transition="opacity 0.2s ease, transform 0.2s ease"
+      _hover={{ opacity: 0.9 }}
+    >
+      <Flex gap={2} as={Link} to={`/${user.username}`} flex={1} minW={0}>
+        <Avatar src={user.profilePic} name={user.name || user.username} size="sm" flexShrink={0} />
+        <Box minW={0} flex={1}>
+          <Text fontSize="sm" fontWeight="bold" noOfLines={1}>
             {user.username}
           </Text>
-          <Text color="gray.500" fontSize="xs">
+          <Text color="gray.500" fontSize="xs" noOfLines={1}>
             {user.name}
           </Text>
         </Box>
@@ -112,6 +119,8 @@ const SuggestedUser = ({ user, onFollowed, onUserFollowed }) => {
         onClick={handleFollow}
         isLoading={updating}
         isDisabled={updating}
+        flexShrink={0}
+        transition="all 0.2s ease"
       >
         {following ? 'Unfollow' : 'Follow'}
       </Button>
