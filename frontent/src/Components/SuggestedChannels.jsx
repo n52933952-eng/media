@@ -29,12 +29,48 @@ const SuggestedChannels = ({ onUserFollowed }) => {
     const secondaryTextColor = useColorModeValue('gray.600', 'gray.400')
     const hoverBg = useColorModeValue('gray.50', 'gray.700')
     
-    // Fetch Football channel account and all live channels (only on mount, not on user changes)
+    // Fetch Football channel account and all live channels (with caching to avoid unnecessary refetches)
     useEffect(() => {
-        const fetchData = async () => {
+        const fetchData = async (useCache = true) => {
             try {
-                setLoading(true)
                 const baseUrl = import.meta.env.PROD ? window.location.origin : "http://localhost:5000"
+                const CACHE_KEY = 'suggestedChannelsCache'
+                const CACHE_DURATION = 10 * 60 * 1000 // 10 minutes
+                
+                // Check cache first
+                if (useCache) {
+                    try {
+                        const cached = localStorage.getItem(CACHE_KEY)
+                        if (cached) {
+                            const cacheData = JSON.parse(cached)
+                            const now = Date.now()
+                            
+                            // Use cache if it's less than 10 minutes old
+                            if (cacheData.timestamp && (now - cacheData.timestamp < CACHE_DURATION)) {
+                                console.log('📦 [SuggestedChannels] Using cached data')
+                                if (cacheData.footballAccount) {
+                                    setFootballAccount(cacheData.footballAccount)
+                                    setFootballPostId(cacheData.footballPostId)
+                                }
+                                if (cacheData.channels) {
+                                    setChannels(cacheData.channels)
+                                }
+                                setLoading(false)
+                                
+                                // Fetch fresh data in background (don't show loading)
+                                fetchData(false)
+                                return
+                            }
+                        }
+                    } catch (error) {
+                        console.error('Error reading cache:', error)
+                    }
+                }
+                
+                // Fetch fresh data
+                if (!useCache || !loading) {
+                    setLoading(true)
+                }
                 
                 // Fetch Football account
                 const footballRes = await fetch(
@@ -42,6 +78,8 @@ const SuggestedChannels = ({ onUserFollowed }) => {
                     { credentials: 'include' }
                 )
                 const footballData = await footballRes.json()
+                
+                let footballPostIdValue = null
                 
                 if (footballRes.ok && footballData) {
                     setFootballAccount(footballData)
@@ -56,7 +94,8 @@ const SuggestedChannels = ({ onUserFollowed }) => {
                         if (postsRes.ok && postsData.posts && postsData.posts.length > 0) {
                             // Get the latest post (first one, sorted by date)
                             const latestPost = postsData.posts[0]
-                            setFootballPostId(latestPost._id)
+                            footballPostIdValue = latestPost._id
+                            setFootballPostId(footballPostIdValue)
                         }
                     } catch (error) {
                         console.error('Error fetching Football post:', error)
@@ -72,6 +111,22 @@ const SuggestedChannels = ({ onUserFollowed }) => {
                 if (channelsRes.ok && channelsData.channels) {
                     setChannels(channelsData.channels)
                 }
+                
+                // Cache the data after fetching
+                if (footballRes.ok && footballData && channelsRes.ok && channelsData.channels) {
+                    try {
+                        const cacheData = {
+                            footballAccount: footballData,
+                            footballPostId: footballPostIdValue,
+                            channels: channelsData.channels,
+                            timestamp: Date.now()
+                        }
+                        localStorage.setItem(CACHE_KEY, JSON.stringify(cacheData))
+                        console.log('💾 [SuggestedChannels] Data cached')
+                    } catch (error) {
+                        console.error('Error caching data:', error)
+                    }
+                }
             } catch (error) {
                 console.error('Error fetching data:', error)
             } finally {
@@ -79,7 +134,7 @@ const SuggestedChannels = ({ onUserFollowed }) => {
             }
         }
         
-        fetchData()
+        fetchData(true) // Start with cache check
     }, []) // Only run on mount, not when user changes
     
     // Update isFollowing state when user.following changes (without refetching everything)
