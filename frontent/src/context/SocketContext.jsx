@@ -6,6 +6,7 @@ import { useToast } from '@chakra-ui/react';
 import { UserContext } from './UserContext';
 import ringTone from '../assets/ring.mp3'; // Import ring tone
 import messageSound from '../assets/frontend_src_assets_sounds_message.mp3'; // Import message notification sound
+import chessTone from '../assets/chesstone.mp3'; // Import chess challenge tone
 
 export const SocketContext = createContext();
 
@@ -33,6 +34,7 @@ export const SocketContextProvider = ({ children }) => {
   const peerRef = useRef();
   const ringtoneAudio = useRef(new Audio(ringTone)); // Audio for incoming call ringtone
   const messageSoundAudio = useRef(new Audio(messageSound)); // Audio for new unread message notification
+  const chessToneAudio = useRef(new Audio(chessTone)); // Audio for chess challenge notification
   const selectedConversationIdRef = useRef(null); // Track which conversation is currently open
   
   // Ensure audio is ready to play (browser autoplay policy)
@@ -43,17 +45,29 @@ export const SocketContextProvider = ({ children }) => {
     if (ringtoneAudio.current) {
       ringtoneAudio.current.load();
     }
+    if (chessToneAudio.current) {
+      chessToneAudio.current.load();
+    }
     
     let isUnlocked = false
     
     // Unlock audio on user interaction (browser security requirement)
     const unlockAudio = () => {
-      if (isUnlocked || !messageSoundAudio.current) return
+      if (isUnlocked) return
       
-      messageSoundAudio.current.play().then(() => {
-        messageSoundAudio.current.pause();
-        messageSoundAudio.current.currentTime = 0;
-        isUnlocked = true
+      // Try to unlock all audio files
+      const audioFiles = [messageSoundAudio.current, ringtoneAudio.current, chessToneAudio.current].filter(Boolean);
+      
+      Promise.all(audioFiles.map(audio => {
+        if (!audio) return Promise.resolve();
+        return audio.play().then(() => {
+          audio.pause();
+          audio.currentTime = 0;
+        }).catch(() => {
+          // Still locked, browser needs user interaction
+        });
+      })).then(() => {
+        isUnlocked = true;
         console.log('✅ Audio unlocked - notification sounds ready');
       }).catch(() => {
         // Still locked, browser needs user interaction
@@ -686,10 +700,23 @@ export const SocketContextProvider = ({ children }) => {
         fromProfilePic: data.fromProfilePic,
         isReceivingChallenge: true,
       });
+
+      // Play chess challenge tone
+      if (chessToneAudio.current) {
+        chessToneAudio.current.loop = true; // Loop until answered/declined
+        chessToneAudio.current.play().catch(err => {
+          console.log('Chess tone play error (browser may require user interaction):', err);
+        });
+      }
     };
 
     const handleChessDeclined = () => {
       console.log('♟️ Chess challenge declined');
+      // Stop chess tone when challenge is declined
+      if (chessToneAudio.current) {
+        chessToneAudio.current.pause();
+        chessToneAudio.current.currentTime = 0;
+      }
       setChessChallenge(null);
     };
 
@@ -705,6 +732,12 @@ export const SocketContextProvider = ({ children }) => {
   // Accept chess challenge
   const acceptChessChallenge = () => {
     if (!socket || !chessChallenge) return;
+
+    // Stop chess tone when accepting
+    if (chessToneAudio.current) {
+      chessToneAudio.current.pause();
+      chessToneAudio.current.currentTime = 0;
+    }
 
     const roomId = `chess_${chessChallenge.from}_${user._id}_${Date.now()}`;
     const acceptData = {
@@ -728,6 +761,12 @@ export const SocketContextProvider = ({ children }) => {
   // Decline chess challenge
   const declineChessChallenge = () => {
     if (!socket || !chessChallenge) return;
+
+    // Stop chess tone when declining
+    if (chessToneAudio.current) {
+      chessToneAudio.current.pause();
+      chessToneAudio.current.currentTime = 0;
+    }
 
     socket.emit('declineChessChallenge', {
       from: user._id,
