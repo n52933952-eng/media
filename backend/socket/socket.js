@@ -824,6 +824,17 @@ export const initializeSocket = async (app) => {
                 // ALWAYS send current game state when joining/rejoining (for catch-up)
                 // This ensures spectators see current position even if they navigate away and come back
                 const gameState = await getChessGameState(roomId)
+                
+                // Extract player IDs from roomId (format: chess_player1_player2_timestamp)
+                // player1 = challenger (WHITE), player2 = accepter (BLACK)
+                let player1Id = null
+                let player2Id = null
+                const roomIdParts = roomId.split('_')
+                if (roomIdParts.length >= 3) {
+                    player1Id = roomIdParts[1] // Challenger (WHITE)
+                    player2Id = roomIdParts[2] // Accepter (BLACK)
+                }
+                
                 if (gameState) {
                     console.log(`📤 Sending game state to spectator for catch-up:`, {
                         roomId,
@@ -831,14 +842,18 @@ export const initializeSocket = async (app) => {
                         capturedWhite: gameState.capturedWhite?.length || 0,
                         capturedBlack: gameState.capturedBlack?.length || 0,
                         lastUpdated: new Date(gameState.lastUpdated).toISOString(),
-                        isRejoin: wasAlreadyInRoom
+                        isRejoin: wasAlreadyInRoom,
+                        player1Id,
+                        player2Id
                     })
                     // Use io.to() to ensure it reaches the spectator socket
                     io.to(socket.id).emit("chessGameState", {
                         roomId,
                         fen: gameState.fen,
                         capturedWhite: gameState.capturedWhite || [],
-                        capturedBlack: gameState.capturedBlack || []
+                        capturedBlack: gameState.capturedBlack || [],
+                        player1Id, // WHITE player (challenger)
+                        player2Id  // BLACK player (accepter)
                     })
                 } else {
                     console.log(`⚠️ No game state found for room ${roomId} - game may not have started yet`)
@@ -847,7 +862,9 @@ export const initializeSocket = async (app) => {
                         roomId,
                         fen: "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
                         capturedWhite: [],
-                        capturedBlack: []
+                        capturedBlack: [],
+                        player1Id, // WHITE player (challenger)
+                        player2Id  // BLACK player (accepter)
                     })
                 }
             }

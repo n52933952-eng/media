@@ -24,6 +24,9 @@ const ChessGamePage = () => {
     const [opponent, setOpponent] = useState(null)
     const [roomId, setRoomId] = useState(null)
     const [isSpectator, setIsSpectator] = useState(false)
+    // For spectator mode: store both players
+    const [player1, setPlayer1] = useState(null) // WHITE player (challenger)
+    const [player2, setPlayer2] = useState(null) // BLACK player (accepter)
     
     // Read orientation same way ChessTable does in madechess: localStorage first, then state
     // Line 201 in madechess: const storedOrientation = localStorage.getItem("chessOrientation") || orientation;
@@ -222,6 +225,32 @@ const ChessGamePage = () => {
                         setCapturedBlack(state.capturedBlack)
                         localStorage.setItem("capturedBlack", JSON.stringify(state.capturedBlack))
                     }
+                    
+                    // For spectators: fetch both players' data from pending state
+                    if (isSpectator && state.player1Id && state.player2Id) {
+                        const fetchPlayer = async (playerId, isPlayer1) => {
+                            try {
+                                const baseUrl = import.meta.env.PROD ? window.location.origin : "http://localhost:5000"
+                                const res = await fetch(`${baseUrl}/api/user/getUserPro/${playerId}`, {
+                                    credentials: 'include'
+                                })
+                                if (res.ok) {
+                                    const playerData = await res.json()
+                                    if (isPlayer1) {
+                                        setPlayer1(playerData)
+                                    } else {
+                                        setPlayer2(playerData)
+                                    }
+                                    console.log(`✅ [ChessGamePage] Fetched ${isPlayer1 ? 'player1' : 'player2'} from pending state:`, playerData.username)
+                                }
+                            } catch (error) {
+                                console.error(`❌ [ChessGamePage] Error fetching ${isPlayer1 ? 'player1' : 'player2'}:`, error)
+                            }
+                        }
+                        fetchPlayer(state.player1Id, true)  // WHITE player
+                        fetchPlayer(state.player2Id, false) // BLACK player
+                    }
+                    
                     pendingGameStateRef.current = null
                     console.log('✅ [ChessGamePage] Applied pending game state')
                 } catch (error) {
@@ -693,7 +722,9 @@ const ChessGamePage = () => {
                             roomId: data.roomId,
                             fen: data.fen,
                             capturedWhite: data.capturedWhite || [],
-                            capturedBlack: data.capturedBlack || []
+                            capturedBlack: data.capturedBlack || [],
+                            player1Id: data.player1Id,
+                            player2Id: data.player2Id
                         }
                         return
                     }
@@ -738,6 +769,38 @@ const ChessGamePage = () => {
                         if (data.capturedBlack && Array.isArray(data.capturedBlack)) {
                             setCapturedBlack(data.capturedBlack)
                             localStorage.setItem("capturedBlack", JSON.stringify(data.capturedBlack))
+                        }
+                        
+                        // For spectators: fetch both players' data
+                        if ((isSpectatorMode || isSpectator) && data.player1Id && data.player2Id) {
+                            console.log('👁️ [ChessGamePage] Fetching player data for spectator mode:', {
+                                player1Id: data.player1Id,
+                                player2Id: data.player2Id
+                            })
+                            
+                            // Fetch player1 (WHITE/challenger) and player2 (BLACK/accepter)
+                            const fetchPlayer = async (playerId, isPlayer1) => {
+                                try {
+                                    const baseUrl = import.meta.env.PROD ? window.location.origin : "http://localhost:5000"
+                                    const res = await fetch(`${baseUrl}/api/user/getUserPro/${playerId}`, {
+                                        credentials: 'include'
+                                    })
+                                    if (res.ok) {
+                                        const playerData = await res.json()
+                                        if (isPlayer1) {
+                                            setPlayer1(playerData)
+                                        } else {
+                                            setPlayer2(playerData)
+                                        }
+                                        console.log(`✅ [ChessGamePage] Fetched ${isPlayer1 ? 'player1' : 'player2'} data:`, playerData.username)
+                                    }
+                                } catch (error) {
+                                    console.error(`❌ [ChessGamePage] Error fetching ${isPlayer1 ? 'player1' : 'player2'}:`, error)
+                                }
+                            }
+                            
+                            fetchPlayer(data.player1Id, true)  // WHITE player
+                            fetchPlayer(data.player2Id, false) // BLACK player
                         }
                         
                         if (isPlayerRejoining) {
@@ -1037,67 +1100,129 @@ const ChessGamePage = () => {
                         order={{ base: 2, md: 1 }}
                         flexShrink={0}
                     >
-                        {/* Top: Opponent */}
-                        <Box>
-                            <Flex justify="center" mb={2}>
-                                <Avatar
-                                    src={opponent?.profilePic}
-                                    name={opponent?.name}
-                                    size="sm"
-                                />
-                            </Flex>
-                            <Text fontSize="xs" textAlign="center" color={textColor} mb={2} fontWeight="bold">
-                                {opponent?.username}
-                            </Text>
-                            <Text fontSize="xs" textAlign="center" color="gray.500" mb={2}>
-                                {/* Opponent is always the opposite color of user */}
-                                {storedOrientation === 'white' ? 'Black ⚫' : 'White ⚪'}
-                            </Text>
-                            <Flex wrap="wrap" justify="center" gap={1} minH="60px">
-                                {/* If user is white, opponent is black - show pieces black captured (white pieces) = capturedWhite */}
-                                {/* If user is black, opponent is white - show pieces white captured (black pieces) = capturedBlack */}
-                                {(storedOrientation === 'white' ? capturedWhite : capturedBlack).length > 0 ? (
-                                    (storedOrientation === 'white' ? capturedWhite : capturedBlack).map((p, i) => (
-                                        <Text key={i} fontSize="2xl">
-                                            {getPieceUnicode(p, storedOrientation === 'white' ? 'white' : 'black')}
-                                        </Text>
-                                    ))
-                                ) : (
-                                    <Text fontSize="xs" color="gray.500">No pieces</Text>
-                                )}
-                            </Flex>
-                        </Box>
+                        {isSpectator ? (
+                            <>
+                                {/* Top: Player 1 (WHITE/Challenger) */}
+                                <Box>
+                                    <Flex justify="center" mb={2}>
+                                        <Avatar
+                                            src={player1?.profilePic}
+                                            name={player1?.name || player1?.username}
+                                            size="sm"
+                                        />
+                                    </Flex>
+                                    <Text fontSize="xs" textAlign="center" color={textColor} mb={2} fontWeight="bold">
+                                        {player1?.username || 'Loading...'}
+                                    </Text>
+                                    <Text fontSize="xs" textAlign="center" color="gray.500" mb={2}>
+                                        White ⚪
+                                    </Text>
+                                    <Flex wrap="wrap" justify="center" gap={1} minH="60px">
+                                        {capturedWhite.length > 0 ? (
+                                            capturedWhite.map((p, i) => (
+                                                <Text key={i} fontSize="2xl">
+                                                    {getPieceUnicode(p, 'white')}
+                                                </Text>
+                                            ))
+                                        ) : (
+                                            <Text fontSize="xs" color="gray.500">No pieces</Text>
+                                        )}
+                                    </Flex>
+                                </Box>
 
-                        {/* Bottom: You */}
-                        <Box>
-                            <Flex justify="center" mb={2}>
-                                <Avatar
-                                    src={user?.profilePic}
-                                    name={user?.name}
-                                    size="sm"
-                                />
-                            </Flex>
-                            <Text fontSize="xs" textAlign="center" color={textColor} mb={2} fontWeight="bold">
-                                {user?.username} (You)
-                            </Text>
-                            <Text fontSize="xs" textAlign="center" color="gray.500" mb={2}>
-                                {/* User's color is always storedOrientation */}
-                                {storedOrientation === 'white' ? 'White ⚪' : 'Black ⚫'}
-                            </Text>
-                            <Flex wrap="wrap" justify="center" gap={1} minH="60px">
-                                {/* If user is white, show pieces white captured (black pieces) = capturedBlack */}
-                                {/* If user is black, show pieces black captured (white pieces) = capturedWhite */}
-                                {(storedOrientation === 'white' ? capturedBlack : capturedWhite).length > 0 ? (
-                                    (storedOrientation === 'white' ? capturedBlack : capturedWhite).map((p, i) => (
-                                        <Text key={i} fontSize="2xl">
-                                            {getPieceUnicode(p, storedOrientation === 'white' ? 'black' : 'white')}
-                                        </Text>
-                                    ))
-                                ) : (
-                                    <Text fontSize="xs" color="gray.500">No pieces</Text>
-                                )}
-                            </Flex>
-                        </Box>
+                                {/* Bottom: Player 2 (BLACK/Accepter) */}
+                                <Box>
+                                    <Flex justify="center" mb={2}>
+                                        <Avatar
+                                            src={player2?.profilePic}
+                                            name={player2?.name || player2?.username}
+                                            size="sm"
+                                        />
+                                    </Flex>
+                                    <Text fontSize="xs" textAlign="center" color={textColor} mb={2} fontWeight="bold">
+                                        {player2?.username || 'Loading...'}
+                                    </Text>
+                                    <Text fontSize="xs" textAlign="center" color="gray.500" mb={2}>
+                                        Black ⚫
+                                    </Text>
+                                    <Flex wrap="wrap" justify="center" gap={1} minH="60px">
+                                        {capturedBlack.length > 0 ? (
+                                            capturedBlack.map((p, i) => (
+                                                <Text key={i} fontSize="2xl">
+                                                    {getPieceUnicode(p, 'black')}
+                                                </Text>
+                                            ))
+                                        ) : (
+                                            <Text fontSize="xs" color="gray.500">No pieces</Text>
+                                        )}
+                                    </Flex>
+                                </Box>
+                            </>
+                        ) : (
+                            <>
+                                {/* Top: Opponent */}
+                                <Box>
+                                    <Flex justify="center" mb={2}>
+                                        <Avatar
+                                            src={opponent?.profilePic}
+                                            name={opponent?.name}
+                                            size="sm"
+                                        />
+                                    </Flex>
+                                    <Text fontSize="xs" textAlign="center" color={textColor} mb={2} fontWeight="bold">
+                                        {opponent?.username}
+                                    </Text>
+                                    <Text fontSize="xs" textAlign="center" color="gray.500" mb={2}>
+                                        {/* Opponent is always the opposite color of user */}
+                                        {storedOrientation === 'white' ? 'Black ⚫' : 'White ⚪'}
+                                    </Text>
+                                    <Flex wrap="wrap" justify="center" gap={1} minH="60px">
+                                        {/* If user is white, opponent is black - show pieces black captured (white pieces) = capturedWhite */}
+                                        {/* If user is black, opponent is white - show pieces white captured (black pieces) = capturedBlack */}
+                                        {(storedOrientation === 'white' ? capturedWhite : capturedBlack).length > 0 ? (
+                                            (storedOrientation === 'white' ? capturedWhite : capturedBlack).map((p, i) => (
+                                                <Text key={i} fontSize="2xl">
+                                                    {getPieceUnicode(p, storedOrientation === 'white' ? 'white' : 'black')}
+                                                </Text>
+                                            ))
+                                        ) : (
+                                            <Text fontSize="xs" color="gray.500">No pieces</Text>
+                                        )}
+                                    </Flex>
+                                </Box>
+
+                                {/* Bottom: You */}
+                                <Box>
+                                    <Flex justify="center" mb={2}>
+                                        <Avatar
+                                            src={user?.profilePic}
+                                            name={user?.name}
+                                            size="sm"
+                                        />
+                                    </Flex>
+                                    <Text fontSize="xs" textAlign="center" color={textColor} mb={2} fontWeight="bold">
+                                        {user?.username} (You)
+                                    </Text>
+                                    <Text fontSize="xs" textAlign="center" color="gray.500" mb={2}>
+                                        {/* User's color is always storedOrientation */}
+                                        {storedOrientation === 'white' ? 'White ⚪' : 'Black ⚫'}
+                                    </Text>
+                                    <Flex wrap="wrap" justify="center" gap={1} minH="60px">
+                                        {/* If user is white, show pieces white captured (black pieces) = capturedBlack */}
+                                        {/* If user is black, show pieces black captured (white pieces) = capturedWhite */}
+                                        {(storedOrientation === 'white' ? capturedBlack : capturedWhite).length > 0 ? (
+                                            (storedOrientation === 'white' ? capturedBlack : capturedWhite).map((p, i) => (
+                                                <Text key={i} fontSize="2xl">
+                                                    {getPieceUnicode(p, storedOrientation === 'white' ? 'black' : 'white')}
+                                                </Text>
+                                            ))
+                                        ) : (
+                                            <Text fontSize="xs" color="gray.500">No pieces</Text>
+                                        )}
+                                    </Flex>
+                                </Box>
+                            </>
+                        )}
                     </Box>
                 )}
 
