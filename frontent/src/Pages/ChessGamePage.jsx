@@ -17,7 +17,7 @@ const ChessGamePage = () => {
     const { opponentId } = useParams()
     const [searchParams] = useSearchParams()
     const navigate = useNavigate()
-    const { socket } = useContext(SocketContext)
+    const { socket, endChessGameOnNavigate } = useContext(SocketContext)
     const { user, orientation, setOrientation } = useContext(UserContext)
     const showToast = useShowToast()
 
@@ -1064,6 +1064,25 @@ const ChessGamePage = () => {
             window.removeEventListener('beforeunload', handleBeforeUnload)
         }
     }, [])
+    
+    // Handle browser back button - cancel game when navigating away
+    useEffect(() => {
+        const handlePopState = (e) => {
+            // Check if game is live
+            const gameLive = localStorage.getItem('gameLive') === 'true'
+            if (gameLive && endChessGameOnNavigate) {
+                console.log('⬅️ [ChessGamePage] Browser back button pressed - ending chess game')
+                endChessGameOnNavigate()
+            }
+        }
+        
+        // Listen for popstate event (browser back/forward button)
+        window.addEventListener('popstate', handlePopState)
+        
+        return () => {
+            window.removeEventListener('popstate', handlePopState)
+        }
+    }, [endChessGameOnNavigate])
     
     // Cleanup when user navigates away to a DIFFERENT route (not page refresh)
     // This only runs when React Router navigates away, not on page refresh
