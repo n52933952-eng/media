@@ -112,6 +112,37 @@ export const getActivities = async (req, res) => {
     }
 }
 
+// Delete a specific activity (for manual removal by user)
+export const deleteActivity = async (req, res) => {
+    try {
+        const { activityId } = req.params
+        const userId = req.user._id
+
+        // Find the activity
+        const activity = await Activity.findById(activityId)
+        if (!activity) {
+            return res.status(404).json({ error: 'Activity not found' })
+        }
+
+        // Check if user is following the activity creator (they can only delete activities from users they follow)
+        const user = await User.findById(userId).select('following')
+        const followingIds = user?.following?.map(f => f.toString()) || []
+        const activityUserId = activity.userId?.toString() || activity.userId
+
+        if (!followingIds.includes(activityUserId)) {
+            return res.status(403).json({ error: 'You can only delete activities from users you follow' })
+        }
+
+        // Delete the activity
+        await Activity.findByIdAndDelete(activityId)
+
+        res.status(200).json({ message: 'Activity deleted successfully' })
+    } catch (error) {
+        console.error('Error deleting activity:', error)
+        res.status(500).json({ error: error.message })
+    }
+}
+
 // Cleanup old activities (older than 7 hours) - call this periodically
 export const cleanupOldActivities = async () => {
     try {

@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useContext } from 'react'
-import { Box, Flex, Text, Avatar, VStack, HStack, Spinner, useColorModeValue, Divider } from '@chakra-ui/react'
+import { Box, Flex, Text, Avatar, VStack, HStack, Spinner, useColorModeValue, Divider, IconButton } from '@chakra-ui/react'
 import { useNavigate } from 'react-router-dom'
 import { SocketContext } from '../context/SocketContext'
 import { formatDistanceToNow } from 'date-fns'
+import { CloseIcon } from '@chakra-ui/icons'
 
 const ActivityFeed = () => {
     const { socket } = useContext(SocketContext) || {}
@@ -117,6 +118,29 @@ const ActivityFeed = () => {
         }
     }
 
+    const handleDeleteActivity = async (activityId, e) => {
+        e.stopPropagation() // Prevent triggering the click event
+        
+        try {
+            const res = await fetch(
+                `${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/activity/${activityId}`,
+                {
+                    method: 'DELETE',
+                    credentials: 'include'
+                }
+            )
+
+            if (res.ok) {
+                // Remove from state immediately
+                setActivities(prev => prev.filter(activity => activity._id !== activityId))
+            } else {
+                console.error('Failed to delete activity')
+            }
+        } catch (error) {
+            console.error('Error deleting activity:', error)
+        }
+    }
+
     if (loading) {
         return (
             <Box 
@@ -228,7 +252,25 @@ const ActivityFeed = () => {
                                 cursor="pointer"
                                 onClick={() => handleActivityClick(activity)}
                                 transition="all 0.2s"
+                                position="relative"
                             >
+                                <IconButton
+                                    icon={<CloseIcon />}
+                                    size="xs"
+                                    variant="ghost"
+                                    aria-label="Delete activity"
+                                    onClick={(e) => handleDeleteActivity(activity._id, e)}
+                                    color={secondaryTextColor}
+                                    opacity={0.6}
+                                    _hover={{ 
+                                        color: 'red.500', 
+                                        bg: useColorModeValue('red.50', 'red.900'),
+                                        opacity: 1 
+                                    }}
+                                    flexShrink={0}
+                                    minW="20px"
+                                    h="20px"
+                                />
                                 <Text fontSize="sm">{getActivityIcon(activity.type)}</Text>
                                 <Avatar
                                     src={activity.userId?.profilePic}
