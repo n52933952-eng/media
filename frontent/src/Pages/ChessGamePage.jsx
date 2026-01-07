@@ -2,7 +2,7 @@ import React, { useState, useMemo, useCallback, useEffect, useContext, useRef } 
 import { Chessboard } from 'react-chessboard'
 import { Chess } from 'chess.js'
 import { Box, Heading, Text, Flex, VStack, HStack, Avatar, useColorModeValue, Button } from '@chakra-ui/react'
-import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
+import { useParams, useNavigate, useSearchParams, useLocation } from 'react-router-dom'
 import { UserContext } from '../context/UserContext'
 import { SocketContext } from '../context/SocketContext'
 import useShowToast from '../hooks/useShowToast'
@@ -17,6 +17,7 @@ const ChessGamePage = () => {
     const { opponentId } = useParams()
     const [searchParams] = useSearchParams()
     const navigate = useNavigate()
+    const location = useLocation()
     const { socket, endChessGameOnNavigate } = useContext(SocketContext)
     const { user, orientation, setOrientation } = useContext(UserContext)
     const showToast = useShowToast()
@@ -66,6 +67,7 @@ const ChessGamePage = () => {
     const handleGameEndRef = useRef(null)
     const socketRef = useRef(socket)
     const userRef = useRef(user)
+    const previousPathRef = useRef(null)
     
     // Update refs when values change
     useEffect(() => {
@@ -1065,13 +1067,18 @@ const ChessGamePage = () => {
         }
     }, [])
     
-    // Handle browser back button - cancel game when navigating away
+    // Handle browser back button and navigation away - cancel game when leaving chess page
     useEffect(() => {
+        // Initialize previous path on mount
+        if (previousPathRef.current === null) {
+            previousPathRef.current = location.pathname
+        }
+        
         const handlePopState = (e) => {
             // Check if game is live
             const gameLive = localStorage.getItem('gameLive') === 'true'
             if (gameLive && endChessGameOnNavigate) {
-                console.log('⬅️ [ChessGamePage] Browser back button pressed - ending chess game')
+                console.log('⬅️ [ChessGamePage] Browser back/forward button pressed - ending chess game')
                 endChessGameOnNavigate()
             }
         }
@@ -1079,8 +1086,46 @@ const ChessGamePage = () => {
         // Listen for popstate event (browser back/forward button)
         window.addEventListener('popstate', handlePopState)
         
+        // Check on location change (React Router navigation)
+        const currentPath = location.pathname
+        const previousPath = previousPathRef.current
+        const isChessPage = currentPath.startsWith('/chess/')
+        const wasOnChessPage = previousPath && previousPath.startsWith('/chess/')
+        
+        // If we were on chess page and now we're not, cancel the game
+        if (wasOnChessPage && !isChessPage && previousPath !== currentPath) {
+            const gameLive = localStorage.getItem('gameLive') === 'true'
+            if (gameLive && endChessGameOnNavigate) {
+                console.log('⬅️ [ChessGamePage] Navigated away from chess page - ending chess game')
+                endChessGameOnNavigate()
+            }
+        }
+        
+        // Update previous path
+        previousPathRef.current = currentPath
+        
         return () => {
             window.removeEventListener('popstate', handlePopState)
+        }
+    }, [location.pathname, endChessGameOnNavigate])
+    
+    // Additional cleanup on component unmount (for browser back button)
+    useEffect(() => {
+        return () => {
+            // Only cancel if we're actually navigating away (not refreshing)
+            // Check if we're still in the app and not on chess page
+            const gameLive = localStorage.getItem('gameLive') === 'true'
+            if (gameLive && endChessGameOnNavigate) {
+                // Use a small delay to check the actual URL after navigation
+                setTimeout(() => {
+                    const currentUrl = window.location.pathname
+                    const stillOnChessPage = currentUrl.startsWith('/chess/')
+                    if (!stillOnChessPage) {
+                        console.log('⬅️ [ChessGamePage] Component unmounting (navigation detected) - ending chess game')
+                        endChessGameOnNavigate()
+                    }
+                }, 50)
+            }
         }
     }, [endChessGameOnNavigate])
     
