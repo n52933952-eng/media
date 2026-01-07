@@ -2,11 +2,13 @@ import React, { useState, useEffect, useContext } from 'react'
 import { Box, Flex, Text, Avatar, VStack, HStack, Spinner, useColorModeValue, Divider, IconButton } from '@chakra-ui/react'
 import { useNavigate } from 'react-router-dom'
 import { SocketContext } from '../context/SocketContext'
+import { UserContext } from '../context/UserContext'
 import { formatDistanceToNow } from 'date-fns'
 import { CloseIcon } from '@chakra-ui/icons'
 
 const ActivityFeed = () => {
     const { socket } = useContext(SocketContext) || {}
+    const { user } = useContext(UserContext) || {}
     const navigate = useNavigate()
     const [activities, setActivities] = useState([])
     const [loading, setLoading] = useState(true)
