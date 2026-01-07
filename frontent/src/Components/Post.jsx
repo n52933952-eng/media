@@ -61,7 +61,7 @@ const showToast = useShowToast()
   // Check if this is a Chess game post
   const isChessPost = post?.chessGameData
   
-  // Hide chess post immediately if user navigated away from their game (local state only)
+  // Hide entire chess post immediately if user canceled their game (local state only)
   const [hideChessPost, setHideChessPost] = useState(false)
   
   useEffect(() => {
@@ -86,7 +86,7 @@ const showToast = useShowToast()
       const roomId = localStorage.getItem('chessRoomId')
       const postRoomId = chessGameData?.roomId
       
-      // If game is not live or roomId doesn't match, hide the post immediately
+      // If game is not live or roomId doesn't match, hide the entire post immediately
       if (!gameLive || roomId !== postRoomId) {
         setHideChessPost(true)
       } else {
@@ -137,6 +137,11 @@ const showToast = useShowToast()
       clearInterval(interval)
     }
   }, [isChessPost, post?.chessGameData, user?._id])
+  
+  // Don't render the entire post if it should be hidden
+  if (hideChessPost) {
+    return null
+  }
   
   // Debug Al Jazeera posts
   if (postedBy?.username === 'AlJazeera') {
@@ -650,8 +655,8 @@ const showToast = useShowToast()
     </VStack>
   )}
   
-  {/* Chess Game Post Display */}
-  {isChessPost && chessGameData && !hideChessPost && (
+  {/* Chess Game Card Display */}
+  {isChessPost && chessGameData && (
     <Box
       as="button"
       type="button"
