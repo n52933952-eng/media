@@ -452,6 +452,7 @@ if(!post) return
             reply={reply} 
             postId={post._id}
             allReplies={post.replies}  // Pass all replies so Comment can find nested ones
+            postedBy={post.postedBy}  // Pass post owner so Comment can check delete permissions
           />
         </Box>
       ))}

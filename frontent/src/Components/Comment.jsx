@@ -1,7 +1,8 @@
 import React, { useState, useContext, useRef, useEffect } from 'react'
-import { Avatar, Flex, Text, Divider, Button, Input, Box, Link, VStack } from '@chakra-ui/react'
+import { Avatar, Flex, Text, Divider, Button, Input, Box, Link, VStack, IconButton } from '@chakra-ui/react'
 import { Link as RouterLink } from 'react-router-dom'
 import { BiDotsHorizontalRounded } from "react-icons/bi";
+import { MdOutlineDeleteOutline } from "react-icons/md";
 import { formatDistanceToNow } from 'date-fns'
 import { UserContext } from '../context/UserContext'
 import { PostContext } from '../context/PostContext'
@@ -11,12 +12,18 @@ import useShowToast from '../hooks/useShowToast'
 
 
 
-const Comment = ({ reply, postId, allReplies }) => {
+const Comment = ({ reply, postId, allReplies, postedBy }) => {
   
 
   const { user } = useContext(UserContext)
   const { followPost, setFollowPost } = useContext(PostContext)
   const showToast = useShowToast()
+  
+  // Check if user can delete this comment
+  // User can delete if: they are the post owner OR they are the comment owner
+  const isPostOwner = postedBy && (postedBy._id?.toString() === user?._id?.toString() || postedBy.toString() === user?._id?.toString())
+  const isCommentOwner = reply?.userId && (reply.userId.toString() === user?._id?.toString())
+  const canDelete = isPostOwner || isCommentOwner
 
   const nestedReplies = (allReplies || []).filter((r) => {
    
@@ -382,6 +389,69 @@ const Comment = ({ reply, postId, allReplies }) => {
   }
 }
 
+  // Handle delete comment
+  const handleDeleteComment = async () => {
+    if (!user) {
+      showToast("Error", "You must be logged in to delete comments", "error")
+      return
+    }
+
+    if (!window.confirm("Are you sure you want to delete this comment?")) {
+      return
+    }
+
+    try {
+      const res = await fetch(
+        `${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/post/comment/${postId}/${reply._id}`,
+        {
+          credentials: "include",
+          method: "DELETE",
+          headers: {
+            "Content-Type": "application/json"
+          }
+        }
+      )
+
+      const data = await res.json()
+
+      if (res.ok) {
+        // Remove comment from the post's replies array
+        const updatedFollowPost = followPost.map((p) => {
+          if (p._id === postId) {
+            // Filter out the deleted comment and all its nested replies
+            const filterReplies = (replies, deletedId) => {
+              return replies.filter((r) => {
+                // If this reply is the deleted one, exclude it
+                if (r._id.toString() === deletedId.toString()) {
+                  return false
+                }
+                // If this reply's parent is the deleted one, exclude it (nested reply)
+                if (r.parentReplyId && r.parentReplyId.toString() === deletedId.toString()) {
+                  return false
+                }
+                return true
+              })
+            }
+            
+            return {
+              ...p,
+              replies: filterReplies(p.replies, reply._id)
+            }
+          }
+          return p
+        })
+
+        setFollowPost(updatedFollowPost)
+        showToast("Success", "Comment deleted successfully", "success")
+      } else {
+        showToast("Error", data.error || "Failed to delete comment", "error")
+      }
+    } catch (error) {
+      console.error("Error deleting comment:", error)
+      showToast("Error", "Failed to delete comment", "error")
+    }
+  }
+
 
   
  
@@ -398,12 +468,22 @@ const Comment = ({ reply, postId, allReplies }) => {
         <Flex justifyContent="space-between" w="full" alignItems="center">
             <Text>{reply.username}</Text>
            
-            <Flex alignItems="center" gap={1}>
+            <Flex alignItems="center" gap={2}>
                <Text fontSize="sm">
                  {reply?.date && !isNaN(new Date(reply.date).getTime())
                    ? `${formatDistanceToNow(new Date(reply.date))} ago`
                    : 'just now'}
                </Text>
+                {canDelete && (
+                  <IconButton
+                    icon={<MdOutlineDeleteOutline />}
+                    size="xs"
+                    variant="ghost"
+                    colorScheme="red"
+                    onClick={handleDeleteComment}
+                    aria-label="Delete comment"
+                  />
+                )}
                 <BiDotsHorizontalRounded />
             </Flex>
            
@@ -541,6 +621,7 @@ const Comment = ({ reply, postId, allReplies }) => {
             reply={nestedReply}
             postId={postId}
             allReplies={allReplies}
+            postedBy={postedBy}
           />
         ))}
       </Box>

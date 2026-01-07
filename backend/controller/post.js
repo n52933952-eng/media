@@ -1226,6 +1226,65 @@ export const getUserComments = async(req,res) => {
     }
 }
 
+export const deleteComment = async(req,res) => {
+    try{
+        const { postId, replyId } = req.params 
+        const userId = req.user._id 
+
+        const post = await Post.findById(postId)
+        
+        if(!post){
+            return res.status(404).json({error:"Post not found"})
+        }
+
+        const reply = post.replies.id(replyId) 
+        
+        if(!reply){
+            return res.status(404).json({error:"Comment not found"})
+        }
+
+        // Check permissions: user must be either post owner OR comment owner
+        const isPostOwner = post.postedBy.toString() === userId.toString()
+        const isCommentOwner = reply.userId && reply.userId.toString() === userId.toString()
+
+        if(!isPostOwner && !isCommentOwner){
+            return res.status(403).json({error:"You can only delete your own comments or comments on your posts"})
+        }
+
+        // Helper function to recursively delete nested replies
+        const deleteNestedReplies = (parentReplyId) => {
+            const nestedReplies = post.replies.filter(r => 
+                r.parentReplyId && r.parentReplyId.toString() === parentReplyId.toString()
+            )
+            
+            nestedReplies.forEach(nestedReply => {
+                // Recursively delete nested replies
+                deleteNestedReplies(nestedReply._id)
+                // Remove the nested reply
+                post.replies.pull(nestedReply._id)
+            })
+        }
+
+        // Delete all nested replies first
+        deleteNestedReplies(replyId)
+
+        // Delete the comment itself
+        post.replies.pull(replyId)
+        
+        await post.save()
+
+        res.status(200).json({
+            message: "Comment deleted successfully",
+            deletedReplyId: replyId
+        })
+
+    }
+    catch(error){
+        console.error('Error deleting comment:', error)
+        res.status(500).json({error: error.message || "Failed to delete comment"})
+    }
+}
+
 export const LikeComent = async(req,res) => {
 
     try{
