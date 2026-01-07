@@ -64,11 +64,36 @@ const ChessChallenge = () => {
                 console.warn('⚠️ [ChessChallenge] Failed to fetch busy users:', err)
             }
             
-            // Get unique user IDs from both followers and following
+            // CRITICAL: Fetch fresh user data from API instead of using stale context
+            // This ensures we have the latest following/followers after follow/unfollow actions
+            let freshUserData = user
+            try {
+                const userRes = await fetch(`${baseUrl}/api/user/getUserPro/${user._id}`, {
+                    credentials: 'include'
+                })
+                if (userRes.ok) {
+                    freshUserData = await userRes.json()
+                    if (import.meta.env.DEV) {
+                        console.log('♟️ [ChessChallenge] Fetched fresh user data:', {
+                            following: freshUserData.following?.length || 0,
+                            followers: freshUserData.followers?.length || 0
+                        })
+                    }
+                } else {
+                    if (import.meta.env.DEV) {
+                        console.warn('⚠️ [ChessChallenge] Failed to fetch fresh user data, using context data')
+                    }
+                }
+            } catch (err) {
+                console.warn('⚠️ [ChessChallenge] Error fetching fresh user data:', err)
+                // Fallback to context data if API call fails
+            }
+            
+            // Get unique user IDs from both followers and following (using fresh data)
             // Filter out null, undefined, and empty strings
             const allConnectionIds = [
-                ...(user.following || []),
-                ...(user.followers || [])
+                ...(freshUserData.following || []),
+                ...(freshUserData.followers || [])
             ].filter(id => {
                 // Validate MongoDB ObjectId format (24 hex characters)
                 const idStr = id?.toString().trim()
