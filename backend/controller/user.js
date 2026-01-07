@@ -326,6 +326,25 @@ export const UpdateUser = async(req,res) => {
 
                 user = await user.save()
 
+                // Update all existing comments with new profile picture and username
+                // This ensures all comments show the updated profile picture immediately
+                try {
+                  await Post.updateMany(
+                    { "replies.userId": userId },
+                    {
+                      $set: {
+                        "replies.$[reply].username": user.username,
+                        "replies.$[reply].userProfilePic": user.profilePic,
+                      },
+                    },
+                    { arrayFilters: [{ "reply.userId": userId }] }
+                  )
+                  console.log(`✅ Updated all comments for user ${user.username} with new profile picture`)
+                } catch (updateError) {
+                  // Log error but don't fail the profile update
+                  console.error('Error updating comments with new profile picture:', updateError)
+                }
+
                 // Return safe fields only (exclude password)
                 // Include followers and following to preserve them in frontend
                 if (!res.headersSent) {
@@ -372,6 +391,31 @@ export const UpdateUser = async(req,res) => {
       user.instagram = instagram !== undefined ? instagram : user.instagram
 
       user = await user.save()
+
+      // Update all existing comments with new profile picture and username
+      // This ensures all comments show the updated profile picture immediately
+      // Only update if profile picture or username actually changed
+      const profilePicChanged = profilePic && profilePic !== user.profilePic
+      const usernameChanged = username && username !== user.username
+      
+      if (profilePicChanged || usernameChanged) {
+        try {
+          await Post.updateMany(
+            { "replies.userId": userId },
+            {
+              $set: {
+                "replies.$[reply].username": user.username,
+                "replies.$[reply].userProfilePic": user.profilePic,
+              },
+            },
+            { arrayFilters: [{ "reply.userId": userId }] }
+          )
+          console.log(`✅ Updated all comments for user ${user.username} with new profile picture/username`)
+        } catch (updateError) {
+          // Log error but don't fail the profile update
+          console.error('Error updating comments with new profile picture:', updateError)
+        }
+      }
 
       // Return safe fields only (exclude password)
       // Include followers and following to preserve them in frontend

@@ -17,6 +17,7 @@ import {
   
 } from "@chakra-ui/react";
 import{UserContext} from '../context/UserContext'
+import{PostContext} from '../context/PostContext'
 import useShowToast from '../hooks/useShowToast.js'
 
 
@@ -27,6 +28,7 @@ const UpdateProfile = () => {
  
 
 const{user,setUser}=useContext(UserContext)
+const{followPost,setFollowPost}=useContext(PostContext)
 const[updating,setUpdating]=useState(false)
 
 const showToast = useShowToast()
@@ -145,6 +147,31 @@ const handleImageChange = async (event) => {
             setUser(data)
             localStorage.setItem("userInfo", JSON.stringify(data))
             
+            // Update all comments in posts with new profile picture and username
+            // This ensures comments update immediately in the UI
+            if (data.profilePic || data.username) {
+              setFollowPost(prev => prev.map(post => {
+                if (post.replies && post.replies.length > 0) {
+                  const updatedReplies = post.replies.map(reply => {
+                    // Check if this comment is from the current user
+                    if (reply.userId && reply.userId.toString() === user._id.toString()) {
+                      return {
+                        ...reply,
+                        userProfilePic: data.profilePic || reply.userProfilePic,
+                        username: data.username || reply.username
+                      }
+                    }
+                    return reply
+                  })
+                  return {
+                    ...post,
+                    replies: updatedReplies
+                  }
+                }
+                return post
+              }))
+            }
+            
             // Clear image preview and file
             if (imagePreview && imagePreview.startsWith('blob:')) {
               URL.revokeObjectURL(imagePreview)
@@ -205,6 +232,32 @@ const handleImageChange = async (event) => {
     showToast("Success", "Profile updated successfully", "success")
     setUser(data)
     localStorage.setItem("userInfo", JSON.stringify(data))
+    
+    // Update all comments in posts with new profile picture and username
+    // This ensures comments update immediately in the UI
+    if (data.profilePic || data.username) {
+      setFollowPost(prev => prev.map(post => {
+        if (post.replies && post.replies.length > 0) {
+          const updatedReplies = post.replies.map(reply => {
+            // Check if this comment is from the current user
+            if (reply.userId && reply.userId.toString() === user._id.toString()) {
+              return {
+                ...reply,
+                userProfilePic: data.profilePic || reply.userProfilePic,
+                username: data.username || reply.username
+              }
+            }
+            return reply
+          })
+          return {
+            ...post,
+            replies: updatedReplies
+          }
+        }
+        return post
+      }))
+    }
+    
     setUpdating(false)
   }
   catch(error){
