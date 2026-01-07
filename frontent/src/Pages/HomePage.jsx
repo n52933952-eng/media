@@ -8,7 +8,6 @@ import {UserContext} from '../context/UserContext'
 import SuggestedUsers from '../Components/SuggestedUsers'
 import SuggestedChannels from '../Components/SuggestedChannels'
 import ChessChallenge from '../Components/ChessChallenge'
-import ChessNotification from '../Components/ChessNotification'
 import ActivityFeed from '../Components/ActivityFeed'
 
 
@@ -408,9 +407,6 @@ const HomePage = () => {
         flex={{ base: 1, lg: '0 0 50%' }} 
         maxW={{ base: '100%', lg: '50%' }}
       >
-        {/* Chess Challenges - Always at top */}
-        <ChessNotification />
-
         {/* Error state */}
         {error && !loading && (
           <Box textAlign="center" p={8} bg={bgColor} borderRadius="md" mb={4}>

@@ -1,17 +1,23 @@
 import React,{useContext} from 'react'
 import{Button} from '@chakra-ui/react'
 import{UserContext} from '../context/UserContext'
+import{SocketContext} from '../context/SocketContext'
 import useShowToast from '../hooks/useShowToast.js'
  import { IoIosLogOut } from "react-icons/io";  
 const LogOutButton = () => {
     
      const{setUser}=useContext(UserContext)
+     const {endChessGameOnNavigate} = useContext(SocketContext) || {}
        
      const showToast = useShowToast()
    
       const handleLogout = async() => {
 
         try{
+          // End chess game if one is active before logging out
+          if (endChessGameOnNavigate) {
+            endChessGameOnNavigate()
+          }
 
           const res = await fetch(`${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/user/logout`,{
             method:"POST",
@@ -29,7 +35,7 @@ const LogOutButton = () => {
                 return
              }
              
-             // Clean up chess game state on logout
+             // Clean up chess game state on logout (in case endChessGameOnNavigate didn't run)
              localStorage.removeItem("chessOrientation")
              localStorage.removeItem("gameLive")
              localStorage.removeItem("chessRoomId")

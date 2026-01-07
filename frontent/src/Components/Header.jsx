@@ -8,7 +8,7 @@ import { IoNotificationsOutline } from "react-icons/io5";
 
 import{UserContext} from '../context/UserContext'
 import{SocketContext} from '../context/SocketContext'
-import{Link} from 'react-router-dom'
+import{Link, useNavigate} from 'react-router-dom'
 
 
 const Header = () => {
@@ -18,7 +18,24 @@ const Header = () => {
   const borderColor = useColorModeValue('gray.200', 'gray.700')
 
    const{user}=useContext(UserContext)
-   const {socket, totalUnreadCount, notificationCount} = useContext(SocketContext) || {}
+   const {socket, totalUnreadCount, notificationCount, endChessGameOnNavigate} = useContext(SocketContext) || {}
+   const navigate = useNavigate()
+
+   // Function to handle navigation with chess game cleanup
+   const handleNavigation = (path, e) => {
+     // Check if a chess game is currently live
+     const gameLive = localStorage.getItem('gameLive') === 'true'
+     
+     if (gameLive) {
+       // End the chess game before navigating
+       if (endChessGameOnNavigate) {
+         endChessGameOnNavigate()
+       }
+     }
+     
+     // Navigate to the new path
+     navigate(path)
+   }
   
   
   
@@ -37,9 +54,16 @@ const Header = () => {
        
 
        {user &&
-       <Link to="/home">
+       <Box 
+         as="button"
+         onClick={(e) => {
+           e.preventDefault()
+           handleNavigation('/home', e)
+         }}
+         cursor="pointer"
+       >
         <TiHomeOutline size={24}/>
-       </Link>
+       </Box>
        
        }
 
@@ -57,9 +81,16 @@ const Header = () => {
       {user && (
         <Flex gap={4} alignItems="center">
           <Box position="relative">
-            <Link to="/messages">
+            <Box
+              as="button"
+              onClick={(e) => {
+                e.preventDefault()
+                handleNavigation('/messages', e)
+              }}
+              cursor="pointer"
+            >
               <FaRegMessage size={24} />
-            </Link>
+            </Box>
             {totalUnreadCount > 0 && (
               <Badge
                 position="absolute"
@@ -82,9 +113,16 @@ const Header = () => {
           </Box>
           
           <Box position="relative">
-            <Link to="/notifications">
+            <Box
+              as="button"
+              onClick={(e) => {
+                e.preventDefault()
+                handleNavigation('/notifications', e)
+              }}
+              cursor="pointer"
+            >
               <IoNotificationsOutline size={24} />
-            </Link>
+            </Box>
             {notificationCount > 0 && (
               <Badge
                 position="absolute"
@@ -106,9 +144,16 @@ const Header = () => {
             )}
           </Box>
           
-          <Link to={`/${user?.username}`}>
+          <Box
+            as="button"
+            onClick={(e) => {
+              e.preventDefault()
+              handleNavigation(`/${user?.username}`, e)
+            }}
+            cursor="pointer"
+          >
             <CgProfile size={24} />
-          </Link>
+          </Box>
         </Flex>
       )}
 

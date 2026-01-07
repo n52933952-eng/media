@@ -3,7 +3,6 @@ import { Box, Container, Heading, Text, VStack, HStack, Avatar, Flex, Button, Sp
 import { Link, useNavigate } from 'react-router-dom'
 import { formatDistanceToNow } from 'date-fns'
 import { FaTrash } from 'react-icons/fa'
-import ChessNotification from '../Components/ChessNotification'
 import { SocketContext } from '../context/SocketContext'
 import { UserContext } from '../context/UserContext'
 
@@ -241,9 +240,6 @@ const NotificationsPage = () => {
                 </Flex>
 
                 <VStack spacing={4} align="stretch">
-                    {/* Chess Challenges */}
-                    <ChessNotification />
-
                     {/* All Notifications */}
                     {loading ? (
                         <Flex justify="center" py={8}>

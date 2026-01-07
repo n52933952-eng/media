@@ -737,6 +737,58 @@ export const SocketContextProvider = ({ children }) => {
     setChessChallenge(null);
   };
 
+  // Function to end chess game when navigating away
+  const endChessGameOnNavigate = () => {
+    if (!socket || !user?._id) return;
+
+    const gameLive = localStorage.getItem('gameLive') === 'true';
+    const roomId = localStorage.getItem('chessRoomId');
+
+    if (gameLive && roomId) {
+      try {
+        // Extract player IDs from roomId (format: chess_player1_player2_timestamp)
+        // Use regex to match the pattern more reliably
+        const match = roomId.match(/^chess_(.+?)_(.+?)_(\d+)$/);
+        
+        if (match) {
+          const player1 = match[1];
+          const player2 = match[2];
+          
+          // Determine which player we are
+          const currentUserId = user._id.toString();
+          const player1Str = player1.toString();
+          const player2Str = player2.toString();
+          
+          // Emit chessGameEnd to backend with both player IDs
+          // The backend will determine which player left
+          socket.emit('chessGameEnd', {
+            roomId,
+            player1: player1Str,
+            player2: player2Str
+          });
+
+          console.log('♟️ Chess game ended due to navigation', { roomId, player1: player1Str, player2: player2Str });
+        } else {
+          console.warn('⚠️ Could not parse roomId format:', roomId);
+          // Still try to emit with roomId only (backend might handle it)
+          socket.emit('chessGameEnd', { roomId });
+        }
+      } catch (error) {
+        console.error('❌ Error ending chess game:', error);
+        // Still try to emit with roomId only
+        socket.emit('chessGameEnd', { roomId });
+      }
+
+      // Clean up localStorage
+      localStorage.removeItem('chessOrientation');
+      localStorage.removeItem('gameLive');
+      localStorage.removeItem('chessRoomId');
+      localStorage.removeItem('chessFEN');
+      localStorage.removeItem('capturedWhite');
+      localStorage.removeItem('capturedBlack');
+    }
+  };
+
   // Function to update which conversation is currently open (for notification sound control)
   const setSelectedConversationId = (userId) => {
     console.log('🔊 Setting selectedConversationId:', userId || 'none')
@@ -770,6 +822,7 @@ export const SocketContextProvider = ({ children }) => {
         chessChallenge, // Export chess challenge state
         acceptChessChallenge, // Function to accept chess challenge
         declineChessChallenge, // Function to decline chess challenge
+        endChessGameOnNavigate, // Function to end chess game when navigating away
       }}
     >
       {children}
