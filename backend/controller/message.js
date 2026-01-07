@@ -12,7 +12,7 @@ export const sendMessaeg = async(req,res) => {
  const{recipientId,message,replyTo}= req.body
  const senderId = req.user._id
  let img = ''
-  console.log(img)
+  
        // Handle file upload via Multer to Cloudinary
        if(req.file) {
          return new Promise((resolve, reject) => {

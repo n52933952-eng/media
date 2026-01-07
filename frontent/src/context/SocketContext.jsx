@@ -533,6 +533,10 @@ export const SocketContextProvider = ({ children }) => {
       ringtoneAudio.current.currentTime = 0;
     }
     
+    // Clear the call notification by removing isReceivingCall flag
+    // This will dismiss the notification since CallNotification checks for isReceivingCall
+    setCall(prev => ({ ...prev, isReceivingCall: false }));
+    
     // Ensure we have the right stream type
     const callTypeForAnswer = call.callType || 'video';
     setCallType(callTypeForAnswer);
