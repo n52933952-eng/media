@@ -27,11 +27,11 @@ const ActivityFeed = () => {
                 )
                 const data = await res.json()
                 if (res.ok && data.activities) {
-                    // Filter out activities older than 7 hours and limit to 20
-                    const sevenHoursAgo = new Date(Date.now() - 7 * 60 * 60 * 1000)
+                    // Filter out activities older than 6 hours and limit to 15
+                    const sixHoursAgo = new Date(Date.now() - 6 * 60 * 60 * 1000)
                     const recentActivities = data.activities
-                        .filter(activity => new Date(activity.createdAt) >= sevenHoursAgo)
-                        .slice(0, 20) // Show only 20 most recent
+                        .filter(activity => new Date(activity.createdAt) >= sixHoursAgo)
+                        .slice(0, 15) // Show only 15 most recent
                     setActivities(recentActivities)
                 }
             } catch (error) {
@@ -50,13 +50,13 @@ const ActivityFeed = () => {
 
         const handleNewActivity = (activity) => {
             setActivities(prev => {
-                // Filter out activities older than 7 hours
-                const sevenHoursAgo = new Date(Date.now() - 7 * 60 * 60 * 1000)
+                // Filter out activities older than 6 hours
+                const sixHoursAgo = new Date(Date.now() - 6 * 60 * 60 * 1000)
                 const recentActivities = prev.filter(a => 
-                    new Date(a.createdAt) >= sevenHoursAgo
+                    new Date(a.createdAt) >= sixHoursAgo
                 )
-                // Add new activity at the beginning, keep only 20
-                const updated = [activity, ...recentActivities].slice(0, 20)
+                // Add new activity at the beginning, replace old ones if limit reached (keep only 15)
+                const updated = [activity, ...recentActivities].slice(0, 15)
                 return updated
             })
         }
