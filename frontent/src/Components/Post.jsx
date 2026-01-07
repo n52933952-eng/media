@@ -61,6 +61,83 @@ const showToast = useShowToast()
   // Check if this is a Chess game post
   const isChessPost = post?.chessGameData
   
+  // Hide chess post immediately if user navigated away from their game (local state only)
+  const [hideChessPost, setHideChessPost] = useState(false)
+  
+  useEffect(() => {
+    if (!isChessPost || !user?._id) return
+    
+    let chessGameData = null
+    try {
+      chessGameData = JSON.parse(post.chessGameData)
+    } catch (e) {
+      return
+    }
+    
+    // Check if this is the current user's game
+    const player1Id = chessGameData?.player1?._id?.toString()
+    const player2Id = chessGameData?.player2?._id?.toString()
+    const currentUserId = user._id.toString()
+    const isMyGame = (player1Id === currentUserId || player2Id === currentUserId)
+    
+    if (isMyGame) {
+      // Check if game is still live in localStorage
+      const gameLive = localStorage.getItem('gameLive') === 'true'
+      const roomId = localStorage.getItem('chessRoomId')
+      const postRoomId = chessGameData?.roomId
+      
+      // If game is not live or roomId doesn't match, hide the post immediately
+      if (!gameLive || roomId !== postRoomId) {
+        setHideChessPost(true)
+      } else {
+        setHideChessPost(false)
+      }
+    }
+  }, [isChessPost, post?.chessGameData, user?._id])
+  
+  // Also listen for localStorage changes (when game ends)
+  useEffect(() => {
+    if (!isChessPost || !user?._id) return
+    
+    const checkGameStatus = () => {
+      let chessGameData = null
+      try {
+        chessGameData = JSON.parse(post.chessGameData)
+      } catch (e) {
+        return
+      }
+      
+      const player1Id = chessGameData?.player1?._id?.toString()
+      const player2Id = chessGameData?.player2?._id?.toString()
+      const currentUserId = user._id.toString()
+      const isMyGame = (player1Id === currentUserId || player2Id === currentUserId)
+      
+      if (isMyGame) {
+        const gameLive = localStorage.getItem('gameLive') === 'true'
+        const roomId = localStorage.getItem('chessRoomId')
+        const postRoomId = chessGameData?.roomId
+        
+        if (!gameLive || roomId !== postRoomId) {
+          setHideChessPost(true)
+        }
+      }
+    }
+    
+    // Check immediately
+    checkGameStatus()
+    
+    // Listen for storage events (when localStorage changes in other tabs/windows)
+    window.addEventListener('storage', checkGameStatus)
+    
+    // Also check periodically (in case localStorage changes in same tab)
+    const interval = setInterval(checkGameStatus, 500)
+    
+    return () => {
+      window.removeEventListener('storage', checkGameStatus)
+      clearInterval(interval)
+    }
+  }, [isChessPost, post?.chessGameData, user?._id])
+  
   // Debug Al Jazeera posts
   if (postedBy?.username === 'AlJazeera') {
     console.log('🔴 Al Jazeera Post Data:', {
@@ -574,7 +651,7 @@ const showToast = useShowToast()
   )}
   
   {/* Chess Game Post Display */}
-  {isChessPost && chessGameData && (
+  {isChessPost && chessGameData && !hideChessPost && (
     <Box
       as="button"
       type="button"
