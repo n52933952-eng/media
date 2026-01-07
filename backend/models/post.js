@@ -138,6 +138,9 @@ PostSchema.index({ contributors: 1 })
 PostSchema.index({ isCollaborative: 1, createdAt: -1 })
 // Index on footballData for Football posts (sparse index - only for posts with footballData)
 PostSchema.index({ footballData: 1 }, { sparse: true })
+// CRITICAL: Index on replies.userId for fast profile picture updates
+// This is essential for the UpdateUser function that updates all comments when profile changes
+PostSchema.index({ "replies.userId": 1 })
 
 const Post = mongoose.model("Post",PostSchema)
 
