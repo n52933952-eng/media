@@ -162,10 +162,12 @@ const ChessGamePage = () => {
     // Store pending game state in case it arrives before component is ready
     const pendingGameStateRef = useRef(null)
     
-    // Separate useEffect to join socket room when spectator mode is active
+    // Separate useEffect to join socket room when spectator mode is active OR when player refreshes
     // Also handles switching between multiple games and rejoining
     useEffect(() => {
-        if (isSpectator && roomId && socket) {
+        // Join room if: (1) spectator mode, OR (2) player with active game (page refresh scenario)
+        const shouldJoinRoom = (isSpectator || (gameLive && roomId)) && roomId && socket
+        if (shouldJoinRoom) {
             const isSwitchingGames = previousRoomIdRef.current && previousRoomIdRef.current !== roomId
             const isRejoining = previousRoomIdRef.current === roomId
             
@@ -229,15 +231,23 @@ const ChessGamePage = () => {
             }
             
             // Always emit joinChessRoom to request game state (even if rejoining)
-            // Backend will always send current game state
+            // Backend will always send current game state from Redis (source of truth)
             if (socket.connected) {
-                console.log('👁️ [ChessGamePage] Spectator joining room via useEffect (already connected):', roomId)
+                if (isSpectator) {
+                    console.log('👁️ [ChessGamePage] Spectator joining room via useEffect (already connected):', roomId)
+                } else {
+                    console.log('♟️ [ChessGamePage] Player rejoining room after refresh (already connected):', roomId)
+                }
                 socket.emit('joinChessRoom', { roomId })
             } else {
-                console.log('👁️ [ChessGamePage] Socket not connected yet, waiting...')
+                console.log('⏳ [ChessGamePage] Socket not connected yet, waiting...')
                 // Wait for connection
                 const onConnect = () => {
-                    console.log('👁️ [ChessGamePage] Socket connected, spectator joining room:', roomId)
+                    if (isSpectator) {
+                        console.log('👁️ [ChessGamePage] Socket connected, spectator joining room:', roomId)
+                    } else {
+                        console.log('♟️ [ChessGamePage] Socket connected, player rejoining room:', roomId)
+                    }
                     socket.emit('joinChessRoom', { roomId })
                     socket.off('connect', onConnect)
                 }
@@ -248,10 +258,10 @@ const ChessGamePage = () => {
             }
         } else {
             if (import.meta.env.DEV) {
-                console.log('👁️ [ChessGamePage] Spectator room join skipped:', { isSpectator, roomId: !!roomId, socket: !!socket })
+                console.log('⏭️ [ChessGamePage] Room join skipped:', { isSpectator, gameLive, roomId: !!roomId, socket: !!socket })
             }
         }
-    }, [isSpectator, roomId, socket, chess])
+    }, [isSpectator, gameLive, roomId, socket, chess])
     
     // Debug: Log orientation changes (only in development)
     useEffect(() => {
@@ -413,9 +423,13 @@ const ChessGamePage = () => {
             console.log('✅ Chess socket connected')
             showToast('Connected', 'Chess connection restored', 'success')
             
-            // If spectator mode, join the room when socket connects
-            if (isSpectator && roomId) {
-                console.log('👁️ [ChessGamePage] Spectator joining room on connect:', roomId)
+            // If spectator mode OR player with active game, join the room when socket connects
+            if (roomId && (isSpectator || (gameLive && !isSpectator))) {
+                if (isSpectator) {
+                    console.log('👁️ [ChessGamePage] Spectator joining room on connect:', roomId)
+                } else {
+                    console.log('♟️ [ChessGamePage] Player rejoining room on connect (page refresh):', roomId)
+                }
                 socket.emit('joinChessRoom', { roomId })
             }
         })
@@ -631,10 +645,12 @@ const ChessGamePage = () => {
                 isSpectatorState: isSpectator
             })
             
-            // Apply state if: we're a spectator AND roomId matches (from URL or state)
+            // Apply state if: roomId matches (from URL or state)
+            // Apply for both spectators AND players (players need it after page refresh)
             if (data && data.roomId && (data.roomId === urlRoomId || data.roomId === roomId)) {
-                // Only apply if we're actually in spectator mode
-                if (isSpectatorMode || isSpectator) {
+                // Apply if we're a spectator OR if we're a player with an active game (page refresh scenario)
+                const isPlayerRejoining = gameLive && roomId === data.roomId && !isSpectatorMode && !isSpectator
+                if (isSpectatorMode || isSpectator || isPlayerRejoining) {
                     console.log('📥 [ChessGamePage] Received game state for catch-up:', {
                         roomId: data.roomId,
                         fen: data.fen?.substring(0, 50) + '...',
@@ -642,6 +658,7 @@ const ChessGamePage = () => {
                         capturedBlack: data.capturedBlack?.length || 0,
                         isSpectatorMode,
                         isSpectatorState: isSpectator,
+                        isPlayerRejoining: isPlayerRejoining,
                         currentRoomId: roomId
                     })
                     
@@ -699,7 +716,11 @@ const ChessGamePage = () => {
                             localStorage.setItem("capturedBlack", JSON.stringify(data.capturedBlack))
                         }
                         
-                        console.log('✅ [ChessGamePage] Game state applied - spectator caught up!')
+                        if (isPlayerRejoining) {
+                            console.log('✅ [ChessGamePage] Game state applied - player reconnected and caught up!')
+                        } else {
+                            console.log('✅ [ChessGamePage] Game state applied - spectator caught up!')
+                        }
                     } catch (error) {
                         console.error('❌ [ChessGamePage] Error applying game state:', error)
                         // Reset to starting position on error
@@ -707,7 +728,12 @@ const ChessGamePage = () => {
                         setFen(chess.fen())
                     }
                 } else {
-                    console.log('⚠️ [ChessGamePage] Received game state but not in spectator mode, ignoring')
+                    console.log('⚠️ [ChessGamePage] Received game state but conditions not met, ignoring:', {
+                        isSpectatorMode,
+                        isSpectator,
+                        gameLive,
+                        roomIdMatch: roomId === data.roomId
+                    })
                 }
             }
         })
@@ -761,7 +787,7 @@ const ChessGamePage = () => {
             socket.off('chessGameState')
             socket.off('chessGameEnded')
         }
-    }, [socket, navigate, showToast, makeAMove, user?._id, chess, isSpectator, roomId])
+    }, [socket, navigate, showToast, makeAMove, user?._id, chess, isSpectator, roomId, gameLive])
 
     function onDrop(sourceSquare, targetSquare) {
         // SPECTATORS CANNOT MAKE MOVES
