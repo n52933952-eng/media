@@ -34,13 +34,21 @@ const Comment = ({ reply, postId, allReplies, postedBy }) => {
     const fetchFreshProfilePic = async () => {
       if (!reply?.userId || !reply?.username) return
       
+      // If this is the current user's comment, use their profile pic from context (always up-to-date)
+      if (user?._id && reply.userId.toString() === user._id.toString()) {
+        if (user.profilePic && user.profilePic !== reply.userProfilePic) {
+          setFreshProfilePic(user.profilePic)
+        }
+        return
+      }
+      
       // Check if we have a cached profile picture for this user
       const cacheKey = `profilePic_${reply.userId}`
       const cached = sessionStorage.getItem(cacheKey)
       const cacheData = cached ? JSON.parse(cached) : null
       
-      // Use cached data if it's less than 5 minutes old
-      if (cacheData && cacheData.timestamp && (Date.now() - cacheData.timestamp < 5 * 60 * 1000)) {
+      // Use cached data if it's less than 2 minutes old (shorter cache for fresher data)
+      if (cacheData && cacheData.timestamp && (Date.now() - cacheData.timestamp < 2 * 60 * 1000)) {
         if (cacheData.profilePic !== reply.userProfilePic) {
           setFreshProfilePic(cacheData.profilePic)
         }
@@ -74,13 +82,9 @@ const Comment = ({ reply, postId, allReplies, postedBy }) => {
       }
     }
     
-    // Fetch fresh profile picture (with a small delay to avoid too many requests)
-    // Stagger requests based on comment index to avoid overwhelming the server
-    const delay = Math.min(1000 + (Math.random() * 2000), 3000)
-    const timeoutId = setTimeout(fetchFreshProfilePic, delay)
-    
-    return () => clearTimeout(timeoutId)
-  }, [reply?.userId, reply?.username, reply?.userProfilePic])
+    // Fetch immediately (no delay) for better UX
+    fetchFreshProfilePic()
+  }, [reply?.userId, reply?.username, reply?.userProfilePic, user?._id, user?.profilePic])
   
   // Use fresh profile picture if available, otherwise use stored one
   const displayProfilePic = freshProfilePic || reply?.userProfilePic
