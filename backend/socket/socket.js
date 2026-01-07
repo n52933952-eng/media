@@ -1063,9 +1063,12 @@ export const initializeSocket = async (app) => {
             }
 
             // Check if disconnected user was in an active chess game
+            // IMPORTANT: Don't end game immediately - wait to see if user reconnects (page refresh scenario)
+            // Only end game if user doesn't reconnect within 10 seconds
             if (disconnectedUserId && await hasActiveChessGame(disconnectedUserId)) {
                 const gameRoomId = await getActiveChessGame(disconnectedUserId)
                 console.log(`♟️ User ${disconnectedUserId} disconnected while in game: ${gameRoomId}`)
+                console.log(`⏳ Waiting 10 seconds to see if user reconnects (page refresh)...`)
                 
                 // Find the other player
                 let otherPlayerId = null
@@ -1076,39 +1079,54 @@ export const initializeSocket = async (app) => {
                     }
                 }
                 
-                // Notify the other player
-                if (otherPlayerId) {
-                    const otherPlayerData = await getUserSocket(otherPlayerId)
-                    const otherPlayerSocketId = otherPlayerData?.socketId
-                    if (otherPlayerSocketId) {
-                        io.to(otherPlayerSocketId).emit("opponentLeftGame")
-                        io.to(otherPlayerSocketId).emit("chessGameCleanup")
+                // Wait 10 seconds before ending the game (allows time for page refresh reconnect)
+                setTimeout(async () => {
+                    // Check if user reconnected (has active game and socket)
+                    const stillInGame = await hasActiveChessGame(disconnectedUserId)
+                    const reconnectedSocket = await getUserSocket(disconnectedUserId)
+                    
+                    if (stillInGame && reconnectedSocket) {
+                        console.log(`✅ User ${disconnectedUserId} reconnected - game continues!`)
+                        return // User reconnected, don't end the game
                     }
-                }
-                
-                // Notify all spectators in the room
-                if (gameRoomId) {
-                    const room = io.sockets.adapter.rooms.get(gameRoomId)
-                    if (room && room.size > 0) {
-                        console.log(`👁️ Notifying ${room.size} spectators that game ended (player disconnected)`)
-                        io.to(gameRoomId).emit("chessGameEnded", { reason: 'player_disconnected' })
+                    
+                    // User didn't reconnect - end the game
+                    console.log(`❌ User ${disconnectedUserId} did not reconnect - ending game`)
+                    
+                    // Notify the other player
+                    if (otherPlayerId) {
+                        const otherPlayerData = await getUserSocket(otherPlayerId)
+                        const otherPlayerSocketId = otherPlayerData?.socketId
+                        if (otherPlayerSocketId) {
+                            io.to(otherPlayerSocketId).emit("opponentLeftGame")
+                            io.to(otherPlayerSocketId).emit("chessGameCleanup")
+                        }
                     }
-                }
-                
-                // Delete chess game post immediately
-                deleteChessGamePost(gameRoomId).catch(err => {
-                    console.error('❌ Error deleting chess game post on disconnect:', err)
-                })
-                
-                // Remove from active games tracking (Redis)
-                await deleteActiveChessGame(disconnectedUserId)
-                if (otherPlayerId) {
-                    await deleteActiveChessGame(otherPlayerId)
-                }
-                
-                // Clean up game state (Redis)
-                await deleteChessGameState(gameRoomId)
-                console.log(`🗑️ Cleaned up game state for room ${gameRoomId}`)
+                    
+                    // Notify all spectators in the room
+                    if (gameRoomId) {
+                        const room = io.sockets.adapter.rooms.get(gameRoomId)
+                        if (room && room.size > 0) {
+                            console.log(`👁️ Notifying ${room.size} spectators that game ended (player disconnected)`)
+                            io.to(gameRoomId).emit("chessGameEnded", { reason: 'player_disconnected' })
+                        }
+                    }
+                    
+                    // Delete chess game post
+                    deleteChessGamePost(gameRoomId).catch(err => {
+                        console.error('❌ Error deleting chess game post on disconnect:', err)
+                    })
+                    
+                    // Remove from active games tracking (Redis)
+                    await deleteActiveChessGame(disconnectedUserId)
+                    if (otherPlayerId) {
+                        await deleteActiveChessGame(otherPlayerId)
+                    }
+                    
+                    // Clean up game state (Redis)
+                    await deleteChessGameState(gameRoomId)
+                    console.log(`🗑️ Cleaned up game state for room ${gameRoomId}`)
+                }, 10000) // Wait 10 seconds before ending game
             }
             
             // Remove socket from chess rooms

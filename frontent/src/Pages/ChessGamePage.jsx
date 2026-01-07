@@ -423,14 +423,23 @@ const ChessGamePage = () => {
             console.log('✅ Chess socket connected')
             showToast('Connected', 'Chess connection restored', 'success')
             
+            // Check localStorage directly (not state) to handle page refresh scenario
+            // State might not be initialized yet when socket reconnects after page refresh
+            const localGameLive = localStorage.getItem('gameLive') === 'true'
+            const localRoomId = localStorage.getItem('chessRoomId')
+            const urlParams = new URLSearchParams(window.location.search)
+            const isSpectatorMode = urlParams.get('spectator') === 'true'
+            
             // If spectator mode OR player with active game, join the room when socket connects
-            if (roomId && (isSpectator || (gameLive && !isSpectator))) {
-                if (isSpectator) {
-                    console.log('👁️ [ChessGamePage] Spectator joining room on connect:', roomId)
+            const shouldJoin = localRoomId && (isSpectator || isSpectatorMode || localGameLive)
+            if (shouldJoin) {
+                const roomToJoin = localRoomId || roomId
+                if (isSpectator || isSpectatorMode) {
+                    console.log('👁️ [ChessGamePage] Spectator joining room on connect:', roomToJoin)
                 } else {
-                    console.log('♟️ [ChessGamePage] Player rejoining room on connect (page refresh):', roomId)
+                    console.log('♟️ [ChessGamePage] Player rejoining room on connect (page refresh):', roomToJoin)
                 }
-                socket.emit('joinChessRoom', { roomId })
+                socket.emit('joinChessRoom', { roomId: roomToJoin })
             }
         })
 
@@ -959,60 +968,29 @@ const ChessGamePage = () => {
         handleGameEndRef.current = handleGameEnd
     }, [handleGameEnd])
 
-    // Cleanup when user navigates away (home, messages, profile, etc.)
-    // This works like resign - clears storage and notifies other user
-    // IMPORTANT: Only run cleanup on unmount, NOT when dependencies change
-    // This prevents clearing localStorage immediately after it's set
+    // Handle page unload (browser close/refresh) - DON'T cancel game on refresh
+    // Only cleanup if user explicitly navigates away (not page refresh)
     useEffect(() => {
-        return () => {
+        const handleBeforeUnload = (e) => {
+            // On page refresh/close, DON'T cleanup - let the game continue
+            // The backend will handle reconnection when socket reconnects
             if (import.meta.env.DEV) {
-                console.log('🎯 [ChessGamePage] Cleanup useEffect running - component unmounting')
+                console.log('🔄 [ChessGamePage] Page unloading (refresh/close) - preserving game state')
             }
-            
-            // Read current values from localStorage at unmount time
-            const localGameLive = localStorage.getItem('gameLive') === 'true'
-            const localRoomId = localStorage.getItem('chessRoomId')
-            const localOpponentId = opponentId // opponentId from useParams
-            
-            if (import.meta.env.DEV) {
-                console.log('🎯 [ChessGamePage] Cleanup check (on unmount):', {
-                    localStorageGameLive: localGameLive,
-                    localRoomId: localRoomId,
-                    localOpponentId: localOpponentId
-                })
-            }
-            
-            // Only cleanup if game was actually live
-            if (localGameLive) {
-                if (import.meta.env.DEV) {
-                    console.log('🎯 [ChessGamePage] Clearing localStorage (game was live)')
-                }
-                
-                // Notify backend only if we have roomId and opponentId
-                // Use refs to get current values (captured at unmount time)
-                const currentSocket = socketRef.current
-                const currentUser = userRef.current
-                if (currentSocket && localRoomId && localOpponentId && currentUser?._id) {
-                    currentSocket.emit('chessGameEnd', {
-                        roomId: localRoomId,
-                        player1: currentUser._id,
-                        player2: localOpponentId
-                    })
-                    if (import.meta.env.DEV) {
-                        console.log('🎯 [ChessGamePage] Emitted chessGameEnd to backend')
-                    }
-                }
-                
-                // Clear localStorage
-                localStorage.removeItem('chessOrientation')
-                localStorage.removeItem('gameLive')
-                localStorage.removeItem('chessRoomId')
-                localStorage.removeItem('chessFEN')
-                localStorage.removeItem('capturedWhite')
-                localStorage.removeItem('capturedBlack')
-            }
+            // Don't prevent default - allow normal page unload
         }
-    }, [opponentId]) // Only opponentId as dependency (from useParams, doesn't change during component lifetime)
+        
+        window.addEventListener('beforeunload', handleBeforeUnload)
+        
+        return () => {
+            window.removeEventListener('beforeunload', handleBeforeUnload)
+        }
+    }, [])
+    
+    // Cleanup when user navigates away to a DIFFERENT route (not page refresh)
+    // This only runs when React Router navigates away, not on page refresh
+    // IMPORTANT: We removed the unmount cleanup because it was canceling games on refresh
+    // Now we only cleanup when explicitly leaving (via leaveGame function)
 
     const getPieceUnicode = (type, color) => {
         const unicodeMap = {
