@@ -29,7 +29,7 @@ const SuggestedChannels = ({ onUserFollowed }) => {
     const secondaryTextColor = useColorModeValue('gray.600', 'gray.400')
     const hoverBg = useColorModeValue('gray.50', 'gray.700')
     
-    // Fetch Football channel account and all live channels
+    // Fetch Football channel account and all live channels (only on mount, not on user changes)
     useEffect(() => {
         const fetchData = async () => {
             try {
@@ -45,10 +45,6 @@ const SuggestedChannels = ({ onUserFollowed }) => {
                 
                 if (footballRes.ok && footballData) {
                     setFootballAccount(footballData)
-                    // Check if user is already following
-                    if (user?.following) {
-                        setIsFollowing(user.following.includes(footballData._id))
-                    }
                     
                     // Fetch latest Football post
                     try {
@@ -84,7 +80,14 @@ const SuggestedChannels = ({ onUserFollowed }) => {
         }
         
         fetchData()
-    }, [user])
+    }, []) // Only run on mount, not when user changes
+    
+    // Update isFollowing state when user.following changes (without refetching everything)
+    useEffect(() => {
+        if (footballAccount && user?.following) {
+            setIsFollowing(user.following.includes(footballAccount._id))
+        }
+    }, [user?.following, footballAccount?._id]) // Only update follow status, don't refetch channels
     
     // Handle channel click - navigate to channel post page
     const handleChannelClick = async (channel) => {
@@ -232,7 +235,10 @@ const SuggestedChannels = ({ onUserFollowed }) => {
                         .then(res => res.json())
                         .then(postData => {
                             console.log('📬 Post result:', postData)
-                            if (postData.posted && postData.post) {
+                                if (postData.posted && postData.post) {
+                                // Save scroll position to prevent page jumping
+                                const scrollY = window.scrollY
+                                
                                 // Add post to feed immediately (fallback if socket doesn't work)
                                 setFollowPost(prev => {
                                     // Check if post already exists
@@ -248,6 +254,11 @@ const SuggestedChannels = ({ onUserFollowed }) => {
                                     // Add to top of feed
                                     console.log('✅ [SuggestedChannels] Added Football post to feed immediately')
                                     return [postData.post, ...prev]
+                                })
+                                
+                                // Restore scroll position after state update
+                                requestAnimationFrame(() => {
+                                    window.scrollTo({ top: scrollY, behavior: 'instant' })
                                 })
                                 
                                 // Also call onUserFollowed callback if provided
@@ -281,6 +292,9 @@ const SuggestedChannels = ({ onUserFollowed }) => {
                                 .then(res => res.json())
                                 .then(postRes => {
                                     if (postRes && postRes.post) {
+                                        // Save scroll position to prevent page jumping
+                                        const scrollY = window.scrollY
+                                        
                                         setFollowPost(prev => {
                                             const exists = prev.some(p => {
                                                 const prevId = p._id?.toString()
@@ -290,6 +304,11 @@ const SuggestedChannels = ({ onUserFollowed }) => {
                                             if (exists) return prev
                                             console.log('✅ [SuggestedChannels] Added existing Football post to feed')
                                             return [postRes.post, ...prev]
+                                        })
+                                        
+                                        // Restore scroll position after state update
+                                        requestAnimationFrame(() => {
+                                            window.scrollTo({ top: scrollY, behavior: 'instant' })
                                         })
                                     }
                                 })

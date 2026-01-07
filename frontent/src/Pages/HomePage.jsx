@@ -50,28 +50,12 @@ const HomePage = () => {
         console.error('Error checking if Football account:', e)
       }
       
-      // If following Football account, refresh the entire feed to ensure Football post is included
+      // If following Football account, add Football posts smoothly without refreshing entire feed
+      // This prevents page jumping - SuggestedChannels component already handles adding Football posts
       if (isFootballAccount) {
-        console.log('⚽ [fetchUserPosts] Following Football, refreshing entire feed...')
-        // Reset and reload feed to ensure Football post is included
-        followPostCountRef.current = 0
-        // Call getFeedPost directly without dependency to avoid circular dependency
-        const skip = 0
-        const res = await fetch(`${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/post/feed/feedpost?limit=10&skip=${skip}`,{
-          credentials:"include",
-        })
-        const data = await res.json()
-        if (res.ok && data.posts) {
-          const posts = data.posts || []
-          const uniquePosts = posts.filter((post, index, self) => 
-            index === self.findIndex(p => p._id?.toString() === post._id?.toString())
-          )
-          setFollowPost(uniquePosts)
-          followPostCountRef.current = uniquePosts.length
-          setHasMore(data.hasMore !== undefined ? data.hasMore : false)
-        } else {
-          console.error('❌ [fetchUserPosts] Failed to refresh feed:', data)
-        }
+        console.log('⚽ [fetchUserPosts] Following Football - posts will be added by SuggestedChannels component')
+        // Don't refresh entire feed - let SuggestedChannels handle it smoothly
+        // This prevents page jumping
         return
       }
       
@@ -85,6 +69,9 @@ const HomePage = () => {
       const data = await res.json()
 
       if (res.ok && data.posts && data.posts.length > 0) {
+        // Save current scroll position to prevent page jumping
+        const scrollY = window.scrollY
+        
         // Add posts to feed and sort by date (newest first)
         setFollowPost(prev => {
           // Combine existing posts with new posts
@@ -106,6 +93,11 @@ const HomePage = () => {
           followPostCountRef.current = unique.length
           
           return unique
+        })
+        
+        // Restore scroll position after state update to prevent page jumping
+        requestAnimationFrame(() => {
+          window.scrollTo({ top: scrollY, behavior: 'instant' })
         })
       }
     } catch (error) {
