@@ -301,7 +301,8 @@ const ChessGamePage = () => {
         }
     }
 
-    // Fetch opponent info
+    // Fetch opponent info - only fetch once on mount and when page becomes visible
+    // No need to poll API since users can't update profile while in active game
     useEffect(() => {
         const fetchOpponent = async () => {
             try {
@@ -320,7 +321,21 @@ const ChessGamePage = () => {
         }
 
         if (opponentId) {
+            // Fetch immediately on mount
             fetchOpponent()
+            
+            // Also refresh when page becomes visible (user switches back to tab)
+            // This handles the case where user updates profile and comes back to game
+            const handleVisibilityChange = () => {
+                if (document.visibilityState === 'visible') {
+                    fetchOpponent()
+                }
+            }
+            document.addEventListener('visibilitychange', handleVisibilityChange)
+            
+            return () => {
+                document.removeEventListener('visibilitychange', handleVisibilityChange)
+            }
         }
     }, [opponentId])
 

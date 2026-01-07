@@ -19,11 +19,71 @@ const Comment = ({ reply, postId, allReplies, postedBy }) => {
   const { followPost, setFollowPost } = useContext(PostContext)
   const showToast = useShowToast()
   
+  // State to store fresh profile picture (if fetched)
+  const [freshProfilePic, setFreshProfilePic] = useState(null)
+  
   // Check if user can delete this comment
   // User can delete if: they are the post owner OR they are the comment owner
   const isPostOwner = postedBy && (postedBy._id?.toString() === user?._id?.toString() || postedBy.toString() === user?._id?.toString())
   const isCommentOwner = reply?.userId && (reply.userId.toString() === user?._id?.toString())
   const canDelete = isPostOwner || isCommentOwner
+  
+  // Fetch fresh profile picture for comment author (to show updated profile pics)
+  // Use a shared cache to avoid duplicate requests for the same user
+  useEffect(() => {
+    const fetchFreshProfilePic = async () => {
+      if (!reply?.userId || !reply?.username) return
+      
+      // Check if we have a cached profile picture for this user
+      const cacheKey = `profilePic_${reply.userId}`
+      const cached = sessionStorage.getItem(cacheKey)
+      const cacheData = cached ? JSON.parse(cached) : null
+      
+      // Use cached data if it's less than 5 minutes old
+      if (cacheData && cacheData.timestamp && (Date.now() - cacheData.timestamp < 5 * 60 * 1000)) {
+        if (cacheData.profilePic !== reply.userProfilePic) {
+          setFreshProfilePic(cacheData.profilePic)
+        }
+        return
+      }
+      
+      try {
+        const baseUrl = import.meta.env.PROD ? window.location.origin : "http://localhost:5000"
+        const res = await fetch(`${baseUrl}/api/user/getUserPro/${reply.username}`, {
+          credentials: 'include'
+        })
+        
+        if (res.ok) {
+          const userData = await res.json()
+          if (userData?.profilePic) {
+            // Cache the profile picture
+            sessionStorage.setItem(cacheKey, JSON.stringify({
+              profilePic: userData.profilePic,
+              timestamp: Date.now()
+            }))
+            
+            if (userData.profilePic !== reply.userProfilePic) {
+              // Only update if profile picture has changed
+              setFreshProfilePic(userData.profilePic)
+            }
+          }
+        }
+      } catch (error) {
+        // Silently fail - use stored profile pic as fallback
+        console.error('Error fetching fresh profile pic for comment:', error)
+      }
+    }
+    
+    // Fetch fresh profile picture (with a small delay to avoid too many requests)
+    // Stagger requests based on comment index to avoid overwhelming the server
+    const delay = Math.min(1000 + (Math.random() * 2000), 3000)
+    const timeoutId = setTimeout(fetchFreshProfilePic, delay)
+    
+    return () => clearTimeout(timeoutId)
+  }, [reply?.userId, reply?.username, reply?.userProfilePic])
+  
+  // Use fresh profile picture if available, otherwise use stored one
+  const displayProfilePic = freshProfilePic || reply?.userProfilePic
 
   const nestedReplies = (allReplies || []).filter((r) => {
    
@@ -462,7 +522,7 @@ const Comment = ({ reply, postId, allReplies, postedBy }) => {
     
     <Flex gap={4} py={2} my={2} mb={6} w="full">  {/* Added mb={6} for margin bottom */}
    
-    <Avatar src={reply.userProfilePic} size="sm"/>
+    <Avatar src={displayProfilePic} size="sm"/>
 
     <Flex w="full" gap={1} flexDirection="column">
         <Flex justifyContent="space-between" w="full" alignItems="center">
