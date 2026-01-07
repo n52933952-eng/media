@@ -37,6 +37,18 @@ useEffect(() => {
    }
   
    getUser()
+   
+   // Refresh user profile when page becomes visible (in case profile was updated)
+   const handleVisibilityChange = () => {
+     if (document.visibilityState === 'visible') {
+       getUser()
+     }
+   }
+   document.addEventListener('visibilitychange', handleVisibilityChange)
+   
+   return () => {
+     document.removeEventListener('visibilitychange', handleVisibilityChange)
+   }
 
 },[username])
 

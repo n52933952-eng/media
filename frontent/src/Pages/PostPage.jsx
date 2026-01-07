@@ -94,6 +94,18 @@ const PostPage = () => {
       }
 
    getpost()
+   
+   // Refresh post when page becomes visible (in case profile was updated)
+   const handleVisibilityChange = () => {
+     if (document.visibilityState === 'visible') {
+       getpost()
+     }
+   }
+   document.addEventListener('visibilitychange', handleVisibilityChange)
+   
+   return () => {
+     document.removeEventListener('visibilitychange', handleVisibilityChange)
+   }
   },[id])
 
 
@@ -158,10 +170,15 @@ if(!post) return
     <Flex>
     
     <Flex w="full" alignItems="center" gap={3}>
-      <Avatar src={userpro?.porfilePic} size="sm" bg="white" name={userpro?.username} />
+      <Avatar 
+        src={post?.postedBy?.profilePic || userpro?.profilePic} 
+        size="sm" 
+        bg="white" 
+        name={post?.postedBy?.username || userpro?.username} 
+      />
      
       <Flex>
-        <Text fontSize="sm" fontWeight="bold">{userpro?.username}</Text>
+        <Text fontSize="sm" fontWeight="bold">{post?.postedBy?.username || userpro?.username}</Text>
         <Image src="/verified.png" w={4} h={4} ml={4} />
       </Flex>
     
