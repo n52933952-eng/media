@@ -181,31 +181,12 @@ export const FollowAndUnfollow = async(req,res) => {
             await User.findByIdAndUpdate(req.user._id,{$push:{following:id}})
             await User.findByIdAndUpdate(id,{$push:{followers:req.user._id}})
            
-            // If following Football account, update the Football post's updatedAt to now
-            // This ensures it appears at the top of the feed when user follows
+            // REMOVED: Don't update Football post's updatedAt when following
+            // This was causing Football posts to jump to top for ALL users who follow Football
+            // when ANY user follows Football, which is incorrect behavior
+            // The feed will show Football posts naturally based on their original createdAt/updatedAt
             if (userToModify.username === 'Football') {
                 try {
-                    const Post = (await import('../models/post.js')).default
-                    // Get the latest Football post (today's post)
-                    const todayStart = new Date()
-                    todayStart.setHours(0, 0, 0, 0)
-                    const todayEnd = new Date(todayStart)
-                    todayEnd.setHours(23, 59, 59, 999)
-                    
-                    const latestFootballPost = await Post.findOne({
-                        postedBy: id,
-                        createdAt: { 
-                            $gte: todayStart,
-                            $lte: todayEnd
-                        }
-                    }).sort({ createdAt: -1 })
-                    
-                    if (latestFootballPost) {
-                        // Update updatedAt to now so it appears at top of feed
-                        latestFootballPost.updatedAt = new Date()
-                        await latestFootballPost.save()
-                        console.log(`⚽ [FollowAndUnfollow] Updated Football post ${latestFootballPost._id} updatedAt to now for user ${req.user.username}`)
-                    }
                     
                     // Automatically fetch matches if database is empty (run in background, don't wait)
                     // This ensures users see matches immediately after following
@@ -248,7 +229,7 @@ export const FollowAndUnfollow = async(req,res) => {
                         console.log(`⚽ [FollowAndUnfollow] Database already has ${matchCount} matches, skipping auto-fetch`)
                     }
                 } catch (error) {
-                    console.error('❌ [FollowAndUnfollow] Error updating Football post:', error)
+                    console.error('❌ [FollowAndUnfollow] Error auto-fetching matches:', error)
                 }
             }
            

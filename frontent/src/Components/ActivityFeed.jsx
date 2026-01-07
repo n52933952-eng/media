@@ -49,6 +49,25 @@ const ActivityFeed = () => {
         if (!socket) return
 
         const handleNewActivity = (activity) => {
+            // CRITICAL: Only add activity if it's from a user we follow
+            // This prevents showing activities from users we don't follow
+            if (!user?.following || !activity?.userId?._id) {
+                return // Skip if we don't have following list or activity has no user
+            }
+            
+            const activityUserId = activity.userId._id.toString()
+            const isFollowing = user.following.some(followId => 
+                followId.toString() === activityUserId
+            )
+            
+            if (!isFollowing) {
+                // Don't add activity from users we don't follow
+                if (import.meta.env.DEV) {
+                    console.log('⚠️ [ActivityFeed] Ignoring activity from user we don\'t follow:', activityUserId)
+                }
+                return
+            }
+            
             setActivities(prev => {
                 // Filter out activities older than 6 hours
                 const sixHoursAgo = new Date(Date.now() - 6 * 60 * 60 * 1000)
@@ -66,7 +85,7 @@ const ActivityFeed = () => {
         return () => {
             socket.off('newActivity', handleNewActivity)
         }
-    }, [socket])
+    }, [socket, user?.following]) // Include user.following to check if we follow the activity creator
 
     const getActivityIcon = (type) => {
         switch (type) {
