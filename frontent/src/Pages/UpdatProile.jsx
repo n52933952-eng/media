@@ -50,7 +50,8 @@ const[inputs,setInputs]=useState({
 
  
  
-const[image,setImage]=useState(null) // Will store File object for upload
+const[imageFile,setImageFile]=useState(null) // Store File object for upload
+const[imagePreview,setImagePreview]=useState(null) // Store preview URL for display
 const[uploadProgress,setUploadProgress]=useState(0)
 const[isUploading,setIsUploading]=useState(false)
 
@@ -73,10 +74,10 @@ const handleImageChange = async (event) => {
     }
 
     // Store file object (will be uploaded when form is submitted)
-    setImage(file)
-    // Create preview URL
+    setImageFile(file)
+    // Create preview URL for display
     const previewURL = URL.createObjectURL(file)
-    setImage(previewURL) // Show preview immediately
+    setImagePreview(previewURL) // Show preview immediately
     setUploadProgress(0)
     setIsUploading(false) // Don't upload immediately, wait for form submit
       
@@ -90,9 +91,6 @@ const handleImageChange = async (event) => {
     }
 };
 
-
-
-console.log(image)
 
 
   const handleSubmit = async(e) => {
@@ -116,8 +114,8 @@ console.log(image)
     }
     
     // Upload profile picture if a new file was selected
-    if (image instanceof File) {
-      formData.append('file', image)
+    if (imageFile instanceof File) {
+      formData.append('file', imageFile)
       
       const xhr = new XMLHttpRequest()
       
@@ -147,11 +145,12 @@ console.log(image)
             setUser(data)
             localStorage.setItem("userInfo", JSON.stringify(data))
             
-            // Clear image preview
-            if (image && image.startsWith('blob:')) {
-              URL.revokeObjectURL(image)
+            // Clear image preview and file
+            if (imagePreview && imagePreview.startsWith('blob:')) {
+              URL.revokeObjectURL(imagePreview)
             }
-            setImage(null)
+            setImageFile(null)
+            setImagePreview(null)
             setUploadProgress(0)
             setUpdating(false)
           } catch (error) {
@@ -245,7 +244,7 @@ return (
                     <Center>
                          
                          <Flex position="relative">
-                         <Avatar size='xl'  src={image || user.profilePic} />
+                         <Avatar size='xl'  src={imagePreview || user.profilePic} />
                          </Flex>
                         
                          

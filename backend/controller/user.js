@@ -327,6 +327,7 @@ export const UpdateUser = async(req,res) => {
                 user = await user.save()
 
                 // Return safe fields only (exclude password)
+                // Include followers and following to preserve them in frontend
                 if (!res.headersSent) {
                   res.status(200).json({
                     _id: user._id,
@@ -336,7 +337,9 @@ export const UpdateUser = async(req,res) => {
                     bio: user.bio,
                     profilePic: user.profilePic,
                     country: user.country,
-                    instagram: user.instagram
+                    instagram: user.instagram,
+                    followers: user.followers || [],
+                    following: user.following || []
                   })
                 }
                 resolve()
@@ -371,6 +374,7 @@ export const UpdateUser = async(req,res) => {
       user = await user.save()
 
       // Return safe fields only (exclude password)
+      // Include followers and following to preserve them in frontend
       res.status(200).json({
         _id: user._id,
         name: user.name,
@@ -379,7 +383,9 @@ export const UpdateUser = async(req,res) => {
         bio: user.bio,
         profilePic: user.profilePic,
         country: user.country,
-        instagram: user.instagram
+        instagram: user.instagram,
+        followers: user.followers || [],
+        following: user.following || []
       })
     }
     catch(error){
