@@ -19,6 +19,7 @@ import NewsPage from './Pages/NewsPage'
 import NotificationsPage from './Pages/NotificationsPage'
 import ChessGamePage from './Pages/ChessGamePage'
 import CallNotification from './Components/CallNotification'
+import ChessChallengeNotification from './Components/ChessChallengeNotification'
 
 const AppContent = () => {
   const location = useLocation()
@@ -37,6 +38,9 @@ const AppContent = () => {
     <>
       {/* Global Call Notification - shows on all pages */}
       {user && <CallNotification />}
+      
+      {/* Global Chess Challenge Notification - shows on all pages */}
+      {user && <ChessChallengeNotification />}
       
       {/* Header always centered at 620px - same as other pages */}
       <Container maxW="620px" px={{ base: 4, md: 6 }} position="relative" zIndex={10}>

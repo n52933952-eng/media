@@ -25,6 +25,7 @@ export const SocketContextProvider = ({ children }) => {
   const [busyUsers, setBusyUsers] = useState(new Set()); // Track which users are busy
   const [totalUnreadCount, setTotalUnreadCount] = useState(0); // Global unread message count
   const [notificationCount, setNotificationCount] = useState(0); // Global unread notification count
+  const [chessChallenge, setChessChallenge] = useState(null); // Track incoming chess challenge
 
   const myVideo = useRef();
   const userVideo = useRef();
@@ -672,6 +673,70 @@ export const SocketContextProvider = ({ children }) => {
     // This prevents unnecessary re-renders and message reloading
   };
 
+  // Handle incoming chess challenge
+  useEffect(() => {
+    if (!socket) return;
+
+    const handleChessChallenge = (data) => {
+      console.log('♟️ Chess challenge received:', data);
+      setChessChallenge({
+        from: data.from,
+        fromName: data.fromName,
+        fromUsername: data.fromUsername,
+        fromProfilePic: data.fromProfilePic,
+        isReceivingChallenge: true,
+      });
+    };
+
+    const handleChessDeclined = () => {
+      console.log('♟️ Chess challenge declined');
+      setChessChallenge(null);
+    };
+
+    socket.on('chessChallenge', handleChessChallenge);
+    socket.on('chessDeclined', handleChessDeclined);
+
+    return () => {
+      socket.off('chessChallenge', handleChessChallenge);
+      socket.off('chessDeclined', handleChessDeclined);
+    };
+  }, [socket]);
+
+  // Accept chess challenge
+  const acceptChessChallenge = () => {
+    if (!socket || !chessChallenge) return;
+
+    const roomId = `chess_${chessChallenge.from}_${user._id}_${Date.now()}`;
+    const acceptData = {
+      from: user._id,
+      to: chessChallenge.from,
+      roomId: roomId
+    };
+
+    // Set orientation to black (accepter is always black)
+    localStorage.removeItem("chessOrientation");
+    localStorage.removeItem("gameLive");
+    localStorage.removeItem("chessRoomId");
+    localStorage.setItem("chessOrientation", "black");
+    localStorage.setItem("gameLive", "true");
+    localStorage.setItem("chessRoomId", roomId);
+
+    socket.emit('acceptChessChallenge', acceptData);
+    setChessChallenge(null);
+  };
+
+  // Decline chess challenge
+  const declineChessChallenge = () => {
+    if (!socket || !chessChallenge) return;
+
+    socket.emit('declineChessChallenge', {
+      from: user._id,
+      to: chessChallenge.from
+    });
+
+    setChessChallenge(null);
+  };
+
   // Function to update which conversation is currently open (for notification sound control)
   const setSelectedConversationId = (userId) => {
     console.log('🔊 Setting selectedConversationId:', userId || 'none')
@@ -702,6 +767,9 @@ export const SocketContextProvider = ({ children }) => {
         notificationCount, // Export unread notification count
         setNotificationCount, // Function to update notification count
         setSelectedConversationId, // Function to update selected conversation for notification control
+        chessChallenge, // Export chess challenge state
+        acceptChessChallenge, // Function to accept chess challenge
+        declineChessChallenge, // Function to decline chess challenge
       }}
     >
       {children}
