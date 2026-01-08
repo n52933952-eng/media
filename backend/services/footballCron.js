@@ -6,93 +6,70 @@ import { getIO, getAllUserSockets } from '../socket/socket.js'
 import mongoose from 'mongoose'
 import { autoPostTodayMatches, getFootballAccount, fetchMatchDetails } from '../controller/football.js'
 
-// TheSportsDB API configuration (FREE - 30 requests/minute)
-// Free API key: 123 (or use premium key from .env)
-const getAPIKey = () => process.env.THESPORTSDB_API_KEY || '123' // Default to free key
-const API_BASE_URL = 'https://www.thesportsdb.com/api/v1/json'
-const CURRENT_SEASON = '2024-2025' // Format: YYYY-YYYY
+// API-Football configuration
+const getAPIKey = () => process.env.FOOTBALL_API_KEY || 'f3ebe896455cab31fc80e859716411df'
+const API_BASE_URL = 'https://v3.football.api-sports.io'
+const CURRENT_SEASON = new Date().getFullYear()
 
-// Supported leagues and competitions (TheSportsDB league IDs)
-// Premier League = 4328, La Liga = 4335, Serie A = 4332
-// We'll match by both ID and name for flexibility
+// Supported leagues and competitions (API-Football league IDs)
 const SUPPORTED_LEAGUES = [
-    { id: 4328, name: 'Premier League', country: 'England', searchNames: ['premier league', 'english premier league', 'epl'] },
-    { id: 4335, name: 'La Liga', country: 'Spain', searchNames: ['la liga', 'spanish la liga', 'primera division'] },
-    { id: 4332, name: 'Serie A', country: 'Italy', searchNames: ['serie a', 'italian serie a'] }
+    { id: 39, name: 'Premier League', country: 'England' },
+    { id: 140, name: 'La Liga', country: 'Spain' },
+    { id: 135, name: 'Serie A', country: 'Italy' },
+    { id: 78, name: 'Bundesliga', country: 'Germany' },
+    { id: 61, name: 'Ligue 1', country: 'France' },
+    { id: 2, name: 'UEFA Champions League', country: 'Europe' }
 ]
 
-// Helper: Convert TheSportsDB match format to our database format
-const convertMatchFormat = (eventData, leagueInfo) => {
-    // TheSportsDB uses: strStatus (Live, NotStarted, HalfTime, Finished, etc.)
-    const statusStr = eventData.strStatus || 'Not Started'
+// Helper: Convert API-Football match format to our database format
+const convertMatchFormat = (fixtureData) => {
+    const fixture = fixtureData.fixture
+    const league = fixtureData.league
+    const teams = fixtureData.teams
+    const goals = fixtureData.goals
+    const score = fixtureData.score
     
-    // Map TheSportsDB status to our format
-    let statusShort = 'NS'
-    let statusLong = statusStr
-    let elapsed = null
+    const statusShort = fixture.status.short || 'NS'
+    const statusLong = fixture.status.long || 'Not Started'
+    const elapsed = fixture.status.elapsed || null
     
-    if (statusStr.includes('Live') || statusStr.includes('1H') || statusStr.includes('2H')) {
-        statusShort = statusStr.includes('1H') ? '1H' : statusStr.includes('2H') ? '2H' : '1H'
-        statusLong = statusStr
-        // Try to extract elapsed time from status
-        const timeMatch = statusStr.match(/(\d+)\s*'/i)
-        if (timeMatch) elapsed = parseInt(timeMatch[1])
-    } else if (statusStr.includes('Half Time') || statusStr === 'Half Time') {
-        statusShort = 'HT'
-        statusLong = 'Half Time'
-        elapsed = 45
-    } else if (statusStr.includes('Finished') || statusStr === 'FT') {
-        statusShort = 'FT'
-        statusLong = 'Match Finished'
-        elapsed = 90
-    } else if (statusStr.includes('Postponed') || statusStr === 'Postponed') {
-        statusShort = 'POSTP'
-        statusLong = 'Postponed'
-    } else if (statusStr.includes('Cancelled') || statusStr === 'Cancelled') {
-        statusShort = 'CANC'
-        statusLong = 'Cancelled'
-    }
-    
-    // Parse score from strScore or intHomeScore/intAwayScore
-    let homeScore = null
-    let awayScore = null
-    if (eventData.strScore) {
-        const scoreMatch = eventData.strScore.match(/(\d+)\s*-\s*(\d+)/)
-        if (scoreMatch) {
-            homeScore = parseInt(scoreMatch[1])
-            awayScore = parseInt(scoreMatch[2])
-        }
-    } else {
-        homeScore = eventData.intHomeScore !== null ? parseInt(eventData.intHomeScore) : null
-        awayScore = eventData.intAwayScore !== null ? parseInt(eventData.intAwayScore) : null
-    }
+    const homeScore = goals?.home !== null && goals?.home !== undefined 
+        ? goals.home 
+        : (score?.fulltime?.home !== null && score?.fulltime?.home !== undefined 
+            ? score.fulltime.home 
+            : null)
+    const awayScore = goals?.away !== null && goals?.away !== undefined 
+        ? goals.away 
+        : (score?.fulltime?.away !== null && score?.fulltime?.away !== undefined 
+            ? score.fulltime.away 
+            : null)
     
     return {
-        fixtureId: eventData.idEvent || eventData.idEvent,
+        fixtureId: fixture.id,
         league: {
-            id: eventData.idLeague || leagueInfo?.id || 0,
-            name: eventData.strLeague || leagueInfo?.name || 'Unknown League',
-            country: eventData.strCountry || leagueInfo?.country || 'Unknown',
-            logo: eventData.strBadge || '',
-            flag: '',
-            season: eventData.strSeason || CURRENT_SEASON
+            id: league.id,
+            name: league.name,
+            country: league.country,
+            logo: league.logo || '',
+            flag: league.flag || '',
+            season: league.season
         },
         teams: {
             home: {
-                id: eventData.idHomeTeam || 0,
-                name: eventData.strHomeTeam || 'Unknown',
-                logo: eventData.strHomeTeamBadge || ''
+                id: teams.home.id,
+                name: teams.home.name,
+                logo: teams.home.logo || ''
             },
             away: {
-                id: eventData.idAwayTeam || 0,
-                name: eventData.strAwayTeam || 'Unknown',
-                logo: eventData.strAwayTeamBadge || ''
+                id: teams.away.id,
+                name: teams.away.name,
+                logo: teams.away.logo || ''
             }
         },
         fixture: {
-            date: new Date(eventData.dateEvent + ' ' + (eventData.strTime || '00:00:00')),
-            venue: eventData.strVenue || '',
-            city: '',
+            date: new Date(fixture.date),
+            venue: fixture.venue?.name || '',
+            city: fixture.venue?.city || '',
             status: {
                 long: statusLong,
                 short: statusShort,
@@ -108,43 +85,39 @@ const convertMatchFormat = (eventData, leagueInfo) => {
     }
 }
 
-// Helper: Fetch from TheSportsDB API
+// Helper: Fetch from API-Football API
 const fetchFromAPI = async (endpoint) => {
     try {
         const apiKey = getAPIKey()
-        // TheSportsDB uses API key in URL path: /api/v1/json/{API_KEY}/endpoint.php
-        const fullUrl = `${API_BASE_URL}/${apiKey}/${endpoint}`
+        const fullUrl = `${API_BASE_URL}${endpoint}`
         console.log('⚽ [fetchFromAPI] Fetching:', fullUrl)
         
         const response = await fetch(fullUrl, {
-            method: 'GET'
+            method: 'GET',
+            headers: {
+                'x-apisports-key': apiKey
+            }
         })
         
         console.log('⚽ [fetchFromAPI] Response status:', response.status, response.statusText)
         
-        // Handle rate limit (429 status)
         if (response.status === 429) {
-            console.error('🚫 [fetchFromAPI] RATE LIMIT HIT! (30 requests/minute for free tier)')
+            console.error('🚫 [fetchFromAPI] RATE LIMIT HIT!')
             return { success: false, error: 'Rate limit exceeded', rateLimit: true }
         }
         
         const data = await response.json()
         
-        if (response.ok && data.events) {
-            // TheSportsDB returns { events: [...] } for eventsday.php
-            console.log('⚽ [fetchFromAPI] Success! Found', data.events.length, 'events')
-            return { success: true, data: data.events }
-        } else if (response.ok && Array.isArray(data)) {
-            // Some endpoints return array directly
-            console.log('⚽ [fetchFromAPI] Success! Found', data.length, 'items')
-            return { success: true, data: data }
+        if (response.ok && data.response) {
+            console.log('⚽ [fetchFromAPI] Success! Found', data.response.length, 'items')
+            return { success: true, data: data.response }
         } else {
-            console.error('⚽ [fetchFromAPI] Error:', data.message || 'Unknown error')
-            return { success: false, error: data.message || 'Failed to fetch from API' }
+            const errorMsg = data.errors?.[0]?.message || data.message || 'Unknown error'
+            console.error('⚽ [fetchFromAPI] Error:', errorMsg)
+            return { success: false, error: errorMsg }
         }
     } catch (error) {
         console.error('⚽ [fetchFromAPI] Fetch Error:', error.message)
-        console.error('⚽ [fetchFromAPI] Error stack:', error.stack)
         return { success: false, error: error.message }
     }
 }
@@ -221,9 +194,8 @@ const fetchAndUpdateLiveMatches = async () => {
     try {
         console.log('⚽ [fetchAndUpdateLiveMatches] Fetching live matches...')
         
-        // TheSportsDB: Get today's events filtered by Soccer, then filter for live matches
-        const today = new Date().toISOString().split('T')[0] // YYYY-MM-DD
-        const result = await fetchFromAPI(`eventsday.php?d=${today}&s=Soccer`)
+        // API-Football: Get all live matches
+        const result = await fetchFromAPI('/fixtures?live=all')
         
         if (result.rateLimit) {
             console.warn('⚠️ [fetchAndUpdateLiveMatches] Rate limit hit, skipping this update')
@@ -231,100 +203,35 @@ const fetchAndUpdateLiveMatches = async () => {
         }
         
         if (!result.success || !result.data) {
-            console.log('📭 [fetchAndUpdateLiveMatches] No events found for today')
+            console.log('📭 [fetchAndUpdateLiveMatches] No live matches found')
             return
         }
         
-        let allLiveMatches = []
+        // Filter for supported leagues only
+        const supportedLeagueIds = SUPPORTED_LEAGUES.map(l => l.id)
+        const filteredMatches = result.data.filter(match => 
+            supportedLeagueIds.includes(match.league.id)
+        )
         
-        // Filter for matches from supported leagues and live status (by ID or name)
-        const supportedLeagueIds = SUPPORTED_LEAGUES.map(l => l.id.toString())
-        const supportedLeagueNames = SUPPORTED_LEAGUES.flatMap(l => [l.name.toLowerCase(), ...(l.searchNames || [])])
-        
-        // Debug: Log all league IDs found
-        const allLeagueIds = result.data.map(e => e.idLeague).filter(Boolean)
-        console.log(`📊 [fetchAndUpdateLiveMatches] League IDs found in events:`, [...new Set(allLeagueIds)])
-        console.log(`📊 [fetchAndUpdateLiveMatches] Looking for league IDs:`, supportedLeagueIds)
-        
-        const filteredMatches = result.data.filter(event => {
-            const leagueId = event.idLeague?.toString()
-            const leagueName = (event.strLeague || '').toLowerCase()
-            const isSupportedById = supportedLeagueIds.includes(leagueId)
-            const isSupportedByName = supportedLeagueNames.some(name => leagueName.includes(name))
-            const isSupported = isSupportedById || isSupportedByName
-            const isLive = event.strStatus?.includes('Live') || event.strStatus?.includes('1H') || event.strStatus?.includes('2H')
-            
-            if (event.idLeague) {
-                console.log(`  📋 Event: ${event.strEvent || 'Unknown'} - League: ${event.strLeague || 'Unknown'} (ID: ${leagueId}), Status: ${event.strStatus}, Supported: ${isSupported}, Live: ${isLive}`)
-            }
-            
-            return isSupported && isLive
-        })
-        
-        if (filteredMatches.length > 0) {
-            // Add league info to each match
-            filteredMatches.forEach(match => {
-                const leagueInfo = SUPPORTED_LEAGUES.find(l => l.id.toString() === match.idLeague?.toString())
-                if (leagueInfo) {
-                    allLiveMatches.push({ ...match, leagueInfo })
-                }
-            })
-            console.log(`⚽ [fetchAndUpdateLiveMatches] Found ${allLiveMatches.length} live matches from supported leagues`)
-        }
-        
-        if (allLiveMatches.length === 0) {
+        if (filteredMatches.length === 0) {
             console.log('📭 [fetchAndUpdateLiveMatches] No live matches at the moment')
             return
         }
         
-        console.log(`📊 [fetchAndUpdateLiveMatches] Found ${allLiveMatches.length} total live matches`)
+        console.log(`📊 [fetchAndUpdateLiveMatches] Found ${filteredMatches.length} live matches`)
         
-        for (const matchData of allLiveMatches) {
+        for (const matchData of filteredMatches) {
             // Get previous state
-            const fixtureId = matchData.idEvent || matchData.id
-            const previousMatch = await Match.findOne({ fixtureId })
+            const convertedMatch = convertMatchFormat(matchData)
+            const previousMatch = await Match.findOne({ fixtureId: convertedMatch.fixtureId })
             
             const previousGoalsHome = previousMatch?.goals?.home || 0
             const previousGoalsAway = previousMatch?.goals?.away || 0
+            const currentGoalsHome = convertedMatch.goals?.home || 0
+            const currentGoalsAway = convertedMatch.goals?.away || 0
             
-            // TheSportsDB: Get current score from intHomeScore/intAwayScore
-            const currentGoalsHome = matchData.intHomeScore !== null ? parseInt(matchData.intHomeScore) : 0
-            const currentGoalsAway = matchData.intAwayScore !== null ? parseInt(matchData.intAwayScore) : 0
-            
-            // For live matches: Get better elapsed time from lookupevent.php (but don't fetch timeline/scorers)
-            let betterElapsedTime = null
-            try {
-                const apiKey = getAPIKey()
-                const eventUrl = `${API_BASE_URL}/${apiKey}/lookupevent.php?id=${fixtureId}`
-                const eventResponse = await fetch(eventUrl)
-                
-                if (eventResponse.ok) {
-                    const eventData = await eventResponse.json()
-                    if (eventData.event) {
-                        const matchInfo = Array.isArray(eventData.event) ? eventData.event[0] : eventData.event
-                        const statusStr = matchInfo.strStatus || ''
-                        if (statusStr.includes('Live') || statusStr.includes('1H') || statusStr.includes('2H')) {
-                            const timeMatch = statusStr.match(/(\d+)\s*'/i)
-                            if (timeMatch) {
-                                betterElapsedTime = parseInt(timeMatch[1])
-                            }
-                        }
-                    }
-                }
-            } catch (error) {
-                console.log(`  ⚠️ Could not fetch better elapsed time for match ${fixtureId}:`, error.message)
-            }
-            
-            // Convert and update match in database
-            const convertedMatch = convertMatchFormat(matchData, matchData.leagueInfo)
-            
-            // Use better elapsed time if available
-            if (betterElapsedTime !== null) {
-                convertedMatch.fixture.status.elapsed = betterElapsedTime
-            }
-            
-            // IMPORTANT: Don't fetch timeline/scorers for live matches (only for finished)
-            convertedMatch.events = [] // Live matches should have empty events array
+            // IMPORTANT: Don't fetch events/scorers for live matches (only for finished)
+            convertedMatch.events = []
             
             const updatedMatch = await Match.findOneAndUpdate(
                 { fixtureId: convertedMatch.fixtureId },
@@ -337,28 +244,13 @@ const fetchAndUpdateLiveMatches = async () => {
             const statusChanged = previousMatch?.fixture?.status?.short !== updatedMatch.fixture?.status?.short
             const elapsedChanged = previousMatch?.fixture?.status?.elapsed !== updatedMatch.fixture?.status?.elapsed
             
-            // Always update post if score, status, or elapsed time changed (for real-time updates)
             if (scoreChanged || statusChanged || elapsedChanged) {
-                console.log(`  🔔 Match update detected: ${updatedMatch.teams?.home?.name} vs ${updatedMatch.teams?.away?.name}`)
+                console.log(`  🔔 Match update: ${updatedMatch.teams?.home?.name} vs ${updatedMatch.teams?.away?.name}`)
                 if (scoreChanged) {
                     console.log(`     Score: ${previousGoalsHome}-${previousGoalsAway} → ${currentGoalsHome}-${currentGoalsAway}`)
                 }
-                if (statusChanged) {
-                    console.log(`     Status: ${previousMatch?.fixture?.status?.short || 'N/A'} → ${updatedMatch.fixture?.status?.short}`)
-                }
-                if (elapsedChanged) {
-                    console.log(`     Elapsed: ${previousMatch?.fixture?.status?.elapsed || 'N/A'}' → ${updatedMatch.fixture?.status?.elapsed || 'N/A'}'`)
-                }
-            } else {
-                console.log(`  ✓ Match unchanged: ${updatedMatch.teams?.home?.name} vs ${updatedMatch.teams?.away?.name} (${currentGoalsHome}-${currentGoalsAway})`)
-            }
-            
-            // Always update post if there are changes (score, status, or elapsed time)
-            if (scoreChanged || statusChanged || elapsedChanged) {
-                console.log(`  🔔 Match updated: ${updatedMatch.teams?.home?.name} vs ${updatedMatch.teams?.away?.name}`)
-                console.log(`     Score: ${previousGoalsHome}-${previousGoalsAway} → ${currentGoalsHome}-${currentGoalsAway}`)
                 
-                // Find the "Today's Top Matches" post for this match
+                // Update post if it exists
                 const footballAccount = await getFootballAccount()
                 if (footballAccount) {
                     const todayPost = await Post.findOne({
@@ -371,26 +263,22 @@ const fetchAndUpdateLiveMatches = async () => {
                     }).sort({ createdAt: -1 })
                     
                     if (todayPost) {
-                        // Parse existing match data
-                        let matchData = []
+                        let matchDataArray = []
                         try {
-                            matchData = JSON.parse(todayPost.footballData)
+                            matchDataArray = JSON.parse(todayPost.footballData)
                         } catch (e) {
                             console.error('Failed to parse football data:', e)
                         }
                         
-                        // Update the match in the post data (find by team names)
-                        const matchIndex = matchData.findIndex(m => {
+                        const matchIndex = matchDataArray.findIndex(m => {
                             const homeName1 = m.homeTeam?.name || m.homeTeam
                             const awayName1 = m.awayTeam?.name || m.awayTeam
-                            const homeName2 = updatedMatch.teams?.home?.name
-                            const awayName2 = updatedMatch.teams?.away?.name
-                            return homeName1 === homeName2 && awayName1 === awayName2
+                            return homeName1 === updatedMatch.teams?.home?.name && awayName1 === updatedMatch.teams?.away?.name
                         })
                         
                         if (matchIndex !== -1) {
-                            matchData[matchIndex] = {
-                                ...matchData[matchIndex],
+                            matchDataArray[matchIndex] = {
+                                ...matchDataArray[matchIndex],
                                 score: {
                                     home: updatedMatch.goals?.home ?? 0,
                                     away: updatedMatch.goals?.away ?? 0
@@ -402,30 +290,21 @@ const fetchAndUpdateLiveMatches = async () => {
                                 }
                             }
                             
-                            // Filter out finished matches (FT, AET, PEN) - only keep live matches
+                            // Filter out finished matches - only keep live matches
                             const finishedStatuses = ['FT', 'AET', 'PEN', 'CANC', 'POSTP', 'SUSP']
-                            const liveMatchesOnly = matchData.filter(m => {
+                            const liveMatchesOnly = matchDataArray.filter(m => {
                                 const status = m.status?.short || m.status
                                 return !finishedStatuses.includes(status)
                             })
                             
-                            // Update post in database with only live matches
                             todayPost.footballData = JSON.stringify(liveMatchesOnly)
-                            // Don't update createdAt - use updatedAt timestamp instead to avoid duplicate detection issues
-                            // The post will still move to top via socket update in frontend
                             await todayPost.save()
-                            
-                            // Update matchData for socket emission
-                            matchData = liveMatchesOnly
                             
                             // Emit socket event to update frontend
                             const io = getIO()
                             if (io) {
-                                // Get all followers of Football account
                                 const freshFootballAccount = await User.findById(footballAccount._id).select('followers')
                                 const followerIds = freshFootballAccount?.followers?.map(f => f.toString()) || []
-                                
-                                // Emit to all online followers
                                 const socketMap = await getAllUserSockets()
                                 let onlineCount = 0
                                 
@@ -434,7 +313,7 @@ const fetchAndUpdateLiveMatches = async () => {
                                     if (socketData && socketData.socketId) {
                                         io.to(socketData.socketId).emit('footballMatchUpdate', {
                                             postId: todayPost._id.toString(),
-                                            matchData: matchData,
+                                            matchData: liveMatchesOnly,
                                             updatedAt: new Date()
                                         })
                                         onlineCount++
@@ -461,62 +340,36 @@ const fetchTodayFixtures = async () => {
         
         const today = new Date().toISOString().split('T')[0] // YYYY-MM-DD
         console.log('📅 [fetchTodayFixtures] Today\'s date:', today)
-        console.log('📅 [fetchTodayFixtures] Supported leagues:', SUPPORTED_LEAGUES)
         
-        // TheSportsDB: Get all events for today, filtered by Soccer (single API call)
-        const result = await fetchFromAPI(`eventsday.php?d=${today}&s=Soccer`)
-        
-        if (result.rateLimit) {
-            console.warn(`⚠️ [fetchTodayFixtures] Rate limit hit, skipping`)
-            return
-        }
-        
-        if (!result.success || !result.data) {
-            console.log('📅 [fetchTodayFixtures] No events found for today')
-            return
-        }
-        
-        // Filter for supported leagues (by ID or name)
-        const supportedLeagueIds = SUPPORTED_LEAGUES.map(l => l.id.toString())
-        const supportedLeagueNames = SUPPORTED_LEAGUES.flatMap(l => [l.name.toLowerCase(), ...(l.searchNames || [])])
-        
-        // Debug: Log all league IDs and names found
-        const allLeagueIds = result.data.map(e => e.idLeague).filter(Boolean)
-        const allLeagueNames = result.data.map(e => e.strLeague?.toLowerCase()).filter(Boolean)
-        console.log(`📊 [fetchTodayFixtures] League IDs found in events:`, [...new Set(allLeagueIds)])
-        console.log(`📊 [fetchTodayFixtures] League names found:`, [...new Set(allLeagueNames)])
-        console.log(`📊 [fetchTodayFixtures] Looking for league IDs:`, supportedLeagueIds)
-        console.log(`📊 [fetchTodayFixtures] Looking for league names:`, supportedLeagueNames)
-        
-        const filteredEvents = result.data.filter(event => {
-            const leagueId = event.idLeague?.toString()
-            const leagueName = (event.strLeague || '').toLowerCase()
-            const isSupportedById = supportedLeagueIds.includes(leagueId)
-            const isSupportedByName = supportedLeagueNames.some(name => leagueName.includes(name))
-            const isSupported = isSupportedById || isSupportedByName
-            
-            if (event.idLeague) {
-                console.log(`  📋 Event: ${event.strEvent || 'Unknown'} - League: ${event.strLeague || 'Unknown'} (ID: ${leagueId}), Supported: ${isSupported}`)
-            }
-            
-            return isSupported
-        })
-        
-        console.log(`📅 [fetchTodayFixtures] Found ${filteredEvents.length} events from supported leagues`)
-        
+        const supportedLeagueIds = SUPPORTED_LEAGUES.map(l => l.id)
         let totalFetched = 0
         
-        for (const eventData of filteredEvents) {
-            const leagueInfo = SUPPORTED_LEAGUES.find(l => l.id.toString() === eventData.idLeague?.toString())
-            if (leagueInfo) {
-                const convertedMatch = convertMatchFormat(eventData, leagueInfo)
-                await Match.findOneAndUpdate(
-                    { fixtureId: convertedMatch.fixtureId },
-                    convertedMatch,
-                    { upsert: true, new: true }
-                )
-                totalFetched++
+        // Fetch fixtures for each supported league
+        for (const league of SUPPORTED_LEAGUES) {
+            const endpoint = `/fixtures?league=${league.id}&date=${today}&season=${CURRENT_SEASON}`
+            const result = await fetchFromAPI(endpoint)
+            
+            if (result.rateLimit) {
+                console.warn(`⚠️ [fetchTodayFixtures] Rate limit hit, skipping`)
+                break
             }
+            
+            if (result.success && result.data) {
+                console.log(`📅 [fetchTodayFixtures] Found ${result.data.length} fixtures for ${league.name}`)
+                
+                for (const matchData of result.data) {
+                    const convertedMatch = convertMatchFormat(matchData)
+                    await Match.findOneAndUpdate(
+                        { fixtureId: convertedMatch.fixtureId },
+                        convertedMatch,
+                        { upsert: true, new: true }
+                    )
+                    totalFetched++
+                }
+            }
+            
+            // Rate limit protection: Wait 1 second between league requests
+            await new Promise(resolve => setTimeout(resolve, 1000))
         }
         
         console.log(`✅ Fetched ${totalFetched} fixtures for today`)
@@ -593,8 +446,8 @@ export const initializeFootballCron = () => {
         await autoPostTodayMatches()
     }, 5000)
     
-    console.log('✅ Football Cron Jobs initialized (TheSportsDB - FREE API)')
-    console.log('   - API: TheSportsDB (FREE - 30 requests/minute)')
+    console.log('✅ Football Cron Jobs initialized (API-Football)')
+    console.log('   - API: API-Football (v3.football.api-sports.io)')
     console.log('   - Live matches: Smart polling during match hours only')
     console.log('     • Weekends 12:00-22:00 UTC: Every 10 min (~30 calls/day)')
     console.log('     • Weekdays 18:00-22:00 UTC: Every 15 min (~3 calls/day)')
@@ -602,7 +455,7 @@ export const initializeFootballCron = () => {
     console.log('   - Daily fixtures: 6 AM UTC (1 call/day)')
     console.log('   - Auto-post today\'s matches: 7 AM UTC (1 call)')
     console.log('   - Post refresh: Every 30 minutes (from database, no API calls)')
-    console.log('   - Leagues: Premier League (4328), La Liga (4335), Serie A (4332)')
-    console.log('   - Total: ~45 calls/day (well under 30 req/min free tier!)')
+    console.log('   - Leagues: Premier League (39), La Liga (140), Serie A (135), Bundesliga (78), Ligue 1 (61), Champions League (2)')
+    console.log('   - Total: ~45 calls/day')
 }
 
