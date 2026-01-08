@@ -150,102 +150,20 @@ const showToast = useShowToast()
   
   const [matchesData, setMatchesData] = useState([])
   
-  // Parse initial football data and calculate elapsed time from match start
+  // Parse initial football data (use API time directly, no client-side calculation)
   useEffect(() => {
     if (isFootballPost && post?.footballData) {
       try {
         const parsed = JSON.parse(post.footballData)
-        
-        // Calculate elapsed time from match start time for each match
-        const matchesWithCalculatedTime = parsed.map(match => {
-          const isLive = ['1H', '2H', 'HT', 'BT', 'ET', 'P', 'LIVE'].includes(match.status?.short)
-          
-          // If match is live and we have a start time, calculate elapsed time
-          if (isLive && match.date && match.status?.short !== 'HT') {
-            const matchStart = new Date(match.date)
-            const now = new Date()
-            const elapsedMinutes = Math.floor((now - matchStart) / (1000 * 60))
-            
-            // Only use calculated time if it's reasonable (0-120 minutes) and match hasn't finished
-            if (elapsedMinutes >= 0 && elapsedMinutes <= 120) {
-              return {
-                ...match,
-                status: {
-                  ...match.status,
-                  elapsed: elapsedMinutes // Use calculated time instead of stale database time
-                }
-              }
-            }
-          }
-          
-          return match
-        })
-        
-        setMatchesData(matchesWithCalculatedTime)
-    } catch (e) {
-      console.error('Failed to parse football data:', e)
+        setMatchesData(parsed)
+      } catch (e) {
+        console.error('Failed to parse football data:', e)
         setMatchesData([])
       }
     } else {
       setMatchesData([])
     }
   }, [post?.footballData, isFootballPost])
-  
-  // Update elapsed time every minute for live matches (client-side timer)
-  useEffect(() => {
-    if (!isFootballPost || matchesData.length === 0) return
-    
-    // Check if any matches are live
-    const hasLiveMatches = matchesData.some(m => 
-      ['1H', '2H', 'HT', 'BT', 'ET', 'P', 'LIVE'].includes(m.status?.short)
-    )
-    
-    if (!hasLiveMatches) return
-    
-    // Update elapsed time every minute
-    const interval = setInterval(() => {
-      setMatchesData(prev => prev.map(match => {
-        const isLive = ['1H', '2H', 'HT', 'BT', 'ET', 'P', 'LIVE'].includes(match.status?.short)
-        if (!isLive || match.status?.short === 'HT') return match
-        
-        // Get current elapsed time from status
-        const currentElapsed = match.status?.elapsed
-        
-        // If we have a valid elapsed time, increment it by 1 minute
-        // This keeps the timer ticking between backend updates
-        if (currentElapsed !== null && currentElapsed !== undefined && currentElapsed < 120) {
-          return {
-            ...match,
-            status: {
-              ...match.status,
-              elapsed: currentElapsed + 1
-            }
-          }
-        }
-        
-        // Fallback: Calculate from match start time if available
-        if (match.date) {
-          const matchStart = new Date(match.date)
-          const now = new Date()
-          const elapsedMinutes = Math.floor((now - matchStart) / (1000 * 60))
-          
-          if (elapsedMinutes > 0 && elapsedMinutes <= 120) {
-            return {
-              ...match,
-              status: {
-                ...match.status,
-                elapsed: elapsedMinutes
-              }
-            }
-          }
-        }
-        
-        return match
-      }))
-    }, 60000) // Update every minute (60,000ms)
-    
-    return () => clearInterval(interval)
-  }, [isFootballPost, matchesData])
   
   // Listen for real-time football match updates
   useEffect(() => {
