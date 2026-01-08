@@ -138,11 +138,6 @@ const showToast = useShowToast()
     }
   }, [isChessPost, post?.chessGameData, user?._id])
   
-  // Don't render the entire post if it should be hidden
-  if (hideChessPost) {
-    return null
-  }
-  
   // Debug Al Jazeera posts
   if (postedBy?.username === 'AlJazeera') {
     console.log('🔴 Al Jazeera Post Data:', {
@@ -920,6 +915,11 @@ const showToast = useShowToast()
         {postContent}
       </Box>
     )
+  }
+
+  // Don't render the entire post if it should be hidden (after all hooks are called)
+  if (hideChessPost) {
+    return null
   }
 
   return (
