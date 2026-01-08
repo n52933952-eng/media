@@ -847,7 +847,10 @@ export const autoPostTodayMatches = async () => {
             console.log(`🧹 [autoPostTodayMatches] Cleaned up ${duplicateNoMatchesPosts.length - 1} duplicate "no matches" posts, kept the most recent one`)
         }
         
-        // Check if post exists for today (either with footballData OR text-only "no matches" post)
+        // Check if post exists for today OR yesterday (old "no matches" posts might be from yesterday)
+        const yesterdayStart = new Date(todayStart)
+        yesterdayStart.setDate(yesterdayStart.getDate() - 1)
+        
         const existingPost = await Post.findOne({
             postedBy: footballAccount._id,
             $or: [
@@ -858,7 +861,7 @@ export const autoPostTodayMatches = async () => {
                 }
             ],
             createdAt: { 
-                $gte: todayStart,
+                $gte: yesterdayStart, // Check yesterday and today
                 $lte: todayEnd
             }
         })
@@ -915,7 +918,7 @@ export const autoPostTodayMatches = async () => {
         }
         
         // Double-check: Make sure no post was created between our check and now (race condition prevention)
-        // Only do this if we didn't already delete a "no matches" post above (we'll check for matches first)
+        // Check yesterday and today for old "no matches" posts
         const doubleCheckPost = await Post.findOne({
             postedBy: footballAccount._id,
             $or: [
@@ -926,7 +929,7 @@ export const autoPostTodayMatches = async () => {
                 }
             ],
             createdAt: { 
-                $gte: todayStart,
+                $gte: yesterdayStart, // Check yesterday and today
                 $lte: todayEnd
             }
         })
@@ -992,11 +995,31 @@ export const autoPostTodayMatches = async () => {
         
         console.log('⚽ [autoPostTodayMatches] Found matches:', matches.length)
         
-        // If we found a "no matches" post earlier AND now we have live matches, delete it
-        if (noMatchesPostToDelete && matches.length > 0) {
-            console.log(`🔄 [autoPostTodayMatches] Live matches started! Deleting "no matches" post to create new post with matches...`)
-            await Post.findByIdAndDelete(noMatchesPostToDelete._id)
-            noMatchesPostToDelete = null // Clear it so we don't check again below
+        // If we have live matches, delete ANY old "no matches" posts (from today or yesterday)
+        if (matches.length > 0) {
+            // Find and delete all old "no matches" posts
+            const oldNoMatchesPosts = await Post.find({
+                postedBy: footballAccount._id,
+                text: { $regex: /Football Live|No live matches/i },
+                footballData: { $exists: false },
+                createdAt: { 
+                    $gte: yesterdayStart,
+                    $lte: todayEnd
+                }
+            })
+            
+            if (oldNoMatchesPosts.length > 0) {
+                console.log(`🔄 [autoPostTodayMatches] Found ${oldNoMatchesPosts.length} old "no matches" post(s), deleting them...`)
+                for (const oldPost of oldNoMatchesPosts) {
+                    await Post.findByIdAndDelete(oldPost._id)
+                }
+            }
+            
+            // Also delete the one we found earlier if it exists
+            if (noMatchesPostToDelete) {
+                await Post.findByIdAndDelete(noMatchesPostToDelete._id)
+                noMatchesPostToDelete = null
+            }
         }
         
         if (matches.length === 0) {
@@ -1024,13 +1047,13 @@ export const autoPostTodayMatches = async () => {
                     }
                 }
             } else {
-                // Double-check if any "no matches" post exists
+                // Double-check if any "no matches" post exists (check yesterday and today)
                 const existingNoMatchesPost = await Post.findOne({
                     postedBy: footballAccount._id,
                     text: { $regex: /Football Live|No live matches/i },
                     footballData: { $exists: false },
                     createdAt: { 
-                        $gte: todayStart,
+                        $gte: yesterdayStart, // Check yesterday and today
                         $lte: todayEnd
                     }
                 })
