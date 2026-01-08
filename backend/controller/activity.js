@@ -5,11 +5,11 @@ import User from '../models/user.js'
 // Create an activity and emit to followers
 export const createActivity = async (userId, type, options = {}) => {
     try {
-        // Delete activities older than 6 hours
-        const sixHoursAgo = new Date(Date.now() - 6 * 60 * 60 * 1000)
+        // Delete activities older than 1 minute (TESTING - change back to 6 hours after testing)
+        const oneMinuteAgo = new Date(Date.now() - 1 * 60 * 1000)
         await Activity.deleteMany({
             userId: userId,
-            createdAt: { $lt: sixHoursAgo }
+            createdAt: { $lt: oneMinuteAgo }
         })
         
         // Get current activity count for this user
@@ -84,13 +84,13 @@ export const getActivities = async (req, res) => {
         const user = await User.findById(userId).select('following')
         const followingIds = user?.following?.map(f => f.toString()) || []
 
-        // Only get activities from last 6 hours
-        const sixHoursAgo = new Date(Date.now() - 6 * 60 * 60 * 1000)
+        // Only get activities from last 1 minute (TESTING - change back to 6 hours after testing)
+        const oneMinuteAgo = new Date(Date.now() - 1 * 60 * 1000)
 
         // Get activities from users they follow (only recent ones, max 15)
         const activities = await Activity.find({
             userId: { $in: followingIds },
-            createdAt: { $gte: sixHoursAgo } // Only activities from last 6 hours
+            createdAt: { $gte: oneMinuteAgo } // Only activities from last 1 minute (TESTING)
         })
         .populate('userId', 'username name profilePic')
         .populate('targetUser', 'username name profilePic')
@@ -143,16 +143,16 @@ export const deleteActivity = async (req, res) => {
     }
 }
 
-// Cleanup old activities (older than 6 hours) - call this periodically
+// Cleanup old activities (older than 1 minute - TESTING - change back to 6 hours after testing) - call this periodically
 export const cleanupOldActivities = async () => {
     try {
-        const sixHoursAgo = new Date(Date.now() - 6 * 60 * 60 * 1000)
+        const oneMinuteAgo = new Date(Date.now() - 1 * 60 * 1000)
         const result = await Activity.deleteMany({
-            createdAt: { $lt: sixHoursAgo }
+            createdAt: { $lt: oneMinuteAgo }
         })
         
         if (result.deletedCount > 0) {
-            console.log(`🧹 [cleanupOldActivities] Deleted ${result.deletedCount} old activities (older than 6 hours)`)
+            console.log(`🧹 [cleanupOldActivities] Deleted ${result.deletedCount} old activities (older than 1 minute - TESTING)`)
         }
         
         // Also ensure each user has max 15 activities (delete oldest if more)
