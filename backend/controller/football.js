@@ -941,6 +941,68 @@ export const autoPostTodayMatches = async () => {
         
         console.log('✅ [autoPostTodayMatches] Creating new post for today...')
         
+        // FIRST: Check all matches in database that were live today - they might have finished
+        // This ensures we detect finished matches even if they're not in the feed post
+        const now = new Date()
+        const dbTodayStart = new Date(now.setHours(0, 0, 0, 0))
+        const dbTodayEnd = new Date(now.setHours(23, 59, 59, 999))
+        
+        const previouslyLiveMatches = await Match.find({
+            'fixture.date': { $gte: dbTodayStart, $lte: dbTodayEnd },
+            'fixture.status.short': { $in: ['1H', '2H', 'HT', 'ET', 'P', 'BT'] }
+        }).limit(20) // Check up to 20 matches
+        
+        console.log(`🔍 [autoPostTodayMatches] Checking ${previouslyLiveMatches.length} previously live matches in database to see if they finished...`)
+        
+        // Check each match against API to see current status
+        for (const dbMatch of previouslyLiveMatches) {
+            try {
+                const apiKey = getAPIKey()
+                const fixtureUrl = `${API_BASE_URL}/fixtures?id=${dbMatch.fixtureId}`
+                
+                const fixtureResponse = await fetch(fixtureUrl, {
+                    method: 'GET',
+                    headers: { 'x-apisports-key': apiKey }
+                })
+                
+                if (fixtureResponse.ok) {
+                    const fixtureData = await fixtureResponse.json()
+                    if (fixtureData.response && fixtureData.response.length > 0) {
+                        const matchData = fixtureData.response[0]
+                        const convertedMatch = convertMatchFormat(matchData)
+                        
+                        const status = convertedMatch.fixture.status.short
+                        const finishedStatuses = ['FT', 'AET', 'PEN', 'CANC', 'POSTP', 'SUSP']
+                        const isFinished = finishedStatuses.includes(status)
+                        const wasLive = ['1H', '2H', 'HT', 'ET', 'P', 'BT'].includes(dbMatch.fixture.status.short)
+                        
+                        if (wasLive && isFinished) {
+                            console.log(`  🏁 Match finished: ${convertedMatch.teams.home.name} vs ${convertedMatch.teams.away.name} (${status}) - Score: ${convertedMatch.goals?.home ?? 0}-${convertedMatch.goals?.away ?? 0}`)
+                            
+                            // Fetch events for finished match (scorers, cards, etc.)
+                            const matchDetails = await fetchMatchDetails(dbMatch.fixtureId, true)
+                            if (matchDetails && matchDetails.events && matchDetails.events.length > 0) {
+                                convertedMatch.events = matchDetails.events
+                                console.log(`    ⚽ Fetched ${matchDetails.events.length} events (scorers)`)
+                            }
+                            
+                            // Update database with finished match
+                            await Match.findOneAndUpdate(
+                                { fixtureId: convertedMatch.fixtureId },
+                                convertedMatch,
+                                { upsert: true, new: true }
+                            )
+                        }
+                    }
+                }
+                
+                // Rate limit protection
+                await new Promise(resolve => setTimeout(resolve, 500))
+            } catch (error) {
+                console.log(`  ⚠️ Error checking match ${dbMatch.fixtureId}:`, error.message)
+            }
+        }
+        
         // Get today's matches: ONLY LIVE matches (currently happening)
         // API-Football: Get all live matches
         const result = await fetchFromAPI('/fixtures?live=all')
@@ -1276,7 +1338,69 @@ export const forceCheckFeedPostMatches = async () => {
         }).sort({ createdAt: -1 })
         
         if (!todayPost) {
-            console.log('📭 [forceCheckFeedPostMatches] No feed post found')
+            console.log('📭 [forceCheckFeedPostMatches] No feed post found - will check database for live matches')
+            // No feed post exists, but there might be live matches in database
+            // Check database for live matches that should be in feed post
+            const liveMatchesInDB = await Match.find({
+                'fixture.date': { $gte: todayStart, $lte: todayEnd },
+                'fixture.status.short': { $in: ['1H', '2H', 'HT', 'ET', 'P', 'BT'] }
+            }).limit(10)
+            
+            if (liveMatchesInDB.length > 0) {
+                console.log(`  ⚠️ Found ${liveMatchesInDB.length} live matches in database but no feed post - checking their status...`)
+                // Check each match against API to see if they finished
+                for (const dbMatch of liveMatchesInDB) {
+                    try {
+                        const apiKey = getAPIKey()
+                        const fixtureUrl = `${API_BASE_URL}/fixtures?id=${dbMatch.fixtureId}`
+                        
+                        const fixtureResponse = await fetch(fixtureUrl, {
+                            method: 'GET',
+                            headers: { 'x-apisports-key': apiKey }
+                        })
+                        
+                        if (fixtureResponse.ok) {
+                            const fixtureData = await fixtureResponse.json()
+                            if (fixtureData.response && fixtureData.response.length > 0) {
+                                const matchData = fixtureData.response[0]
+                                const convertedMatch = convertMatchFormat(matchData)
+                                
+                                const status = convertedMatch.fixture.status.short
+                                const finishedStatuses = ['FT', 'AET', 'PEN', 'CANC', 'POSTP', 'SUSP']
+                                const isFinished = finishedStatuses.includes(status)
+                                
+                                // Update database with current status
+                                await Match.findOneAndUpdate(
+                                    { fixtureId: convertedMatch.fixtureId },
+                                    convertedMatch,
+                                    { upsert: true, new: true }
+                                )
+                                
+                                if (isFinished) {
+                                    console.log(`  🏁 Match finished: ${convertedMatch.teams.home.name} vs ${convertedMatch.teams.away.name} (${status})`)
+                                    // Fetch events for finished match
+                                    const matchDetails = await fetchMatchDetails(dbMatch.fixtureId, true)
+                                    if (matchDetails && matchDetails.events && matchDetails.events.length > 0) {
+                                        convertedMatch.events = matchDetails.events
+                                        await Match.findOneAndUpdate(
+                                            { fixtureId: convertedMatch.fixtureId },
+                                            { events: convertedMatch.events },
+                                            { upsert: true, new: true }
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                        await new Promise(resolve => setTimeout(resolve, 500))
+                    } catch (error) {
+                        console.log(`  ⚠️ Error checking match ${dbMatch.fixtureId}:`, error.message)
+                    }
+                }
+                
+                // After checking all matches, call autoPostTodayMatches to create/update feed post
+                console.log('  🔄 Calling autoPostTodayMatches to create/update feed post...')
+                await autoPostTodayMatches()
+            }
             return
         }
         
@@ -1289,7 +1413,67 @@ export const forceCheckFeedPostMatches = async () => {
         }
         
         if (matchDataArray.length === 0) {
-            console.log('📭 [forceCheckFeedPostMatches] No matches in feed post')
+            console.log('📭 [forceCheckFeedPostMatches] No matches in feed post - checking database for live matches...')
+            // Feed post has no matches, but check if there are live matches in database
+            const liveMatchesInDB = await Match.find({
+                'fixture.date': { $gte: todayStart, $lte: todayEnd },
+                'fixture.status.short': { $in: ['1H', '2H', 'HT', 'ET', 'P', 'BT'] }
+            }).limit(10)
+            
+            if (liveMatchesInDB.length > 0) {
+                console.log(`  ⚠️ Found ${liveMatchesInDB.length} live matches in database but feed post is empty - checking their status...`)
+                // Check each match and update post
+                for (const dbMatch of liveMatchesInDB) {
+                    try {
+                        const apiKey = getAPIKey()
+                        const fixtureUrl = `${API_BASE_URL}/fixtures?id=${dbMatch.fixtureId}`
+                        
+                        const fixtureResponse = await fetch(fixtureUrl, {
+                            method: 'GET',
+                            headers: { 'x-apisports-key': apiKey }
+                        })
+                        
+                        if (fixtureResponse.ok) {
+                            const fixtureData = await fixtureResponse.json()
+                            if (fixtureData.response && fixtureData.response.length > 0) {
+                                const matchData = fixtureData.response[0]
+                                const convertedMatch = convertMatchFormat(matchData)
+                                
+                                const status = convertedMatch.fixture.status.short
+                                const finishedStatuses = ['FT', 'AET', 'PEN', 'CANC', 'POSTP', 'SUSP']
+                                const isFinished = finishedStatuses.includes(status)
+                                
+                                // Update database
+                                await Match.findOneAndUpdate(
+                                    { fixtureId: convertedMatch.fixtureId },
+                                    convertedMatch,
+                                    { upsert: true, new: true }
+                                )
+                                
+                                if (isFinished) {
+                                    console.log(`  🏁 Match finished: ${convertedMatch.teams.home.name} vs ${convertedMatch.teams.away.name} (${status})`)
+                                    const matchDetails = await fetchMatchDetails(dbMatch.fixtureId, true)
+                                    if (matchDetails && matchDetails.events && matchDetails.events.length > 0) {
+                                        convertedMatch.events = matchDetails.events
+                                        await Match.findOneAndUpdate(
+                                            { fixtureId: convertedMatch.fixtureId },
+                                            { events: convertedMatch.events },
+                                            { upsert: true, new: true }
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                        await new Promise(resolve => setTimeout(resolve, 500))
+                    } catch (error) {
+                        console.log(`  ⚠️ Error checking match ${dbMatch.fixtureId}:`, error.message)
+                    }
+                }
+                
+                // Refresh the feed post
+                console.log('  🔄 Refreshing feed post...')
+                await autoPostTodayMatches()
+            }
             return
         }
         
@@ -1306,11 +1490,29 @@ export const forceCheckFeedPostMatches = async () => {
             console.log(`  🔍 Checking: ${homeName} vs ${awayName}`)
             
             // Find match in database first to get fixtureId
-            const dbMatch = await Match.findOne({
+            // Try exact match first
+            let dbMatch = await Match.findOne({
                 'teams.home.name': homeName,
                 'teams.away.name': awayName,
                 'fixture.date': { $gte: todayStart, $lte: todayEnd }
             })
+            
+            // If not found, try case-insensitive match
+            if (!dbMatch) {
+                dbMatch = await Match.findOne({
+                    $or: [
+                        { 
+                            'teams.home.name': { $regex: new RegExp(`^${homeName}$`, 'i') },
+                            'teams.away.name': { $regex: new RegExp(`^${awayName}$`, 'i') }
+                        },
+                        {
+                            'teams.home.name': { $regex: new RegExp(`^${awayName}$`, 'i') },
+                            'teams.away.name': { $regex: new RegExp(`^${homeName}$`, 'i') }
+                        }
+                    ],
+                    'fixture.date': { $gte: todayStart, $lte: todayEnd }
+                })
+            }
             
             if (dbMatch && dbMatch.fixtureId) {
                 // Query API-Football directly for this match

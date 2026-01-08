@@ -4,7 +4,7 @@ import User from '../models/user.js'
 import Post from '../models/post.js'
 import { getIO, getAllUserSockets } from '../socket/socket.js'
 import mongoose from 'mongoose'
-import { autoPostTodayMatches, getFootballAccount, fetchMatchDetails } from '../controller/football.js'
+import { autoPostTodayMatches, getFootballAccount, fetchMatchDetails, forceCheckFeedPostMatches } from '../controller/football.js'
 
 // API-Football configuration
 const getAPIKey = () => process.env.FOOTBALL_API_KEY || 'f3ebe896455cab31fc80e859716411df'
@@ -512,10 +512,8 @@ const fetchAndUpdateLiveMatches = async () => {
         
         // ALSO: Force check feed post matches directly against API (in case some finished)
         // This queries API-Football directly for each match in the feed post to detect finished matches
-        if (forceCheckFeedPostMatches) {
-            console.log('🔍 [fetchAndUpdateLiveMatches] Force checking feed post matches against API...')
-            await forceCheckFeedPostMatches()
-        }
+        console.log('🔍 [fetchAndUpdateLiveMatches] Force checking feed post matches against API...')
+        await forceCheckFeedPostMatches()
         
     } catch (error) {
         console.error('❌ Error in fetchAndUpdateLiveMatches:', error)
