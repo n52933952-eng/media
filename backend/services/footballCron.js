@@ -4,7 +4,7 @@ import User from '../models/user.js'
 import Post from '../models/post.js'
 import { getIO, getAllUserSockets } from '../socket/socket.js'
 import mongoose from 'mongoose'
-import { autoPostTodayMatches, getFootballAccount, fetchMatchDetails, forceCheckFeedPostMatches } from '../controller/football.js'
+import { autoPostTodayMatches, getFootballAccount, fetchMatchDetails } from '../controller/football.js'
 import { 
     getCachedLiveMatches, 
     setCachedLiveMatches,
@@ -333,59 +333,13 @@ const fetchAndUpdateLiveMatches = async () => {
     try {
         console.log('⚽ [fetchAndUpdateLiveMatches] Fetching live matches...')
         
-        // FIRST: Check database for matches that were live but might have finished
-        // Get matches that were live (1H, 2H, HT) but not finished (FT)
+        // Get date range for today
         const now = new Date()
         const todayStart = new Date(now.setHours(0, 0, 0, 0))
         const todayEnd = new Date(now.setHours(23, 59, 59, 999))
         
-        const previouslyLiveMatches = await Match.find({
-            'fixture.date': { $gte: todayStart, $lte: todayEnd },
-            'fixture.status.short': { $in: ['1H', '2H', 'HT', 'ET', 'P', 'BT'] }
-        })
-        
-        console.log(`📊 [fetchAndUpdateLiveMatches] Found ${previouslyLiveMatches.length} previously live matches in database`)
-        
-        // Check each previously live match to see if it finished
-        for (const dbMatch of previouslyLiveMatches) {
-            try {
-                const fixtureId = dbMatch.fixtureId
-                const endpoint = `/fixtures?id=${fixtureId}`
-                const matchResult = await fetchFromAPI(endpoint)
-                
-                if (matchResult.success && matchResult.data && matchResult.data.length > 0) {
-                    const matchData = matchResult.data[0]
-                    const convertedMatch = convertMatchFormat(matchData)
-                    
-                    // Check if match finished
-                    const isFinished = ['FT', 'AET', 'PEN', 'CANC', 'POSTP', 'SUSP'].includes(convertedMatch.fixture.status.short)
-                    const wasLive = ['1H', '2H', 'HT', 'ET', 'P', 'BT'].includes(dbMatch.fixture.status.short)
-                    
-                    if (wasLive && isFinished) {
-                        console.log(`  🏁 Match finished: ${convertedMatch.teams.home.name} vs ${convertedMatch.teams.away.name} (${convertedMatch.fixture.status.short})`)
-                        
-                        // Fetch events for finished match (scorers, cards, etc.)
-                        const { fetchMatchDetails } = await import('../controller/football.js')
-                        const matchDetails = await fetchMatchDetails(fixtureId, true)
-                        if (matchDetails && matchDetails.events && matchDetails.events.length > 0) {
-                            convertedMatch.events = matchDetails.events
-                        }
-                        
-                        // Update database
-                        await Match.findOneAndUpdate(
-                            { fixtureId: convertedMatch.fixtureId },
-                            convertedMatch,
-                            { upsert: true, new: true }
-                        )
-                    }
-                }
-                
-                // Rate limit protection
-                await new Promise(resolve => setTimeout(resolve, 500))
-            } catch (error) {
-                console.log(`  ⚠️ Error checking match ${dbMatch.fixtureId}:`, error.message)
-            }
-        }
+        // REMOVED: Individual match checking loop (was making 10+ API calls!)
+        // Instead, we'll detect finished matches by comparing database with /fixtures?live=all response
         
         // NOW: Fetch currently live matches from API (with caching)
         // Check cache first to avoid unnecessary API calls
@@ -443,6 +397,39 @@ const fetchAndUpdateLiveMatches = async () => {
         
         console.log(`📊 [fetchAndUpdateLiveMatches] Found ${filteredMatches.length} currently live matches`)
         
+        // Get all fixture IDs from live matches to detect finished ones
+        const liveFixtureIds = new Set()
+        for (const matchData of filteredMatches) {
+            const fixtureId = matchData.fixture?.id || matchData.fixtureId
+            if (fixtureId) {
+                liveFixtureIds.add(fixtureId)
+            }
+        }
+        
+        // Detect finished matches: If match was in database as live but NOT in live API response, it finished
+        // This is MUCH more efficient than checking each match individually with API calls!
+        const previouslyLiveMatches = await Match.find({
+            'fixture.date': { $gte: todayStart, $lte: todayEnd },
+            'fixture.status.short': { $in: ['1H', '2H', 'HT', 'ET', 'P', 'BT'] }
+        })
+        
+        for (const dbMatch of previouslyLiveMatches) {
+            // If match was live but not in current live response, it finished
+            if (!liveFixtureIds.has(dbMatch.fixtureId)) {
+                console.log(`  🏁 Match finished (not in live response): ${dbMatch.teams?.home?.name} vs ${dbMatch.teams?.away?.name}`)
+                
+                // Update database status to FT
+                await Match.findOneAndUpdate(
+                    { fixtureId: dbMatch.fixtureId },
+                    { 
+                        'fixture.status.short': 'FT',
+                        'fixture.status.long': 'Full Time'
+                    }
+                )
+            }
+        }
+        
+        // Process live matches and update database/feed post
         for (const matchData of filteredMatches) {
             // Get previous state
             const convertedMatch = convertMatchFormat(matchData)
@@ -574,13 +561,9 @@ const fetchAndUpdateLiveMatches = async () => {
             }
         }
         
-        // After processing all live matches, check if feed post needs updating
+        // Update feed post (removes finished matches from post)
+        // This uses database comparison, not API calls
         await updateFeedPostWhenMatchesFinish()
-        
-        // ALSO: Force check feed post matches directly against API (in case some finished)
-        // This queries API-Football directly for each match in the feed post to detect finished matches
-        console.log('🔍 [fetchAndUpdateLiveMatches] Force checking feed post matches against API...')
-        await forceCheckFeedPostMatches()
         
     } catch (error) {
         console.error('❌ Error in fetchAndUpdateLiveMatches:', error)
