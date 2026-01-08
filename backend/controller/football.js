@@ -25,9 +25,11 @@ const SUPPORTED_LEAGUES = [
 // NOW WITH CACHING to reduce API calls!
 export const fetchMatchDetails = async (fixtureId, includeEvents = true) => {
     try {
+        // Import cache module once (reuse throughout function)
+        const cacheModule = await import('../services/footballCache.js')
+        
         // Check cache first (saves API calls!)
-        const { getCachedMatchDetails, setCachedMatchDetails } = await import('../services/footballCache.js')
-        const cachedDetails = getCachedMatchDetails(fixtureId)
+        const cachedDetails = cacheModule.getCachedMatchDetails(fixtureId)
         
         if (cachedDetails) {
             console.log(`  📦 [Cache] Using cached match details for fixture ${fixtureId} (saving API call!)`)
@@ -116,9 +118,8 @@ export const fetchMatchDetails = async (fixtureId, includeEvents = true) => {
         
         const result = { events, elapsedTime }
         
-        // Cache the result for 5 minutes (scorers don't change often)
-        const { setCachedMatchDetails } = await import('../services/footballCache.js')
-        setCachedMatchDetails(fixtureId, result)
+        // Cache the result for 5 minutes (scorers don't change often) - reuse cacheModule from top
+        cacheModule.setCachedMatchDetails(fixtureId, result)
         
         return result
     } catch (error) {
