@@ -124,6 +124,124 @@ const fetchFromAPI = async (endpoint) => {
 
 // getFootballAccount is imported from '../controller/football.js' - no need to redeclare
 
+// Helper: Update feed post when matches finish (check database for finished matches)
+const updateFeedPostWhenMatchesFinish = async () => {
+    try {
+        const footballAccount = await getFootballAccount()
+        if (!footballAccount) return
+        
+        const now = new Date()
+        const todayStart = new Date(now.setHours(0, 0, 0, 0))
+        const todayEnd = new Date(now.setHours(23, 59, 59, 999))
+        
+        // Find today's feed post
+        const todayPost = await Post.findOne({
+            postedBy: footballAccount._id,
+            footballData: { $exists: true, $ne: null },
+            createdAt: { 
+                $gte: todayStart,
+                $lte: todayEnd
+            }
+        }).sort({ createdAt: -1 })
+        
+        if (!todayPost) return
+        
+        let matchDataArray = []
+        try {
+            matchDataArray = JSON.parse(todayPost.footballData || '[]')
+        } catch (e) {
+            console.error('Failed to parse football data:', e)
+            return
+        }
+        
+        if (matchDataArray.length === 0) return
+        
+        // Check each match in post to see if it finished in database
+        const updatedMatches = []
+        let hasChanges = false
+        
+        for (const match of matchDataArray) {
+            const homeName = match.homeTeam?.name || match.homeTeam
+            const awayName = match.awayTeam?.name || match.awayTeam
+            
+            // Find match in database
+            const dbMatch = await Match.findOne({
+                'teams.home.name': homeName,
+                'teams.away.name': awayName,
+                'fixture.date': { $gte: todayStart, $lte: todayEnd }
+            })
+            
+            if (dbMatch) {
+                const status = dbMatch.fixture?.status?.short
+                const finishedStatuses = ['FT', 'AET', 'PEN', 'CANC', 'POSTP', 'SUSP']
+                const isFinished = finishedStatuses.includes(status)
+                
+                // Only keep live matches
+                if (!isFinished) {
+                    updatedMatches.push({
+                        ...match,
+                        score: {
+                            home: dbMatch.goals?.home ?? 0,
+                            away: dbMatch.goals?.away ?? 0
+                        },
+                        status: {
+                            short: dbMatch.fixture?.status?.short,
+                            long: dbMatch.fixture?.status?.long,
+                            elapsed: dbMatch.fixture?.status?.elapsed
+                        }
+                    })
+                } else {
+                    hasChanges = true
+                    console.log(`  🏁 Match finished in feed post: ${homeName} vs ${awayName} (${status})`)
+                }
+            } else {
+                // Match not found, keep it for now
+                updatedMatches.push(match)
+            }
+        }
+        
+        // If matches finished, update or delete post
+        if (hasChanges) {
+            if (updatedMatches.length === 0) {
+                // All matches finished, delete post and create "no matches" post
+                console.log('  🏁 All matches finished, deleting feed post and creating "no matches" post...')
+                await Post.findByIdAndDelete(todayPost._id)
+                
+                // Create "no matches" post
+                const { autoPostTodayMatches } = await import('../controller/football.js')
+                await autoPostTodayMatches()
+            } else {
+                // Some matches finished, update post with remaining live matches
+                todayPost.footballData = JSON.stringify(updatedMatches)
+                await todayPost.save()
+                
+                // Emit socket event
+                const io = getIO()
+                if (io) {
+                    const freshFootballAccount = await User.findById(footballAccount._id).select('followers')
+                    const followerIds = freshFootballAccount?.followers?.map(f => f.toString()) || []
+                    const socketMap = await getAllUserSockets()
+                    
+                    followerIds.forEach(followerId => {
+                        const socketData = socketMap[followerId]
+                        if (socketData && socketData.socketId) {
+                            io.to(socketData.socketId).emit('footballMatchUpdate', {
+                                postId: todayPost._id.toString(),
+                                matchData: updatedMatches,
+                                updatedAt: new Date()
+                            })
+                        }
+                    })
+                }
+                
+                console.log(`  ✅ Updated feed post: Removed finished matches, ${updatedMatches.length} live matches remaining`)
+            }
+        }
+    } catch (error) {
+        console.error('❌ Error updating feed post when matches finish:', error)
+    }
+}
+
 // Auto-post match update
 const autoPostMatchUpdate = async (match, updateType) => {
     try {
@@ -194,7 +312,61 @@ const fetchAndUpdateLiveMatches = async () => {
     try {
         console.log('⚽ [fetchAndUpdateLiveMatches] Fetching live matches...')
         
-        // API-Football: Get all live matches
+        // FIRST: Check database for matches that were live but might have finished
+        // Get matches that were live (1H, 2H, HT) but not finished (FT)
+        const now = new Date()
+        const todayStart = new Date(now.setHours(0, 0, 0, 0))
+        const todayEnd = new Date(now.setHours(23, 59, 59, 999))
+        
+        const previouslyLiveMatches = await Match.find({
+            'fixture.date': { $gte: todayStart, $lte: todayEnd },
+            'fixture.status.short': { $in: ['1H', '2H', 'HT', 'ET', 'P', 'BT'] }
+        })
+        
+        console.log(`📊 [fetchAndUpdateLiveMatches] Found ${previouslyLiveMatches.length} previously live matches in database`)
+        
+        // Check each previously live match to see if it finished
+        for (const dbMatch of previouslyLiveMatches) {
+            try {
+                const fixtureId = dbMatch.fixtureId
+                const endpoint = `/fixtures?id=${fixtureId}`
+                const matchResult = await fetchFromAPI(endpoint)
+                
+                if (matchResult.success && matchResult.data && matchResult.data.length > 0) {
+                    const matchData = matchResult.data[0]
+                    const convertedMatch = convertMatchFormat(matchData)
+                    
+                    // Check if match finished
+                    const isFinished = ['FT', 'AET', 'PEN', 'CANC', 'POSTP', 'SUSP'].includes(convertedMatch.fixture.status.short)
+                    const wasLive = ['1H', '2H', 'HT', 'ET', 'P', 'BT'].includes(dbMatch.fixture.status.short)
+                    
+                    if (wasLive && isFinished) {
+                        console.log(`  🏁 Match finished: ${convertedMatch.teams.home.name} vs ${convertedMatch.teams.away.name} (${convertedMatch.fixture.status.short})`)
+                        
+                        // Fetch events for finished match (scorers, cards, etc.)
+                        const { fetchMatchDetails } = await import('../controller/football.js')
+                        const matchDetails = await fetchMatchDetails(fixtureId, true)
+                        if (matchDetails && matchDetails.events && matchDetails.events.length > 0) {
+                            convertedMatch.events = matchDetails.events
+                        }
+                        
+                        // Update database
+                        await Match.findOneAndUpdate(
+                            { fixtureId: convertedMatch.fixtureId },
+                            convertedMatch,
+                            { upsert: true, new: true }
+                        )
+                    }
+                }
+                
+                // Rate limit protection
+                await new Promise(resolve => setTimeout(resolve, 500))
+            } catch (error) {
+                console.log(`  ⚠️ Error checking match ${dbMatch.fixtureId}:`, error.message)
+            }
+        }
+        
+        // NOW: Fetch currently live matches from API
         const result = await fetchFromAPI('/fixtures?live=all')
         
         if (result.rateLimit) {
@@ -203,7 +375,9 @@ const fetchAndUpdateLiveMatches = async () => {
         }
         
         if (!result.success || !result.data) {
-            console.log('📭 [fetchAndUpdateLiveMatches] No live matches found')
+            console.log('📭 [fetchAndUpdateLiveMatches] No live matches found in API')
+            // Check if we need to update feed post (remove finished matches)
+            await updateFeedPostWhenMatchesFinish()
             return
         }
         
@@ -213,12 +387,7 @@ const fetchAndUpdateLiveMatches = async () => {
             supportedLeagueIds.includes(match.league.id)
         )
         
-        if (filteredMatches.length === 0) {
-            console.log('📭 [fetchAndUpdateLiveMatches] No live matches at the moment')
-            return
-        }
-        
-        console.log(`📊 [fetchAndUpdateLiveMatches] Found ${filteredMatches.length} live matches`)
+        console.log(`📊 [fetchAndUpdateLiveMatches] Found ${filteredMatches.length} currently live matches`)
         
         for (const matchData of filteredMatches) {
             // Get previous state
@@ -297,36 +466,49 @@ const fetchAndUpdateLiveMatches = async () => {
                                 return !finishedStatuses.includes(status)
                             })
                             
-                            todayPost.footballData = JSON.stringify(liveMatchesOnly)
-                            await todayPost.save()
-                            
-                            // Emit socket event to update frontend
-                            const io = getIO()
-                            if (io) {
-                                const freshFootballAccount = await User.findById(footballAccount._id).select('followers')
-                                const followerIds = freshFootballAccount?.followers?.map(f => f.toString()) || []
-                                const socketMap = await getAllUserSockets()
-                                let onlineCount = 0
+                            // If all matches finished, delete the post or create "no matches" post
+                            if (liveMatchesOnly.length === 0) {
+                                console.log('  🏁 All matches finished, deleting feed post...')
+                                await Post.findByIdAndDelete(todayPost._id)
                                 
-                                followerIds.forEach(followerId => {
-                                    const socketData = socketMap[followerId]
-                                    if (socketData && socketData.socketId) {
-                                        io.to(socketData.socketId).emit('footballMatchUpdate', {
-                                            postId: todayPost._id.toString(),
-                                            matchData: liveMatchesOnly,
-                                            updatedAt: new Date()
-                                        })
-                                        onlineCount++
-                                    }
-                                })
+                                // Create "no matches" post
+                                const { autoPostTodayMatches } = await import('../controller/football.js')
+                                await autoPostTodayMatches()
+                            } else {
+                                todayPost.footballData = JSON.stringify(liveMatchesOnly)
+                                await todayPost.save()
                                 
-                                console.log(`  ✅ Emitted match update to ${onlineCount} online followers`)
+                                // Emit socket event to update frontend
+                                const io = getIO()
+                                if (io) {
+                                    const freshFootballAccount = await User.findById(footballAccount._id).select('followers')
+                                    const followerIds = freshFootballAccount?.followers?.map(f => f.toString()) || []
+                                    const socketMap = await getAllUserSockets()
+                                    let onlineCount = 0
+                                    
+                                    followerIds.forEach(followerId => {
+                                        const socketData = socketMap[followerId]
+                                        if (socketData && socketData.socketId) {
+                                            io.to(socketData.socketId).emit('footballMatchUpdate', {
+                                                postId: todayPost._id.toString(),
+                                                matchData: liveMatchesOnly,
+                                                updatedAt: new Date()
+                                            })
+                                            onlineCount++
+                                        }
+                                    })
+                                    
+                                    console.log(`  ✅ Emitted match update to ${onlineCount} online followers`)
+                                }
                             }
                         }
                     }
                 }
             }
         }
+        
+        // After processing all live matches, check if feed post needs updating
+        await updateFeedPostWhenMatchesFinish()
         
     } catch (error) {
         console.error('❌ Error in fetchAndUpdateLiveMatches:', error)
