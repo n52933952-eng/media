@@ -276,7 +276,7 @@ const ActivityFeed = () => {
                                 position="relative"
                             >
                                 <IconButton
-                                    icon={<CloseIcon />}
+                                    icon={<CloseIcon boxSize="10px" />}
                                     size="xs"
                                     variant="ghost"
                                     aria-label="Delete activity"
@@ -289,8 +289,9 @@ const ActivityFeed = () => {
                                         opacity: 1 
                                     }}
                                     flexShrink={0}
-                                    minW="20px"
-                                    h="20px"
+                                    minW="16px"
+                                    h="16px"
+                                    w="16px"
                                 />
                                 <Text fontSize="sm">{getActivityIcon(activity.type)}</Text>
                                 <Avatar

@@ -30,10 +30,10 @@ const UserPage = () => {
    const[activeTab,setActiveTab]=useState('posts')
    const[comments,setComments]=useState([])
    const[loadingComments,setLoadingComments]=useState(false)
-   const[loadingMoreComments,setLoadingMoreComments]=useState(false)
-   const[hasMoreComments,setHasMoreComments]=useState(true)
-   const[commentsSkip,setCommentsSkip]=useState(0)
-   const COMMENTS_PER_PAGE = 20
+  const[loadingMoreComments,setLoadingMoreComments]=useState(false)
+  const[hasMoreComments,setHasMoreComments]=useState(true)
+  const[commentsSkip,setCommentsSkip]=useState(0)
+  const COMMENTS_PER_PAGE = 9
    
    
    const fetchUser = async() => {

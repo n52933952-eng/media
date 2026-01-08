@@ -78,14 +78,26 @@ export const SocketContextProvider = ({ children }) => {
     unlockAudio()
     
     // Also listen for ANY user interaction to unlock audio
+    // Keep unlocking on user interaction to ensure audio works on all pages
     const events = ['click', 'touchstart', 'keydown', 'scroll', 'mousemove'];
+    const eventHandlers = new Map();
+    
     events.forEach(event => {
-      document.addEventListener(event, unlockAudio, { once: true, passive: true });
+      const handler = () => {
+        if (!isUnlocked) {
+          unlockAudio();
+        }
+      };
+      eventHandlers.set(event, handler);
+      document.addEventListener(event, handler, { passive: true });
     });
     
     return () => {
       events.forEach(event => {
-        document.removeEventListener(event, unlockAudio);
+        const handler = eventHandlers.get(event);
+        if (handler) {
+          document.removeEventListener(event, handler);
+        }
       });
     };
   }, [])
@@ -417,10 +429,41 @@ export const SocketContextProvider = ({ children }) => {
         
         // Play ringtone for incoming call
         if (ringtoneAudio.current) {
-          ringtoneAudio.current.loop = true; // Loop until answered/declined
-          ringtoneAudio.current.play().catch(err => {
-            console.log('Ringtone play error (browser may require user interaction):', err);
-          });
+          // Ensure audio is loaded and ready
+          ringtoneAudio.current.load();
+          
+          // Set properties for looping
+          ringtoneAudio.current.loop = true;
+          
+          // Function to play ringtone (will be called directly or after user interaction)
+          const playRingtone = () => {
+            const playPromise = ringtoneAudio.current.play();
+            if (playPromise !== undefined) {
+              playPromise.catch(err => {
+                console.log('⚠️ Ringtone play blocked (autoplay policy):', err.name);
+                
+                // Set up retry on next user interaction
+                const retryPlay = () => {
+                  ringtoneAudio.current.load();
+                  ringtoneAudio.current.loop = true;
+                  ringtoneAudio.current.play().catch(() => {});
+                  
+                  // Clean up listeners
+                  retryEvents.forEach(event => {
+                    document.removeEventListener(event, retryPlay);
+                  });
+                };
+                
+                const retryEvents = ['click', 'touchstart', 'keydown', 'mousemove', 'scroll'];
+                retryEvents.forEach(event => {
+                  document.addEventListener(event, retryPlay, { once: true, passive: true });
+                });
+              });
+            }
+          };
+          
+          // Try playing immediately
+          playRingtone();
         }
       } 
       // If from matches current user, we're making the call (ringing state)

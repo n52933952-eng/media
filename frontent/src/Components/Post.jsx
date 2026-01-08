@@ -767,8 +767,18 @@ const showToast = useShowToast()
           as="video"
           src={post.img}
           controls
+          autoPlay
+          muted
+          playsInline
+          loop
           w="full"
           maxH="400px"
+          onLoadedData={(e) => {
+            // Ensure video plays when loaded (some browsers need this)
+            e.target.play().catch(err => {
+              console.log('Video autoplay prevented:', err)
+            })
+          }}
         />
       ) : (
         <Image 
