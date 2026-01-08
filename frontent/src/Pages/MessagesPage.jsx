@@ -1363,29 +1363,40 @@ const MessagesPage = () => {
     )
 
     if (existingConv) {
+      // Reset refs to force useEffect to trigger and fetch messages
+      // This ensures messages are loaded properly, same as clicking from conversation list
+      currentConversationIdRef.current = null
+      currentParticipantIdRef.current = null
+      
+      // Set selected conversation - this will trigger the useEffect to fetch messages
       setSelectedConversation(existingConv)
-      // Fetch messages for this conversation
-      try {
-        const res = await fetch(`${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/message/${recipientId}?limit=12`, {
-          credentials: 'include',
+      
+      // Mark messages as seen if there are unread messages
+      if (existingConv._id && socket && user?._id && existingConv.participants[0]?._id && existingConv.unreadCount > 0) {
+        socket.emit("markmessageasSeen", {
+          conversationId: existingConv._id,
+          userId: existingConv.participants[0]._id
         })
-        const data = await res.json()
-        if (res.ok) {
-          setMessages(data.messages || [])
-          setHasMoreMessages(data.hasMore || false)
-        }
-      } catch (error) {
-        showToast('Error', 'Failed to load messages', 'error')
+        // Clear unread count for this conversation in UI
+        setConversations(prev => prev.map(c => 
+          c._id === existingConv._id ? { ...c, unreadCount: 0 } : c
+        ))
       }
     } else {
       // Create a temporary conversation object
       const recipientUser = followedUsers.find((u) => u._id === recipientId)
       if (recipientUser) {
+        // Reset refs to force useEffect to trigger
+        currentConversationIdRef.current = null
+        currentParticipantIdRef.current = null
+        
         setSelectedConversation({
           _id: null,
           participants: [recipientUser],
         })
+        // Messages will be empty for new conversations until first message is sent
         setMessages([])
+        setHasMoreMessages(false)
       } else {
         // User not found - clear selectedConversationId
         if (setSelectedConversationId) {
