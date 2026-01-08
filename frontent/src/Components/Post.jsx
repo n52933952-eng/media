@@ -165,6 +165,62 @@ const showToast = useShowToast()
     }
   }, [post?.footballData, isFootballPost])
   
+  // Update elapsed time every minute for live matches (client-side timer)
+  useEffect(() => {
+    if (!isFootballPost || matchesData.length === 0) return
+    
+    // Check if any matches are live
+    const hasLiveMatches = matchesData.some(m => 
+      ['1H', '2H', 'HT', 'BT', 'ET', 'P', 'LIVE'].includes(m.status?.short)
+    )
+    
+    if (!hasLiveMatches) return
+    
+    // Update elapsed time every minute
+    const interval = setInterval(() => {
+      setMatchesData(prev => prev.map(match => {
+        const isLive = ['1H', '2H', 'HT', 'BT', 'ET', 'P', 'LIVE'].includes(match.status?.short)
+        if (!isLive || match.status?.short === 'HT') return match
+        
+        // Get current elapsed time from status
+        const currentElapsed = match.status?.elapsed
+        
+        // If we have a valid elapsed time, increment it by 1 minute
+        // This keeps the timer ticking between backend updates
+        if (currentElapsed !== null && currentElapsed !== undefined && currentElapsed < 120) {
+          return {
+            ...match,
+            status: {
+              ...match.status,
+              elapsed: currentElapsed + 1
+            }
+          }
+        }
+        
+        // Fallback: Calculate from match start time if available
+        if (match.date) {
+          const matchStart = new Date(match.date)
+          const now = new Date()
+          const elapsedMinutes = Math.floor((now - matchStart) / (1000 * 60))
+          
+          if (elapsedMinutes > 0 && elapsedMinutes <= 120) {
+            return {
+              ...match,
+              status: {
+                ...match.status,
+                elapsed: elapsedMinutes
+              }
+            }
+          }
+        }
+        
+        return match
+      }))
+    }, 60000) // Update every minute (60,000ms)
+    
+    return () => clearInterval(interval)
+  }, [isFootballPost, matchesData])
+  
   // Listen for real-time football match updates
   useEffect(() => {
     if (!isFootballPost || !post?._id) return
@@ -175,14 +231,50 @@ const showToast = useShowToast()
       // Only update if this is the correct post
       if (postId === post._id.toString()) {
         console.log('⚽ Updating match data for post:', postId)
-        setMatchesData(matchData)
         
-        // Move post to top of feed
-        if (setFollowPost) {
+        // Check if score changed (to determine if we should move post to top)
+        let scoreChanged = false
+        const updatedMatchData = matchData.map((newMatch, index) => {
+          // Try to find existing match to preserve date and check score
+          const existingMatch = matchesData.find(m => 
+            (m.homeTeam?.name || m.homeTeam) === (newMatch.homeTeam?.name || newMatch.homeTeam) &&
+            (m.awayTeam?.name || m.awayTeam) === (newMatch.awayTeam?.name || newMatch.awayTeam)
+          )
+          
+          // Check if score changed
+          if (existingMatch) {
+            const oldHomeScore = existingMatch.score?.home ?? 0
+            const oldAwayScore = existingMatch.score?.away ?? 0
+            const newHomeScore = newMatch.score?.home ?? 0
+            const newAwayScore = newMatch.score?.away ?? 0
+            
+            if (oldHomeScore !== newHomeScore || oldAwayScore !== newAwayScore) {
+              scoreChanged = true
+              console.log(`  ⚽ Score changed: ${oldHomeScore}-${oldAwayScore} → ${newHomeScore}-${newAwayScore}`)
+            }
+            
+            // Preserve date if it exists in existing match
+            if (existingMatch.date) {
+              return {
+                ...newMatch,
+                date: existingMatch.date,
+                startTime: existingMatch.startTime || existingMatch.date
+              }
+            }
+          }
+          
+          return newMatch
+        })
+        
+        setMatchesData(updatedMatchData)
+        
+        // Move post to top of feed ONLY if score changed
+        if (scoreChanged && setFollowPost) {
+          console.log('  📌 Moving post to top (score changed)')
           setFollowPost(prev => {
             const filtered = prev.filter(p => p._id !== post._id)
             // Get updated post and move to top
-            const updatedPost = { ...post, footballData: JSON.stringify(matchData) }
+            const updatedPost = { ...post, footballData: JSON.stringify(updatedMatchData) }
             return [updatedPost, ...filtered]
           })
         }

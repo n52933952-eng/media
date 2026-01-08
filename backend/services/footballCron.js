@@ -413,10 +413,17 @@ const fetchAndUpdateLiveMatches = async () => {
             const statusChanged = previousMatch?.fixture?.status?.short !== updatedMatch.fixture?.status?.short
             const elapsedChanged = previousMatch?.fixture?.status?.elapsed !== updatedMatch.fixture?.status?.elapsed
             
+            // Always update database for elapsed time changes, but only emit socket for score/status changes
+            // This prevents the post from moving to top on every time update
+            const shouldEmitSocket = scoreChanged || statusChanged
+            
             if (scoreChanged || statusChanged || elapsedChanged) {
                 console.log(`  🔔 Match update: ${updatedMatch.teams?.home?.name} vs ${updatedMatch.teams?.away?.name}`)
                 if (scoreChanged) {
                     console.log(`     Score: ${previousGoalsHome}-${previousGoalsAway} → ${currentGoalsHome}-${currentGoalsAway}`)
+                }
+                if (elapsedChanged && !scoreChanged && !statusChanged) {
+                    console.log(`     Time: ${previousMatch?.fixture?.status?.elapsed || '?'}' → ${updatedMatch.fixture?.status?.elapsed || '?'}' (silent update)`)
                 }
                 
                 // Update post if it exists
@@ -478,27 +485,33 @@ const fetchAndUpdateLiveMatches = async () => {
                                 todayPost.footballData = JSON.stringify(liveMatchesOnly)
                                 await todayPost.save()
                                 
-                                // Emit socket event to update frontend
-                                const io = getIO()
-                                if (io) {
-                                    const freshFootballAccount = await User.findById(footballAccount._id).select('followers')
-                                    const followerIds = freshFootballAccount?.followers?.map(f => f.toString()) || []
-                                    const socketMap = await getAllUserSockets()
-                                    let onlineCount = 0
-                                    
-                                    followerIds.forEach(followerId => {
-                                        const socketData = socketMap[followerId]
-                                        if (socketData && socketData.socketId) {
-                                            io.to(socketData.socketId).emit('footballMatchUpdate', {
-                                                postId: todayPost._id.toString(),
-                                                matchData: liveMatchesOnly,
-                                                updatedAt: new Date()
-                                            })
-                                            onlineCount++
-                                        }
-                                    })
-                                    
-                                    console.log(`  ✅ Emitted match update to ${onlineCount} online followers`)
+                                // Emit socket event to update frontend ONLY if score or status changed
+                                // This prevents post from moving to top on every time update
+                                if (shouldEmitSocket) {
+                                    const io = getIO()
+                                    if (io) {
+                                        const freshFootballAccount = await User.findById(footballAccount._id).select('followers')
+                                        const followerIds = freshFootballAccount?.followers?.map(f => f.toString()) || []
+                                        const socketMap = await getAllUserSockets()
+                                        let onlineCount = 0
+                                        
+                                        followerIds.forEach(followerId => {
+                                            const socketData = socketMap[followerId]
+                                            if (socketData && socketData.socketId) {
+                                                io.to(socketData.socketId).emit('footballMatchUpdate', {
+                                                    postId: todayPost._id.toString(),
+                                                    matchData: liveMatchesOnly,
+                                                    updatedAt: new Date()
+                                                })
+                                                onlineCount++
+                                            }
+                                        })
+                                        
+                                        console.log(`  ✅ Emitted match update to ${onlineCount} online followers (score/status changed)`)
+                                    }
+                                } else {
+                                    // Silent update - just saved to database, no socket emit
+                                    // Client-side timer will handle elapsed time updates
                                 }
                             }
                         }

@@ -1208,7 +1208,8 @@ export const autoPostTodayMatches = async () => {
                 minute: '2-digit',
                 hour12: true
             }),
-            date: match.fixture.date
+            date: match.fixture.date, // Match start time - used for calculating elapsed time
+            startTime: match.fixture.date // Alias for clarity
         }))
         
         // Create the post with JSON data
