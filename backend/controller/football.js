@@ -943,9 +943,9 @@ export const autoPostTodayMatches = async () => {
         
         // FIRST: Check all matches in database that were live today - they might have finished
         // This ensures we detect finished matches even if they're not in the feed post
-        const now = new Date()
-        const dbTodayStart = new Date(now.setHours(0, 0, 0, 0))
-        const dbTodayEnd = new Date(now.setHours(23, 59, 59, 999))
+        const checkNow = new Date()
+        const dbTodayStart = new Date(checkNow.setHours(0, 0, 0, 0))
+        const dbTodayEnd = new Date(checkNow.setHours(23, 59, 59, 999))
         
         const previouslyLiveMatches = await Match.find({
             'fixture.date': { $gte: dbTodayStart, $lte: dbTodayEnd },
@@ -1034,7 +1034,8 @@ export const autoPostTodayMatches = async () => {
         }
         
         // Always query database for live matches (either from API above or from previous fetches)
-        const now = new Date()
+        // Reuse 'now' from above, create new one only if needed
+        const currentTime = new Date()
         let matches = await Match.find({
             'fixture.date': { $gte: todayStart },
             'fixture.status.short': { 
@@ -1047,7 +1048,7 @@ export const autoPostTodayMatches = async () => {
         // Filter out old matches
         matches = matches.filter(match => {
             const matchDate = new Date(match.fixture.date)
-            const hoursAgo = (now - matchDate) / (1000 * 60 * 60)
+            const hoursAgo = (currentTime - matchDate) / (1000 * 60 * 60)
             if (hoursAgo > 2.5) {
                 console.log(`  ⚠️ [autoPostTodayMatches] Excluding old match: ${match.teams?.home?.name} vs ${match.teams?.away?.name} (${hoursAgo.toFixed(1)}h ago)`)
                 return false
