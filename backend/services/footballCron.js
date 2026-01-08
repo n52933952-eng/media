@@ -511,15 +511,10 @@ const fetchAndUpdateLiveMatches = async () => {
         await updateFeedPostWhenMatchesFinish()
         
         // ALSO: Force check feed post matches directly against API (in case some finished)
-        // Import and call the force check function
-        try {
-            const { forceCheckFeedPostMatches } = await import('../controller/football.js')
-            if (forceCheckFeedPostMatches) {
-                await forceCheckFeedPostMatches()
-            }
-        } catch (importError) {
-            // Function might not be exported, that's okay - updateFeedPostWhenMatchesFinish should handle it
-            console.log('  ℹ️ forceCheckFeedPostMatches not available, using database check only')
+        // This queries API-Football directly for each match in the feed post to detect finished matches
+        if (forceCheckFeedPostMatches) {
+            console.log('🔍 [fetchAndUpdateLiveMatches] Force checking feed post matches against API...')
+            await forceCheckFeedPostMatches()
         }
         
     } catch (error) {
