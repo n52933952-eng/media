@@ -2888,8 +2888,8 @@ const MessagesPage = () => {
                             position="absolute"
                             left={isOwn ? 'auto' : 0}
                             right={isOwn ? 0 : 'auto'}
-                            bottom="100%"
-                            mb={2}
+                            top="100%"
+                            mt={2}
                             zIndex={1000}
                           >
                             <Flex
@@ -2903,7 +2903,7 @@ const MessagesPage = () => {
                               border="1px solid"
                               borderColor={useColorModeValue('gray.200', 'gray.700')}
                               sx={{
-                                animation: 'slideUp 0.2s ease-out'
+                                animation: 'slideDown 0.2s ease-out'
                               }}
                             >
                               {/* Reply button */}
@@ -3607,6 +3607,20 @@ const MessagesPage = () => {
           )}
         </VStack>
       </Box>
+      <style>
+        {`
+          @keyframes slideDown {
+            from {
+              transform: translateY(-10px);
+              opacity: 0;
+            }
+            to {
+              transform: translateY(0);
+              opacity: 1;
+            }
+          }
+        `}
+      </style>
     </Flex>
   )
 }
