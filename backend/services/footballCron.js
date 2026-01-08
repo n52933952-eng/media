@@ -5,6 +5,13 @@ import Post from '../models/post.js'
 import { getIO, getAllUserSockets } from '../socket/socket.js'
 import mongoose from 'mongoose'
 import { autoPostTodayMatches, getFootballAccount, fetchMatchDetails, forceCheckFeedPostMatches } from '../controller/football.js'
+import { 
+    getCachedLiveMatches, 
+    setCachedLiveMatches,
+    getCachedMatchDetails,
+    setCachedMatchDetails,
+    getCacheStats
+} from './footballCache.js'
 
 // API-Football configuration
 const getAPIKey = () => process.env.FOOTBALL_API_KEY || 'f3ebe896455cab31fc80e859716411df'
@@ -108,12 +115,26 @@ const fetchFromAPI = async (endpoint) => {
         
         const data = await response.json()
         
+        // Check for API errors in response
+        if (data.errors && data.errors.length > 0) {
+            const errorMsg = data.errors[0].message || 'API error'
+            console.error('⚽ [fetchFromAPI] API Error:', errorMsg)
+            
+            // Check if it's a rate limit error
+            if (errorMsg.toLowerCase().includes('rate limit') || errorMsg.toLowerCase().includes('quota')) {
+                console.error('🚫 [fetchFromAPI] Rate limit/quota exceeded!')
+                return { success: false, error: errorMsg, rateLimit: true }
+            }
+            
+            return { success: false, error: errorMsg }
+        }
+        
         if (response.ok && data.response) {
             console.log('⚽ [fetchFromAPI] Success! Found', data.response.length, 'items')
             return { success: true, data: data.response }
         } else {
-            const errorMsg = data.errors?.[0]?.message || data.message || 'Unknown error'
-            console.error('⚽ [fetchFromAPI] Error:', errorMsg)
+            const errorMsg = data.message || data.errors?.[0]?.message || 'Unknown error'
+            console.error('⚽ [fetchFromAPI] Error:', errorMsg, 'Status:', response.status)
             return { success: false, error: errorMsg }
         }
     } catch (error) {
@@ -366,19 +387,52 @@ const fetchAndUpdateLiveMatches = async () => {
             }
         }
         
-        // NOW: Fetch currently live matches from API
-        const result = await fetchFromAPI('/fixtures?live=all')
+        // NOW: Fetch currently live matches from API (with caching)
+        // Check cache first to avoid unnecessary API calls
+        let cachedMatches = getCachedLiveMatches()
         
-        if (result.rateLimit) {
-            console.warn('⚠️ [fetchAndUpdateLiveMatches] Rate limit hit, skipping this update')
-            return
+        if (cachedMatches) {
+            console.log('📦 [fetchAndUpdateLiveMatches] Using cached live matches (saving API call!)')
+            // Use cached data but still update database and feed post
+            // This reduces API calls while keeping data fresh
+        } else {
+            console.log('🌐 [fetchAndUpdateLiveMatches] Cache miss - fetching from API...')
         }
         
-        if (!result.success || !result.data) {
-            console.log('📭 [fetchAndUpdateLiveMatches] No live matches found in API')
-            // Check if we need to update feed post (remove finished matches)
-            await updateFeedPostWhenMatchesFinish()
-            return
+        // Only fetch from API if cache is expired or doesn't exist
+        let result = { success: false, data: null }
+        if (!cachedMatches) {
+            result = await fetchFromAPI('/fixtures?live=all')
+            
+            if (result.rateLimit) {
+                console.warn('⚠️ [fetchAndUpdateLiveMatches] Rate limit hit, skipping this update')
+                // Try to use database matches as fallback
+                const dbMatches = await Match.find({
+                    'fixture.date': { $gte: todayStart, $lte: todayEnd },
+                    'fixture.status.short': { $in: ['1H', '2H', 'HT', 'ET', 'P', 'BT'] }
+                }).limit(10)
+                
+                if (dbMatches.length > 0) {
+                    console.log(`📦 [fetchAndUpdateLiveMatches] Using ${dbMatches.length} database matches as fallback`)
+                    // Database matches are already in our format, just use them directly
+                    result = { success: true, data: dbMatches }
+                } else {
+                    return
+                }
+            }
+            
+            if (!result.success || !result.data) {
+                console.log('📭 [fetchAndUpdateLiveMatches] No live matches found in API')
+                // Check if we need to update feed post (remove finished matches)
+                await updateFeedPostWhenMatchesFinish()
+                return
+            }
+            
+            // Cache the API response for 30 seconds
+            setCachedLiveMatches(result.data)
+        } else {
+            // Use cached data but convert to same format
+            result = { success: true, data: cachedMatches }
         }
         
         // Filter for supported leagues only

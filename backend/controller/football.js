@@ -22,10 +22,20 @@ const SUPPORTED_LEAGUES = [
 
 // Helper: Fetch match details with events (scorers, cards, substitutions) - API-Football
 // Fetches events for both live and finished matches
+// NOW WITH CACHING to reduce API calls!
 export const fetchMatchDetails = async (fixtureId, includeEvents = true) => {
     try {
+        // Check cache first (saves API calls!)
+        const { getCachedMatchDetails, setCachedMatchDetails } = await import('../services/footballCache.js')
+        const cachedDetails = getCachedMatchDetails(fixtureId)
+        
+        if (cachedDetails) {
+            console.log(`  📦 [Cache] Using cached match details for fixture ${fixtureId} (saving API call!)`)
+            return cachedDetails
+        }
+        
         const apiKey = getAPIKey()
-        console.log(`  🔍 Fetching match details for fixture ID: ${fixtureId}`)
+        console.log(`  🔍 Fetching match details for fixture ID: ${fixtureId} (cache miss)`)
         
         // API-Football: Get fixture details with events
         const fixtureUrl = `${API_BASE_URL}/fixtures?id=${fixtureId}`
@@ -104,7 +114,13 @@ export const fetchMatchDetails = async (fixtureId, includeEvents = true) => {
         // Sort events by time
         events.sort((a, b) => a.time - b.time)
         
-        return { events, elapsedTime }
+        const result = { events, elapsedTime }
+        
+        // Cache the result for 5 minutes (scorers don't change often)
+        const { setCachedMatchDetails } = await import('../services/footballCache.js')
+        setCachedMatchDetails(fixtureId, result)
+        
+        return result
     } catch (error) {
         console.error(`  ❌ Error fetching fixture ${fixtureId}:`, error.message)
         console.error(`  ❌ Stack:`, error.stack)
@@ -136,13 +152,34 @@ const fetchFromAPI = async (endpoint) => {
         
         const data = await response.json()
         
+        // Check for API errors in response (API-Football returns errors in data.errors array)
+        if (data.errors && data.errors.length > 0) {
+            const errorMsg = data.errors[0].message || 'API error'
+            console.error('⚽ [fetchFromAPI] API Error:', errorMsg)
+            
+            // Check if it's a rate limit/quota error
+            const errorLower = errorMsg.toLowerCase()
+            if (errorLower.includes('rate limit') || errorLower.includes('quota') || errorLower.includes('limit exceeded')) {
+                console.error('🚫 [fetchFromAPI] Rate limit/quota exceeded!')
+                return { success: false, error: errorMsg, rateLimit: true }
+            }
+            
+            // Check if it's an authentication error
+            if (errorLower.includes('api key') || errorLower.includes('authentication') || errorLower.includes('unauthorized')) {
+                console.error('🔑 [fetchFromAPI] API key issue! Check your FOOTBALL_API_KEY in .env')
+                return { success: false, error: 'API key authentication failed', rateLimit: false }
+            }
+            
+            return { success: false, error: errorMsg }
+        }
+        
         if (response.ok && data.response) {
             // API-Football returns { response: [...] }
             console.log('⚽ [fetchFromAPI] Success! Found', data.response.length, 'items')
             return { success: true, data: data.response }
         } else {
-            const errorMsg = data.errors?.[0]?.message || data.message || 'Unknown error'
-            console.error('⚽ [fetchFromAPI] Error:', errorMsg)
+            const errorMsg = data.message || data.errors?.[0]?.message || `HTTP ${response.status}: ${response.statusText}`
+            console.error('⚽ [fetchFromAPI] Error:', errorMsg, 'Status:', response.status)
             return { success: false, error: errorMsg }
         }
     } catch (error) {

@@ -150,14 +150,40 @@ const showToast = useShowToast()
   
   const [matchesData, setMatchesData] = useState([])
   
-  // Parse initial football data
+  // Parse initial football data and calculate elapsed time from match start
   useEffect(() => {
     if (isFootballPost && post?.footballData) {
       try {
         const parsed = JSON.parse(post.footballData)
-        setMatchesData(parsed)
-      } catch (e) {
-        console.error('Failed to parse football data:', e)
+        
+        // Calculate elapsed time from match start time for each match
+        const matchesWithCalculatedTime = parsed.map(match => {
+          const isLive = ['1H', '2H', 'HT', 'BT', 'ET', 'P', 'LIVE'].includes(match.status?.short)
+          
+          // If match is live and we have a start time, calculate elapsed time
+          if (isLive && match.date && match.status?.short !== 'HT') {
+            const matchStart = new Date(match.date)
+            const now = new Date()
+            const elapsedMinutes = Math.floor((now - matchStart) / (1000 * 60))
+            
+            // Only use calculated time if it's reasonable (0-120 minutes) and match hasn't finished
+            if (elapsedMinutes >= 0 && elapsedMinutes <= 120) {
+              return {
+                ...match,
+                status: {
+                  ...match.status,
+                  elapsed: elapsedMinutes // Use calculated time instead of stale database time
+                }
+              }
+            }
+          }
+          
+          return match
+        })
+        
+        setMatchesData(matchesWithCalculatedTime)
+    } catch (e) {
+      console.error('Failed to parse football data:', e)
         setMatchesData([])
       }
     } else {
@@ -431,11 +457,11 @@ const showToast = useShowToast()
                 <FootballIcon size="48px" />
               </Box>
             ) : (
-              <Avatar 
-                size="md" 
-                src={postedBy?.profilePic} 
-                name={postedBy?.name}
-                loading="lazy"
+            <Avatar 
+              size="md" 
+              src={postedBy?.profilePic} 
+              name={postedBy?.name}
+              loading="lazy"
                 cursor="pointer"
                 onClick={handleAvatarOrNameClick}
               />
