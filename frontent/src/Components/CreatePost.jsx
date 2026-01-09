@@ -425,17 +425,17 @@ const CreatePost = () => {
     
     
     
-     <Modal isOpen={isOpen} onClose={onClose}>
+     <Modal isOpen={isOpen} onClose={onClose} blockScrollOnMount={false} scrollBehavior="inside">
         <ModalOverlay />
        
-        <ModalContent>
+        <ModalContent maxH="90vh">
           <ModalHeader>Create Post</ModalHeader>
          
           <ModalCloseButton />
           
          
          
-          <ModalBody mb={6}>
+          <ModalBody mb={6} overflowY="auto">
            <FormControl>
            
          <Textarea placeholder="post text gose here" value={postText}onChange={handleTextChnage}/>

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useContext, useCallback } from 'react'
+import React, { useState, useEffect, useContext, useCallback, useMemo } from 'react'
 import {
     Box,
     Container,
@@ -70,27 +70,41 @@ const WeatherPage = () => {
     const cardBg = useColorModeValue('white', '#252b3b')
     
     // Load user's saved cities
-    useEffect(() => {
-        const loadPreferences = async () => {
-            if (!user) return
-            
-            try {
-                const baseUrl = import.meta.env.PROD ? window.location.origin : "http://localhost:5000"
-                const res = await fetch(`${baseUrl}/api/weather/preferences`, {
-                    credentials: 'include'
-                })
-                const data = await res.json()
-                
-                if (res.ok && data.cities) {
-                    setSelectedCities(data.cities)
-                }
-            } catch (error) {
-                console.error('Error loading preferences:', error)
-            }
-        }
+    const loadPreferences = useCallback(async () => {
+        if (!user) return
         
-        loadPreferences()
+        try {
+            const baseUrl = import.meta.env.PROD ? window.location.origin : "http://localhost:5000"
+            const res = await fetch(`${baseUrl}/api/weather/preferences`, {
+                credentials: 'include',
+                cache: 'no-cache' // Always fetch fresh data
+            })
+            const data = await res.json()
+            
+            if (res.ok && data.cities) {
+                console.log('🌤️ [WeatherPage] Loaded preferences from backend:', data.cities.length, 'cities')
+                setSelectedCities(data.cities)
+                return data.cities
+            } else {
+                setSelectedCities([])
+                return []
+            }
+        } catch (error) {
+            console.error('Error loading preferences:', error)
+            return []
+        }
     }, [user])
+    
+    useEffect(() => {
+        loadPreferences()
+    }, [user, loadPreferences])
+    
+    // Reload preferences when modal opens to ensure fresh data
+    useEffect(() => {
+        if (isOpen && user) {
+            loadPreferences()
+        }
+    }, [isOpen, user, loadPreferences])
     
     // Check if user follows Weather account
     useEffect(() => {
@@ -253,15 +267,23 @@ const WeatherPage = () => {
         }
     }
     
-    // Initial fetch on mount
+    // Initial fetch on mount and when selectedCities changes
+    // Use useMemo to create a stable dependency key
+    const citiesKey = useMemo(() => 
+        selectedCities.map(c => `${c.name}-${c.country}-${c.lat}-${c.lon}`).join('|'),
+        [selectedCities]
+    )
+    
     useEffect(() => {
         if (selectedCities.length > 0) {
+            console.log('🌤️ [WeatherPage] Fetching weather for', selectedCities.length, 'selected cities:', selectedCities.map(c => c.name))
             fetchWeather(false, selectedCities)
         } else {
+            console.log('🌤️ [WeatherPage] No cities selected, fetching default weather')
             fetchWeather()
         }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [selectedCities])
+    }, [citiesKey]) // Trigger when cities actually change (by content, not just reference)
     
     // Search cities
     const handleSearch = async (query) => {
@@ -292,8 +314,8 @@ const WeatherPage = () => {
         }
     }
     
-    // Add city to selection
-    const handleAddCity = (city) => {
+    // Add city to selection and immediately fetch weather
+    const handleAddCity = async (city) => {
         if (selectedCities.length >= 10) {
             showToast('Info', 'Maximum 10 cities allowed', 'info')
             return
@@ -308,14 +330,104 @@ const WeatherPage = () => {
             return
         }
         
-        setSelectedCities([...selectedCities, city])
+        const updatedCities = [...selectedCities, city]
+        setSelectedCities(updatedCities)
         setSearchQuery('')
         setSearchResults([])
+        
+        // Immediately fetch weather for the new city to show it on the page
+        try {
+            const baseUrl = import.meta.env.PROD ? window.location.origin : "http://localhost:5000"
+            const weatherRes = await fetch(
+                `${baseUrl}/api/weather/forecast?lat=${city.lat}&lon=${city.lon}`,
+                { credentials: 'include' }
+            )
+            const weatherResponse = await weatherRes.json()
+            
+            if (weatherRes.ok && weatherResponse.weather) {
+                const w = weatherResponse.weather
+                const newWeatherItem = {
+                    location: {
+                        city: w.location?.city || city.name,
+                        country: w.location?.country || city.country,
+                        lat: city.lat,
+                        lon: city.lon
+                    },
+                    current: {
+                        temperature: w.current?.temperature,
+                        condition: w.current?.condition,
+                        humidity: w.current?.humidity,
+                        windSpeed: w.current?.windSpeed
+                    }
+                }
+                
+                // Add to existing weather data immediately (will also be fetched by useEffect)
+                setWeatherData(prev => {
+                    const exists = prev.some(w => 
+                        w.location?.city === newWeatherItem.location.city &&
+                        w.location?.country === newWeatherItem.location.country
+                    )
+                    if (exists) return prev
+                    return [...prev, newWeatherItem]
+                })
+                
+                console.log('✅ [WeatherPage] Added city and fetched weather immediately:', city.name)
+                // Note: useEffect will also fetch weather for all selectedCities, but this gives immediate feedback
+            }
+        } catch (error) {
+            console.error('Error fetching weather for new city:', error)
+        }
     }
     
-    // Remove city from selection
-    const handleRemoveCity = (index) => {
-        setSelectedCities(selectedCities.filter((_, i) => i !== index))
+    // Remove city from selection and auto-save
+    const handleRemoveCity = async (index) => {
+        const updatedCities = selectedCities.filter((_, i) => i !== index)
+        setSelectedCities(updatedCities)
+        
+        // Auto-save immediately when city is removed
+        if (user && updatedCities.length >= 0) {
+            try {
+                const baseUrl = import.meta.env.PROD ? window.location.origin : "http://localhost:5000"
+                const res = await fetch(`${baseUrl}/api/weather/preferences`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'include',
+                    body: JSON.stringify({ cities: updatedCities })
+                })
+                
+                if (res.ok) {
+                    console.log('✅ [WeatherPage] City removed and saved automatically')
+                    // Clear cache and dispatch event for feed update
+                    if (window.weatherCache) {
+                        window.weatherCache.data = null
+                        window.weatherCache.timestamp = null
+                        window.weatherCache.preferences = null
+                    }
+                    try {
+                        Object.keys(localStorage).forEach(key => {
+                            if (key.startsWith('weatherCache_')) {
+                                localStorage.removeItem(key)
+                            }
+                        })
+                    } catch (e) {
+                        console.error('Error clearing localStorage cache:', e)
+                    }
+                    window.dispatchEvent(new CustomEvent('weatherPreferencesUpdated', { 
+                        detail: { cities: updatedCities } 
+                    }))
+                    // Refresh weather display
+                    if (updatedCities.length > 0) {
+                        fetchWeather(false, updatedCities)
+                    } else {
+                        fetchWeather() // Use defaults if no cities selected
+                    }
+                } else {
+                    console.error('Failed to auto-save after city removal')
+                }
+            } catch (error) {
+                console.error('Error auto-saving after city removal:', error)
+            }
+        }
     }
     
     // Save preferences
