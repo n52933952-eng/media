@@ -58,6 +58,9 @@ const showToast = useShowToast()
   // Check if this is a Football post with match data
   const isFootballPost = postedBy?.username === 'Football' && post?.footballData
   
+  // Check if this is a Weather post
+  const isWeatherPost = postedBy?.username === 'Weather' && post?.weatherData
+  
   // Check if this is a Chess game post
   const isChessPost = post?.chessGameData
   
@@ -149,6 +152,7 @@ const showToast = useShowToast()
   }
   
   const [matchesData, setMatchesData] = useState([])
+  const [weatherDataArray, setWeatherDataArray] = useState([])
   
   // Parse initial football data (use API time directly, no client-side calculation)
   useEffect(() => {
@@ -164,6 +168,21 @@ const showToast = useShowToast()
       setMatchesData([])
     }
   }, [post?.footballData, isFootballPost])
+  
+  // Parse weather data
+  useEffect(() => {
+    if (isWeatherPost && post?.weatherData) {
+      try {
+        const parsed = JSON.parse(post.weatherData)
+        setWeatherDataArray(Array.isArray(parsed) ? parsed : [])
+      } catch (e) {
+        console.error('Failed to parse weather data:', e)
+        setWeatherDataArray([])
+      }
+    } else {
+      setWeatherDataArray([])
+    }
+  }, [post?.weatherData, isWeatherPost])
   
   // Listen for real-time football match updates
   useEffect(() => {
@@ -770,7 +789,48 @@ const showToast = useShowToast()
     </Box>
   )}
   
-  {post?.img && !isFootballPost && !isChessPost && (
+  {/* Weather Data Display */}
+  {isWeatherPost && weatherDataArray.length > 0 && (
+    <VStack spacing={2} mt={3} mb={2} align="stretch">
+      <SimpleGrid columns={{ base: 1, md: 2 }} spacing={3}>
+        {weatherDataArray.slice(0, 6).map((weather, index) => (
+          <Box
+            key={index}
+            bg={cardBg}
+            borderRadius="lg"
+            border="1px solid"
+            borderColor={borderColor}
+            p={3}
+          >
+            <Flex align="center" justify="space-between" mb={2}>
+              <Text fontSize="sm" fontWeight="semibold" color={textColor}>
+                {weather.city}, {weather.country}
+              </Text>
+              {weather.icon && (
+                <img 
+                  src={`https://openweathermap.org/img/wn/${weather.icon}@2x.png`} 
+                  alt={weather.condition}
+                  style={{ width: '40px', height: '40px' }}
+                />
+              )}
+            </Flex>
+            <Text fontSize="xl" fontWeight="bold" color={textColor}>
+              {weather.temperature}°C
+            </Text>
+            <Text fontSize="xs" color={secondaryTextColor} textTransform="capitalize" mt={1}>
+              {weather.description}
+            </Text>
+            <Flex justify="space-between" mt={2} fontSize="xs" color={secondaryTextColor}>
+              <Text>💧 {weather.humidity}%</Text>
+              <Text>💨 {weather.windSpeed?.toFixed(1)} m/s</Text>
+            </Flex>
+          </Box>
+        ))}
+      </SimpleGrid>
+    </VStack>
+  )}
+  
+  {post?.img && !isFootballPost && !isWeatherPost && !isChessPost && (
     <Box borderRadius={4} overflow="hidden" border="0.5px solid" borderColor="gray.light" my={2}>
       {/* YouTube Embed (Al Jazeera Live or any YouTube video) */}
       {(() => {

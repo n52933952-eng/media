@@ -15,6 +15,7 @@ import UpdateProfile from './Pages/UpdatProile'
 import CreatePost from './Components/CreatePost'
 import MessagesPage from './Pages/MessagesPage'
 import FootballPage from './Pages/FootballPage'
+import WeatherPage from './Pages/WeatherPage'
 import NewsPage from './Pages/NewsPage'
 import NotificationsPage from './Pages/NotificationsPage'
 import ChessGamePage from './Pages/ChessGamePage'
@@ -30,7 +31,7 @@ const AppContent = () => {
   // Check if current path is a user page (e.g., /username, but not /username/post/123 or other routes)
   const pathParts = location.pathname.split('/').filter(Boolean)
   const isUserPage = pathParts.length === 1 && 
-                     !['sign', 'update', 'football', 'news', 'notifications', 'chess', 'home', 'messages'].includes(pathParts[0])
+                     !['sign', 'update', 'football', 'weather', 'news', 'notifications', 'chess', 'home', 'messages'].includes(pathParts[0])
   // Check if it's the current user's own page
   const isOwnUserPage = isUserPage && user && pathParts[0] === user.username
 
@@ -85,6 +86,7 @@ const AppContent = () => {
                 <Route path="/sign" element={<SignUp/>}/>
                 <Route path="/update" element={user ? <UpdateProfile/> : <Navigate  to="/"/>}/>
                 <Route path="/football" element={<FootballPage/>} />
+                <Route path="/weather" element={<WeatherPage/>} />
                 <Route path="/news" element={<NewsPage/>} />
                 <Route path="/notifications" element={user ? <NotificationsPage /> : <Navigate to="/" />} />
                 <Route path="/chess/:opponentId" element={user ? <ChessGamePage /> : <Navigate to="/" />} />

@@ -362,10 +362,39 @@ export const manualFetchWeather = async (req, res) => {
     try {
         console.log('🌤️ [manualFetchWeather] ========== MANUAL FETCH TRIGGERED ==========')
         
-        await fetchCurrentWeather(req, res)
+        const allWeatherData = []
         
-        // Also create/update feed post
-        await autoPostWeatherUpdate()
+        for (const city of DEFAULT_CITIES) {
+            // OpenWeatherMap: Get current weather by coordinates (more reliable)
+            const endpoint = `/weather?lat=${city.lat}&lon=${city.lon}`
+            const result = await fetchFromWeatherAPI(endpoint)
+            
+            if (result.success && result.data) {
+                const convertedWeather = convertWeatherFormat(result.data, city)
+                const saved = await Weather.findOneAndUpdate(
+                    { 
+                        'location.city': convertedWeather.location.city,
+                        'location.country': convertedWeather.location.country
+                    },
+                    convertedWeather,
+                    { upsert: true, new: true }
+                )
+                allWeatherData.push(saved)
+            }
+            
+            // Rate limit protection: 60 calls/minute = 1 call per second (use 1.1 for safety)
+            await new Promise(resolve => setTimeout(resolve, 1100))
+        }
+        
+        // Also create/update feed post (run in background, don't wait)
+        autoPostWeatherUpdate().catch(err => {
+            console.error('❌ [manualFetchWeather] Error posting weather update:', err)
+        })
+        
+        res.status(200).json({ 
+            message: `Updated weather for ${allWeatherData.length} cities`,
+            cities: allWeatherData.length
+        })
         
     } catch (error) {
         console.error('❌ [manualFetchWeather] Error:', error)
