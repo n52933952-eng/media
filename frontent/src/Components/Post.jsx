@@ -203,8 +203,6 @@ const showToast = useShowToast()
           
           // If user has selected cities, fetch weather for those cities
           if (prefsRes.ok && prefsData.cities && prefsData.cities.length > 0) {
-            // If force refresh, skip cache
-            if (!forceRefresh) {
             console.log('🌤️ [Post] Loading personalized weather for', prefsData.cities.length, 'cities:', prefsData.cities.map(c => c.name))
             
             // Check memory cache first (shared with WeatherPage) - skip if force refresh
@@ -296,6 +294,7 @@ const showToast = useShowToast()
                   window.weatherCache.timestamp = now
                   window.weatherCache.preferences = cacheKey
                   
+                  setWeatherLoading(false)
                   return
                 }
               }
@@ -381,15 +380,15 @@ const showToast = useShowToast()
           }
         }
         
-          // Fallback: Use post data (default cities) - already set above
-          // Don't clear it, just keep what we have
-        } catch (e) {
-          console.error('❌ Failed to parse weather data:', e)
-          // Keep default data if personalized fails
-        } finally {
-          setWeatherLoading(false)
-        }
+        // Fallback: Use post data (default cities) - already set above
+        // Don't clear it, just keep what we have
+      } catch (e) {
+        console.error('❌ Failed to parse weather data:', e)
+        // Keep default data if personalized fails
+      } finally {
+        setWeatherLoading(false)
       }
+    }
       
       loadPersonalizedWeather()
     
