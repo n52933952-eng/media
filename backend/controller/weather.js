@@ -405,8 +405,83 @@ export const manualFetchWeather = async (req, res) => {
 // 6. Manual trigger to post weather to feed
 export const manualPostWeather = async (req, res) => {
     try {
-        await autoPostWeatherUpdate()
-        res.status(200).json({ message: 'Weather post created/updated successfully' })
+        const weatherAccount = await getWeatherAccount()
+        if (!weatherAccount) {
+            return res.status(404).json({ error: 'Weather account not found' })
+        }
+        
+        const now = new Date()
+        const todayStart = new Date(now.setHours(0, 0, 0, 0))
+        const todayEnd = new Date(now.setHours(23, 59, 59, 999))
+        
+        // Check if post already exists for today
+        const existingPost = await Post.findOne({
+            postedBy: weatherAccount._id,
+            weatherData: { $exists: true, $ne: null },
+            createdAt: { 
+                $gte: todayStart,
+                $lte: todayEnd
+            }
+        }).sort({ createdAt: -1 })
+        
+        if (existingPost) {
+            // Post already exists, return it
+            return res.status(200).json({ 
+                posted: false,
+                alreadyExists: true,
+                postId: existingPost._id,
+                post: existingPost,
+                message: 'Weather post already exists for today'
+            })
+        }
+        
+        // Get latest weather for default cities
+        const weatherData = await Weather.find({
+            'location.city': { $in: DEFAULT_CITIES.map(c => c.name) }
+        })
+        .sort({ lastUpdated: -1 })
+        .limit(5)
+        .lean()
+        
+        if (weatherData.length === 0) {
+            // No weather data available
+            console.log('🌤️ [manualPostWeather] No weather data found')
+            return res.status(404).json({ 
+                error: 'No weather data available',
+                message: 'Please wait for weather data to be fetched by the cron job'
+            })
+        }
+        
+        const weatherDataArray = weatherData.map(w => ({
+            city: w.location.city,
+            country: w.location.country,
+            temperature: w.current.temperature,
+            condition: w.current.condition.main,
+            description: w.current.condition.description,
+            icon: w.current.condition.icon,
+            humidity: w.current.humidity,
+            windSpeed: w.current.windSpeed
+        }))
+        
+        // Create new post
+        const newPost = new Post({
+            postedBy: weatherAccount._id,
+            text: `🌤️ Weather Update - ${new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}`,
+            weatherData: JSON.stringify(weatherDataArray)
+        })
+        
+        await newPost.save()
+        
+        // Populate postedBy for response
+        await newPost.populate('postedBy', 'username name profilePic')
+        
+        console.log('✅ [manualPostWeather] Created weather post:', newPost._id)
+        
+        res.status(200).json({ 
+            posted: true,
+            post: newPost,
+            message: 'Weather post created successfully'
+        })
     } catch (error) {
         console.error('Error posting weather:', error)
         res.status(500).json({ error: error.message })
@@ -486,6 +561,35 @@ export const saveWeatherPreferences = async (req, res) => {
         }
         
         console.log(`✅ [saveWeatherPreferences] Saved ${validCities.length} cities for user ${user.username}`)
+        
+        // Fetch and cache weather for user's selected cities immediately (in background)
+        if (validCities.length > 0) {
+            console.log(`🌤️ [saveWeatherPreferences] Fetching weather for ${validCities.length} cities...`)
+            validCities.forEach(async (city, index) => {
+                // Add delay between requests to avoid rate limiting (60 calls/minute = 1 per second)
+                setTimeout(async () => {
+                    try {
+                        const endpoint = `/weather?lat=${city.lat}&lon=${city.lon}`
+                        const result = await fetchFromWeatherAPI(endpoint)
+                        
+                        if (result.success && result.data) {
+                            const convertedWeather = convertWeatherFormat(result.data, city)
+                            await Weather.findOneAndUpdate(
+                                { 
+                                    'location.city': convertedWeather.location.city,
+                                    'location.country': convertedWeather.location.country
+                                },
+                                convertedWeather,
+                                { upsert: true, new: true }
+                            )
+                            console.log(`✅ [saveWeatherPreferences] Cached weather for ${city.name}`)
+                        }
+                    } catch (error) {
+                        console.error(`❌ [saveWeatherPreferences] Error fetching weather for ${city.name}:`, error)
+                    }
+                }, index * 1100) // 1.1 seconds between requests
+            })
+        }
         
         res.status(200).json({ 
             message: 'Weather preferences saved successfully',

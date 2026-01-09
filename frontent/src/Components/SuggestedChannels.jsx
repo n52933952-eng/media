@@ -456,6 +456,116 @@ const SuggestedChannels = ({ onUserFollowed }) => {
                     })
                 }
                 
+                // If following (not unfollowing), fetch and add Weather post immediately
+                if (!wasFollowing) {
+                    const baseUrl = import.meta.env.PROD ? window.location.origin : "http://localhost:5000"
+                    
+                    // Step 1: Post immediately with available weather data
+                    setTimeout(() => {
+                        fetch(`${baseUrl}/api/weather/post/manual`, {
+                            method: 'POST',
+                            credentials: 'include'
+                        })
+                        .then(res => res.json())
+                        .then(postData => {
+                            console.log('🌤️ Weather post result:', postData)
+                            if (postData.posted && postData.post) {
+                                // Save scroll position to prevent page jumping
+                                const scrollY = window.scrollY
+                                
+                                // Add post to feed immediately
+                                setFollowPost(prev => {
+                                    // Check if post already exists
+                                    const exists = prev.some(p => {
+                                        const prevId = p._id?.toString()
+                                        const newId = postData.post._id?.toString()
+                                        return prevId === newId
+                                    })
+                                    if (exists) {
+                                        console.log('⚠️ [SuggestedChannels] Weather post already in feed, skipping')
+                                        return prev
+                                    }
+                                    // Add to top of feed
+                                    console.log('✅ [SuggestedChannels] Added Weather post to feed immediately')
+                                    return [postData.post, ...prev]
+                                })
+                                
+                                // Restore scroll position after state update
+                                requestAnimationFrame(() => {
+                                    window.scrollTo({ top: scrollY, behavior: 'instant' })
+                                })
+                                
+                                // Also call onUserFollowed callback if provided
+                                if (onUserFollowed) {
+                                    onUserFollowed(weatherAccount._id)
+                                }
+                            } else if (postData.alreadyExists || postData.postId) {
+                                // Post already exists, fetch it and add to feed
+                                console.log('ℹ️ Weather post already exists for today, fetching and adding to feed...')
+                                
+                                // Fetch the existing post
+                                fetch(`${baseUrl}/api/post/getPost/${postData.postId}`, {
+                                    credentials: 'include'
+                                })
+                                .then(res => res.json())
+                                .then(postRes => {
+                                    if (postRes && postRes.post) {
+                                        // Save scroll position to prevent page jumping
+                                        const scrollY = window.scrollY
+                                        
+                                        setFollowPost(prev => {
+                                            const exists = prev.some(p => {
+                                                const prevId = p._id?.toString()
+                                                const newId = postRes.post._id?.toString()
+                                                return prevId === newId
+                                            })
+                                            if (exists) return prev
+                                            console.log('✅ [SuggestedChannels] Added existing Weather post to feed')
+                                            return [postRes.post, ...prev]
+                                        })
+                                        
+                                        // Restore scroll position after state update
+                                        requestAnimationFrame(() => {
+                                            window.scrollTo({ top: scrollY, behavior: 'instant' })
+                                        })
+                                    }
+                                })
+                                .catch(err => console.error('Error fetching existing Weather post:', err))
+                            }
+                        })
+                        .catch(err => {
+                            console.error('Weather post error:', err)
+                            showToast('Error', 'Could not create Weather post', 'error')
+                        })
+                    }, 500) // 500ms delay to ensure follow is saved
+                }
+                
+                showToast(
+                    'Success',
+                    isFollowingWeather 
+                        ? 'Unfollowed Weather channel' 
+                        : '🌤️ Following Weather! You\'ll now see weather updates in your feed',
+                    'success'
+                )
+            } else {
+                showToast('Error', data.error || 'Failed to update follow status', 'error')
+            }
+        } catch (error) {
+            console.error('Error toggling Weather follow:', error)
+            showToast('Error', 'Failed to update follow status', 'error')
+        } finally {
+            setWeatherFollowLoading(false)
+        }
+    }, [weatherAccount, isFollowingWeather, setUser, setFollowPost, showToast, onUserFollowed])
+                            const postedById = p.postedBy?._id?.toString() || p.postedBy?.toString()
+                            const weatherId = weatherAccount._id?.toString()
+                            return postedById !== weatherId
+                        })
+                        console.log(`🗑️ [SuggestedChannels] Removed ${prev.length - filtered.length} Weather post(s) from feed`)
+                        return filtered
+                    })
+                }
+                
                 // If following (not unfollowing), trigger weather post
                 if (!wasFollowing) {
                     const baseUrl = import.meta.env.PROD ? window.location.origin : "http://localhost:5000"

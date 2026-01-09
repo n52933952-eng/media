@@ -30,6 +30,20 @@ import { UserContext } from '../context/UserContext'
 import { SocketContext } from '../context/SocketContext'
 import useShowToast from '../hooks/useShowToast'
 
+// In-memory cache for weather data (shared across component instances)
+// Also expose to window for Post component to use
+const weatherCache = {
+    data: null,
+    timestamp: null,
+    preferences: null,
+    CACHE_TTL: 5 * 60 * 1000 // 5 minutes
+}
+
+// Expose to window for Post component
+if (typeof window !== 'undefined') {
+    window.weatherCache = weatherCache
+}
+
 const WeatherPage = () => {
     const { user, setUser } = useContext(UserContext)
     const { socket } = useContext(SocketContext) || {}
@@ -102,22 +116,60 @@ const WeatherPage = () => {
         }
     }, [user])
     
-    // Fetch weather function - for user's selected cities or default
+    // Fetch weather function - for user's selected cities or default (with memory cache)
     const fetchWeather = async (silent = false, cities = null) => {
         try {
+            const baseUrl = import.meta.env.PROD ? window.location.origin : "http://localhost:5000"
+            const citiesToFetch = cities || selectedCities
+            const cacheKey = citiesToFetch.length > 0 
+                ? JSON.stringify(citiesToFetch.map(c => `${c.name}-${c.country}`).sort())
+                : 'default'
+            
+            // Check memory cache first
+            const now = Date.now()
+            if (weatherCache.data && 
+                weatherCache.preferences === cacheKey &&
+                weatherCache.timestamp && 
+                (now - weatherCache.timestamp) < weatherCache.CACHE_TTL) {
+                console.log('💾 [WeatherPage] Using cached weather data')
+                setWeatherData(weatherCache.data)
+                if (!silent) setLoading(false)
+                return
+            }
+            
+            // Check localStorage cache as fallback
+            try {
+                const cached = localStorage.getItem(`weatherCache_${cacheKey}`)
+                if (cached) {
+                    const parsed = JSON.parse(cached)
+                    if (parsed.timestamp && (now - parsed.timestamp) < weatherCache.CACHE_TTL) {
+                        console.log('💾 [WeatherPage] Using localStorage cached weather data')
+                        setWeatherData(parsed.data)
+                        weatherCache.data = parsed.data
+                        weatherCache.timestamp = parsed.timestamp
+                        weatherCache.preferences = cacheKey
+                        if (!silent) setLoading(false)
+                        return
+                    }
+                }
+            } catch (e) {
+                console.error('Error reading localStorage cache:', e)
+            }
+            
             if (!silent) {
                 console.log('🌤️ [WeatherPage] Starting to fetch weather...')
                 setLoading(true)
             }
             
-            const baseUrl = import.meta.env.PROD ? window.location.origin : "http://localhost:5000"
-            
             // If user has selected cities, fetch weather for those cities
-            const citiesToFetch = cities || selectedCities
-            
             if (citiesToFetch.length > 0) {
                 // Fetch weather for each selected city
-                const weatherPromises = citiesToFetch.map(async (city) => {
+                const weatherPromises = citiesToFetch.map(async (city, index) => {
+                    // Add delay between requests to avoid rate limiting (except first one)
+                    if (index > 0) {
+                        await new Promise(resolve => setTimeout(resolve, 1100))
+                    }
+                    
                     try {
                         const res = await fetch(
                             `${baseUrl}/api/weather/forecast?lat=${city.lat}&lon=${city.lon}`,
@@ -137,6 +189,21 @@ const WeatherPage = () => {
                 const results = await Promise.all(weatherPromises)
                 const validResults = results.filter(w => w !== null)
                 
+                // Update cache
+                weatherCache.data = validResults
+                weatherCache.timestamp = now
+                weatherCache.preferences = cacheKey
+                
+                // Also save to localStorage
+                try {
+                    localStorage.setItem(`weatherCache_${cacheKey}`, JSON.stringify({
+                        data: validResults,
+                        timestamp: now
+                    }))
+                } catch (e) {
+                    console.error('Error saving to localStorage cache:', e)
+                }
+                
                 if (!silent) console.log('🌤️ [WeatherPage] Setting weather data:', validResults.length)
                 setWeatherData(validResults)
             } else {
@@ -148,6 +215,21 @@ const WeatherPage = () => {
                 const data = await res.json()
                 
                 if (res.ok && data.weather) {
+                    // Update cache
+                    weatherCache.data = data.weather || []
+                    weatherCache.timestamp = now
+                    weatherCache.preferences = cacheKey
+                    
+                    // Also save to localStorage
+                    try {
+                        localStorage.setItem(`weatherCache_${cacheKey}`, JSON.stringify({
+                            data: data.weather || [],
+                            timestamp: now
+                        }))
+                    } catch (e) {
+                        console.error('Error saving to localStorage cache:', e)
+                    }
+                    
                     if (!silent) console.log('🌤️ [WeatherPage] Setting weather data:', data.weather.length)
                     setWeatherData(data.weather || [])
                 } else {
@@ -260,6 +342,10 @@ const WeatherPage = () => {
                 onClose()
                 // Refresh weather data
                 fetchWeather(false, selectedCities)
+                // Trigger feed refresh by updating localStorage timestamp
+                localStorage.setItem('weatherPreferencesUpdated', Date.now().toString())
+                // Dispatch custom event to refresh feed posts
+                window.dispatchEvent(new CustomEvent('weatherPreferencesUpdated'))
             } else {
                 showToast('Error', data.error || 'Failed to save preferences', 'error')
             }

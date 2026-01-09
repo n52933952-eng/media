@@ -171,68 +171,216 @@ const showToast = useShowToast()
   
   // Parse weather data and fetch user's personalized cities
   useEffect(() => {
-    if (isWeatherPost && post?.weatherData) {
-      const loadPersonalizedWeather = async () => {
-        try {
-          // First, try to load user's selected cities
-          if (user?._id) {
-            const baseUrl = import.meta.env.PROD ? window.location.origin : "http://localhost:5000"
-            const prefsRes = await fetch(`${baseUrl}/api/weather/preferences`, {
-              credentials: 'include'
-            })
-            const prefsData = await prefsRes.json()
+    if (!isWeatherPost || !post?.weatherData) {
+      setWeatherDataArray([])
+      return
+    }
+    
+    const loadPersonalizedWeather = async () => {
+      try {
+        // First, try to load user's selected cities
+        if (user?._id) {
+          const baseUrl = import.meta.env.PROD ? window.location.origin : "http://localhost:5000"
+          const prefsRes = await fetch(`${baseUrl}/api/weather/preferences`, {
+            credentials: 'include'
+          })
+          const prefsData = await prefsRes.json()
+          
+          console.log('🌤️ [Post] User preferences:', prefsData.cities?.length || 0, 'cities')
+          
+          // If user has selected cities, fetch weather for those cities
+          if (prefsRes.ok && prefsData.cities && prefsData.cities.length > 0) {
+            console.log('🌤️ [Post] Loading personalized weather for', prefsData.cities.length, 'cities:', prefsData.cities.map(c => c.name))
             
-            // If user has selected cities, fetch weather for those cities
-            if (prefsRes.ok && prefsData.cities && prefsData.cities.length > 0) {
-              const weatherPromises = prefsData.cities.map(async (city) => {
-                try {
-                  const weatherRes = await fetch(
-                    `${baseUrl}/api/weather/forecast?lat=${city.lat}&lon=${city.lon}`,
-                    { credentials: 'include' }
-                  )
-                  const weatherData = await weatherRes.json()
-                  if (weatherRes.ok && weatherData.weather) {
-                    const w = weatherData.weather
-                    return {
-                      city: w.location?.city || city.name,
-                      country: w.location?.country || city.country,
-                      temperature: w.current?.temperature,
-                      condition: w.current?.condition?.main,
-                      description: w.current?.condition?.description,
-                      icon: w.current?.condition?.icon,
-                      humidity: w.current?.humidity,
-                      windSpeed: w.current?.windSpeed
-                    }
-                  }
-                  return null
-                } catch (error) {
-                  console.error(`Error fetching weather for ${city.name}:`, error)
-                  return null
+            // Check memory cache first (shared with WeatherPage)
+            const cacheKey = JSON.stringify(prefsData.cities.map(c => `${c.name}-${c.country}`).sort())
+            const now = Date.now()
+            
+            // Check if we have cached data in memory (from WeatherPage)
+            if (window.weatherCache && 
+                window.weatherCache.preferences === cacheKey &&
+                window.weatherCache.timestamp && 
+                (now - window.weatherCache.timestamp) < (5 * 60 * 1000)) {
+              console.log('💾 [Post] Using memory cached weather data')
+              const formattedWeather = window.weatherCache.data.map(w => ({
+                city: w.location?.city,
+                country: w.location?.country,
+                temperature: w.current?.temperature,
+                condition: w.current?.condition?.main,
+                description: w.current?.condition?.description,
+                icon: w.current?.condition?.icon,
+                humidity: w.current?.humidity,
+                windSpeed: w.current?.windSpeed
+              }))
+              setWeatherDataArray(formattedWeather)
+              return
+            }
+            
+            // Check localStorage cache
+            try {
+              const cached = localStorage.getItem(`weatherCache_${cacheKey}`)
+              if (cached) {
+                const parsed = JSON.parse(cached)
+                if (parsed.timestamp && (now - parsed.timestamp) < (5 * 60 * 1000)) {
+                  console.log('💾 [Post] Using localStorage cached weather data')
+                  // Convert from Weather model format to display format
+                  const formattedWeather = parsed.data.map(w => ({
+                    city: w.location?.city,
+                    country: w.location?.country,
+                    temperature: w.current?.temperature,
+                    condition: w.current?.condition?.main,
+                    description: w.current?.condition?.description,
+                    icon: w.current?.condition?.icon,
+                    humidity: w.current?.humidity,
+                    windSpeed: w.current?.windSpeed
+                  }))
+                  setWeatherDataArray(formattedWeather)
+                  return
                 }
+              }
+            } catch (e) {
+              console.error('Error reading localStorage cache:', e)
+            }
+            
+            // First try to get cached weather from database
+            try {
+              const cacheRes = await fetch(`${baseUrl}/api/weather?limit=50`, {
+                credentials: 'include'
               })
+              const cachedWeather = await cacheRes.json()
               
-              const personalizedWeather = await Promise.all(weatherPromises)
-              const validWeather = personalizedWeather.filter(w => w !== null)
+              if (cacheRes.ok && cachedWeather.weather && cachedWeather.weather.length > 0) {
+                const cityNames = prefsData.cities.map(c => c.name)
+                const matchingCached = cachedWeather.weather.filter(w => 
+                  cityNames.includes(w.location?.city)
+                )
+                
+                if (matchingCached.length > 0) {
+                  console.log('✅ [Post] Found', matchingCached.length, 'cached cities from database')
+                  const formattedWeather = matchingCached.map(w => ({
+                    city: w.location?.city,
+                    country: w.location?.country,
+                    temperature: w.current?.temperature,
+                    condition: w.current?.condition?.main,
+                    description: w.current?.condition?.description,
+                    icon: w.current?.condition?.icon,
+                    humidity: w.current?.humidity,
+                    windSpeed: w.current?.windSpeed
+                  }))
+                  setWeatherDataArray(formattedWeather)
+                  
+                  // Update memory cache for future use
+                  if (!window.weatherCache) window.weatherCache = {}
+                  window.weatherCache.data = matchingCached
+                  window.weatherCache.timestamp = now
+                  window.weatherCache.preferences = cacheKey
+                  
+                  return
+                }
+              }
+            } catch (cacheError) {
+              console.error('❌ [Post] Error checking cache:', cacheError)
+            }
+            
+            // If not cached, fetch from API (limit to 5 cities to avoid too many API calls)
+            console.log('🌤️ [Post] No cache found, fetching from API for first 5 cities...')
+            const citiesToFetch = prefsData.cities.slice(0, 5)
+            const fetchedWeather = []
+            
+            for (let i = 0; i < citiesToFetch.length; i++) {
+              const city = citiesToFetch[i]
+              // Add delay to avoid rate limiting (except first one)
+              if (i > 0) {
+                await new Promise(resolve => setTimeout(resolve, 1100))
+              }
               
-              if (validWeather.length > 0) {
-                setWeatherDataArray(validWeather)
-                return
+              try {
+                const weatherRes = await fetch(
+                  `${baseUrl}/api/weather/forecast?lat=${city.lat}&lon=${city.lon}`,
+                  { credentials: 'include' }
+                )
+                const weatherResponse = await weatherRes.json()
+                
+                if (weatherRes.ok && weatherResponse.weather) {
+                  const w = weatherResponse.weather
+                  const weatherItem = {
+                    city: w.location?.city || city.name,
+                    country: w.location?.country || city.country,
+                    temperature: w.current?.temperature,
+                    condition: w.current?.condition?.main,
+                    description: w.current?.condition?.description,
+                    icon: w.current?.condition?.icon,
+                    humidity: w.current?.humidity,
+                    windSpeed: w.current?.windSpeed
+                  }
+                  
+                  if (weatherItem.temperature !== undefined) {
+                    fetchedWeather.push(weatherItem)
+                  }
+                }
+              } catch (error) {
+                console.error(`❌ Error fetching weather for ${city.name}:`, error)
               }
             }
+            
+            if (fetchedWeather.length > 0) {
+              console.log('✅ [Post] Loaded personalized weather for', fetchedWeather.length, 'cities')
+              setWeatherDataArray(fetchedWeather)
+              
+              // Update memory cache for future use
+              if (!window.weatherCache) window.weatherCache = {}
+              // Convert back to Weather model format for cache
+              const cacheData = fetchedWeather.map(item => ({
+                location: { city: item.city, country: item.country },
+                current: {
+                  temperature: item.temperature,
+                  condition: { main: item.condition, description: item.description, icon: item.icon },
+                  humidity: item.humidity,
+                  windSpeed: item.windSpeed
+                }
+              }))
+              window.weatherCache.data = cacheData
+              window.weatherCache.timestamp = Date.now()
+              window.weatherCache.preferences = cacheKey
+              
+              // Also save to localStorage
+              try {
+                localStorage.setItem(`weatherCache_${cacheKey}`, JSON.stringify({
+                  data: cacheData,
+                  timestamp: Date.now()
+                }))
+              } catch (e) {
+                console.error('Error saving to localStorage cache:', e)
+              }
+              
+              return
+            } else {
+              console.log('⚠️ [Post] No weather fetched from API, using default')
+            }
           }
-          
-          // Fallback: Use post data (default cities)
-          const parsed = JSON.parse(post.weatherData)
-          setWeatherDataArray(Array.isArray(parsed) ? parsed : [])
-        } catch (e) {
-          console.error('Failed to parse weather data:', e)
-          setWeatherDataArray([])
         }
+        
+        // Fallback: Use post data (default cities)
+        const parsed = JSON.parse(post.weatherData)
+        setWeatherDataArray(Array.isArray(parsed) ? parsed : [])
+      } catch (e) {
+        console.error('❌ Failed to parse weather data:', e)
+        setWeatherDataArray([])
       }
-      
+    }
+    
+    loadPersonalizedWeather()
+    
+    // Listen for preference updates
+    const handlePreferencesUpdate = () => {
+      console.log('🌤️ [Post] Preferences updated event received, reloading weather...')
       loadPersonalizedWeather()
-    } else {
-      setWeatherDataArray([])
+    }
+    
+    window.addEventListener('weatherPreferencesUpdated', handlePreferencesUpdate)
+    
+    return () => {
+      window.removeEventListener('weatherPreferencesUpdated', handlePreferencesUpdate)
     }
   }, [post?.weatherData, isWeatherPost, user?._id])
   
