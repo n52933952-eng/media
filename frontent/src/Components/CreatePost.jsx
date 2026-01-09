@@ -104,24 +104,35 @@ const CreatePost = () => {
     setUploadProgress(0)
     setIsUploading(false)
 
-    // Compress video if needed
+    // Compress video if needed (non-blocking - allows posting original if compression fails)
     if (needsCompression(file)) {
       setIsUploading(true)
       setUploadProgress(10)
       
+      // Set compression timeout (2 minutes max)
+      const compressionTimeout = setTimeout(() => {
+        console.warn('⚠️ Compression timeout - using original file')
+        setIsUploading(false)
+        setUploadProgress(0)
+        showToast("Compression taking too long", "You can post the original video. Compression will be skipped.", "warning", 5000)
+      }, 120000) // 2 minutes timeout
+      
       try {
-        showToast("Compressing video", "Please wait while we compress your video...", "info", 5000)
+        showToast("Compressing video", "Please wait while we compress your video... You can still post if it takes too long.", "info", 5000)
         
         const compressedFile = await compressVideo(file, {
           maxSizeMB: 95,
           quality: fileSizeMB > 50 ? 'low' : 'medium',
+          timeout: 110000, // Slightly less than UI timeout
           progressCallback: (progress) => {
             setUploadProgress(10 + (progress * 0.8))
           }
         })
         
+        clearTimeout(compressionTimeout)
+        
         const compressedSizeMB = compressedFile.size / (1024 * 1024)
-        console.log(`Video compressed: ${fileSizeMB.toFixed(2)}MB → ${compressedSizeMB.toFixed(2)}MB`)
+        console.log(`✅ Video compressed: ${fileSizeMB.toFixed(2)}MB → ${compressedSizeMB.toFixed(2)}MB`)
         
         setImage(compressedFile)
         
@@ -135,17 +146,29 @@ const CreatePost = () => {
         setIsUploading(false)
         showToast("Compression complete", `Video compressed to ${compressedSizeMB.toFixed(2)}MB`, "success")
       } catch (error) {
-        console.error('Video compression error:', error)
+        clearTimeout(compressionTimeout)
+        console.error('❌ Video compression error:', error)
         setUploadProgress(0)
         setIsUploading(false)
-        setImage(null)
-        setImagePreview('')
-        showToast("Compression failed", error.message || "Failed to compress video", "error")
         
-        if (imageInput.current) {
-          imageInput.current.value = ''
+        // Don't clear the image - allow user to post original file
+        // Only clear if file is too large for Cloudinary (100MB limit)
+        if (file.size > 100 * 1024 * 1024) {
+          setImage(null)
+          setImagePreview('')
+          showToast("File too large", "File exceeds 100MB limit. Please use a smaller video.", "error")
+          if (imageInput.current) {
+            imageInput.current.value = ''
+          }
+        } else {
+          // Keep original file - user can post it
+          showToast("Compression failed", "You can still post the original video. It may take longer to upload.", "warning", 5000)
+          console.log('✅ Keeping original file for upload')
         }
       }
+    } else if (file.type.startsWith('video/')) {
+      // Video under 50MB - no compression needed, ready to upload
+      console.log(`✅ Video ${fileSizeMB.toFixed(2)}MB is under 50MB - ready to upload without compression`)
     }
     
     // Reset input value
@@ -167,9 +190,18 @@ const CreatePost = () => {
 
 
    const handleCreatePost = async() => {
-     if (isUploading) {
+     // Allow posting even if compression is in progress (will use original file)
+     // Only block if no file is selected at all
+     if (isUploading && !image) {
        showToast("Please wait", "File is still processing. Please wait for it to complete.", "warning")
        return
+     }
+     
+     // If compression is still running but we have a file, cancel compression and use original
+     if (isUploading && image) {
+       console.log('⚠️ Compression in progress, but proceeding with upload using available file')
+       setIsUploading(false)
+       setUploadProgress(0)
      }
 
      setLoading(true)
@@ -207,7 +239,21 @@ const CreatePost = () => {
         
         xhr.open('POST', `${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/post/create`)
         xhr.withCredentials = true
-        xhr.timeout = 1200000 // 20 minutes
+        xhr.timeout = 1200000 // 20 minutes for large video uploads
+        
+        // Handle timeout
+        xhr.ontimeout = () => {
+          showToast("Upload timeout", "Video upload is taking longer than expected. Please try again or use a smaller video.", "error")
+          setLoading(false)
+          setUploadProgress(0)
+        }
+        
+        // Handle network errors
+        xhr.onerror = () => {
+          showToast("Upload error", "Network error during upload. Please check your connection and try again.", "error")
+          setLoading(false)
+          setUploadProgress(0)
+        }
         
         xhr.onload = () => {
           if (xhr.status === 200) {

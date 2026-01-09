@@ -178,18 +178,12 @@ const showToast = useShowToast()
       return
     }
     
-    // First, show default weather data from post immediately (prevents UI jumping)
-    try {
-      const defaultParsed = JSON.parse(post.weatherData)
-      if (Array.isArray(defaultParsed) && defaultParsed.length > 0) {
-        setWeatherDataArray(defaultParsed)
-      }
-    } catch (e) {
-      console.error('Failed to parse default weather data:', e)
-    }
-    
     const loadPersonalizedWeather = async (forceRefresh = false) => {
       setWeatherLoading(true)
+      
+      // Don't show default data immediately - check preferences first
+      setWeatherDataArray([])
+      
       try {
         // First, try to load user's selected cities
         if (user?._id) {
@@ -201,7 +195,7 @@ const showToast = useShowToast()
           
           console.log('🌤️ [Post] User preferences:', prefsData.cities?.length || 0, 'cities', prefsData.cities?.map(c => c.name))
           
-          // If user has selected cities, fetch weather for those cities
+          // If user has selected cities, fetch weather for those cities (don't show default)
           if (prefsRes.ok && prefsData.cities && prefsData.cities.length > 0) {
             console.log('🌤️ [Post] Loading personalized weather for', prefsData.cities.length, 'cities:', prefsData.cities.map(c => c.name))
             
@@ -460,22 +454,52 @@ const showToast = useShowToast()
                 console.log('⚠️ [Post] Fetched weather but no valid items after filtering')
               }
             } else {
-              console.log('⚠️ [Post] No weather fetched from API, using default')
+              console.log('⚠️ [Post] No weather fetched from API')
+              // Don't show default if user has preferences - keep it empty or show loading
+              // User's cities might not have weather data yet, but don't fallback to default
+            }
+          } else {
+            // User has no selected cities - show default from post
+            console.log('🌤️ [Post] No user preferences found, showing default cities')
+            try {
+              const defaultParsed = JSON.parse(post.weatherData)
+              if (Array.isArray(defaultParsed) && defaultParsed.length > 0) {
+                setWeatherDataArray(defaultParsed)
+              }
+            } catch (e) {
+              console.error('Failed to parse default weather data:', e)
             }
           }
+        } else {
+          // No user logged in - show default
+          console.log('🌤️ [Post] No user logged in, showing default cities')
+          try {
+            const defaultParsed = JSON.parse(post.weatherData)
+            if (Array.isArray(defaultParsed) && defaultParsed.length > 0) {
+              setWeatherDataArray(defaultParsed)
+            }
+          } catch (e) {
+            console.error('Failed to parse default weather data:', e)
+          }
         }
-        
-        // Fallback: Use post data (default cities) - already set above
-        // Don't clear it, just keep what we have
       } catch (e) {
-        console.error('❌ Failed to parse weather data:', e)
-        // Keep default data if personalized fails
+        console.error('❌ Failed to load weather data:', e)
+        // Only show default on error if user has no preferences
+        // If user has preferences but fetch failed, don't show default
+        try {
+          const defaultParsed = JSON.parse(post.weatherData)
+          if (Array.isArray(defaultParsed) && defaultParsed.length > 0) {
+            setWeatherDataArray(defaultParsed)
+          }
+        } catch (parseError) {
+          console.error('Failed to parse default weather data:', parseError)
+        }
       } finally {
         setWeatherLoading(false)
       }
     }
-      
-      loadPersonalizedWeather()
+    
+    loadPersonalizedWeather()
     
     // Listen for preference updates
     const handlePreferencesUpdate = () => {

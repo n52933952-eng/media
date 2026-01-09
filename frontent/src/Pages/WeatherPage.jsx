@@ -339,13 +339,38 @@ const WeatherPage = () => {
             
             if (res.ok) {
                 showToast('Success', 'Weather preferences saved! Feed will now show weather for your selected cities.', 'success')
+                
+                // Clear all weather caches immediately
+                if (window.weatherCache) {
+                    window.weatherCache.data = null
+                    window.weatherCache.timestamp = null
+                    window.weatherCache.preferences = null
+                }
+                
+                // Clear localStorage cache
+                try {
+                    Object.keys(localStorage).forEach(key => {
+                        if (key.startsWith('weatherCache_')) {
+                            localStorage.removeItem(key)
+                        }
+                    })
+                } catch (e) {
+                    console.error('Error clearing localStorage cache:', e)
+                }
+                
                 onClose()
-                // Refresh weather data
+                
+                // Fetch weather immediately for selected cities (will cache for Post component)
                 fetchWeather(false, selectedCities)
-                // Trigger feed refresh by updating localStorage timestamp
-                localStorage.setItem('weatherPreferencesUpdated', Date.now().toString())
-                // Dispatch custom event to refresh feed posts
-                window.dispatchEvent(new CustomEvent('weatherPreferencesUpdated'))
+                
+                // Small delay to ensure backend has started fetching, then dispatch event
+                setTimeout(() => {
+                    // Trigger feed refresh - dispatch event for Post components
+                    window.dispatchEvent(new CustomEvent('weatherPreferencesUpdated', { 
+                        detail: { cities: selectedCities } 
+                    }))
+                    console.log('✅ [WeatherPage] Preferences saved, cache cleared, event dispatched')
+                }, 500)
             } else {
                 showToast('Error', data.error || 'Failed to save preferences', 'error')
             }

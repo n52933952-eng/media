@@ -562,12 +562,19 @@ export const saveWeatherPreferences = async (req, res) => {
         
         console.log(`✅ [saveWeatherPreferences] Saved ${validCities.length} cities for user ${user.username}`)
         
-        // Fetch and cache weather for user's selected cities immediately (in background)
+        // Fetch and cache weather for user's selected cities immediately (in background, non-blocking)
         if (validCities.length > 0) {
-            console.log(`🌤️ [saveWeatherPreferences] Fetching weather for ${validCities.length} cities...`)
-            validCities.forEach(async (city, index) => {
-                // Add delay between requests to avoid rate limiting (60 calls/minute = 1 per second)
-                setTimeout(async () => {
+            console.log(`🌤️ [saveWeatherPreferences] Fetching weather for ${validCities.length} cities in background...`)
+            
+            // Use setImmediate to run in background without blocking response
+            setImmediate(async () => {
+                for (let i = 0; i < validCities.length && i < 5; i++) { // Limit to 5 cities
+                    const city = validCities[i]
+                    // Add delay between requests to avoid rate limiting (60 calls/minute = 1 per second)
+                    if (i > 0) {
+                        await new Promise(resolve => setTimeout(resolve, 1100))
+                    }
+                    
                     try {
                         const endpoint = `/weather?lat=${city.lat}&lon=${city.lon}`
                         const result = await fetchFromWeatherAPI(endpoint)
@@ -587,7 +594,8 @@ export const saveWeatherPreferences = async (req, res) => {
                     } catch (error) {
                         console.error(`❌ [saveWeatherPreferences] Error fetching weather for ${city.name}:`, error)
                     }
-                }, index * 1100) // 1.1 seconds between requests
+                }
+                console.log(`✅ [saveWeatherPreferences] Finished caching weather for user's cities`)
             })
         }
         
