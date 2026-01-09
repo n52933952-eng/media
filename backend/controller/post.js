@@ -314,24 +314,57 @@ export const updatePost = async(req,res) => {
                             }
                         }
                         
-                        // Emit update to followers
+                        // Emit update to followers, post owner, and all contributors
                         const io = getIO()
                         if (io) {
-                            const poster = await User.findById(post.postedBy).select('followers')
-                            if (poster && poster.followers && poster.followers.length > 0) {
-                                const userSocketMap = getUserSocketMap()
-                                const onlineFollowers = []
-                                
-                                poster.followers.forEach(followerId => {
-                                    const followerIdStr = followerId.toString()
-                                    if (userSocketMap[followerIdStr]) {
-                                        onlineFollowers.push(userSocketMap[followerIdStr].socketId)
+                            const userSocketMap = getUserSocketMap()
+                            const recipients = [] // Socket IDs to receive the update
+                            
+                            // 1. Add post owner (always include them)
+                            const postOwnerId = post.postedBy.toString()
+                            const ownerSocketData = userSocketMap[postOwnerId]
+                            if (ownerSocketData) {
+                                recipients.push(ownerSocketData.socketId)
+                                console.log(`📤 [updatePost] Adding post owner ${postOwnerId} to postUpdated recipients`)
+                            }
+                            
+                            // 2. Add all contributors
+                            if (post.contributors && post.contributors.length > 0) {
+                                post.contributors.forEach(contributor => {
+                                    const contributorId = (contributor._id || contributor).toString()
+                                    if (contributorId !== postOwnerId) { // Don't duplicate owner
+                                        const contributorSocketData = userSocketMap[contributorId]
+                                        if (contributorSocketData) {
+                                            recipients.push(contributorSocketData.socketId)
+                                            console.log(`📤 [updatePost] Adding contributor ${contributorId} to postUpdated recipients`)
+                                        }
                                     }
                                 })
-                                
-                                if (onlineFollowers.length > 0) {
-                                    io.to(onlineFollowers).emit("postUpdated", { postId: post._id, post })
-                                }
+                            }
+                            
+                            // 3. Add followers
+                            const poster = await User.findById(post.postedBy).select('followers')
+                            if (poster && poster.followers && poster.followers.length > 0) {
+                                poster.followers.forEach(followerId => {
+                                    const followerIdStr = followerId.toString()
+                                    // Don't duplicate owner/contributors
+                                    if (followerIdStr !== postOwnerId && 
+                                        !post.contributors?.some(c => (c._id || c).toString() === followerIdStr)) {
+                                        const followerSocketData = userSocketMap[followerIdStr]
+                                        if (followerSocketData) {
+                                            recipients.push(followerSocketData.socketId)
+                                        }
+                                    }
+                                })
+                            }
+                            
+                            // Emit to all recipients (owner, contributors, followers)
+                            const uniqueRecipients = [...new Set(recipients)] // Remove duplicates
+                            if (uniqueRecipients.length > 0) {
+                                uniqueRecipients.forEach(socketId => {
+                                    io.to(socketId).emit("postUpdated", { postId: post._id.toString(), post })
+                                })
+                                console.log(`📤 [updatePost] Emitted postUpdated to ${uniqueRecipients.length} recipients (owner, contributors, followers)`)
                             }
                         }
                         
@@ -372,24 +405,57 @@ export const updatePost = async(req,res) => {
             }
         }
         
-        // Emit update to followers
+        // Emit update to followers, post owner, and all contributors
         const io = getIO()
         if (io) {
-            const poster = await User.findById(post.postedBy).select('followers')
-            if (poster && poster.followers && poster.followers.length > 0) {
-                const userSocketMap = getUserSocketMap()
-                const onlineFollowers = []
-                
-                poster.followers.forEach(followerId => {
-                    const followerIdStr = followerId.toString()
-                    if (userSocketMap[followerIdStr]) {
-                        onlineFollowers.push(userSocketMap[followerIdStr].socketId)
+            const userSocketMap = getUserSocketMap()
+            const recipients = [] // Socket IDs to receive the update
+            
+            // 1. Add post owner (always include them)
+            const postOwnerId = post.postedBy.toString()
+            const ownerSocketData = userSocketMap[postOwnerId]
+            if (ownerSocketData) {
+                recipients.push(ownerSocketData.socketId)
+                console.log(`📤 [updatePost] Adding post owner ${postOwnerId} to postUpdated recipients`)
+            }
+            
+            // 2. Add all contributors
+            if (post.contributors && post.contributors.length > 0) {
+                post.contributors.forEach(contributor => {
+                    const contributorId = (contributor._id || contributor).toString()
+                    if (contributorId !== postOwnerId) { // Don't duplicate owner
+                        const contributorSocketData = userSocketMap[contributorId]
+                        if (contributorSocketData) {
+                            recipients.push(contributorSocketData.socketId)
+                            console.log(`📤 [updatePost] Adding contributor ${contributorId} to postUpdated recipients`)
+                        }
                     }
                 })
-                
-                if (onlineFollowers.length > 0) {
-                    io.to(onlineFollowers).emit("postUpdated", { postId: post._id, post })
-                }
+            }
+            
+            // 3. Add followers
+            const poster = await User.findById(post.postedBy).select('followers')
+            if (poster && poster.followers && poster.followers.length > 0) {
+                poster.followers.forEach(followerId => {
+                    const followerIdStr = followerId.toString()
+                    // Don't duplicate owner/contributors
+                    if (followerIdStr !== postOwnerId && 
+                        !post.contributors?.some(c => (c._id || c).toString() === followerIdStr)) {
+                        const followerSocketData = userSocketMap[followerIdStr]
+                        if (followerSocketData) {
+                            recipients.push(followerSocketData.socketId)
+                        }
+                    }
+                })
+            }
+            
+            // Emit to all recipients (owner, contributors, followers)
+            const uniqueRecipients = [...new Set(recipients)] // Remove duplicates
+            if (uniqueRecipients.length > 0) {
+                uniqueRecipients.forEach(socketId => {
+                    io.to(socketId).emit("postUpdated", { postId: post._id.toString(), post })
+                })
+                console.log(`📤 [updatePost] Emitted postUpdated to ${uniqueRecipients.length} recipients (owner, contributors, followers)`)
             }
         }
         

@@ -322,10 +322,21 @@ const HomePage = () => {
       })
     }
 
-    const handlePostUpdated = (updatedPost) => {
-      console.log('✏️ Post updated via socket:', updatedPost._id)
+    const handlePostUpdated = (data) => {
+      // Handle both formats: { postId, post } or just post object
+      const postId = data.postId || data._id
+      const updatedPost = data.post || data
+      
+      console.log('✏️ Post updated via socket:', postId)
       setFollowPost(prev => 
-        prev.map(p => p._id === updatedPost._id ? updatedPost : p)
+        prev.map(p => {
+          const postIdStr = p._id?.toString()
+          const updatedPostIdStr = postId?.toString()
+          if (postIdStr === updatedPostIdStr) {
+            return updatedPost
+          }
+          return p
+        })
       )
     }
 

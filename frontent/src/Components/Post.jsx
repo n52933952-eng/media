@@ -1269,11 +1269,13 @@ const showToast = useShowToast()
   <Flex gap={3} my={1} align="center">
     <Actions post={post}/>
     
-    {/* Collaborative Post Actions */}
-    {post?.isCollaborative && (
-      (user?._id === postedBy?._id || 
-       (post?.contributors && Array.isArray(post.contributors) && 
-        post.contributors.some(c => (c._id || c).toString() === user?._id?.toString()))) && (
+    {/* Edit Post Button - Show for:
+        1. Post owner (for both regular and collaborative posts)
+        2. Contributors (for collaborative posts only)
+    */}
+    {(user?._id?.toString() === postedBy?._id?.toString() || 
+      (post?.isCollaborative && post?.contributors && Array.isArray(post.contributors) && 
+       post.contributors.some(c => (c._id || c).toString() === user?._id?.toString()))) && (
       <HStack spacing={2}>
         <Button
           size="xs"
@@ -1287,49 +1289,54 @@ const showToast = useShowToast()
         >
           ✏️ Edit Post
         </Button>
-        <Button
-          size="xs"
-          variant="outline"
-          colorScheme="blue"
-          onClick={(e) => {
-            e.preventDefault()
-            e.stopPropagation()
-            onAddContributorOpen()
-          }}
-        >
-          + Add Contributor
-        </Button>
         
-        {/* Manage Contributors Menu (only for owner) */}
-        {user?._id === postedBy?._id && post?.contributors && post.contributors.length > 0 && (
-          <Menu>
-            <MenuButton
-              as={IconButton}
-              icon={<BsThreeDotsVertical />}
+        {/* Collaborative Post Actions - Only show for collaborative posts */}
+        {post?.isCollaborative && (
+          <>
+            <Button
               size="xs"
-              variant="ghost"
-              aria-label="Manage contributors"
+              variant="outline"
+              colorScheme="blue"
               onClick={(e) => {
                 e.preventDefault()
                 e.stopPropagation()
+                onAddContributorOpen()
               }}
-            />
-            <MenuList>
-              <MenuItem
-                icon={<MdPersonRemove />}
-                onClick={(e) => {
-                  e.preventDefault()
-                  e.stopPropagation()
-                  onManageContributorsOpen()
-                }}
-              >
-                Manage Contributors
-              </MenuItem>
-            </MenuList>
-          </Menu>
+            >
+              + Add Contributor
+            </Button>
+            
+            {/* Manage Contributors Menu (only for owner) */}
+            {user?._id === postedBy?._id && post?.contributors && post.contributors.length > 0 && (
+              <Menu>
+                <MenuButton
+                  as={IconButton}
+                  icon={<BsThreeDotsVertical />}
+                  size="xs"
+                  variant="ghost"
+                  aria-label="Manage contributors"
+                  onClick={(e) => {
+                    e.preventDefault()
+                    e.stopPropagation()
+                  }}
+                />
+                <MenuList>
+                  <MenuItem
+                    icon={<MdPersonRemove />}
+                    onClick={(e) => {
+                      e.preventDefault()
+                      e.stopPropagation()
+                      onManageContributorsOpen()
+                    }}
+                  >
+                    Manage Contributors
+                  </MenuItem>
+                </MenuList>
+              </Menu>
+            )}
+          </>
         )}
       </HStack>
-      )
     )}
     
     {/* Add Contributor Modal */}

@@ -1,12 +1,14 @@
 import React,{useEffect,useState,useContext} from 'react'
-import{Avatar,Flex,Text,Image,Box,Divider,Button,Spinner,VStack,HStack,Grid,GridItem,SimpleGrid,useColorModeValue} from '@chakra-ui/react'
+import{Avatar,Flex,Text,Image,Box,Divider,Button,Spinner,VStack,HStack,Grid,GridItem,SimpleGrid,useColorModeValue,useDisclosure} from '@chakra-ui/react'
 import { HiDotsHorizontal } from "react-icons/hi";
 import Actions from '../Components/Actions'
 import Comment from '../Components/Comment'
+import EditPost from '../Components/EditPost'
 import GetUserProfile from '../hooks/GetUserProfile.js'
 import{useParams} from 'react-router-dom'
 import{PostContext} from '../context/PostContext'
 import{UserContext} from '../context/UserContext'
+import{SocketContext} from '../context/SocketContext'
 import { MdOutlineDeleteOutline } from "react-icons/md";
 import{formatDistanceToNow} from 'date-fns'
 import useShowToast from '../hooks/useShowToast.js'
@@ -24,11 +26,14 @@ const PostPage = () => {
    const{user}=useContext(UserContext)
 
    const{followPost,setFollowPost}=useContext(PostContext)
+   const {socket} = useContext(SocketContext) || {}
 
     const post = followPost[0]
     
     const showToast = useShowToast()
-
+    
+    // Edit post modal state
+    const { isOpen: isEditPostOpen, onOpen: onEditPostOpen, onClose: onEditPostClose } = useDisclosure()
 
     const navigate = useNavigate()
 
@@ -295,6 +300,40 @@ const PostPage = () => {
       }
     }, [isFootballPost, post?._id, post])
 
+    // Listen for real-time post updates (when contributors edit the post)
+    useEffect(() => {
+      if (!socket || !post?._id) return
+      
+      const handlePostUpdated = (data) => {
+        // Handle both formats: { postId, post } or just post object
+        const postId = data.postId || data._id
+        const updatedPost = data.post || data
+        
+        const postIdStr = post._id?.toString()
+        const updatedPostIdStr = postId?.toString()
+        
+        if (postIdStr === updatedPostIdStr) {
+          console.log('✏️ Post updated via socket on PostPage:', postId)
+          // Update post in context
+          setFollowPost(prev => 
+            prev.map(p => {
+              const pIdStr = p._id?.toString()
+              if (pIdStr === updatedPostIdStr) {
+                return updatedPost
+              }
+              return p
+            })
+          )
+        }
+      }
+      
+      socket.on('postUpdated', handlePostUpdated)
+      
+      return () => {
+        socket.off('postUpdated', handlePostUpdated)
+      }
+    }, [socket, post?._id, setFollowPost])
+
     useEffect(() => {
    
     const getpost = async() => {
@@ -419,7 +458,30 @@ if(!post) {
         <Text fontSize="sm" color="gray.light" textAlign="right" width={36}>
          {formatDistanceToNow(new Date(post.createdAt))} ago </Text>
         
-         {user?._id === post?.postedBy && <MdOutlineDeleteOutline onClick={handleDeletepost}/>}
+        {/* Edit button for owner and contributors */}
+        {post?.isCollaborative && (
+          (user?._id?.toString() === post?.postedBy?._id?.toString() || 
+           (post?.contributors && Array.isArray(post.contributors) && 
+            post.contributors.some(c => (c._id || c).toString() === user?._id?.toString()))) && (
+            <Button
+              size="xs"
+              variant="outline"
+              colorScheme="blue"
+              onClick={(e) => {
+                e.preventDefault()
+                e.stopPropagation()
+                onEditPostOpen()
+              }}
+            >
+              ✏️ Edit Post
+            </Button>
+          )
+        )}
+        
+        {/* Delete button only for owner */}
+        {user?._id?.toString() === post?.postedBy?._id?.toString() && (
+          <MdOutlineDeleteOutline onClick={handleDeletepost} style={{ cursor: 'pointer' }} />
+        )}
      </Flex>
 
 
@@ -745,6 +807,19 @@ if(!post) {
       ))}
     </Box>
    
+      {/* Edit Post Modal */}
+      <EditPost
+        post={post}
+        isOpen={isEditPostOpen}
+        onClose={onEditPostClose}
+        onUpdate={(updatedPost) => {
+          // Update post in context
+          if (setFollowPost && updatedPost) {
+            setFollowPost(prev => prev.map(p => p._id === updatedPost._id ? updatedPost : p))
+          }
+          console.log('✅ Post updated on PostPage:', updatedPost?._id)
+        }}
+      />
  
      
     </Box>
