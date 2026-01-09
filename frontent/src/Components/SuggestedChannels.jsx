@@ -450,7 +450,7 @@ const SuggestedChannels = ({ onUserFollowed }) => {
                             const postedById = p.postedBy?._id?.toString() || p.postedBy?.toString()
                             const weatherId = weatherAccount._id?.toString()
                             return postedById !== weatherId
-                        })
+                        });
                         console.log(`🗑️ [SuggestedChannels] Removed ${prev.length - filtered.length} Weather post(s) from feed`)
                         return filtered
                     })
@@ -557,54 +557,6 @@ const SuggestedChannels = ({ onUserFollowed }) => {
             setWeatherFollowLoading(false)
         }
     }, [weatherAccount, isFollowingWeather, setUser, setFollowPost, showToast, onUserFollowed])
-                            const postedById = p.postedBy?._id?.toString() || p.postedBy?.toString()
-                            const weatherId = weatherAccount._id?.toString()
-                            return postedById !== weatherId
-                        })
-                        console.log(`🗑️ [SuggestedChannels] Removed ${prev.length - filtered.length} Weather post(s) from feed`)
-                        return filtered
-                    })
-                }
-                
-                // If following (not unfollowing), trigger weather post
-                if (!wasFollowing) {
-                    const baseUrl = import.meta.env.PROD ? window.location.origin : "http://localhost:5000"
-                    
-                    // Post weather update immediately
-                    setTimeout(() => {
-                        fetch(`${baseUrl}/api/weather/post/manual`, {
-                            method: 'POST',
-                            credentials: 'include'
-                        })
-                        .then(res => res.json())
-                        .then(postData => {
-                            console.log('📬 Weather post result:', postData)
-                            showToast('Success', 'Weather updates will appear in your feed!', 'success')
-                        })
-                        .catch(err => {
-                            console.error('Weather post error:', err)
-                            showToast('Info', 'Weather updates will appear soon', 'info')
-                        })
-                    }, 500) // 500ms delay to ensure follow is saved
-                }
-                
-                showToast(
-                    'Success',
-                    isFollowingWeather 
-                        ? 'Unfollowed Weather channel' 
-                        : '🌤️ Following Weather! You\'ll now see weather updates in your feed',
-                    'success'
-                )
-            } else {
-                showToast('Error', data.error || 'Failed to update follow status', 'error')
-            }
-        } catch (error) {
-            console.error('Error toggling weather follow:', error)
-            showToast('Error', 'Failed to update follow status', 'error')
-        } finally {
-            setWeatherFollowLoading(false)
-        }
-    }, [weatherAccount, isFollowingWeather, setUser, setFollowPost, showToast])
     
     return (
         <Box
