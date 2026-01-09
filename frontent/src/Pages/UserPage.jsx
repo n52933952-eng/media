@@ -232,7 +232,15 @@ if(!user && loading){
               {posts && posts.length > 0 ? (
                 <>
                   {posts.map((post) => (
-                    <Post key={post._id} post={post} postedBy={post.postedBy} />
+                    <Post 
+                      key={post._id} 
+                      post={post} 
+                      postedBy={post.postedBy}
+                      onDelete={(postId) => {
+                        // Remove post from local state immediately
+                        setPosts(prev => prev.filter(p => p._id !== postId))
+                      }}
+                    />
                   ))}
                   
                   {hasMore && (

@@ -16,7 +16,7 @@ import FootballIcon from './FootballIcon'
 
 
 
-const Post = ({post,postedBy}) => {
+const Post = ({post,postedBy, onDelete}) => {
     
 
   const navigate = useNavigate()
@@ -210,52 +210,122 @@ const showToast = useShowToast()
             const now = Date.now()
             
             if (!forceRefresh) {
-              // Check if we have cached data in memory (from WeatherPage)
-              if (window.weatherCache && 
-                  window.weatherCache.preferences === cacheKey &&
-                  window.weatherCache.timestamp && 
-                  (now - window.weatherCache.timestamp) < (5 * 60 * 1000)) {
-                console.log('💾 [Post] Using memory cached weather data')
-                const formattedWeather = window.weatherCache.data.map(w => ({
-                  city: w.location?.city,
-                  country: w.location?.country,
-                  temperature: w.current?.temperature,
-                  condition: w.current?.condition?.main,
-                  description: w.current?.condition?.description,
-                  icon: w.current?.condition?.icon,
-                  humidity: w.current?.humidity,
-                  windSpeed: w.current?.windSpeed
-                }))
+            // Check if we have cached data in memory (from WeatherPage)
+            if (window.weatherCache && 
+                window.weatherCache.preferences === cacheKey &&
+                window.weatherCache.timestamp && 
+                (now - window.weatherCache.timestamp) < (5 * 60 * 1000)) {
+              console.log('💾 [Post] Using memory cached weather data', window.weatherCache.data)
+              
+              // Handle different cache formats - WeatherPage saves Weather model format
+              let formattedWeather = []
+              
+              if (window.weatherCache.data && Array.isArray(window.weatherCache.data)) {
+                formattedWeather = window.weatherCache.data.map(w => {
+                  // Check if it's already in display format (has city directly)
+                  if (w.city && typeof w.city === 'string' && (w.temperature !== undefined || w.temperature !== null)) {
+                    return w
+                  }
+                  // Convert from Weather model format (what WeatherPage saves)
+                  return {
+                    city: w.location?.city || w.city,
+                    country: w.location?.country || w.country,
+                    temperature: w.current?.temperature !== undefined && w.current?.temperature !== null 
+                      ? w.current.temperature 
+                      : (w.temperature !== undefined && w.temperature !== null ? w.temperature : null),
+                    condition: w.current?.condition?.main || w.condition,
+                    description: w.current?.condition?.description || w.description,
+                    icon: w.current?.condition?.icon || w.icon,
+                    humidity: w.current?.humidity !== undefined ? w.current.humidity : w.humidity,
+                    windSpeed: w.current?.windSpeed !== undefined ? w.current.windSpeed : w.windSpeed
+                  }
+                }).filter(w => w.city && w.temperature !== undefined && w.temperature !== null && typeof w.temperature === 'number')
+              }
+              
+              console.log('💾 [Post] Formatted weather from memory cache:', formattedWeather)
+              
+              if (formattedWeather.length > 0) {
                 setWeatherDataArray(formattedWeather)
                 setWeatherLoading(false)
                 return
+              } else {
+                console.log('⚠️ [Post] Memory cache found but no valid weather items after formatting')
               }
+            }
               
               // Check localStorage cache
               try {
                 const cached = localStorage.getItem(`weatherCache_${cacheKey}`)
                 if (cached) {
                   const parsed = JSON.parse(cached)
+                  console.log('💾 [Post] Raw cached data:', parsed)
+                  
                   if (parsed.timestamp && (now - parsed.timestamp) < (5 * 60 * 1000)) {
-                    console.log('💾 [Post] Using localStorage cached weather data')
-                    // Convert from Weather model format to display format
-                    const formattedWeather = parsed.data.map(w => ({
-                      city: w.location?.city,
-                      country: w.location?.country,
-                      temperature: w.current?.temperature,
-                      condition: w.current?.condition?.main,
-                      description: w.current?.condition?.description,
-                      icon: w.current?.condition?.icon,
-                      humidity: w.current?.humidity,
-                      windSpeed: w.current?.windSpeed
-                    }))
-                    setWeatherDataArray(formattedWeather)
-                    setWeatherLoading(false)
-                    return
+                    console.log('💾 [Post] Using localStorage cached weather data', parsed.data)
+                    
+                    // Handle different cache formats - WeatherPage saves Weather model format
+                    let formattedWeather = []
+                    
+                    if (parsed.data && Array.isArray(parsed.data)) {
+                      console.log('💾 [Post] Cached data array length:', parsed.data.length)
+                      
+                      formattedWeather = parsed.data.map(w => {
+                        // Weather model format (from WeatherPage): { location: {city, country}, current: {temperature, condition: {...}, ...} }
+                        // Display format: { city, country, temperature, condition, description, icon, humidity, windSpeed }
+                        
+                        // Check if it's already in display format (has city directly)
+                        if (w.city && typeof w.city === 'string' && (w.temperature !== undefined || w.temperature !== null)) {
+                          console.log('💾 [Post] Item already in display format:', w)
+                          return w
+                        }
+                        
+                        // Convert from Weather model format (what WeatherPage saves)
+                        const formatted = {
+                          city: w.location?.city || w.city,
+                          country: w.location?.country || w.country,
+                          temperature: w.current?.temperature !== undefined && w.current?.temperature !== null 
+                            ? w.current.temperature 
+                            : (w.temperature !== undefined && w.temperature !== null ? w.temperature : null),
+                          condition: w.current?.condition?.main || w.condition,
+                          description: w.current?.condition?.description || w.description,
+                          icon: w.current?.condition?.icon || w.icon,
+                          humidity: w.current?.humidity !== undefined ? w.current.humidity : w.humidity,
+                          windSpeed: w.current?.windSpeed !== undefined ? w.current.windSpeed : w.windSpeed
+                        }
+                        
+                        console.log('💾 [Post] Converted from Weather model:', { original: w, formatted })
+                        return formatted
+                      }).filter(w => {
+                        const isValid = w.city && w.temperature !== undefined && w.temperature !== null && typeof w.temperature === 'number'
+                        if (!isValid) {
+                          console.warn('⚠️ [Post] Filtered out invalid item:', w, {
+                            hasCity: !!w.city,
+                            hasTemp: w.temperature !== undefined,
+                            tempNotNull: w.temperature !== null,
+                            tempIsNumber: typeof w.temperature === 'number'
+                          })
+                        }
+                        return isValid
+                      })
+                    }
+                    
+                    console.log('💾 [Post] Final formatted weather from cache:', formattedWeather, 'Length:', formattedWeather.length)
+                    
+                    if (formattedWeather.length > 0) {
+                      setWeatherDataArray(formattedWeather)
+                      setWeatherLoading(false)
+                      return
+                    } else {
+                      console.warn('⚠️ [Post] Cached data found but no valid weather items after formatting. Raw data:', parsed.data)
+                    }
+                  } else {
+                    console.log('⚠️ [Post] Cached data expired or invalid timestamp')
                   }
+                } else {
+                  console.log('⚠️ [Post] No cached data found for key:', `weatherCache_${cacheKey}`)
                 }
               } catch (e) {
-                console.error('Error reading localStorage cache:', e)
+                console.error('❌ Error reading localStorage cache:', e, e.stack)
               }
             } else {
               console.log('🔄 [Post] Force refresh - skipping cache')
@@ -275,7 +345,7 @@ const showToast = useShowToast()
                 )
                 
                 if (matchingCached.length > 0) {
-                  console.log('✅ [Post] Found', matchingCached.length, 'cached cities from database')
+                  console.log('✅ [Post] Found', matchingCached.length, 'cached cities from database', matchingCached)
                   const formattedWeather = matchingCached.map(w => ({
                     city: w.location?.city,
                     country: w.location?.country,
@@ -285,17 +355,24 @@ const showToast = useShowToast()
                     icon: w.current?.condition?.icon,
                     humidity: w.current?.humidity,
                     windSpeed: w.current?.windSpeed
-                  }))
-                  setWeatherDataArray(formattedWeather)
+                  })).filter(w => w.city && w.temperature !== undefined && w.temperature !== null)
                   
-                  // Update memory cache for future use
-                  if (!window.weatherCache) window.weatherCache = {}
-                  window.weatherCache.data = matchingCached
-                  window.weatherCache.timestamp = now
-                  window.weatherCache.preferences = cacheKey
+                  console.log('✅ [Post] Formatted weather from database:', formattedWeather)
                   
-                  setWeatherLoading(false)
-                  return
+                  if (formattedWeather.length > 0) {
+                    setWeatherDataArray(formattedWeather)
+                    
+                    // Update memory cache for future use
+                    if (!window.weatherCache) window.weatherCache = {}
+                    window.weatherCache.data = matchingCached
+                    window.weatherCache.timestamp = now
+                    window.weatherCache.preferences = cacheKey
+                    
+                    setWeatherLoading(false)
+                    return
+                  } else {
+                    console.log('⚠️ [Post] Database cache found but no valid weather items after formatting')
+                  }
                 }
               }
             } catch (cacheError) {
@@ -334,8 +411,12 @@ const showToast = useShowToast()
                     windSpeed: w.current?.windSpeed
                   }
                   
-                  if (weatherItem.temperature !== undefined) {
+                  console.log(`🌤️ [Post] Fetched weather for ${city.name}:`, weatherItem)
+                  
+                  if (weatherItem.temperature !== undefined && weatherItem.temperature !== null) {
                     fetchedWeather.push(weatherItem)
+                  } else {
+                    console.warn(`⚠️ [Post] Invalid temperature for ${city.name}:`, weatherItem.temperature)
                   }
                 }
               } catch (error) {
@@ -344,36 +425,40 @@ const showToast = useShowToast()
             }
             
             if (fetchedWeather.length > 0) {
-              console.log('✅ [Post] Loaded personalized weather for', fetchedWeather.length, 'cities')
-              setWeatherDataArray(fetchedWeather)
+              console.log('✅ [Post] Loaded personalized weather for', fetchedWeather.length, 'cities:', fetchedWeather)
+              // Filter out any invalid items just to be safe
+              const validWeather = fetchedWeather.filter(w => 
+                w.city && 
+                w.temperature !== undefined && 
+                w.temperature !== null
+              )
               
-              // Update memory cache for future use
-              if (!window.weatherCache) window.weatherCache = {}
-              // Convert back to Weather model format for cache
-              const cacheData = fetchedWeather.map(item => ({
-                location: { city: item.city, country: item.country },
-                current: {
-                  temperature: item.temperature,
-                  condition: { main: item.condition, description: item.description, icon: item.icon },
-                  humidity: item.humidity,
-                  windSpeed: item.windSpeed
+              if (validWeather.length > 0) {
+                console.log('✅ [Post] Setting', validWeather.length, 'valid weather items')
+                setWeatherDataArray(validWeather)
+              
+                // Update memory cache for future use (store in display format for easier retrieval)
+                if (!window.weatherCache) window.weatherCache = {}
+                window.weatherCache.data = validWeather
+                window.weatherCache.timestamp = Date.now()
+                window.weatherCache.preferences = cacheKey
+                
+                // Also save to localStorage in display format
+                try {
+                  localStorage.setItem(`weatherCache_${cacheKey}`, JSON.stringify({
+                    data: validWeather,
+                    timestamp: Date.now()
+                  }))
+                  console.log('💾 [Post] Saved', validWeather.length, 'weather items to cache')
+                } catch (e) {
+                  console.error('Error saving to localStorage cache:', e)
                 }
-              }))
-              window.weatherCache.data = cacheData
-              window.weatherCache.timestamp = Date.now()
-              window.weatherCache.preferences = cacheKey
-              
-              // Also save to localStorage
-              try {
-                localStorage.setItem(`weatherCache_${cacheKey}`, JSON.stringify({
-                  data: cacheData,
-                  timestamp: Date.now()
-                }))
-              } catch (e) {
-                console.error('Error saving to localStorage cache:', e)
+                
+                setWeatherLoading(false)
+                return
+              } else {
+                console.log('⚠️ [Post] Fetched weather but no valid items after filtering')
               }
-              
-              return
             } else {
               console.log('⚠️ [Post] No weather fetched from API, using default')
             }
@@ -585,6 +670,12 @@ const showToast = useShowToast()
      if(res.ok){
       // Remove post from the feed
       setFollowPost(followPost.filter((p) => p._id !== post._id))
+      
+      // Call onDelete callback if provided (for UserPage to update local state)
+      if (onDelete) {
+        onDelete(post._id)
+      }
+      
       showToast("Success","POST deleted","success")
      } else {
       showToast("Error", data.error || "Failed to delete post", "error")
