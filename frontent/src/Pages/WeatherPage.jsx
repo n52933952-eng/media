@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useContext } from 'react'
+import React, { useState, useEffect, useContext, useCallback } from 'react'
 import {
     Box,
     Container,
@@ -272,7 +272,7 @@ const WeatherPage = () => {
     }
     
     // Follow/Unfollow Weather account
-    const handleFollowToggle = async () => {
+    const handleFollowToggle = useCallback(async () => {
         if (!weatherAccountId) {
             showToast('Error', 'Weather account not found', 'error')
             return
@@ -312,7 +312,7 @@ const WeatherPage = () => {
         } finally {
             setFollowLoading(false)
         }
-    }
+    }, [weatherAccountId, isFollowing, setUser, showToast])
     
     // Get weather icon URL
     const getWeatherIcon = (iconCode) => {
