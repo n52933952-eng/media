@@ -1,6 +1,6 @@
 import React,{useEffect,useState,useContext, memo} from 'react'
 import{Link} from 'react-router-dom'
-import{Flex,Avatar,Box,Text,Image,Button, VStack, HStack, Grid, GridItem, useColorModeValue, useDisclosure, Menu, MenuButton, MenuList, MenuItem, IconButton, Tooltip} from '@chakra-ui/react'
+import{Flex,Avatar,Box,Text,Image,Button, VStack, HStack, Grid, GridItem, SimpleGrid, useColorModeValue, useDisclosure, Menu, MenuButton, MenuList, MenuItem, IconButton, Tooltip} from '@chakra-ui/react'
 import { HiOutlineDotsHorizontal } from "react-icons/hi";
 import { MdOutlineDeleteOutline, MdPersonRemove } from "react-icons/md";
 import { BsThreeDotsVertical } from "react-icons/bs";
