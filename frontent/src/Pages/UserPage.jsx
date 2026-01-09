@@ -199,7 +199,7 @@ const UserPage = () => {
 
 if(!user && loading){
   return(
-    <Flex justifyContent="center">
+    <Flex justifyContent="center" minH="60vh" alignItems="center">
       <Spinner size="xl"  />
     </Flex>
     
@@ -217,18 +217,18 @@ if(!user && loading){
   
    return (
    
-   <>
+   <Box minH="100vh">
     
       <UserHeader users={user} activeTab={activeTab} setActiveTab={setActiveTab}/>
       
       {activeTab === 'posts' ? (
         <>
           {loadingpost ? (
-            <Flex justifyContent="center" py={8}>
+            <Flex justifyContent="center" py={8} minH="400px" alignItems="center" transition="opacity 0.2s">
               <Spinner size="xl" />
             </Flex>
           ) : (
-            <>
+            <Box transition="opacity 0.2s">
               {posts && posts.length > 0 ? (
                 <>
                   {posts.map((post) => (
@@ -264,17 +264,17 @@ if(!user && loading){
                   </Text>
                 </Box>
               )}
-            </>
+            </Box>
           )}
         </>
       ) : (
         <>
           {loadingComments ? (
-            <Flex justifyContent="center" py={8}>
+            <Flex justifyContent="center" py={8} minH="400px" alignItems="center" transition="opacity 0.2s">
               <Spinner size="xl" />
             </Flex>
           ) : (
-            <>
+            <Box transition="opacity 0.2s">
               {comments && comments.length > 0 ? (
                 <>
                   {comments.map((comment) => (
@@ -350,12 +350,12 @@ if(!user && loading){
                   </Text>
                 </Box>
               )}
-            </>
+            </Box>
           )}
         </>
       )}
     
-    </>
+    </Box>
   )
 }
 

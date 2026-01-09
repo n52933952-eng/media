@@ -2,7 +2,7 @@ import express from 'express'
 
 const router = express.Router()
 
-import{LikeComent,ReplyToComment,createPost,getPost,deletePost,LikePost,ReplyPost,getFeedPost,getUserPosts,getUserPostsById,addContributorToPost,removeContributorFromPost,getUserComments,deleteComment} from '../controller/post.js'
+import{LikeComent,ReplyToComment,createPost,getPost,deletePost,updatePost,LikePost,ReplyPost,getFeedPost,getUserPosts,getUserPostsById,addContributorToPost,removeContributorFromPost,getUserComments,deleteComment} from '../controller/post.js'
 import protectRoute from '../middlware/protectRoute.js'
 import upload from '../middlware/upload.js'
 
@@ -13,6 +13,7 @@ router.get("/user/id/:userId",protectRoute,getUserPostsById)
 router.get("/comments/user/:username",getUserComments)
 
 router.delete("/:id",protectRoute,deletePost)
+router.put("/:id",protectRoute,upload.single('file'),updatePost)
 
 router.put("/likes/:id",protectRoute,LikePost)
 router.put("/reply/:id",protectRoute,ReplyPost)

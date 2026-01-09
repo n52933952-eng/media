@@ -334,7 +334,7 @@ const PostPage = () => {
    
    
     return(
-      <Flex justifyContent="center">
+      <Flex justifyContent="center" minH="70vh" alignItems="center">
        <Spinner  size="xl"/>
       </Flex>
     )
@@ -343,7 +343,13 @@ const PostPage = () => {
 
   console.log(followPost)
   
-if(!post) return
+if(!post) {
+  return (
+    <Flex justifyContent="center" minH="70vh" alignItems="center">
+      <Spinner size="xl" />
+    </Flex>
+  )
+}
   
   
 
@@ -383,7 +389,7 @@ if(!post) return
 
   return (
     
-    <>
+    <Box minH="100vh" transition="opacity 0.2s">
     <Flex>
     
     <Flex w="full" alignItems="center" gap={3}>
@@ -741,7 +747,7 @@ if(!post) return
    
  
      
-      </>
+    </Box>
   )
 }
 

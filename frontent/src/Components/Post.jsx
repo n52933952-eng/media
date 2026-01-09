@@ -12,6 +12,7 @@ import{UserContext} from '../context/UserContext'
 import{PostContext} from '../context/PostContext'
 import AddContributorModal from './AddContributorModal'
 import ManageContributorsModal from './ManageContributorsModal'
+import EditPost from './EditPost'
 import FootballIcon from './FootballIcon'
 
 
@@ -47,6 +48,7 @@ const showToast = useShowToast()
   const{followPost,setFollowPost}=useContext(PostContext)
   const { isOpen: isAddContributorOpen, onOpen: onAddContributorOpen, onClose: onAddContributorClose } = useDisclosure()
   const { isOpen: isManageContributorsOpen, onOpen: onManageContributorsOpen, onClose: onManageContributorsClose } = useDisclosure()
+  const { isOpen: isEditPostOpen, onOpen: onEditPostOpen, onClose: onEditPostClose } = useDisclosure()
   
   // Color modes
   const bgColor = useColorModeValue('#f7f9fc', '#1a1d2e')
@@ -1280,6 +1282,18 @@ const showToast = useShowToast()
           onClick={(e) => {
             e.preventDefault()
             e.stopPropagation()
+            onEditPostOpen()
+          }}
+        >
+          ✏️ Edit Post
+        </Button>
+        <Button
+          size="xs"
+          variant="outline"
+          colorScheme="blue"
+          onClick={(e) => {
+            e.preventDefault()
+            e.stopPropagation()
             onAddContributorOpen()
           }}
         >
@@ -1338,6 +1352,20 @@ const showToast = useShowToast()
         } catch (error) {
           console.error('Error refreshing post:', error)
         }
+      }}
+    />
+    
+    {/* Edit Post Modal */}
+    <EditPost
+      post={post}
+      isOpen={isEditPostOpen}
+      onClose={onEditPostClose}
+      onUpdate={(updatedPost) => {
+        // Update post in feed
+        if (setFollowPost && updatedPost) {
+          setFollowPost(prev => prev.map(p => p._id === updatedPost._id ? updatedPost : p))
+        }
+        console.log('✅ Post updated:', updatedPost._id)
       }}
     />
     

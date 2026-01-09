@@ -205,6 +205,172 @@ export const getPost = async(req,res) => {
 
 
 
+// Update post (allows owner or contributors for collaborative posts)
+export const updatePost = async(req,res) => {
+    try{
+        const { id } = req.params
+        const { text } = req.body
+        const userId = req.user._id
+        
+        const post = await Post.findById(id).populate('contributors', '_id')
+        
+        if(!post){
+            return res.status(400).json({error:"Post not found"})
+        }
+        
+        // Check if user is owner
+        const isOwner = post.postedBy.toString() === userId.toString()
+        
+        // Check if user is a contributor (for collaborative posts)
+        const isContributor = post.isCollaborative && 
+            post.contributors && 
+            post.contributors.some(c => (c._id || c).toString() === userId.toString())
+        
+        if(!isOwner && !isContributor){
+            return res.status(403).json({error:"You can only edit your own posts or collaborative posts you contribute to"})
+        }
+        
+        // Validate text length
+        const MaxLength = 500
+        if(text && text.length > MaxLength){
+            return res.status(400).json({error:"Post text must be 500 characters or less"})
+        }
+        
+        // Handle file upload if new file is provided
+        let img = post.img // Keep existing image by default
+        
+        if(req.file) {
+            // Delete old image/video from Cloudinary if it exists
+            if(post.img && post.img.includes('cloudinary')){
+                try {
+                    const isVideo = post.img.includes('/video/upload/') || 
+                                   post.img.match(/\.(mp4|webm|ogg|mov)$/i) ||
+                                   (post.img.includes('cloudinary') && post.img.includes('video'))
+                    
+                    const urlParts = post.img.split('/')
+                    const uploadIndex = urlParts.findIndex(part => part === 'upload')
+                    
+                    if(uploadIndex !== -1 && uploadIndex < urlParts.length - 1){
+                        let publicIdParts = urlParts.slice(uploadIndex + 1)
+                        // Remove file extension for public ID
+                        const publicId = publicIdParts.join('/').replace(/\.[^/.]+$/, '')
+                        
+                        await cloudinary.uploader.destroy(publicId, {
+                            resource_type: isVideo ? 'video' : 'image'
+                        })
+                        console.log(`✅ Deleted old ${isVideo ? 'video' : 'image'} from Cloudinary: ${publicId}`)
+                    }
+                } catch (cloudinaryError) {
+                    console.error('Error deleting old file from Cloudinary:', cloudinaryError)
+                    // Continue with update even if old file deletion fails
+                }
+            }
+            
+            // Upload new file
+            return new Promise((resolve, reject) => {
+                const stream = cloudinary.uploader.upload_stream(
+                    {
+                        resource_type: req.file.mimetype.startsWith('video/') ? 'video' : 'image',
+                        folder: 'posts',
+                        timeout: 1200000,
+                        chunk_size: 6000000,
+                    },
+                    async (error, result) => {
+                        if (error) {
+                            console.error('Cloudinary upload error:', error)
+                            if (!res.headersSent) {
+                                res.status(500).json({ 
+                                    error: 'Failed to upload file to Cloudinary',
+                                    details: error.message 
+                                })
+                            }
+                            reject(error)
+                            return
+                        }
+                        
+                        img = result.secure_url
+                        
+                        // Update post
+                        post.text = text || post.text
+                        post.img = img
+                        await post.save()
+                        
+                        // Populate for response
+                        await post.populate("postedBy", "username profilePic name")
+                        await post.populate("contributors", "username profilePic name")
+                        
+                        // Emit update to followers
+                        const io = getIO()
+                        if (io) {
+                            const poster = await User.findById(post.postedBy).select('followers')
+                            if (poster && poster.followers && poster.followers.length > 0) {
+                                const userSocketMap = getUserSocketMap()
+                                const onlineFollowers = []
+                                
+                                poster.followers.forEach(followerId => {
+                                    const followerIdStr = followerId.toString()
+                                    if (userSocketMap[followerIdStr]) {
+                                        onlineFollowers.push(userSocketMap[followerIdStr].socketId)
+                                    }
+                                })
+                                
+                                if (onlineFollowers.length > 0) {
+                                    io.to(onlineFollowers).emit("postUpdated", { postId: post._id, post })
+                                }
+                            }
+                        }
+                        
+                        if (!res.headersSent) {
+                            res.status(200).json({message:"Post updated successfully", post})
+                        }
+                        resolve()
+                    }
+                )
+                
+                const bufferStream = new Readable()
+                bufferStream.push(req.file.buffer)
+                bufferStream.push(null)
+                bufferStream.pipe(stream)
+            })
+        }
+        
+        // No file upload - just update text
+        post.text = text || post.text
+        await post.save()
+        
+        // Populate for response
+        await post.populate("postedBy", "username profilePic name")
+        await post.populate("contributors", "username profilePic name")
+        
+        // Emit update to followers
+        const io = getIO()
+        if (io) {
+            const poster = await User.findById(post.postedBy).select('followers')
+            if (poster && poster.followers && poster.followers.length > 0) {
+                const userSocketMap = getUserSocketMap()
+                const onlineFollowers = []
+                
+                poster.followers.forEach(followerId => {
+                    const followerIdStr = followerId.toString()
+                    if (userSocketMap[followerIdStr]) {
+                        onlineFollowers.push(userSocketMap[followerIdStr].socketId)
+                    }
+                })
+                
+                if (onlineFollowers.length > 0) {
+                    io.to(onlineFollowers).emit("postUpdated", { postId: post._id, post })
+                }
+            }
+        }
+        
+        res.status(200).json({message:"Post updated successfully", post})
+    }
+    catch(error){
+        console.error('Error updating post:', error)
+        res.status(500).json({error: error.message || "Failed to update post"})
+    }
+}
+
 export const deletePost = async(req,res) => {
     try{
       const post = await Post.findById(req.params.id)
