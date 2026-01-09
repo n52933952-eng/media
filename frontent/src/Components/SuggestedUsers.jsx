@@ -54,8 +54,8 @@ const SuggestedUsers = ({ onUserFollowed }) => {
 
       const data = await res.json()
       if (res.ok && Array.isArray(data)) {
-        // Filter out Football system account from suggestions (it's in Suggested Channels)
-        const filteredUsers = data.filter(u => u.username !== 'Football')
+        // Filter out Football and Weather system accounts from suggestions (they're in Suggested Channels)
+        const filteredUsers = data.filter(u => u.username !== 'Football' && u.username !== 'Weather')
         setSuggestedUsers(filteredUsers)
       } else {
         setSuggestedUsers([])
@@ -123,6 +123,7 @@ const SuggestedUsers = ({ onUserFollowed }) => {
   // Complete list of all channel accounts to exclude (matches backend)
   const channelUsernames = [
     'Football',           // System account
+    'Weather',            // Weather system account
     'AlJazeera',         // News channel
     'NBCNews',           // News channel
     'BeinSportsNews',    // Sports news channel

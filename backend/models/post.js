@@ -25,6 +25,10 @@ const PostSchema = mongoose.Schema({
         type:String // JSON string of match data for Football posts
     },
 
+    weatherData:{
+        type:String // JSON string of weather data for Weather posts
+    },
+
     chessGameData:{
         type:String // JSON string of chess game data: {player1, player2, roomId, gameStatus}
     },
@@ -138,6 +142,8 @@ PostSchema.index({ contributors: 1 })
 PostSchema.index({ isCollaborative: 1, createdAt: -1 })
 // Index on footballData for Football posts (sparse index - only for posts with footballData)
 PostSchema.index({ footballData: 1 }, { sparse: true })
+// Index on weatherData for Weather posts (sparse index - only for posts with weatherData)
+PostSchema.index({ weatherData: 1 }, { sparse: true })
 // CRITICAL: Index on replies.userId for fast profile picture updates
 // This is essential for the UpdateUser function that updates all comments when profile changes
 PostSchema.index({ "replies.userId": 1 })

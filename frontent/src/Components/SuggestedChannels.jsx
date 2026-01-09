@@ -12,10 +12,13 @@ const SuggestedChannels = ({ onUserFollowed }) => {
     const navigate = useNavigate()
     const [footballAccount, setFootballAccount] = useState(null)
     const [footballPostId, setFootballPostId] = useState(null) // Store latest Football post ID
+    const [weatherAccount, setWeatherAccount] = useState(null)
     const [channels, setChannels] = useState([])
     const [loading, setLoading] = useState(true)
     const [followLoading, setFollowLoading] = useState(false)
+    const [weatherFollowLoading, setWeatherFollowLoading] = useState(false)
     const [isFollowing, setIsFollowing] = useState(false)
+    const [isFollowingWeather, setIsFollowingWeather] = useState(false)
     const [streamLoading, setStreamLoading] = useState({})
     const [expandedChannel, setExpandedChannel] = useState(null) // Track which channel is expanded
     const expandedChannelRef = useRef(null) // Ref for scrolling to expanded channel details
@@ -102,6 +105,17 @@ const SuggestedChannels = ({ onUserFollowed }) => {
                     }
                 }
                 
+                // Fetch Weather account
+                const weatherRes = await fetch(
+                    `${baseUrl}/api/user/getUserPro/Weather`,
+                    { credentials: 'include' }
+                )
+                const weatherData = await weatherRes.json()
+                
+                if (weatherRes.ok && weatherData) {
+                    setWeatherAccount(weatherData)
+                }
+                
                 // Fetch all live channels
                 const channelsRes = await fetch(`${baseUrl}/api/news/channels`, {
                     credentials: 'include'
@@ -142,7 +156,10 @@ const SuggestedChannels = ({ onUserFollowed }) => {
         if (footballAccount && user?.following) {
             setIsFollowing(user.following.includes(footballAccount._id))
         }
-    }, [user?.following, footballAccount?._id]) // Only update follow status, don't refetch channels
+        if (weatherAccount && user?.following) {
+            setIsFollowingWeather(user.following.includes(weatherAccount._id))
+        }
+    }, [user?.following, footballAccount?._id, weatherAccount?._id]) // Only update follow status, don't refetch channels
     
     // Handle channel click - navigate to channel post page
     const handleChannelClick = async (channel) => {
@@ -395,6 +412,90 @@ const SuggestedChannels = ({ onUserFollowed }) => {
         }
     }
     
+    // Handle weather follow/unfollow
+    const handleWeatherFollowToggle = async () => {
+        if (!weatherAccount) return
+        
+        try {
+            setWeatherFollowLoading(true)
+            
+            const res = await fetch(
+                `${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/user/follow/${weatherAccount._id}`,
+                {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'include'
+                }
+            )
+            
+            const data = await res.json()
+            
+            if (res.ok) {
+                const wasFollowing = isFollowingWeather
+                
+                // Update local state
+                setIsFollowingWeather(!isFollowingWeather)
+                
+                // Update user context with new following list
+                if (data.current) {
+                    setUser(data.current)
+                    localStorage.setItem('userInfo', JSON.stringify(data.current))
+                }
+                
+                // If UNFOLLOWING, remove Weather posts from feed immediately
+                if (wasFollowing) {
+                    setFollowPost(prev => {
+                        // Remove all posts from Weather account
+                        const filtered = prev.filter(p => {
+                            const postedById = p.postedBy?._id?.toString() || p.postedBy?.toString()
+                            const weatherId = weatherAccount._id?.toString()
+                            return postedById !== weatherId
+                        })
+                        console.log(`🗑️ [SuggestedChannels] Removed ${prev.length - filtered.length} Weather post(s) from feed`)
+                        return filtered
+                    })
+                }
+                
+                // If following (not unfollowing), trigger weather post
+                if (!wasFollowing) {
+                    const baseUrl = import.meta.env.PROD ? window.location.origin : "http://localhost:5000"
+                    
+                    // Post weather update immediately
+                    setTimeout(() => {
+                        fetch(`${baseUrl}/api/weather/post/manual`, {
+                            method: 'POST',
+                            credentials: 'include'
+                        })
+                        .then(res => res.json())
+                        .then(postData => {
+                            console.log('📬 Weather post result:', postData)
+                            showToast('Success', 'Weather updates will appear in your feed!', 'success')
+                        })
+                        .catch(err => {
+                            console.error('Weather post error:', err)
+                            showToast('Info', 'Weather updates will appear soon', 'info')
+                        })
+                    }, 500) // 500ms delay to ensure follow is saved
+                }
+                
+                showToast(
+                    'Success',
+                    isFollowingWeather 
+                        ? 'Unfollowed Weather channel' 
+                        : '🌤️ Following Weather! You\'ll now see weather updates in your feed',
+                    'success'
+                )
+            } else {
+                showToast('Error', data.error || 'Failed to update follow status', 'error')
+            }
+        } catch (error) {
+            console.error('Error toggling weather follow:', error)
+            showToast('Error', 'Failed to update follow status', 'error')
+        } finally {
+            setWeatherFollowLoading(false)
+        }
+    }
+    
     return (
         <Box
             position="sticky"
@@ -418,57 +519,138 @@ const SuggestedChannels = ({ onUserFollowed }) => {
                 </Box>
             ) : footballAccount ? (
                 <>
-                    <VStack spacing={3} align="stretch">
+                    {/* Compact Grid: Football & Weather */}
+                    <SimpleGrid columns={2} spacing={2} mb={3}>
                         {/* Football Channel */}
-                        <Flex
-                            align="center"
-                            justify="space-between"
-                            p={3}
+                        <Box
+                            bg={cardBg}
                             borderRadius="md"
+                            p={2}
                             border="1px solid"
                             borderColor={borderColor}
-                            _hover={{ bg: hoverBg, cursor: 'pointer' }}
+                            _hover={{ bg: hoverBg, borderColor: 'blue.300' }}
                             transition="all 0.2s"
+                            cursor="pointer"
+                            onClick={() => navigate('/football')}
+                            position="relative"
+                        >
+                            <VStack spacing={1}>
+                                <FootballIcon size="32px" />
+                                <Text fontSize="2xs" fontWeight="semibold" color={textColor} textAlign="center" noOfLines={1}>
+                                    Football
+                                </Text>
+                                <Text fontSize="2xs" color={secondaryTextColor} textAlign="center" noOfLines={1}>
+                                    {footballAccount.followers?.length || 0} followers
+                                </Text>
+                                {isFollowing && (
+                                    <Box
+                                        position="absolute"
+                                        top={1}
+                                        right={1}
+                                        w="8px"
+                                        h="8px"
+                                        bg="green.500"
+                                        borderRadius="full"
+                                        border="2px solid"
+                                        borderColor={cardBg}
+                                    />
+                                )}
+                            </VStack>
+                        </Box>
+
+                        {/* Weather Channel */}
+                        <Box
+                            bg={cardBg}
+                            borderRadius="md"
+                            p={2}
+                            border="1px solid"
+                            borderColor={borderColor}
+                            _hover={{ bg: hoverBg, borderColor: 'blue.300' }}
+                            transition="all 0.2s"
+                            cursor="pointer"
                             onClick={() => {
-                                // Always navigate to Football page
-                                navigate('/football')
+                                if (weatherAccount) {
+                                    navigate(`/weather`)
+                                } else {
+                                    showToast('Info', 'Weather feature coming soon!', 'info')
+                                }
                             }}
+                            position="relative"
+                            opacity={weatherAccount ? 1 : 0.7}
                         >
-                            <Flex align="center" gap={3} flex={1}>
-                                <FootballIcon size="48px" />
-                                <VStack align="start" spacing={0} flex={1}>
-                                    <Flex align="center" gap={1}>
-                                        <Text fontSize="sm" fontWeight="semibold" color={textColor}>
-                                            {footballAccount.name}
-                                        </Text>
-                                        <Text fontSize="lg" color="white" filter="drop-shadow(0 0 1px rgba(0,0,0,0.5))">⚽</Text>
-                                    </Flex>
-                                    <Text fontSize="xs" color={secondaryTextColor} noOfLines={1}>
-                                        Live football scores & updates
-                                    </Text>
-                                    <Text fontSize="xs" color={secondaryTextColor} mt={1}>
-                                        {footballAccount.followers?.length || 0} followers
-                                    </Text>
-                                </VStack>
-                            </Flex>
-                        </Flex>
+                            <VStack spacing={1}>
+                                <Text fontSize="2xl">🌤️</Text>
+                                <Text fontSize="2xs" fontWeight="semibold" color={textColor} textAlign="center" noOfLines={1}>
+                                    Weather
+                                </Text>
+                                <Text fontSize="2xs" color={secondaryTextColor} textAlign="center" noOfLines={1}>
+                                    {weatherAccount ? `${weatherAccount.followers?.length || 0} followers` : 'Coming soon'}
+                                </Text>
+                                {isFollowingWeather && weatherAccount && (
+                                    <Box
+                                        position="absolute"
+                                        top={1}
+                                        right={1}
+                                        w="8px"
+                                        h="8px"
+                                        bg="green.500"
+                                        borderRadius="full"
+                                        border="2px solid"
+                                        borderColor={cardBg}
+                                    />
+                                )}
+                            </VStack>
+                        </Box>
+                    </SimpleGrid>
+                    
+                    {/* Follow Buttons */}
+                    <VStack spacing={2} mt={2}>
+                        {/* Football Follow Button */}
+                        {isFollowing ? (
+                            <Button
+                                onClick={handleFollowToggle}
+                                isLoading={followLoading}
+                                colorScheme="gray"
+                                size="sm"
+                                w="full"
+                            >
+                                Unfollow Football
+                            </Button>
+                        ) : (
+                            <Button
+                                onClick={handleFollowToggle}
+                                isLoading={followLoading}
+                                colorScheme="blue"
+                                size="sm"
+                                w="full"
+                            >
+                                Follow Football
+                            </Button>
+                        )}
                         
-                        {/* Follow Button */}
-                        <Button
-                            onClick={handleFollowToggle}
-                            isLoading={followLoading}
-                            colorScheme={isFollowing ? 'gray' : 'blue'}
-                            size="sm"
-                            w="full"
-                        >
-                            {isFollowing ? 'Following' : 'Follow'}
-                        </Button>
-                        
-                        {/* Info text */}
-                        {!isFollowing && (
-                            <Text fontSize="xs" color={secondaryTextColor} textAlign="center">
-                                Follow to see live match updates in your feed
-                            </Text>
+                        {/* Weather Follow Button */}
+                        {weatherAccount && (
+                            isFollowingWeather ? (
+                                <Button
+                                    onClick={() => handleWeatherFollowToggle()}
+                                    isLoading={weatherFollowLoading}
+                                    colorScheme="gray"
+                                    size="sm"
+                                    w="full"
+                                >
+                                    Unfollow Weather
+                                </Button>
+                            ) : (
+                                <Button
+                                    onClick={() => handleWeatherFollowToggle()}
+                                    isLoading={weatherFollowLoading}
+                                    colorScheme="blue"
+                                    size="sm"
+                                    w="full"
+                                >
+                                    Follow Weather
+                                </Button>
+                            )
                         )}
                     </VStack>
                     

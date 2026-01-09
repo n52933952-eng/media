@@ -36,8 +36,6 @@ const FootballPage = () => {
     const [isFollowing, setIsFollowing] = useState(false)
     const [followLoading, setFollowLoading] = useState(false)
     const [footballAccountId, setFootballAccountId] = useState(null)
-    const [fetchingMatches, setFetchingMatches] = useState(false)
-    const [refreshingFeed, setRefreshingFeed] = useState(false)
     const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]) // Today by default
     
     const showToast = useShowToast()
@@ -257,93 +255,6 @@ const FootballPage = () => {
         }
     }
     
-    // Fetch all matches from all leagues (manual trigger)
-    const handleFetchAllMatches = async () => {
-        try {
-            console.log('⚽ [FootballPage] Load All Leagues button clicked!')
-            setFetchingMatches(true)
-            showToast('Info', 'Fetching matches from all leagues... This will take ~40 seconds', 'info')
-            
-            const baseUrl = import.meta.env.PROD ? window.location.origin : "http://localhost:5000"
-            const url = `${baseUrl}/api/football/fetch/manual`
-            console.log('⚽ [FootballPage] Fetching from:', url)
-            
-            const res = await fetch(url, {
-                method: 'POST',
-                credentials: 'include',
-                headers: {
-                    'Content-Type': 'application/json'
-                }
-            })
-            
-            console.log('⚽ [FootballPage] Response status:', res.status, res.statusText)
-            
-            const data = await res.json()
-            console.log('⚽ [FootballPage] Response data:', data)
-            
-            if (res.ok) {
-                showToast(
-                    'Success',
-                    `Fetched ${data.totalFetched} matches from ${data.leaguesFetched} leagues!`,
-                    'success'
-                )
-                // Refresh matches silently (no page reload!)
-                setTimeout(() => {
-                    fetchMatches(true)
-                }, 1000)
-            } else {
-                console.error('⚽ [FootballPage] Error response:', data)
-                showToast('Error', data.error || 'Failed to fetch matches', 'error')
-            }
-        } catch (error) {
-            console.error('⚽ [FootballPage] Error fetching matches:', error)
-            showToast('Error', `Failed to fetch matches: ${error.message}`, 'error')
-        } finally {
-            setFetchingMatches(false)
-        }
-    }
-    
-    // Refresh feed post (manually trigger post creation/update)
-    const handleRefreshFeedPost = async () => {
-        try {
-            console.log('⚽ [FootballPage] Refresh Feed Post button clicked!')
-            setRefreshingFeed(true)
-            showToast('Info', 'Refreshing feed post...', 'info')
-            
-            const baseUrl = import.meta.env.PROD ? window.location.origin : "http://localhost:5000"
-            const url = `${baseUrl}/api/football/post/manual`
-            
-            const res = await fetch(url, {
-                method: 'POST',
-                credentials: 'include',
-                headers: {
-                    'Content-Type': 'application/json'
-                }
-            })
-            
-            const data = await res.json()
-            
-            if (res.ok) {
-                if (data.noMatches) {
-                    showToast('Info', 'No live matches at the moment', 'info')
-                } else {
-                    showToast(
-                        'Success',
-                        `Feed post refreshed! ${data.matchesPosted || 0} live match(es) posted to feed.`,
-                        'success'
-                    )
-                }
-            } else {
-                showToast('Error', data.error || 'Failed to refresh feed post', 'error')
-            }
-        } catch (error) {
-            console.error('⚽ [FootballPage] Error refreshing feed post:', error)
-            showToast('Error', `Failed to refresh feed post: ${error.message}`, 'error')
-        } finally {
-            setRefreshingFeed(false)
-        }
-    }
-    
     // Format time
     const formatTime = (date) => {
         const matchDate = new Date(date)
@@ -553,34 +464,16 @@ const FootballPage = () => {
                     </VStack>
                 </HStack>
                 
-                <HStack spacing={2}>
+                {user && (
                     <Button
-                        onClick={handleFetchAllMatches}
-                        isLoading={fetchingMatches}
-                        colorScheme="green"
+                        onClick={handleFollowToggle}
+                        isLoading={followLoading}
+                        colorScheme={isFollowing ? 'gray' : 'blue'}
                         size="sm"
                     >
-                        ⚽ Load All Leagues
+                        {isFollowing ? 'Following' : 'Follow'}
                     </Button>
-                    <Button
-                        onClick={handleRefreshFeedPost}
-                        isLoading={refreshingFeed}
-                        colorScheme="orange"
-                        size="sm"
-                    >
-                        🔄 Refresh Feed
-                    </Button>
-                    {user && (
-                        <Button
-                            onClick={handleFollowToggle}
-                            isLoading={followLoading}
-                            colorScheme={isFollowing ? 'gray' : 'blue'}
-                            size="sm"
-                        >
-                            {isFollowing ? 'Following' : 'Follow'}
-                        </Button>
-                    )}
-                </HStack>
+                )}
             </Flex>
             
             {!user && (

@@ -712,10 +712,22 @@ export const emitFootballPageUpdate = async () => {
 // 2. Fetch today's fixtures (runs once daily)
 const fetchTodayFixtures = async () => {
     try {
-        console.log('📅 [fetchTodayFixtures] Starting to fetch today\'s fixtures...')
+        console.log('📅 [fetchTodayFixtures] Starting to fetch fixtures...')
         
-        const today = new Date().toISOString().split('T')[0] // YYYY-MM-DD
+        const todayDate = new Date()
+        const today = todayDate.toISOString().split('T')[0] // YYYY-MM-DD
         console.log('📅 [fetchTodayFixtures] Today\'s date:', today)
+        
+        // Fetch for past 3 days (finished) and next 7 days (upcoming) to populate database
+        const startDate = new Date(todayDate)
+        startDate.setDate(startDate.getDate() - 3) // 3 days ago
+        const startDateStr = startDate.toISOString().split('T')[0]
+        
+        const endDate = new Date(todayDate)
+        endDate.setDate(endDate.getDate() + 7) // 7 days ahead
+        const endDateStr = endDate.toISOString().split('T')[0]
+        
+        console.log(`📅 [fetchTodayFixtures] Fetching fixtures from ${startDateStr} to ${endDateStr} (10-day range)`)
         
         const supportedLeagueIds = SUPPORTED_LEAGUES.map(l => l.id)
         let totalFetched = 0
@@ -723,7 +735,7 @@ const fetchTodayFixtures = async () => {
         // Fetch fixtures for each supported league
         for (const league of SUPPORTED_LEAGUES) {
             // football-data.org: /competitions/{code}/matches?dateFrom={date}&dateTo={date}
-            const endpoint = `/competitions/${league.id}/matches?dateFrom=${today}&dateTo=${today}`
+            const endpoint = `/competitions/${league.id}/matches?dateFrom=${startDateStr}&dateTo=${endDateStr}`
             const result = await fetchFromAPI(endpoint)
             
             if (result.rateLimit) {
@@ -749,7 +761,7 @@ const fetchTodayFixtures = async () => {
             await new Promise(resolve => setTimeout(resolve, 7000))
         }
         
-        console.log(`✅ Fetched ${totalFetched} fixtures for today`)
+        console.log(`✅ Fetched ${totalFetched} fixtures (past 3 days + next 7 days)`)
         
         // Emit real-time update to Football page after fetching fixtures
         await emitFootballPageUpdate()

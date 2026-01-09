@@ -8,11 +8,13 @@ import PostRoute from './routes/post.js'
 import{v2 as cloudinary} from 'cloudinary'
 import MessageRoute from './routes/message.js'
 import FootballRoute from './routes/football.js'
+import WeatherRoute from './routes/weather.js'
 import NewsRoute from './routes/news.js'
 import NotificationRoute from './routes/notification.js'
 import ActivityRoute from './routes/activity.js'
 import { initializeSocket } from './socket/socket.js'
 import { initializeFootballCron } from './services/footballCron.js'
+import { initializeWeatherCron } from './services/weatherCron.js'
 import { initializeChessPostCleanup } from './services/chessPostCleanup.js'
 import { initializeActivityCleanup } from './services/activityCleanup.js'
 import { initRedis, isRedisAvailable } from './services/redis.js'
@@ -105,6 +107,7 @@ app.use("/api/user",UserRoute)
 app.use("/api/post",PostRoute)
 app.use("/api/message",MessageRoute)
 app.use("/api/football",FootballRoute)
+app.use("/api/weather",WeatherRoute)
 app.use("/api/news",NewsRoute)
 app.use("/api/notification",NotificationRoute)
 app.use("/api/activity",ActivityRoute)
@@ -140,6 +143,11 @@ initializeSocket(app).then((result) => {
         initializeFootballCron()
         console.log("✅ Football Cron Jobs initialized successfully")
         
+        // Initialize Weather Cron Jobs AFTER socket is initialized
+        console.log("🌤️ Initializing Weather Cron Jobs (Socket.IO is ready)...")
+        initializeWeatherCron()
+        console.log("✅ Weather Cron Jobs initialized successfully")
+        
         // Ensure Football account exists on startup
         setTimeout(async () => {
             try {
@@ -165,6 +173,16 @@ initializeSocket(app).then((result) => {
                 console.error('❌ Error checking Football account on startup:', error)
             }
         }, 2000) // Run 2 seconds after server starts
+        
+        // Ensure Weather account exists on startup
+        setTimeout(async () => {
+            try {
+                const { getWeatherAccount } = await import('./controller/weather.js')
+                await getWeatherAccount()
+            } catch (error) {
+                console.error('❌ Error checking Weather account on startup:', error)
+            }
+        }, 2500) // Run 2.5 seconds after server starts
         
         // Initialize Chess Post Cleanup Cron Job
         initializeChessPostCleanup()

@@ -545,6 +545,7 @@ export const getSuggestedUsers = async(req, res) => {
         // Get all channel usernames from config + Football system account + any additional channels
         const channelUsernames = [
             'Football', // System account (not in LIVE_CHANNELS)
+            'Weather', // Weather system account
             ...LIVE_CHANNELS.map(channel => channel.username), // All channel accounts from config
             'SkySportsNews' // Additional channel (if exists in database but not in config)
         ]
