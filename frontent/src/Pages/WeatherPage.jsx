@@ -271,6 +271,49 @@ const WeatherPage = () => {
         }
     }
     
+    // Follow/Unfollow Weather account
+    const handleFollowToggle = async () => {
+        if (!weatherAccountId) {
+            showToast('Error', 'Weather account not found', 'error')
+            return
+        }
+        
+        try {
+            setFollowLoading(true)
+            
+            const res = await fetch(
+                `${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/user/follow/${weatherAccountId}`,
+                {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'include'
+                }
+            )
+            
+            const data = await res.json()
+            
+            if (res.ok) {
+                setIsFollowing(!isFollowing)
+                if (data.current) {
+                    setUser(data.current)
+                    localStorage.setItem('userInfo', JSON.stringify(data.current))
+                }
+                showToast(
+                    'Success',
+                    isFollowing ? 'Unfollowed Weather channel' : 'Following Weather channel! You\'ll now see updates in your feed',
+                    'success'
+                )
+            } else {
+                showToast('Error', data.error || 'Failed to update follow status', 'error')
+            }
+        } catch (error) {
+            console.error('Error toggling follow:', error)
+            showToast('Error', 'Failed to update follow status', 'error')
+        } finally {
+            setFollowLoading(false)
+        }
+    }
+    
     // Get weather icon URL
     const getWeatherIcon = (iconCode) => {
         return `https://openweathermap.org/img/wn/${iconCode}@2x.png`
