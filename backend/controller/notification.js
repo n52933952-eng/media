@@ -14,10 +14,14 @@ export const createNotification = async (userId, type, fromUserId, options = {})
         // Create new notification
         const notification = new Notification({
             user: userId,
-            type: type, // 'follow', 'comment', or 'mention'
+            type: type, // 'follow', 'comment', 'mention', 'collaboration', 'post_edit'
             from: fromUserId,
             post: options.postId || null,
             comment: options.commentText || null,
+            metadata: (options.postText || options.postId) ? { 
+                postText: options.postText || null,
+                postId: options.postId || null
+            } : null, // Store postText and postId in metadata for collaboration/post_edit
             read: false
         })
 
@@ -26,15 +30,22 @@ export const createNotification = async (userId, type, fromUserId, options = {})
         // Populate notification (for both new and existing) before emitting
         // Populate 'from' field for socket emission
         await notification.populate('from', 'username name profilePic')
-        if (notification.post) {
-            await notification.populate({
-                path: 'post',
-                select: 'text img postedBy',
-                populate: {
-                    path: 'postedBy',
-                    select: 'username'
-                }
-            })
+        
+        // Populate post if it exists (even if postId was provided as string, Mongoose should have converted it)
+        if (notification.post || options.postId) {
+            try {
+                await notification.populate({
+                    path: 'post',
+                    select: 'text img postedBy',
+                    populate: {
+                        path: 'postedBy',
+                        select: 'username name'
+                    }
+                })
+            } catch (populateError) {
+                console.error('⚠️ [createNotification] Error populating post:', populateError)
+                // Continue even if populate fails - metadata has the info we need
+            }
         }
         
         // Emit real-time notification to user if online
@@ -77,8 +88,26 @@ export const createNotification = async (userId, type, fromUserId, options = {})
                         }
                     }
                     
+                    // Include metadata in socket emission (for collaboration/post_edit notifications)
+                    if (notification.metadata) {
+                        notificationObj.metadata = notification.metadata
+                    } else if (options.postText || options.postId) {
+                        // Ensure metadata is included even if not saved properly
+                        notificationObj.metadata = {
+                            postText: options.postText || null,
+                            postId: options.postId?.toString() || notificationObj.post?._id?.toString() || null
+                        }
+                    }
+                    
+                    // Ensure post is included for navigation (even if populate failed)
+                    if (!notificationObj.post && options.postId) {
+                        notificationObj.post = {
+                            _id: options.postId.toString()
+                        }
+                    }
+                    
                     io.to(userSocketData.socketId).emit('newNotification', notificationObj)
-                    console.log(`📬 [createNotification] Sent notification to user ${userId} (socket: ${userSocketData.socketId})`)
+                    console.log(`📬 [createNotification] Sent notification to user ${userId} (socket: ${userSocketData.socketId}), type: ${type}`)
                 } else {
                     console.log(`⚠️ [createNotification] User ${userId} is not online (not in socket map)`)
                     console.log(`🔍 [createNotification] Available users in socket map:`, Object.keys(userSocketMap))

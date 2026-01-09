@@ -299,6 +299,21 @@ export const updatePost = async(req,res) => {
                         await post.populate("postedBy", "username profilePic name")
                         await post.populate("contributors", "username profilePic name")
                         
+                        // Notify post owner if a contributor edited the post
+                        const isContributorEdit = !isOwner && isContributor
+                        if (isContributorEdit) {
+                            try {
+                                const { createNotification } = await import('./notification.js')
+                                await createNotification(post.postedBy, 'post_edit', userId, {
+                                    postId: post._id,
+                                    postText: post.text?.substring(0, 50) || 'your collaborative post'
+                                })
+                                console.log(`📬 [updatePost] Created edit notification for post owner`)
+                            } catch (err) {
+                                console.error('Error creating edit notification:', err)
+                            }
+                        }
+                        
                         // Emit update to followers
                         const io = getIO()
                         if (io) {
@@ -341,6 +356,21 @@ export const updatePost = async(req,res) => {
         // Populate for response
         await post.populate("postedBy", "username profilePic name")
         await post.populate("contributors", "username profilePic name")
+        
+        // Notify post owner if a contributor edited the post
+        const isContributorEdit = !isOwner && isContributor
+        if (isContributorEdit) {
+            try {
+                const { createNotification } = await import('./notification.js')
+                await createNotification(post.postedBy.toString(), 'post_edit', userId.toString(), {
+                    postId: post._id.toString(),
+                    postText: post.text?.substring(0, 50) || 'your collaborative post'
+                })
+                console.log(`📬 [updatePost] Created edit notification for post owner ${post.postedBy}`)
+            } catch (err) {
+                console.error('❌ [updatePost] Error creating edit notification:', err)
+            }
+        }
         
         // Emit update to followers
         const io = getIO()
@@ -1252,14 +1282,16 @@ export const addContributorToPost = async (req, res) => {
         await post.populate("contributors", "username profilePic name")
         await post.populate("postedBy", "username profilePic name")
 
-        // Notify the new contributor
+        // Notify the new contributor (with real-time socket notification)
         try {
+            const { createNotification } = await import('./notification.js')
             await createNotification(contributorId, 'collaboration', userId, {
-                postId: post._id,
+                postId: post._id.toString(), // Ensure it's a string
                 postText: post.text?.substring(0, 50) || 'a collaborative post'
             })
+            console.log(`📬 [addContributorToPost] Created collaboration notification for user ${contributorId}`)
         } catch (err) {
-            console.error('Error creating collaboration notification:', err)
+            console.error('❌ [addContributorToPost] Error creating collaboration notification:', err)
         }
 
         res.status(200).json({

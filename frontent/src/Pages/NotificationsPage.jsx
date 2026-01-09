@@ -116,14 +116,16 @@ const NotificationsPage = () => {
         // Navigate based on notification type
         if (notification.type === 'follow') {
             navigate(`/${notification.from?.username || notification.from?.name || 'user'}`)
-        } else if (notification.type === 'comment' || notification.type === 'mention' || notification.type === 'like' || notification.type === 'collaboration') {
+        } else if (notification.type === 'comment' || notification.type === 'mention' || notification.type === 'like' || notification.type === 'collaboration' || notification.type === 'post_edit') {
             if (notification.post && notification.post._id) {
                 // Get post owner from populated post
                 const postOwner = notification.post.postedBy?.username || notification.post.postedBy?.name || user?.username
                 navigate(`/${postOwner}/post/${notification.post._id}`)
-            } else if (notification.metadata?.postId) {
-                // For collaboration notifications, navigate to the post
-                navigate(`/post/${notification.metadata.postId}`)
+            } else if (notification.metadata?.postId || notification.post?._id) {
+                // For collaboration/post_edit notifications, try to get post owner
+                const postId = notification.metadata?.postId || notification.post?._id
+                const postOwner = notification.post?.postedBy?.username || user?.username
+                navigate(`/${postOwner}/post/${postId}`)
             }
         }
     }
@@ -203,6 +205,9 @@ const NotificationsPage = () => {
             case 'collaboration':
                 const postText = notification.metadata?.postText || 'a collaborative post'
                 return `${fromName} added you as a contributor to "${postText}"`
+            case 'post_edit':
+                const editedPostText = notification.metadata?.postText || 'your collaborative post'
+                return `${fromName} edited "${editedPostText}"`
             default:
                 return 'New notification'
         }
@@ -220,6 +225,8 @@ const NotificationsPage = () => {
                 return '❤️'
             case 'collaboration':
                 return '🤝'
+            case 'post_edit':
+                return '✏️'
             default:
                 return '🔔'
         }

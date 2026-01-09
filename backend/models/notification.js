@@ -10,7 +10,7 @@ const notificationSchema = new mongoose.Schema({
     type: {
         type: String,
         required: true,
-        enum: ['follow', 'comment', 'mention', 'like', 'collaboration'], // Types of notifications
+        enum: ['follow', 'comment', 'mention', 'like', 'collaboration', 'post_edit'], // Types of notifications
         index: true
     },
     from: {
@@ -21,11 +21,15 @@ const notificationSchema = new mongoose.Schema({
     post: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'Post',
-        default: null // Only for comment/mention notifications
+        default: null // Post related to notification
     },
     comment: {
         type: String,
         default: null // Comment text for comment/mention notifications
+    },
+    metadata: {
+        type: mongoose.Schema.Types.Mixed,
+        default: null // For additional data like postText for collaboration/post_edit
     },
     read: {
         type: Boolean,
