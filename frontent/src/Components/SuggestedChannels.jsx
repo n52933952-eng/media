@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useContext, useRef } from 'react'
+import React, { useState, useEffect, useContext, useRef, useCallback } from 'react'
 import { Box, Flex, Text, Avatar, Button, VStack, Spinner, useColorModeValue, Grid, GridItem, SimpleGrid } from '@chakra-ui/react'
 import { Link as RouterLink, useNavigate } from 'react-router-dom'
 import { UserContext } from '../context/UserContext'
@@ -251,7 +251,7 @@ const SuggestedChannels = ({ onUserFollowed }) => {
     }, [expandedChannel])
     
     // Handle follow/unfollow
-    const handleFollowToggle = async () => {
+    const handleFollowToggle = useCallback(async () => {
         if (!footballAccount) return
         
         try {
@@ -410,10 +410,10 @@ const SuggestedChannels = ({ onUserFollowed }) => {
         } finally {
             setFollowLoading(false)
         }
-    }
+    }, [footballAccount, isFollowing, setUser, setFollowPost, showToast, onUserFollowed])
     
     // Handle weather follow/unfollow
-    const handleWeatherFollowToggle = async () => {
+    const handleWeatherFollowToggle = useCallback(async () => {
         if (!weatherAccount) return
         
         try {
@@ -494,7 +494,7 @@ const SuggestedChannels = ({ onUserFollowed }) => {
         } finally {
             setWeatherFollowLoading(false)
         }
-    }
+    }, [weatherAccount, isFollowingWeather, setUser, setFollowPost, showToast])
     
     return (
         <Box
