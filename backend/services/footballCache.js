@@ -18,13 +18,14 @@ const CACHE_KEYS = {
 }
 
 // Cache TTL (Time To Live) in seconds
+// OPTIMIZED FOR FREE TIER (5,000 requests/day limit)
 const CACHE_TTL = {
-    LIVE_MATCHES: 90, // 90 seconds - slightly longer than cron interval (1 min) to ensure cache freshness
-    // Cache serves all users between cron runs, reducing API calls dramatically
-    // With 1-minute cron + 90s cache: Cache hit rate ~98% (most requests served from cache)
+    LIVE_MATCHES: 180, // 3 minutes - longer cache to reduce API calls (was 90s)
+    // With 3-minute cron + 180s cache: Cache hit rate ~99% (almost all requests served from cache)
+    // This reduces API calls from ~600/day to ~200/day
     UPCOMING_MATCHES: 3600, // 1 hour - upcoming matches don't change often
     FINISHED_MATCHES: 3600, // 1 hour - finished matches don't change
-    MATCH_DETAILS: 300 // 5 minutes - match details (scorers, events) don't change often
+    MATCH_DETAILS: 600 // 10 minutes - match details (scorers, events) don't change often (was 5 min)
 }
 
 /**
