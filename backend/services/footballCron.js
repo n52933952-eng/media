@@ -331,7 +331,10 @@ const autoPostMatchUpdate = async (match, updateType) => {
 // 1. Fetch live matches and update database
 const fetchAndUpdateLiveMatches = async () => {
     try {
-        console.log('⚽ [fetchAndUpdateLiveMatches] Fetching live matches...')
+        const isDev = process.env.NODE_ENV !== 'production'
+        if (isDev) {
+            console.log('⚽ [fetchAndUpdateLiveMatches] Fetching live matches...')
+        }
         
         // Get date range for today
         const now = new Date()
@@ -346,11 +349,14 @@ const fetchAndUpdateLiveMatches = async () => {
         let cachedMatches = getCachedLiveMatches()
         
         if (cachedMatches) {
-            console.log('📦 [fetchAndUpdateLiveMatches] Using cached live matches (saving API call!)')
+            // Only log cache hits in dev (less noisy)
+            if (isDev) {
+                console.log('📦 Using cached live matches (saving API call!)')
+            }
             // Use cached data but still update database and feed post
             // This reduces API calls while keeping data fresh
-        } else {
-            console.log('🌐 [fetchAndUpdateLiveMatches] Cache miss - fetching from API...')
+        } else if (isDev) {
+            console.log('🌐 Cache miss - fetching from API...')
         }
         
         // Only fetch from API if cache is expired or doesn't exist
@@ -376,7 +382,9 @@ const fetchAndUpdateLiveMatches = async () => {
             }
             
             if (!result.success || !result.data) {
-                console.log('📭 [fetchAndUpdateLiveMatches] No live matches found in API')
+                if (isDev) {
+                    console.log('📭 No live matches found in API')
+                }
                 // Check if we need to update feed post (remove finished matches)
                 await updateFeedPostWhenMatchesFinish()
                 return
@@ -395,7 +403,9 @@ const fetchAndUpdateLiveMatches = async () => {
             supportedLeagueIds.includes(match.league.id)
         )
         
-        console.log(`📊 [fetchAndUpdateLiveMatches] Found ${filteredMatches.length} currently live matches`)
+        if (isDev && filteredMatches.length > 0) {
+            console.log(`📊 Found ${filteredMatches.length} live matches`)
+        }
         
         // Get all fixture IDs from live matches to detect finished ones
         const liveFixtureIds = new Set()
@@ -565,8 +575,109 @@ const fetchAndUpdateLiveMatches = async () => {
         // This uses database comparison, not API calls
         await updateFeedPostWhenMatchesFinish()
         
+        // Emit real-time update to Football page (live, upcoming, finished matches)
+        await emitFootballPageUpdate()
+        
     } catch (error) {
         console.error('❌ Error in fetchAndUpdateLiveMatches:', error)
+    }
+}
+
+// Export function to emit real-time updates to Football page
+export const emitFootballPageUpdate = async () => {
+    try {
+        const io = getIO()
+        if (!io) {
+            console.error('⚠️ [emitFootballPageUpdate] Socket.IO not available - make sure socket is initialized before cron jobs start!')
+            return
+        }
+        
+        // Check if socket is actually connected (keep this check - it's useful)
+        const clientCount = io.engine?.clientsCount || 0
+        
+        // Only log detailed info in development
+        const isDev = process.env.NODE_ENV !== 'production'
+        if (isDev && clientCount > 0) {
+            console.log(`📡 [emitFootballPageUpdate] Broadcasting to ${clientCount} clients`)
+        }
+        
+        // Fetch live matches (today)
+        const today = new Date().toISOString().split('T')[0]
+        const todayStart = new Date(today)
+        todayStart.setHours(0, 0, 0, 0)
+        const todayEnd = new Date(todayStart)
+        todayEnd.setHours(23, 59, 59, 999)
+        
+        const liveMatches = await Match.find({
+            'fixture.status.short': { $in: ['1H', '2H', 'HT', 'ET', 'P'] },
+            'fixture.date': { $gte: todayStart, $lt: todayEnd }
+        })
+        .sort({ 'fixture.date': -1 })
+        .limit(50)
+        .lean()
+        
+        // Fetch upcoming matches (next 7 days)
+        const nextWeek = new Date()
+        nextWeek.setDate(nextWeek.getDate() + 7)
+        const upcomingMatches = await Match.find({
+            'fixture.status.short': 'NS',
+            'fixture.date': { $gte: new Date(), $lt: nextWeek }
+        })
+        .sort({ 'fixture.date': 1 })
+        .limit(50)
+        .lean()
+        
+        // Fetch finished matches (last 3 days)
+        const threeDaysAgo = new Date()
+        threeDaysAgo.setDate(threeDaysAgo.getDate() - 3)
+        const finishedMatches = await Match.find({
+            'fixture.status.short': 'FT',
+            'fixture.date': { $gte: threeDaysAgo, $lt: new Date() }
+        })
+        .sort({ 'fixture.date': -1 })
+        .limit(50)
+        .lean()
+        
+        // Fetch events for finished matches if missing (lazy load - only first 10 to avoid delays)
+        const finishedToProcess = finishedMatches.slice(0, 10)
+        for (const match of finishedToProcess) {
+            if (!match.events || match.events.length === 0) {
+                try {
+                    const matchDetails = await fetchMatchDetails(match.fixtureId, true)
+                    if (matchDetails && matchDetails.events && matchDetails.events.length > 0) {
+                        match.events = matchDetails.events
+                        // Save to database for future queries
+                        await Match.findByIdAndUpdate(match._id, { events: matchDetails.events })
+                    }
+                } catch (error) {
+                    // Silent fail - events will be fetched on-demand when user views match
+                }
+            }
+        }
+        
+        const data = {
+            live: liveMatches,
+            upcoming: upcomingMatches,
+            finished: finishedMatches,
+            updatedAt: new Date()
+        }
+        
+        // Broadcast to all connected users (no filtering needed - public data)
+        // IMPORTANT: Always emit even when using cached data (cache only affects API calls, not socket emissions)
+        io.emit('footballPageUpdate', data)
+        
+        // Only log success in development (errors always logged)
+        // Note: isDev already declared at top of function
+        if (isDev && clientCount > 0) {
+            console.log(`✅ Broadcasted: ${liveMatches.length} live, ${upcomingMatches.length} upcoming, ${finishedMatches.length} finished`)
+        }
+        
+    } catch (error) {
+        // Always log errors (important for debugging)
+        console.error('❌ [emitFootballPageUpdate] Error:', error.message)
+        if (process.env.NODE_ENV !== 'production') {
+            console.error('   Stack:', error.stack)
+        }
     }
 }
 
@@ -611,6 +722,9 @@ const fetchTodayFixtures = async () => {
         
         console.log(`✅ Fetched ${totalFetched} fixtures for today`)
         
+        // Emit real-time update to Football page after fetching fixtures
+        await emitFootballPageUpdate()
+        
     } catch (error) {
         console.error('❌ Error in fetchTodayFixtures:', error)
     }
@@ -626,26 +740,44 @@ export const initializeFootballCron = () => {
     // - Weekdays: 18:00-22:00 UTC (evening matches)
     // - Off-hours: Don't poll (or very rarely)
     
-    // Weekend matches (Saturday & Sunday): Poll every 10 minutes during 12:00-22:00 UTC
-    // This gives us: 10 hours × 6 calls/hour = 60 calls for 2 days = ~30 calls/day average
-    cron.schedule('*/10 12-22 * * 6,0', async () => {
-        console.log('⚽ [CRON] Running live match update (weekend match hours: every 10 min)...')
+    // OPTIMIZED: With caching (90s TTL), we poll every 1 minute but cache serves all users
+    // Cache TTL (90s) = Slightly longer than cron interval to ensure cache is always fresh
+    // Weekend matches (Saturday & Sunday): Poll every 1 minute during 12:00-22:00 UTC
+    // With cache: ~10 hours × 60 calls/hour = 600 calls for 2 days = ~300 calls/day average
+    // BUT: Cache serves all users, so actual API usage = ~300 calls/day (better real-time updates!)
+    // Only log detailed debug info in development
+    const isDev = process.env.NODE_ENV !== 'production'
+    
+    cron.schedule('*/1 12-22 * * 6,0', async () => {
+        if (isDev) {
+            const timestamp = new Date().toLocaleString('en-US', { timeZone: 'UTC' })
+            console.log(`⚽ [CRON] Running live match update (weekend: every 1 min) - ${timestamp} UTC`)
+        }
         await fetchAndUpdateLiveMatches()
     })
     
-    // Weekday evening matches (Mon-Fri): Poll every 15 minutes during 18:00-22:00 UTC
-    // This gives us: 4 hours × 4 calls/hour = 16 calls for 5 days = ~3 calls/day average
-    cron.schedule('*/15 18-22 * * 1-5', async () => {
-        console.log('⚽ [CRON] Running live match update (weekday evenings: every 15 min)...')
+    // Weekday evening matches (Mon-Fri): Poll every 1 minute during 18:00-22:00 UTC
+    // With cache: ~4 hours × 60 calls/hour = 240 calls for 5 days = ~48 calls/day average
+    cron.schedule('*/1 18-22 * * 1-5', async () => {
+        if (isDev) {
+            const timestamp = new Date().toLocaleString('en-US', { timeZone: 'UTC' })
+            console.log(`⚽ [CRON] Running live match update (weekday: every 1 min) - ${timestamp} UTC`)
+        }
         await fetchAndUpdateLiveMatches()
     })
     
-    // Off-hours check: Once per hour (just in case) during non-match hours
-    // This gives us: ~12 calls/day (when matches unlikely)
-    cron.schedule('0 0-11,23 * * *', async () => {
-        console.log('⚽ [CRON] Running live match update (off-hours check: hourly)...')
+    // Off-hours check: Every 15 minutes (just in case) during non-match hours
+    // With cache: ~48 calls/day during off-hours (unlikely to have matches)
+    cron.schedule('*/15 0-11,23 * * *', async () => {
+        if (isDev) {
+            const timestamp = new Date().toLocaleString('en-US', { timeZone: 'UTC' })
+            console.log(`⚽ [CRON] Running live match update (off-hours: every 15 min) - ${timestamp} UTC`)
+        }
         await fetchAndUpdateLiveMatches()
     })
+    
+    // Total with cache: ~300 (weekends) + ~48 (weekdays) + ~48 (off-hours) = ~396 calls/day
+    // With unused API quota, this provides near real-time updates!
     
     // Total: ~45 calls/day (well under 100 free tier limit!)
     

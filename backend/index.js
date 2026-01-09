@@ -135,8 +135,10 @@ initializeSocket(app).then((result) => {
         console.log("✅ Server is running on port", process.env.PORT)
         console.log("✅ App is ready for 1M+ users with Redis scaling!")
         
-        // Initialize Football Cron Jobs after server starts
+        // Initialize Football Cron Jobs AFTER socket is initialized (IMPORTANT: Socket must be ready first!)
+        console.log("⚽ Initializing Football Cron Jobs (Socket.IO is ready)...")
         initializeFootballCron()
+        console.log("✅ Football Cron Jobs initialized successfully")
         
         // Ensure Football account exists on startup
         setTimeout(async () => {

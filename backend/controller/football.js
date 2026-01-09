@@ -760,18 +760,18 @@ export const manualFetchFixtures = async (req, res) => {
             // Fetch for all supported leagues on this date
             for (const league of SUPPORTED_LEAGUES) {
                 const endpoint = `/fixtures?league=${league.id}&date=${dateStr}&season=${CURRENT_SEASON}`
-                const result = await fetchFromAPI(endpoint)
+            const result = await fetchFromAPI(endpoint)
                 
                 if (result.rateLimit) {
                     console.warn(`🚫 [manualFetchFixtures] Rate limit hit, stopping fetch`)
                     break
                 }
-                
-                if (result.success && result.data && result.data.length > 0) {
+            
+            if (result.success && result.data && result.data.length > 0) {
                     console.log(`  ✅ Found ${result.data.length} matches for ${league.name} on ${dateStr}`)
-                    
+                
                     // Save each match to database
-                    for (const matchData of result.data) {
+                for (const matchData of result.data) {
                         const convertedMatch = convertMatchFormat(matchData)
                         
                         // For finished matches: Fetch events (scorers, cards, substitutions)
@@ -791,13 +791,13 @@ export const manualFetchFixtures = async (req, res) => {
                                 console.log(`    ⚠️ Could not fetch events for match ${convertedMatch.fixtureId}:`, error.message)
                             }
                         }
-                        
-                        await Match.findOneAndUpdate(
-                            { fixtureId: convertedMatch.fixtureId },
-                            convertedMatch,
-                            { upsert: true, new: true }
-                        )
-                        totalFetched++
+                    
+                    await Match.findOneAndUpdate(
+                        { fixtureId: convertedMatch.fixtureId },
+                        convertedMatch,
+                        { upsert: true, new: true }
+                    )
+                    totalFetched++
                         
                         // Track by league
                         if (!dateResults[league.name]) {
@@ -814,8 +814,8 @@ export const manualFetchFixtures = async (req, res) => {
         
         // Format results
         for (const league of SUPPORTED_LEAGUES) {
-            results.push({
-                league: league.name,
+                results.push({
+                    league: league.name,
                 id: league.id,
                 matches: dateResults[league.name] || 0
             })
@@ -823,6 +823,16 @@ export const manualFetchFixtures = async (req, res) => {
         
         console.log(`✅ [manualFetchFixtures] COMPLETE! Total matches fetched: ${totalFetched}`)
         console.log(`📊 [manualFetchFixtures] Results by league:`, results)
+        
+        // Emit real-time update to Football page after manual fetch
+        try {
+            const { emitFootballPageUpdate } = await import('../services/footballCron.js')
+            if (emitFootballPageUpdate) {
+                await emitFootballPageUpdate()
+            }
+        } catch (error) {
+            console.error('⚠️ [manualFetchFixtures] Could not emit football page update:', error.message)
+        }
         
         res.status(200).json({ 
             message: `Fetched ${totalFetched} matches from ${results.filter(r => r.matches > 0).length} leagues`,

@@ -150,20 +150,70 @@ const FootballPage = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [])
     
-    // Listen for real-time match updates via socket (NO RELOADING!)
+    // Listen for real-time match updates via socket (NO API CALLS - Direct state update!)
     useEffect(() => {
         if (!socket) return
         
+        // Only log in development
+        const isDev = import.meta.env.DEV
+        
+        const handleFootballPageUpdate = (data) => {
+            // Only log in development (optional - remove if not needed)
+            if (isDev) {
+                console.log('📥 [FootballPage] Update received:', {
+                    live: data.live?.length || 0,
+                    upcoming: data.upcoming?.length || 0,
+                    finished: data.finished?.length || 0
+                })
+            }
+            
+            // Update state directly - no API calls needed!
+            if (data.live !== undefined) {
+                setLiveMatches(data.live)
+            }
+            if (data.upcoming !== undefined) {
+                setUpcomingMatches(data.upcoming)
+            }
+            if (data.finished !== undefined) {
+                setFinishedMatches(data.finished)
+            }
+        }
+        
+        // Listen for feed post updates (from feed page)
         const handleFootballMatchUpdate = (data) => {
-            console.log('⚽ [FootballPage] Real-time match update received via socket, refreshing matches silently...')
-            // Silently refresh matches (no loading spinner, no toast)
+            console.log('⚽ [FootballPage] Feed post update received, refreshing matches silently...')
+            // Only refresh if we're on the page and user might be viewing feed
+            // For Football page, we rely on footballPageUpdate event
             fetchMatches(true)
         }
         
+        // Connection status listeners (only log errors in production)
+        socket.on('connect', () => {
+            if (isDev) {
+                console.log('✅ [FootballPage] Socket connected')
+            }
+        })
+        
+        socket.on('disconnect', () => {
+            // Always log disconnections (important)
+            console.warn('⚠️ [FootballPage] Socket disconnected')
+        })
+        
+        socket.on('connect_error', (error) => {
+            // Always log connection errors (important)
+            console.error('❌ [FootballPage] Socket connection error:', error)
+        })
+        
+        // Listen for football updates
+        socket.on('footballPageUpdate', handleFootballPageUpdate)
         socket.on('footballMatchUpdate', handleFootballMatchUpdate)
         
         return () => {
+            socket.off('footballPageUpdate', handleFootballPageUpdate)
             socket.off('footballMatchUpdate', handleFootballMatchUpdate)
+            socket.off('connect')
+            socket.off('disconnect')
+            socket.off('connect_error')
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [socket])
