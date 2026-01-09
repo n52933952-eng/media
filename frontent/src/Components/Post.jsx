@@ -153,6 +153,7 @@ const showToast = useShowToast()
   
   const [matchesData, setMatchesData] = useState([])
   const [weatherDataArray, setWeatherDataArray] = useState([])
+  const [weatherLoading, setWeatherLoading] = useState(false)
   
   // Parse initial football data (use API time directly, no client-side calculation)
   useEffect(() => {
@@ -173,10 +174,22 @@ const showToast = useShowToast()
   useEffect(() => {
     if (!isWeatherPost || !post?.weatherData) {
       setWeatherDataArray([])
+      setWeatherLoading(false)
       return
     }
     
-    const loadPersonalizedWeather = async () => {
+    // First, show default weather data from post immediately (prevents UI jumping)
+    try {
+      const defaultParsed = JSON.parse(post.weatherData)
+      if (Array.isArray(defaultParsed) && defaultParsed.length > 0) {
+        setWeatherDataArray(defaultParsed)
+      }
+    } catch (e) {
+      console.error('Failed to parse default weather data:', e)
+    }
+    
+    const loadPersonalizedWeather = async (forceRefresh = false) => {
+      setWeatherLoading(true)
       try {
         // First, try to load user's selected cities
         if (user?._id) {
@@ -186,60 +199,68 @@ const showToast = useShowToast()
           })
           const prefsData = await prefsRes.json()
           
-          console.log('🌤️ [Post] User preferences:', prefsData.cities?.length || 0, 'cities')
+          console.log('🌤️ [Post] User preferences:', prefsData.cities?.length || 0, 'cities', prefsData.cities?.map(c => c.name))
           
           // If user has selected cities, fetch weather for those cities
           if (prefsRes.ok && prefsData.cities && prefsData.cities.length > 0) {
+            // If force refresh, skip cache
+            if (!forceRefresh) {
             console.log('🌤️ [Post] Loading personalized weather for', prefsData.cities.length, 'cities:', prefsData.cities.map(c => c.name))
             
-            // Check memory cache first (shared with WeatherPage)
+            // Check memory cache first (shared with WeatherPage) - skip if force refresh
             const cacheKey = JSON.stringify(prefsData.cities.map(c => `${c.name}-${c.country}`).sort())
             const now = Date.now()
             
-            // Check if we have cached data in memory (from WeatherPage)
-            if (window.weatherCache && 
-                window.weatherCache.preferences === cacheKey &&
-                window.weatherCache.timestamp && 
-                (now - window.weatherCache.timestamp) < (5 * 60 * 1000)) {
-              console.log('💾 [Post] Using memory cached weather data')
-              const formattedWeather = window.weatherCache.data.map(w => ({
-                city: w.location?.city,
-                country: w.location?.country,
-                temperature: w.current?.temperature,
-                condition: w.current?.condition?.main,
-                description: w.current?.condition?.description,
-                icon: w.current?.condition?.icon,
-                humidity: w.current?.humidity,
-                windSpeed: w.current?.windSpeed
-              }))
-              setWeatherDataArray(formattedWeather)
-              return
-            }
-            
-            // Check localStorage cache
-            try {
-              const cached = localStorage.getItem(`weatherCache_${cacheKey}`)
-              if (cached) {
-                const parsed = JSON.parse(cached)
-                if (parsed.timestamp && (now - parsed.timestamp) < (5 * 60 * 1000)) {
-                  console.log('💾 [Post] Using localStorage cached weather data')
-                  // Convert from Weather model format to display format
-                  const formattedWeather = parsed.data.map(w => ({
-                    city: w.location?.city,
-                    country: w.location?.country,
-                    temperature: w.current?.temperature,
-                    condition: w.current?.condition?.main,
-                    description: w.current?.condition?.description,
-                    icon: w.current?.condition?.icon,
-                    humidity: w.current?.humidity,
-                    windSpeed: w.current?.windSpeed
-                  }))
-                  setWeatherDataArray(formattedWeather)
-                  return
-                }
+            if (!forceRefresh) {
+              // Check if we have cached data in memory (from WeatherPage)
+              if (window.weatherCache && 
+                  window.weatherCache.preferences === cacheKey &&
+                  window.weatherCache.timestamp && 
+                  (now - window.weatherCache.timestamp) < (5 * 60 * 1000)) {
+                console.log('💾 [Post] Using memory cached weather data')
+                const formattedWeather = window.weatherCache.data.map(w => ({
+                  city: w.location?.city,
+                  country: w.location?.country,
+                  temperature: w.current?.temperature,
+                  condition: w.current?.condition?.main,
+                  description: w.current?.condition?.description,
+                  icon: w.current?.condition?.icon,
+                  humidity: w.current?.humidity,
+                  windSpeed: w.current?.windSpeed
+                }))
+                setWeatherDataArray(formattedWeather)
+                setWeatherLoading(false)
+                return
               }
-            } catch (e) {
-              console.error('Error reading localStorage cache:', e)
+              
+              // Check localStorage cache
+              try {
+                const cached = localStorage.getItem(`weatherCache_${cacheKey}`)
+                if (cached) {
+                  const parsed = JSON.parse(cached)
+                  if (parsed.timestamp && (now - parsed.timestamp) < (5 * 60 * 1000)) {
+                    console.log('💾 [Post] Using localStorage cached weather data')
+                    // Convert from Weather model format to display format
+                    const formattedWeather = parsed.data.map(w => ({
+                      city: w.location?.city,
+                      country: w.location?.country,
+                      temperature: w.current?.temperature,
+                      condition: w.current?.condition?.main,
+                      description: w.current?.condition?.description,
+                      icon: w.current?.condition?.icon,
+                      humidity: w.current?.humidity,
+                      windSpeed: w.current?.windSpeed
+                    }))
+                    setWeatherDataArray(formattedWeather)
+                    setWeatherLoading(false)
+                    return
+                  }
+                }
+              } catch (e) {
+                console.error('Error reading localStorage cache:', e)
+              }
+            } else {
+              console.log('🔄 [Post] Force refresh - skipping cache')
             }
             
             // First try to get cached weather from database
@@ -360,21 +381,39 @@ const showToast = useShowToast()
           }
         }
         
-        // Fallback: Use post data (default cities)
-        const parsed = JSON.parse(post.weatherData)
-        setWeatherDataArray(Array.isArray(parsed) ? parsed : [])
-      } catch (e) {
-        console.error('❌ Failed to parse weather data:', e)
-        setWeatherDataArray([])
+          // Fallback: Use post data (default cities) - already set above
+          // Don't clear it, just keep what we have
+        } catch (e) {
+          console.error('❌ Failed to parse weather data:', e)
+          // Keep default data if personalized fails
+        } finally {
+          setWeatherLoading(false)
+        }
       }
-    }
-    
-    loadPersonalizedWeather()
+      
+      loadPersonalizedWeather()
     
     // Listen for preference updates
     const handlePreferencesUpdate = () => {
       console.log('🌤️ [Post] Preferences updated event received, reloading weather...')
-      loadPersonalizedWeather()
+      // Clear cache and reload with force refresh
+      if (window.weatherCache) {
+        window.weatherCache.data = null
+        window.weatherCache.timestamp = null
+        window.weatherCache.preferences = null
+      }
+      // Clear localStorage cache for all keys
+      try {
+        Object.keys(localStorage).forEach(key => {
+          if (key.startsWith('weatherCache_')) {
+            localStorage.removeItem(key)
+          }
+        })
+      } catch (e) {
+        console.error('Error clearing localStorage cache:', e)
+      }
+      // Force refresh to fetch fresh data
+      loadPersonalizedWeather(true)
     }
     
     window.addEventListener('weatherPreferencesUpdated', handlePreferencesUpdate)
@@ -990,44 +1029,65 @@ const showToast = useShowToast()
   )}
   
   {/* Weather Data Display */}
-  {isWeatherPost && weatherDataArray.length > 0 && (
-    <VStack spacing={2} mt={3} mb={2} align="stretch">
-      <SimpleGrid columns={{ base: 1, md: 2 }} spacing={3}>
-        {weatherDataArray.slice(0, 6).map((weather, index) => (
-          <Box
-            key={index}
-            bg={cardBg}
-            borderRadius="lg"
-            border="1px solid"
-            borderColor={borderColor}
-            p={3}
-          >
-            <Flex align="center" justify="space-between" mb={2}>
-              <Text fontSize="sm" fontWeight="semibold" color={textColor}>
-                {weather.city}, {weather.country}
-              </Text>
-              {weather.icon && (
-                <img 
-                  src={`https://openweathermap.org/img/wn/${weather.icon}@2x.png`} 
-                  alt={weather.condition}
-                  style={{ width: '40px', height: '40px' }}
-                />
-              )}
-            </Flex>
-            <Text fontSize="xl" fontWeight="bold" color={textColor}>
-              {weather.temperature}°C
-            </Text>
-            <Text fontSize="xs" color={secondaryTextColor} textTransform="capitalize" mt={1}>
-              {weather.description}
-            </Text>
-            <Flex justify="space-between" mt={2} fontSize="xs" color={secondaryTextColor}>
-              <Text>💧 {weather.humidity}%</Text>
-              <Text>💨 {weather.windSpeed?.toFixed(1)} m/s</Text>
-            </Flex>
-          </Box>
-        ))}
-      </SimpleGrid>
-    </VStack>
+  {isWeatherPost && (
+    <Box mt={3} mb={2}>
+      {weatherLoading && weatherDataArray.length === 0 ? (
+        <Flex justify="center" py={4}>
+          <Text fontSize="sm" color={secondaryTextColor}>Loading weather data...</Text>
+        </Flex>
+      ) : weatherDataArray.length > 0 ? (
+        <VStack spacing={2} align="stretch">
+          <SimpleGrid columns={{ base: 1, md: 2 }} spacing={3}>
+            {weatherDataArray.slice(0, 6).map((weather, index) => (
+              <Box
+                key={index}
+                bg={cardBg}
+                borderRadius="lg"
+                border="1px solid"
+                borderColor={borderColor}
+                p={3}
+                transition="all 0.2s"
+                _hover={{ shadow: 'md', transform: 'translateY(-2px)' }}
+              >
+                <Flex align="center" justify="space-between" mb={2}>
+                  <Text fontSize="sm" fontWeight="semibold" color={textColor} noOfLines={1}>
+                    {weather.city}, {weather.country}
+                  </Text>
+                  {weather.icon && (
+                    <img 
+                      src={`https://openweathermap.org/img/wn/${weather.icon}@2x.png`} 
+                      alt={weather.condition || 'weather'}
+                      style={{ width: '40px', height: '40px', flexShrink: 0 }}
+                      loading="lazy"
+                    />
+                  )}
+                </Flex>
+                <Text fontSize="xl" fontWeight="bold" color={textColor}>
+                  {weather.temperature}°C
+                </Text>
+                <Text fontSize="xs" color={secondaryTextColor} textTransform="capitalize" mt={1} noOfLines={1}>
+                  {weather.description || weather.condition}
+                </Text>
+                <Flex justify="space-between" mt={2} fontSize="xs" color={secondaryTextColor}>
+                  <HStack spacing={1}>
+                    <Text>💧</Text>
+                    <Text fontWeight="semibold">{weather.humidity}%</Text>
+                  </HStack>
+                  <HStack spacing={1}>
+                    <Text>💨</Text>
+                    <Text fontWeight="semibold">{weather.windSpeed?.toFixed(1) || '0.0'} m/s</Text>
+                  </HStack>
+                </Flex>
+              </Box>
+            ))}
+          </SimpleGrid>
+        </VStack>
+      ) : (
+        <Text fontSize="sm" color={secondaryTextColor} textAlign="center" py={2}>
+          No weather data available
+        </Text>
+      )}
+    </Box>
   )}
   
   {post?.img && !isFootballPost && !isWeatherPost && !isChessPost && (
