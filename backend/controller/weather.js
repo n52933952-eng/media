@@ -412,3 +412,107 @@ export const manualPostWeather = async (req, res) => {
         res.status(500).json({ error: error.message })
     }
 }
+
+// 7. Search cities using OpenWeatherMap Geocoding API
+export const searchCities = async (req, res) => {
+    try {
+        const { query } = req.query
+        
+        if (!query || query.trim().length < 2) {
+            return res.status(400).json({ error: 'Query must be at least 2 characters' })
+        }
+        
+        const apiKey = getWeatherAPIKey()
+        const geocodeUrl = `http://api.openweathermap.org/geo/1.0/direct?q=${encodeURIComponent(query)}&limit=10&appid=${apiKey}`
+        
+        console.log('🌤️ [searchCities] Searching:', query)
+        
+        const response = await fetch(geocodeUrl)
+        const data = await response.json()
+        
+        if (!response.ok) {
+            console.error('🌤️ [searchCities] API Error:', data)
+            return res.status(response.status).json({ error: data.message || 'Failed to search cities' })
+        }
+        
+        // Format response
+        const cities = data.map(city => ({
+            name: city.name,
+            country: city.country,
+            countryCode: city.country,
+            state: city.state || '',
+            lat: city.lat,
+            lon: city.lon
+        }))
+        
+        res.status(200).json({ cities })
+        
+    } catch (error) {
+        console.error('Error searching cities:', error)
+        res.status(500).json({ error: error.message })
+    }
+}
+
+// 8. Save user's weather city preferences
+export const saveWeatherPreferences = async (req, res) => {
+    try {
+        const userId = req.user._id
+        const { cities } = req.body
+        
+        if (!Array.isArray(cities)) {
+            return res.status(400).json({ error: 'Cities must be an array' })
+        }
+        
+        if (cities.length > 10) {
+            return res.status(400).json({ error: 'Maximum 10 cities allowed' })
+        }
+        
+        // Validate city structure
+        const validCities = cities.filter(city => 
+            city.name && 
+            city.country && 
+            typeof city.lat === 'number' && 
+            typeof city.lon === 'number'
+        )
+        
+        const user = await User.findByIdAndUpdate(
+            userId,
+            { weatherCities: validCities },
+            { new: true }
+        ).select('-password')
+        
+        if (!user) {
+            return res.status(404).json({ error: 'User not found' })
+        }
+        
+        console.log(`✅ [saveWeatherPreferences] Saved ${validCities.length} cities for user ${user.username}`)
+        
+        res.status(200).json({ 
+            message: 'Weather preferences saved successfully',
+            cities: validCities
+        })
+        
+    } catch (error) {
+        console.error('Error saving weather preferences:', error)
+        res.status(500).json({ error: error.message })
+    }
+}
+
+// 9. Get user's weather city preferences
+export const getWeatherPreferences = async (req, res) => {
+    try {
+        const userId = req.user._id
+        
+        const user = await User.findById(userId).select('weatherCities')
+        
+        if (!user) {
+            return res.status(404).json({ error: 'User not found' })
+        }
+        
+        res.status(200).json({ cities: user.weatherCities || [] })
+        
+    } catch (error) {
+        console.error('Error getting weather preferences:', error)
+        res.status(500).json({ error: error.message })
+    }
+}

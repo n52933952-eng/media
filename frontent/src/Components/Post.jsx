@@ -169,20 +169,72 @@ const showToast = useShowToast()
     }
   }, [post?.footballData, isFootballPost])
   
-  // Parse weather data
+  // Parse weather data and fetch user's personalized cities
   useEffect(() => {
     if (isWeatherPost && post?.weatherData) {
-      try {
-        const parsed = JSON.parse(post.weatherData)
-        setWeatherDataArray(Array.isArray(parsed) ? parsed : [])
-      } catch (e) {
-        console.error('Failed to parse weather data:', e)
-        setWeatherDataArray([])
+      const loadPersonalizedWeather = async () => {
+        try {
+          // First, try to load user's selected cities
+          if (user?._id) {
+            const baseUrl = import.meta.env.PROD ? window.location.origin : "http://localhost:5000"
+            const prefsRes = await fetch(`${baseUrl}/api/weather/preferences`, {
+              credentials: 'include'
+            })
+            const prefsData = await prefsRes.json()
+            
+            // If user has selected cities, fetch weather for those cities
+            if (prefsRes.ok && prefsData.cities && prefsData.cities.length > 0) {
+              const weatherPromises = prefsData.cities.map(async (city) => {
+                try {
+                  const weatherRes = await fetch(
+                    `${baseUrl}/api/weather/forecast?lat=${city.lat}&lon=${city.lon}`,
+                    { credentials: 'include' }
+                  )
+                  const weatherData = await weatherRes.json()
+                  if (weatherRes.ok && weatherData.weather) {
+                    const w = weatherData.weather
+                    return {
+                      city: w.location?.city || city.name,
+                      country: w.location?.country || city.country,
+                      temperature: w.current?.temperature,
+                      condition: w.current?.condition?.main,
+                      description: w.current?.condition?.description,
+                      icon: w.current?.condition?.icon,
+                      humidity: w.current?.humidity,
+                      windSpeed: w.current?.windSpeed
+                    }
+                  }
+                  return null
+                } catch (error) {
+                  console.error(`Error fetching weather for ${city.name}:`, error)
+                  return null
+                }
+              })
+              
+              const personalizedWeather = await Promise.all(weatherPromises)
+              const validWeather = personalizedWeather.filter(w => w !== null)
+              
+              if (validWeather.length > 0) {
+                setWeatherDataArray(validWeather)
+                return
+              }
+            }
+          }
+          
+          // Fallback: Use post data (default cities)
+          const parsed = JSON.parse(post.weatherData)
+          setWeatherDataArray(Array.isArray(parsed) ? parsed : [])
+        } catch (e) {
+          console.error('Failed to parse weather data:', e)
+          setWeatherDataArray([])
+        }
       }
+      
+      loadPersonalizedWeather()
     } else {
       setWeatherDataArray([])
     }
-  }, [post?.weatherData, isWeatherPost])
+  }, [post?.weatherData, isWeatherPost, user?._id])
   
   // Listen for real-time football match updates
   useEffect(() => {

@@ -7,18 +7,31 @@ import {
     Flex,
     Spinner,
     Button,
+    Input,
+    InputGroup,
+    InputLeftElement,
     useColorModeValue,
     VStack,
     HStack,
     Badge,
-    SimpleGrid
+    SimpleGrid,
+    IconButton,
+    useDisclosure,
+    Modal,
+    ModalOverlay,
+    ModalContent,
+    ModalHeader,
+    ModalBody,
+    ModalCloseButton,
+    ModalFooter
 } from '@chakra-ui/react'
+import { SearchIcon, DeleteIcon, AddIcon } from '@chakra-ui/icons'
 import { UserContext } from '../context/UserContext'
 import { SocketContext } from '../context/SocketContext'
 import useShowToast from '../hooks/useShowToast'
 
 const WeatherPage = () => {
-    const { user } = useContext(UserContext)
+    const { user, setUser } = useContext(UserContext)
     const { socket } = useContext(SocketContext) || {}
     const [weatherData, setWeatherData] = useState([])
     const [loading, setLoading] = useState(true)
@@ -26,12 +39,44 @@ const WeatherPage = () => {
     const [followLoading, setFollowLoading] = useState(false)
     const [weatherAccountId, setWeatherAccountId] = useState(null)
     
+    // City selection states
+    const [selectedCities, setSelectedCities] = useState([])
+    const [searchQuery, setSearchQuery] = useState('')
+    const [searchResults, setSearchResults] = useState([])
+    const [searchLoading, setSearchLoading] = useState(false)
+    const [saving, setSaving] = useState(false)
+    const { isOpen, onOpen, onClose } = useDisclosure()
+    
     const showToast = useShowToast()
     
     const bgColor = useColorModeValue('white', 'gray.800')
     const borderColor = useColorModeValue('gray.200', 'gray.700')
     const textColor = useColorModeValue('gray.800', 'white')
     const secondaryTextColor = useColorModeValue('gray.600', 'gray.400')
+    const cardBg = useColorModeValue('white', '#252b3b')
+    
+    // Load user's saved cities
+    useEffect(() => {
+        const loadPreferences = async () => {
+            if (!user) return
+            
+            try {
+                const baseUrl = import.meta.env.PROD ? window.location.origin : "http://localhost:5000"
+                const res = await fetch(`${baseUrl}/api/weather/preferences`, {
+                    credentials: 'include'
+                })
+                const data = await res.json()
+                
+                if (res.ok && data.cities) {
+                    setSelectedCities(data.cities)
+                }
+            } catch (error) {
+                console.error('Error loading preferences:', error)
+            }
+        }
+        
+        loadPreferences()
+    }, [user])
     
     // Check if user follows Weather account
     useEffect(() => {
@@ -57,8 +102,8 @@ const WeatherPage = () => {
         }
     }, [user])
     
-    // Fetch weather function
-    const fetchWeather = async (silent = false) => {
+    // Fetch weather function - for user's selected cities or default
+    const fetchWeather = async (silent = false, cities = null) => {
         try {
             if (!silent) {
                 console.log('🌤️ [WeatherPage] Starting to fetch weather...')
@@ -67,19 +112,49 @@ const WeatherPage = () => {
             
             const baseUrl = import.meta.env.PROD ? window.location.origin : "http://localhost:5000"
             
-            const res = await fetch(
-                `${baseUrl}/api/weather?limit=10`,
-                { credentials: 'include' }
-            )
-            const data = await res.json()
+            // If user has selected cities, fetch weather for those cities
+            const citiesToFetch = cities || selectedCities
             
-            if (res.ok && data.weather) {
-                if (!silent) console.log('🌤️ [WeatherPage] Setting weather data:', data.weather.length)
-                setWeatherData(data.weather || [])
+            if (citiesToFetch.length > 0) {
+                // Fetch weather for each selected city
+                const weatherPromises = citiesToFetch.map(async (city) => {
+                    try {
+                        const res = await fetch(
+                            `${baseUrl}/api/weather/forecast?lat=${city.lat}&lon=${city.lon}`,
+                            { credentials: 'include' }
+                        )
+                        const data = await res.json()
+                        if (res.ok && data.weather) {
+                            return data.weather
+                        }
+                        return null
+                    } catch (error) {
+                        console.error(`Error fetching weather for ${city.name}:`, error)
+                        return null
+                    }
+                })
+                
+                const results = await Promise.all(weatherPromises)
+                const validResults = results.filter(w => w !== null)
+                
+                if (!silent) console.log('🌤️ [WeatherPage] Setting weather data:', validResults.length)
+                setWeatherData(validResults)
             } else {
-                console.error('🌤️ [WeatherPage] Weather request failed:', data)
-                if (!silent) {
-                    showToast('Error', 'Failed to load weather data', 'error')
+                // No selected cities, fetch default cities
+                const res = await fetch(
+                    `${baseUrl}/api/weather?limit=10`,
+                    { credentials: 'include' }
+                )
+                const data = await res.json()
+                
+                if (res.ok && data.weather) {
+                    if (!silent) console.log('🌤️ [WeatherPage] Setting weather data:', data.weather.length)
+                    setWeatherData(data.weather || [])
+                } else {
+                    console.error('🌤️ [WeatherPage] Weather request failed:', data)
+                    if (!silent) {
+                        showToast('Error', 'Failed to load weather data', 'error')
+                    }
                 }
             }
             
@@ -98,90 +173,101 @@ const WeatherPage = () => {
     
     // Initial fetch on mount
     useEffect(() => {
-        fetchWeather()
+        if (selectedCities.length > 0) {
+            fetchWeather(false, selectedCities)
+        } else {
+            fetchWeather()
+        }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [])
+    }, [selectedCities])
     
-    // Listen for real-time weather updates via socket
-    useEffect(() => {
-        if (!socket) return
+    // Search cities
+    const handleSearch = async (query) => {
+        setSearchQuery(query)
         
-        const isDev = import.meta.env.DEV
-        
-        const handleWeatherPageUpdate = (data) => {
-            if (isDev) {
-                console.log('📥 [WeatherPage] Update received:', {
-                    weather: data.weather?.length || 0
-                })
-            }
-            
-            if (data.weather !== undefined) {
-                setWeatherData(data.weather)
-            }
-        }
-        
-        socket.on('connect', () => {
-            if (isDev) {
-                console.log('✅ [WeatherPage] Socket connected')
-            }
-        })
-        
-        socket.on('disconnect', () => {
-            console.warn('⚠️ [WeatherPage] Socket disconnected')
-        })
-        
-        socket.on('connect_error', (error) => {
-            console.error('❌ [WeatherPage] Socket connection error:', error)
-        })
-        
-        // Listen for weather updates
-        socket.on('weatherPageUpdate', handleWeatherPageUpdate)
-        
-        return () => {
-            socket.off('weatherPageUpdate', handleWeatherPageUpdate)
-            socket.off('connect')
-            socket.off('disconnect')
-            socket.off('connect_error')
-        }
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [socket])
-    
-    // Follow/Unfollow Weather account
-    const handleFollowToggle = async () => {
-        if (!weatherAccountId) {
-            showToast('Error', 'Weather account not found', 'error')
+        if (query.trim().length < 2) {
+            setSearchResults([])
             return
         }
         
+        setSearchLoading(true)
         try {
-            setFollowLoading(true)
-            
+            const baseUrl = import.meta.env.PROD ? window.location.origin : "http://localhost:5000"
             const res = await fetch(
-                `${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/user/follow/${weatherAccountId}`,
-                {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    credentials: 'include'
-                }
+                `${baseUrl}/api/weather/search?query=${encodeURIComponent(query)}`,
+                { credentials: 'include' }
             )
+            const data = await res.json()
+            
+            if (res.ok && data.cities) {
+                setSearchResults(data.cities)
+            }
+        } catch (error) {
+            console.error('Error searching cities:', error)
+            showToast('Error', 'Failed to search cities', 'error')
+        } finally {
+            setSearchLoading(false)
+        }
+    }
+    
+    // Add city to selection
+    const handleAddCity = (city) => {
+        if (selectedCities.length >= 10) {
+            showToast('Info', 'Maximum 10 cities allowed', 'info')
+            return
+        }
+        
+        const exists = selectedCities.some(c => 
+            c.name === city.name && c.country === city.country
+        )
+        
+        if (exists) {
+            showToast('Info', 'City already added', 'info')
+            return
+        }
+        
+        setSelectedCities([...selectedCities, city])
+        setSearchQuery('')
+        setSearchResults([])
+    }
+    
+    // Remove city from selection
+    const handleRemoveCity = (index) => {
+        setSelectedCities(selectedCities.filter((_, i) => i !== index))
+    }
+    
+    // Save preferences
+    const handleSavePreferences = async () => {
+        if (!user) {
+            showToast('Error', 'Please login to save preferences', 'error')
+            return
+        }
+        
+        setSaving(true)
+        try {
+            const baseUrl = import.meta.env.PROD ? window.location.origin : "http://localhost:5000"
+            const res = await fetch(`${baseUrl}/api/weather/preferences`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
+                body: JSON.stringify({ cities: selectedCities })
+            })
             
             const data = await res.json()
             
             if (res.ok) {
-                setIsFollowing(!isFollowing)
-                showToast(
-                    'Success',
-                    isFollowing ? 'Unfollowed Weather channel' : 'Following Weather channel! You\'ll now see updates in your feed',
-                    'success'
-                )
+                showToast('Success', 'Weather preferences saved! Feed will now show weather for your selected cities.', 'success')
+                onClose()
+                // Refresh weather data
+                fetchWeather(false, selectedCities)
             } else {
-                showToast('Error', data.error || 'Failed to update follow status', 'error')
+                showToast('Error', data.error || 'Failed to save preferences', 'error')
             }
         } catch (error) {
-            console.error('Error toggling follow:', error)
-            showToast('Error', 'Failed to update follow status', 'error')
+            console.error('Error saving preferences:', error)
+            showToast('Error', 'Failed to save preferences', 'error')
         } finally {
-            setFollowLoading(false)
+            setSaving(false)
         }
     }
     
@@ -193,7 +279,7 @@ const WeatherPage = () => {
     // Render weather card
     const WeatherCard = ({ weather }) => (
         <Box
-            bg={bgColor}
+            bg={cardBg}
             borderRadius="lg"
             border="1px solid"
             borderColor={borderColor}
@@ -285,22 +371,83 @@ const WeatherPage = () => {
                     <VStack align="start" spacing={0}>
                         <Heading size="lg">Weather Updates</Heading>
                         <Text fontSize="sm" color={secondaryTextColor}>
-                            Live weather from cities around the world
+                            {selectedCities.length > 0 
+                                ? `Showing weather for ${selectedCities.length} selected city${selectedCities.length > 1 ? 'ies' : ''}`
+                                : 'Live weather from cities around the world'
+                            }
                         </Text>
                     </VStack>
                 </HStack>
                 
-                {user && (
-                    <Button
-                        onClick={handleFollowToggle}
-                        isLoading={followLoading}
-                        colorScheme={isFollowing ? 'gray' : 'blue'}
-                        size="sm"
-                    >
-                        {isFollowing ? 'Following' : 'Follow'}
-                    </Button>
-                )}
+                <HStack spacing={2}>
+                    {user && (
+                        <>
+                            <Button
+                                onClick={onOpen}
+                                colorScheme="blue"
+                                size="sm"
+                                leftIcon={<AddIcon />}
+                            >
+                                {selectedCities.length > 0 ? 'Edit Cities' : 'Select Cities'}
+                            </Button>
+                            <Button
+                                onClick={handleFollowToggle}
+                                isLoading={followLoading}
+                                colorScheme={isFollowing ? 'gray' : 'blue'}
+                                size="sm"
+                            >
+                                {isFollowing ? 'Following' : 'Follow'}
+                            </Button>
+                        </>
+                    )}
+                </HStack>
             </Flex>
+            
+            {/* Selected Cities Display */}
+            {selectedCities.length > 0 && (
+                <Box
+                    bg={bgColor}
+                    borderRadius="lg"
+                    border="1px solid"
+                    borderColor={borderColor}
+                    p={4}
+                    mb={4}
+                >
+                    <Text fontSize="sm" fontWeight="semibold" color={textColor} mb={2}>
+                        Your Selected Cities ({selectedCities.length}/10):
+                    </Text>
+                    <Flex flexWrap="wrap" gap={2}>
+                        {selectedCities.map((city, index) => (
+                            <Badge
+                                key={index}
+                                px={3}
+                                py={1}
+                                borderRadius="full"
+                                colorScheme="blue"
+                                fontSize="xs"
+                            >
+                                {city.name}, {city.country}
+                                {user && (
+                                    <IconButton
+                                        aria-label="Remove city"
+                                        icon={<DeleteIcon />}
+                                        size="xs"
+                                        ml={2}
+                                        onClick={() => handleRemoveCity(index)}
+                                        variant="ghost"
+                                        colorScheme="red"
+                                    />
+                                )}
+                            </Badge>
+                        ))}
+                    </Flex>
+                    {selectedCities.length > 0 && (
+                        <Text fontSize="xs" color={secondaryTextColor} mt={2}>
+                            💡 Your feed will show weather for these cities only. Click "Save Preferences" to update.
+                        </Text>
+                    )}
+                </Box>
+            )}
             
             {!user && (
                 <Box
@@ -312,7 +459,7 @@ const WeatherPage = () => {
                     borderColor="blue.200"
                 >
                     <Text color="blue.700" fontSize="sm">
-                        💡 Follow the Weather channel to get live weather updates in your feed!
+                        💡 Login to select your preferred cities and see personalized weather in your feed!
                     </Text>
                 </Box>
             )}
@@ -333,10 +480,138 @@ const WeatherPage = () => {
                         🌤️ No weather data available
                     </Text>
                     <Text fontSize="sm" color={secondaryTextColor}>
-                        Weather updates will appear here once fetched
+                        {selectedCities.length > 0 
+                            ? 'Select cities and click "Save Preferences" to see weather'
+                            : 'Weather updates will appear here once fetched'
+                        }
                     </Text>
                 </Box>
             )}
+            
+            {/* City Selection Modal */}
+            <Modal isOpen={isOpen} onClose={onClose} size="lg">
+                <ModalOverlay />
+                <ModalContent>
+                    <ModalHeader>Select Your Cities</ModalHeader>
+                    <ModalCloseButton />
+                    <ModalBody>
+                        <VStack spacing={4} align="stretch">
+                            <Box>
+                                <Text fontSize="sm" color={secondaryTextColor} mb={2}>
+                                    Search and select cities to see weather for your location (e.g., Amman, Jordan)
+                                </Text>
+                                <InputGroup>
+                                    <InputLeftElement pointerEvents="none">
+                                        <SearchIcon color="gray.400" />
+                                    </InputLeftElement>
+                                    <Input
+                                        placeholder="Search cities (e.g., Amman, Jordan)"
+                                        value={searchQuery}
+                                        onChange={(e) => handleSearch(e.target.value)}
+                                        bg={useColorModeValue('gray.50', '#2d2d2d')}
+                                    />
+                                </InputGroup>
+                            </Box>
+                            
+                            {/* Search Results */}
+                            {searchLoading && (
+                                <Flex justify="center" py={4}>
+                                    <Spinner size="sm" />
+                                </Flex>
+                            )}
+                            
+                            {searchResults.length > 0 && (
+                                <Box maxH="200px" overflowY="auto">
+                                    <VStack align="stretch" spacing={2}>
+                                        {searchResults.map((city, index) => (
+                                            <Flex
+                                                key={index}
+                                                p={2}
+                                                borderRadius="md"
+                                                border="1px solid"
+                                                borderColor={borderColor}
+                                                justify="space-between"
+                                                align="center"
+                                                _hover={{ bg: useColorModeValue('gray.50', 'gray.700') }}
+                                            >
+                                                <VStack align="start" spacing={0}>
+                                                    <Text fontSize="sm" fontWeight="semibold" color={textColor}>
+                                                        {city.name}
+                                                    </Text>
+                                                    <Text fontSize="xs" color={secondaryTextColor}>
+                                                        {city.state && `${city.state}, `}{city.country}
+                                                    </Text>
+                                                </VStack>
+                                                <Button
+                                                    size="xs"
+                                                    colorScheme="blue"
+                                                    onClick={() => handleAddCity(city)}
+                                                    isDisabled={selectedCities.length >= 10}
+                                                >
+                                                    Add
+                                                </Button>
+                                            </Flex>
+                                        ))}
+                                    </VStack>
+                                </Box>
+                            )}
+                            
+                            {/* Selected Cities */}
+                            {selectedCities.length > 0 && (
+                                <Box>
+                                    <Text fontSize="sm" fontWeight="semibold" color={textColor} mb={2}>
+                                        Selected Cities ({selectedCities.length}/10):
+                                    </Text>
+                                    <VStack align="stretch" spacing={2}>
+                                        {selectedCities.map((city, index) => (
+                                            <Flex
+                                                key={index}
+                                                p={2}
+                                                borderRadius="md"
+                                                border="1px solid"
+                                                borderColor={borderColor}
+                                                justify="space-between"
+                                                align="center"
+                                            >
+                                                <Text fontSize="sm" color={textColor}>
+                                                    {city.name}, {city.country}
+                                                </Text>
+                                                <IconButton
+                                                    aria-label="Remove city"
+                                                    icon={<DeleteIcon />}
+                                                    size="sm"
+                                                    onClick={() => handleRemoveCity(index)}
+                                                    colorScheme="red"
+                                                    variant="ghost"
+                                                />
+                                            </Flex>
+                                        ))}
+                                    </VStack>
+                                </Box>
+                            )}
+                            
+                            {searchQuery.length >= 2 && searchResults.length === 0 && !searchLoading && (
+                                <Text fontSize="sm" color={secondaryTextColor} textAlign="center" py={4}>
+                                    No cities found. Try a different search term.
+                                </Text>
+                            )}
+                        </VStack>
+                    </ModalBody>
+                    <ModalFooter>
+                        <Button variant="ghost" mr={3} onClick={onClose}>
+                            Cancel
+                        </Button>
+                        <Button
+                            colorScheme="blue"
+                            onClick={handleSavePreferences}
+                            isLoading={saving}
+                            isDisabled={selectedCities.length === 0}
+                        >
+                            Save Preferences
+                        </Button>
+                    </ModalFooter>
+                </ModalContent>
+            </Modal>
         </Container>
     )
 }

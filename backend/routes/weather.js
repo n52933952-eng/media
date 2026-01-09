@@ -4,7 +4,10 @@ import {
     fetchWeatherForecast,
     getWeather,
     manualFetchWeather,
-    manualPostWeather
+    manualPostWeather,
+    searchCities,
+    saveWeatherPreferences,
+    getWeatherPreferences
 } from '../controller/weather.js'
 import protectRoute from '../middlware/protectRoute.js'
 
@@ -24,5 +27,14 @@ router.post('/fetch/manual', manualFetchWeather)
 
 // Manual trigger to post weather to feed (for testing)
 router.post('/post/manual', manualPostWeather)
+
+// Search cities (for user selection)
+router.get('/search', searchCities)
+
+// Save user's weather city preferences
+router.post('/preferences', protectRoute, saveWeatherPreferences)
+
+// Get user's weather city preferences
+router.get('/preferences', protectRoute, getWeatherPreferences)
 
 export default router

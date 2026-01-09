@@ -62,6 +62,17 @@ const UserSchema = mongoose.Schema({
     instagram:{
         type:String,
         default:""
+    },
+
+    weatherCities:{
+        type:[{
+            name: String,
+            country: String,
+            countryCode: String,
+            lat: Number,
+            lon: Number
+        }],
+        default:[]
     }
 
 },{timestamps:true})

@@ -522,137 +522,159 @@ const SuggestedChannels = ({ onUserFollowed }) => {
                     {/* Compact Grid: Football & Weather */}
                     <SimpleGrid columns={2} spacing={2} mb={3}>
                         {/* Football Channel */}
-                        <Box
-                            bg={cardBg}
-                            borderRadius="md"
-                            p={2}
-                            border="1px solid"
-                            borderColor={borderColor}
-                            _hover={{ bg: hoverBg, borderColor: 'blue.300' }}
-                            transition="all 0.2s"
-                            cursor="pointer"
-                            onClick={() => navigate('/football')}
-                            position="relative"
-                        >
-                            <VStack spacing={1}>
-                                <FootballIcon size="32px" />
-                                <Text fontSize="2xs" fontWeight="semibold" color={textColor} textAlign="center" noOfLines={1}>
-                                    Football
-                                </Text>
-                                <Text fontSize="2xs" color={secondaryTextColor} textAlign="center" noOfLines={1}>
-                                    {footballAccount.followers?.length || 0} followers
-                                </Text>
-                                {isFollowing && (
-                                    <Box
-                                        position="absolute"
-                                        top={1}
-                                        right={1}
-                                        w="8px"
-                                        h="8px"
-                                        bg="green.500"
-                                        borderRadius="full"
-                                        border="2px solid"
-                                        borderColor={cardBg}
-                                    />
-                                )}
-                            </VStack>
-                        </Box>
-
-                        {/* Weather Channel */}
-                        <Box
-                            bg={cardBg}
-                            borderRadius="md"
-                            p={2}
-                            border="1px solid"
-                            borderColor={borderColor}
-                            _hover={{ bg: hoverBg, borderColor: 'blue.300' }}
-                            transition="all 0.2s"
-                            cursor="pointer"
-                            onClick={() => {
-                                if (weatherAccount) {
-                                    navigate(`/weather`)
-                                } else {
-                                    showToast('Info', 'Weather feature coming soon!', 'info')
-                                }
-                            }}
-                            position="relative"
-                            opacity={weatherAccount ? 1 : 0.7}
-                        >
-                            <VStack spacing={1}>
-                                <Text fontSize="2xl">🌤️</Text>
-                                <Text fontSize="2xs" fontWeight="semibold" color={textColor} textAlign="center" noOfLines={1}>
-                                    Weather
-                                </Text>
-                                <Text fontSize="2xs" color={secondaryTextColor} textAlign="center" noOfLines={1}>
-                                    {weatherAccount ? `${weatherAccount.followers?.length || 0} followers` : 'Coming soon'}
-                                </Text>
-                                {isFollowingWeather && weatherAccount && (
-                                    <Box
-                                        position="absolute"
-                                        top={1}
-                                        right={1}
-                                        w="8px"
-                                        h="8px"
-                                        bg="green.500"
-                                        borderRadius="full"
-                                        border="2px solid"
-                                        borderColor={cardBg}
-                                    />
-                                )}
-                            </VStack>
-                        </Box>
-                    </SimpleGrid>
-                    
-                    {/* Follow Buttons */}
-                    <VStack spacing={2} mt={2}>
-                        {/* Football Follow Button */}
-                        {isFollowing ? (
-                            <Button
-                                onClick={handleFollowToggle}
-                                isLoading={followLoading}
-                                colorScheme="gray"
-                                size="sm"
-                                w="full"
+                        <VStack spacing={2} align="stretch">
+                            <Box
+                                bg={cardBg}
+                                borderRadius="md"
+                                p={2}
+                                border="1px solid"
+                                borderColor={borderColor}
+                                _hover={{ bg: hoverBg, borderColor: 'blue.300' }}
+                                transition="all 0.2s"
+                                cursor="pointer"
+                                onClick={() => navigate('/football')}
+                                position="relative"
                             >
-                                Unfollow Football
-                            </Button>
-                        ) : (
-                            <Button
-                                onClick={handleFollowToggle}
-                                isLoading={followLoading}
-                                colorScheme="blue"
-                                size="sm"
-                                w="full"
-                            >
-                                Follow Football
-                            </Button>
-                        )}
-                        
-                        {/* Weather Follow Button */}
-                        {weatherAccount && (
-                            isFollowingWeather ? (
+                                <VStack spacing={1}>
+                                    <FootballIcon size="32px" />
+                                    <Text fontSize="2xs" fontWeight="semibold" color={textColor} textAlign="center" noOfLines={1}>
+                                        Football
+                                    </Text>
+                                    <Text fontSize="2xs" color={secondaryTextColor} textAlign="center" noOfLines={1}>
+                                        {footballAccount.followers?.length || 0} followers
+                                    </Text>
+                                    {isFollowing && (
+                                        <Box
+                                            position="absolute"
+                                            top={1}
+                                            right={1}
+                                            w="8px"
+                                            h="8px"
+                                            bg="green.500"
+                                            borderRadius="full"
+                                            border="2px solid"
+                                            borderColor={cardBg}
+                                        />
+                                    )}
+                                </VStack>
+                            </Box>
+                            
+                            {/* Football Follow Button */}
+                            {isFollowing ? (
                                 <Button
-                                    onClick={() => handleWeatherFollowToggle()}
-                                    isLoading={weatherFollowLoading}
+                                    onClick={(e) => {
+                                        e.stopPropagation()
+                                        handleFollowToggle()
+                                    }}
+                                    isLoading={followLoading}
                                     colorScheme="gray"
                                     size="sm"
                                     w="full"
                                 >
-                                    Unfollow Weather
+                                    Unfollow
                                 </Button>
                             ) : (
                                 <Button
-                                    onClick={() => handleWeatherFollowToggle()}
-                                    isLoading={weatherFollowLoading}
+                                    onClick={(e) => {
+                                        e.stopPropagation()
+                                        handleFollowToggle()
+                                    }}
+                                    isLoading={followLoading}
                                     colorScheme="blue"
                                     size="sm"
                                     w="full"
                                 >
-                                    Follow Weather
+                                    Follow
                                 </Button>
-                            )
-                        )}
-                    </VStack>
+                            )}
+                        </VStack>
+
+                        {/* Weather Channel */}
+                        <VStack spacing={2} align="stretch">
+                            <Box
+                                bg={cardBg}
+                                borderRadius="md"
+                                p={2}
+                                border="1px solid"
+                                borderColor={borderColor}
+                                _hover={{ bg: hoverBg, borderColor: 'blue.300' }}
+                                transition="all 0.2s"
+                                cursor="pointer"
+                                onClick={() => {
+                                    if (weatherAccount) {
+                                        navigate(`/weather`)
+                                    } else {
+                                        showToast('Info', 'Weather feature coming soon!', 'info')
+                                    }
+                                }}
+                                position="relative"
+                                opacity={weatherAccount ? 1 : 0.7}
+                            >
+                                <VStack spacing={1}>
+                                    <Text fontSize="2xl">🌤️</Text>
+                                    <Text fontSize="2xs" fontWeight="semibold" color={textColor} textAlign="center" noOfLines={1}>
+                                        Weather
+                                    </Text>
+                                    <Text fontSize="2xs" color={secondaryTextColor} textAlign="center" noOfLines={1}>
+                                        {weatherAccount ? `${weatherAccount.followers?.length || 0} followers` : 'Coming soon'}
+                                    </Text>
+                                    {isFollowingWeather && weatherAccount && (
+                                        <Box
+                                            position="absolute"
+                                            top={1}
+                                            right={1}
+                                            w="8px"
+                                            h="8px"
+                                            bg="green.500"
+                                            borderRadius="full"
+                                            border="2px solid"
+                                            borderColor={cardBg}
+                                        />
+                                    )}
+                                </VStack>
+                            </Box>
+                            
+                            {/* Weather Follow Button */}
+                            {weatherAccount ? (
+                                isFollowingWeather ? (
+                                    <Button
+                                        onClick={(e) => {
+                                            e.stopPropagation()
+                                            handleWeatherFollowToggle()
+                                        }}
+                                        isLoading={weatherFollowLoading}
+                                        colorScheme="gray"
+                                        size="sm"
+                                        w="full"
+                                    >
+                                        Unfollow
+                                    </Button>
+                                ) : (
+                                    <Button
+                                        onClick={(e) => {
+                                            e.stopPropagation()
+                                            handleWeatherFollowToggle()
+                                        }}
+                                        isLoading={weatherFollowLoading}
+                                        colorScheme="blue"
+                                        size="sm"
+                                        w="full"
+                                    >
+                                        Follow
+                                    </Button>
+                                )
+                            ) : (
+                                <Button
+                                    size="sm"
+                                    w="full"
+                                    isDisabled
+                                    opacity={0.5}
+                                >
+                                    Coming Soon
+                                </Button>
+                            )}
+                        </VStack>
+                    </SimpleGrid>
                     
                     {/* Live Stream Channels */}
                     {channels.length > 0 && (
