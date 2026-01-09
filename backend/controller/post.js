@@ -304,13 +304,15 @@ export const updatePost = async(req,res) => {
                         if (isContributorEdit) {
                             try {
                                 const { createNotification } = await import('./notification.js')
-                                await createNotification(post.postedBy, 'post_edit', userId, {
-                                    postId: post._id,
+                                // Get post owner ID - after populate, postedBy might be an object
+                                const postOwnerId = post.postedBy._id?.toString() || post.postedBy.toString()
+                                await createNotification(postOwnerId, 'post_edit', userId.toString(), {
+                                    postId: post._id.toString(),
                                     postText: post.text?.substring(0, 50) || 'your collaborative post'
                                 })
-                                console.log(`📬 [updatePost] Created edit notification for post owner`)
+                                console.log(`📬 [updatePost] Created edit notification for post owner ${postOwnerId}`)
                             } catch (err) {
-                                console.error('Error creating edit notification:', err)
+                                console.error('❌ [updatePost] Error creating edit notification:', err)
                             }
                         }
                         
@@ -321,7 +323,7 @@ export const updatePost = async(req,res) => {
                             const recipients = [] // Socket IDs to receive the update
                             
                             // 1. Add post owner (always include them)
-                            const postOwnerId = post.postedBy.toString()
+                            const postOwnerId = post.postedBy._id?.toString() || post.postedBy.toString()
                             const ownerSocketData = userSocketMap[postOwnerId]
                             if (ownerSocketData) {
                                 recipients.push(ownerSocketData.socketId)
@@ -343,7 +345,7 @@ export const updatePost = async(req,res) => {
                             }
                             
                             // 3. Add followers
-                            const poster = await User.findById(post.postedBy).select('followers')
+                            const poster = await User.findById(postOwnerId).select('followers')
                             if (poster && poster.followers && poster.followers.length > 0) {
                                 poster.followers.forEach(followerId => {
                                     const followerIdStr = followerId.toString()
@@ -434,7 +436,7 @@ export const updatePost = async(req,res) => {
             }
             
             // 3. Add followers
-            const poster = await User.findById(post.postedBy).select('followers')
+            const poster = await User.findById(postOwnerId).select('followers')
             if (poster && poster.followers && poster.followers.length > 0) {
                 poster.followers.forEach(followerId => {
                     const followerIdStr = followerId.toString()
@@ -1358,6 +1360,63 @@ export const addContributorToPost = async (req, res) => {
             console.log(`📬 [addContributorToPost] Created collaboration notification for user ${contributorId}`)
         } catch (err) {
             console.error('❌ [addContributorToPost] Error creating collaboration notification:', err)
+        }
+
+        // Emit real-time post update to post owner, all contributors, and followers
+        const io = getIO()
+        if (io) {
+            const userSocketMap = getUserSocketMap()
+            const recipients = [] // Socket IDs to receive the update
+            
+            // 1. Add post owner (always include them)
+            const postOwnerId = post.postedBy._id?.toString() || post.postedBy.toString()
+            const ownerSocketData = userSocketMap[postOwnerId]
+            if (ownerSocketData) {
+                recipients.push(ownerSocketData.socketId)
+                console.log(`📤 [addContributorToPost] Adding post owner ${postOwnerId} to postUpdated recipients`)
+            }
+            
+            // 2. Add all contributors (including the newly added one)
+            if (post.contributors && post.contributors.length > 0) {
+                post.contributors.forEach(contributor => {
+                    const contributorId = (contributor._id || contributor).toString()
+                    if (contributorId !== postOwnerId) { // Don't duplicate owner
+                        const contributorSocketData = userSocketMap[contributorId]
+                        if (contributorSocketData) {
+                            recipients.push(contributorSocketData.socketId)
+                            console.log(`📤 [addContributorToPost] Adding contributor ${contributorId} to postUpdated recipients`)
+                        }
+                    }
+                })
+            }
+            
+            // 3. Add followers
+            const poster = await User.findById(post.postedBy).select('followers')
+            if (poster && poster.followers && poster.followers.length > 0) {
+                poster.followers.forEach(followerId => {
+                    const followerIdStr = followerId.toString()
+                    // Don't duplicate owner/contributors
+                    if (followerIdStr !== postOwnerId && 
+                        !post.contributors?.some(c => {
+                            const cId = (c._id || c).toString()
+                            return cId === followerIdStr
+                        })) {
+                        const followerSocketData = userSocketMap[followerIdStr]
+                        if (followerSocketData) {
+                            recipients.push(followerSocketData.socketId)
+                        }
+                    }
+                })
+            }
+            
+            // Emit to all recipients (owner, contributors, followers)
+            const uniqueRecipients = [...new Set(recipients)] // Remove duplicates
+            if (uniqueRecipients.length > 0) {
+                uniqueRecipients.forEach(socketId => {
+                    io.to(socketId).emit("postUpdated", { postId: post._id.toString(), post })
+                })
+                console.log(`📤 [addContributorToPost] Emitted postUpdated to ${uniqueRecipients.length} recipients (owner, contributors, followers)`)
+            }
         }
 
         res.status(200).json({
