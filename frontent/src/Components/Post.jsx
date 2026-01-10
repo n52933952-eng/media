@@ -1533,7 +1533,11 @@ const showToast = useShowToast()
             username: c.username
           })), null, 2))
           
-          // Force immediate state update with completely new array reference
+          // IMMEDIATELY update local state - this ensures the owner sees the update right away
+          console.log('🔥🔥🔥 [Post] UPDATING LOCAL STATE IMMEDIATELY')
+          setLocalPost({ ...updatedPost })
+          
+          // Also update feed state if post is in feed
           setFollowPost(prevPosts => {
             console.log('🔥🔥🔥 [Post] ============ UPDATING FEED STATE ============')
             console.log('🔥 [Post] Current feed has', prevPosts.length, 'posts')
@@ -1564,10 +1568,7 @@ const showToast = useShowToast()
             if (foundPost) {
               console.log('🔥🔥🔥 [Post] POST REPLACED IN FEED! Returning new array...')
             } else {
-              console.error('❌❌❌ [Post] POST NOT FOUND IN FEED!')
-              console.log('🔄 [Post] Updating local post state instead...')
-              // If post not in feed, update local post state
-              setLocalPost(updatedPost)
+              console.error('❌❌❌ [Post] POST NOT FOUND IN FEED! (But local state already updated)')
             }
             console.log('🔥 [Post] Returning array of length:', newPosts.length)
             
@@ -1619,14 +1620,15 @@ const showToast = useShowToast()
       onContributorRemoved={(updatedPost) => {
         console.log('🔥 [Post] onContributorRemoved called')
         if (updatedPost) {
-          // Update post in feed
+          // IMMEDIATELY update local state - ensures owner sees update right away
+          console.log('🔥 [Post] UPDATING LOCAL STATE IMMEDIATELY after removal')
+          setLocalPost({ ...updatedPost })
+          
+          // Also update feed state if post is in feed
           setFollowPost(prev => {
             const updated = prev.map(p => p._id === post._id ? updatedPost : p)
             const foundInFeed = prev.some(p => p._id === post._id)
-            if (!foundInFeed) {
-              console.log('🔄 [Post] Post not in feed, updating local state')
-              setLocalPost(updatedPost)
-            }
+            console.log(foundInFeed ? '✅ [Post] Updated in feed' : '⚠️ [Post] Not in feed (but local state updated)')
             return updated
           })
           console.log('✅ [Post] Updated post after removing contributor:', updatedPost.contributors?.length)
@@ -1639,13 +1641,13 @@ const showToast = useShowToast()
           .then(res => res.json())
           .then(data => {
             if (data.post) {
+              // Update local state immediately
+              console.log('🔄 [Post] Fetched post, updating local state')
+              setLocalPost({ ...data.post })
+              
+              // Also update feed if post is in it
               setFollowPost(prev => {
                 const updated = prev.map(p => p._id === post._id ? data.post : p)
-                const foundInFeed = prev.some(p => p._id === post._id)
-                if (!foundInFeed) {
-                  console.log('🔄 [Post] Post not in feed, updating local state')
-                  setLocalPost(data.post)
-                }
                 return updated
               })
             }
