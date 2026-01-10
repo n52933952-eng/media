@@ -16,14 +16,19 @@ import {
     Badge,
     SimpleGrid,
     IconButton,
-    useDisclosure,
-    Modal,
-    ModalOverlay,
-    ModalContent,
-    ModalHeader,
-    ModalBody,
-    ModalCloseButton,
-    ModalFooter
+    Table,
+    Thead,
+    Tbody,
+    Tr,
+    Th,
+    Td,
+    TableContainer,
+    Checkbox,
+    Divider,
+    Alert,
+    AlertIcon,
+    AlertTitle,
+    AlertDescription
 } from '@chakra-ui/react'
 import { SearchIcon, DeleteIcon, AddIcon } from '@chakra-ui/icons'
 import { UserContext } from '../context/UserContext'
@@ -59,7 +64,6 @@ const WeatherPage = () => {
     const [searchResults, setSearchResults] = useState([])
     const [searchLoading, setSearchLoading] = useState(false)
     const [saving, setSaving] = useState(false)
-    const { isOpen, onOpen, onClose } = useDisclosure()
     
     const showToast = useShowToast()
     
@@ -542,342 +546,267 @@ const WeatherPage = () => {
         return `https://openweathermap.org/img/wn/${iconCode}@2x.png`
     }
     
-    // Render weather card
-    const WeatherCard = ({ weather }) => (
-        <Box
-            bg={cardBg}
-            borderRadius="lg"
-            border="1px solid"
-            borderColor={borderColor}
-            p={4}
-            mb={3}
-            _hover={{ shadow: 'md' }}
-            transition="all 0.2s"
-        >
-            <Flex align="center" justify="space-between" mb={3}>
-                <VStack align="start" spacing={0}>
-                    <Text fontSize="lg" fontWeight="bold" color={textColor}>
-                        {weather.location?.city}, {weather.location?.country}
-                    </Text>
-                    <Text fontSize="xs" color={secondaryTextColor}>
-                        Updated {new Date(weather.lastUpdated).toLocaleString('en-US', { 
-                            hour: '2-digit', 
-                            minute: '2-digit',
-                            month: 'short',
-                            day: 'numeric'
-                        })}
-                    </Text>
-                </VStack>
-            </Flex>
-            
-            <Flex align="center" justify="space-between" mb={4}>
-                <HStack spacing={3}>
-                    {weather.current?.condition?.icon && (
-                        <img 
-                            src={getWeatherIcon(weather.current.condition.icon)} 
-                            alt={weather.current.condition.main}
-                            style={{ width: '60px', height: '60px' }}
-                        />
-                    )}
-                    <VStack align="start" spacing={0}>
-                        <Text fontSize="3xl" fontWeight="bold" color={textColor}>
-                            {weather.current?.temperature}°C
-                        </Text>
-                        <Text fontSize="sm" color={secondaryTextColor} textTransform="capitalize">
-                            {weather.current?.condition?.description}
-                        </Text>
-                    </VStack>
-                </HStack>
-            </Flex>
-            
-            <SimpleGrid columns={2} spacing={4} mt={4} pt={4} borderTop="1px solid" borderColor={borderColor}>
-                <VStack align="start" spacing={1}>
-                    <Text fontSize="xs" color={secondaryTextColor}>Feels like</Text>
-                    <Text fontSize="md" fontWeight="semibold" color={textColor}>
-                        {weather.current?.feelsLike}°C
-                    </Text>
-                </VStack>
-                <VStack align="start" spacing={1}>
-                    <Text fontSize="xs" color={secondaryTextColor}>Humidity</Text>
-                    <Text fontSize="md" fontWeight="semibold" color={textColor}>
-                        {weather.current?.humidity}%
-                    </Text>
-                </VStack>
-                <VStack align="start" spacing={1}>
-                    <Text fontSize="xs" color={secondaryTextColor}>Wind Speed</Text>
-                    <Text fontSize="md" fontWeight="semibold" color={textColor}>
-                        {weather.current?.windSpeed?.toFixed(1)} m/s
-                    </Text>
-                </VStack>
-                <VStack align="start" spacing={1}>
-                    <Text fontSize="xs" color={secondaryTextColor}>Pressure</Text>
-                    <Text fontSize="md" fontWeight="semibold" color={textColor}>
-                        {weather.current?.pressure} hPa
-                    </Text>
-                </VStack>
-            </SimpleGrid>
-            
-            {weather.current?.visibility && (
-                <Box mt={4} pt={4} borderTop="1px solid" borderColor={borderColor}>
-                    <Text fontSize="xs" color={secondaryTextColor}>Visibility</Text>
-                    <Text fontSize="md" fontWeight="semibold" color={textColor}>
-                        {weather.current.visibility} km
-                    </Text>
-                </Box>
-            )}
-        </Box>
-    )
-    
     return (
-        <Container maxW="800px" py={6}>
+        <Container maxW="1200px" py={6}>
             {/* Header */}
-            <Flex align="center" justify="space-between" mb={6}>
-                <HStack spacing={3}>
-                    <Text fontSize="4xl">🌤️</Text>
-                    <VStack align="start" spacing={0}>
-                        <Heading size="lg">Weather Updates</Heading>
-                        <Text fontSize="sm" color={secondaryTextColor}>
-                            {selectedCities.length > 0 
-                                ? `Showing weather for ${selectedCities.length} selected city${selectedCities.length > 1 ? 'ies' : ''}`
-                                : 'Live weather from cities around the world'
-                            }
-                        </Text>
-                    </VStack>
-                </HStack>
-                
-                <HStack spacing={2}>
+            <VStack spacing={6} align="stretch">
+                <Flex align="center" justify="space-between">
+                    <HStack spacing={3}>
+                        <Text fontSize="4xl">🌤️</Text>
+                        <VStack align="start" spacing={0}>
+                            <Heading size="lg">World Temperatures — Weather Around The World</Heading>
+                            <Text fontSize="sm" color={secondaryTextColor}>
+                                Select your cities to see personalized weather in your feed
+                            </Text>
+                        </VStack>
+                    </HStack>
+                    
                     {user && (
-                        <>
-                            <Button
-                                onClick={onOpen}
-                                colorScheme="blue"
-                                size="sm"
-                                leftIcon={<AddIcon />}
-                            >
-                                {selectedCities.length > 0 ? 'Edit Cities' : 'Select Cities'}
-                            </Button>
-                            <Button
-                                onClick={handleFollowToggle}
-                                isLoading={followLoading}
-                                colorScheme={isFollowing ? 'gray' : 'blue'}
-                                size="sm"
-                            >
-                                {isFollowing ? 'Following' : 'Follow'}
-                            </Button>
-                        </>
+                        <Button
+                            onClick={handleFollowToggle}
+                            isLoading={followLoading}
+                            colorScheme={isFollowing ? 'gray' : 'blue'}
+                            size="md"
+                        >
+                            {isFollowing ? 'Following' : 'Follow Weather'}
+                        </Button>
                     )}
-                </HStack>
-            </Flex>
-            
-            {/* Selected Cities Display */}
-            {selectedCities.length > 0 && (
-                <Box
-                    bg={bgColor}
-                    borderRadius="lg"
-                    border="1px solid"
-                    borderColor={borderColor}
-                    p={4}
-                    mb={4}
-                >
-                    <Text fontSize="sm" fontWeight="semibold" color={textColor} mb={2}>
-                        Your Selected Cities ({selectedCities.length}/10):
-                    </Text>
-                    <Flex flexWrap="wrap" gap={2}>
-                        {selectedCities.map((city, index) => (
-                            <Badge
-                                key={index}
-                                px={3}
-                                py={1}
-                                borderRadius="full"
-                                colorScheme="blue"
-                                fontSize="xs"
-                            >
-                                {city.name}, {city.country}
-                                {user && (
-                                    <IconButton
-                                        aria-label="Remove city"
-                                        icon={<DeleteIcon />}
-                                        size="xs"
-                                        ml={2}
-                                        onClick={() => handleRemoveCity(index)}
-                                        variant="ghost"
-                                        colorScheme="red"
-                                    />
-                                )}
-                            </Badge>
-                        ))}
-                    </Flex>
-                    {selectedCities.length > 0 && (
-                        <Text fontSize="xs" color={secondaryTextColor} mt={2}>
-                            💡 Your feed will show weather for these cities only. Click "Save Preferences" to update.
-                        </Text>
-                    )}
-                </Box>
-            )}
-            
-            {!user && (
-                <Box
-                    bg="blue.50"
-                    borderRadius="lg"
-                    p={4}
-                    mb={4}
-                    border="1px solid"
-                    borderColor="blue.200"
-                >
-                    <Text color="blue.700" fontSize="sm">
-                        💡 Login to select your preferred cities and see personalized weather in your feed!
-                    </Text>
-                </Box>
-            )}
-            
-            {loading ? (
-                <Flex justify="center" py={10}>
-                    <Spinner size="xl" />
                 </Flex>
-            ) : weatherData.length > 0 ? (
-                <VStack align="stretch" spacing={0}>
-                    {weatherData.map((weather, index) => (
-                        <WeatherCard key={weather._id || index} weather={weather} />
-                    ))}
-                </VStack>
-            ) : (
-                <Box textAlign="center" py={10}>
-                    <Text fontSize="lg" color={secondaryTextColor} mb={2}>
-                        🌤️ No weather data available
-                    </Text>
-                    <Text fontSize="sm" color={secondaryTextColor}>
-                        {selectedCities.length > 0 
-                            ? 'Select cities and click "Save Preferences" to see weather'
-                            : 'Weather updates will appear here once fetched'
-                        }
-                    </Text>
-                </Box>
-            )}
-            
-            {/* City Selection Modal */}
-            <Modal isOpen={isOpen} onClose={onClose} size="lg">
-                <ModalOverlay />
-                <ModalContent>
-                    <ModalHeader>Select Your Cities</ModalHeader>
-                    <ModalCloseButton />
-                    <ModalBody>
-                        <VStack spacing={4} align="stretch">
-                            <Box>
-                                <Text fontSize="sm" color={secondaryTextColor} mb={2}>
-                                    Search and select cities to see weather for your location (e.g., Amman, Jordan)
-                                </Text>
-                                <InputGroup>
-                                    <InputLeftElement pointerEvents="none">
-                                        <SearchIcon color="gray.400" />
-                                    </InputLeftElement>
-                                    <Input
-                                        placeholder="Search cities (e.g., Amman, Jordan)"
-                                        value={searchQuery}
-                                        onChange={(e) => handleSearch(e.target.value)}
-                                        bg={useColorModeValue('gray.50', '#2d2d2d')}
-                                    />
-                                </InputGroup>
-                            </Box>
+                
+                {/* Onboarding Alert */}
+                {user && isFollowing && selectedCities.length === 0 && (
+                    <Alert status="info" borderRadius="md">
+                        <AlertIcon />
+                        <Box>
+                            <AlertTitle>Select your cities!</AlertTitle>
+                            <AlertDescription>
+                                Search and select cities below to see personalized weather in your feed
+                            </AlertDescription>
+                        </Box>
+                    </Alert>
+                )}
+                
+                {!user && (
+                    <Alert status="info" borderRadius="md">
+                        <AlertIcon />
+                        <AlertDescription>
+                            Login to follow Weather and select your preferred cities
+                        </AlertDescription>
+                    </Alert>
+                )}
+                
+                {/* Search Box */}
+                {user && (
+                    <Box
+                        bg={bgColor}
+                        borderRadius="lg"
+                        border="1px solid"
+                        borderColor={borderColor}
+                        p={4}
+                    >
+                        <VStack spacing={3} align="stretch">
+                            <Text fontWeight="semibold" fontSize="sm">Search & Select Cities (Max 10)</Text>
+                            <InputGroup>
+                                <InputLeftElement pointerEvents="none">
+                                    <SearchIcon color="gray.400" />
+                                </InputLeftElement>
+                                <Input
+                                    placeholder="Search for city or place... (e.g., London, Paris, Tokyo)"
+                                    value={searchQuery}
+                                    onChange={(e) => handleSearch(e.target.value)}
+                                    size="lg"
+                                />
+                            </InputGroup>
                             
                             {/* Search Results */}
                             {searchLoading && (
-                                <Flex justify="center" py={4}>
+                                <Flex justify="center" py={2}>
                                     <Spinner size="sm" />
                                 </Flex>
                             )}
                             
                             {searchResults.length > 0 && (
                                 <Box maxH="200px" overflowY="auto">
-                                    <VStack align="stretch" spacing={2}>
-                                        {searchResults.map((city, index) => (
-                                            <Flex
-                                                key={index}
-                                                p={2}
-                                                borderRadius="md"
-                                                border="1px solid"
-                                                borderColor={borderColor}
-                                                justify="space-between"
-                                                align="center"
-                                                _hover={{ bg: useColorModeValue('gray.50', 'gray.700') }}
-                                            >
-                                                <VStack align="start" spacing={0}>
-                                                    <Text fontSize="sm" fontWeight="semibold" color={textColor}>
-                                                        {city.name}
-                                                    </Text>
-                                                    <Text fontSize="xs" color={secondaryTextColor}>
-                                                        {city.state && `${city.state}, `}{city.country}
-                                                    </Text>
-                                                </VStack>
-                                                <Button
-                                                    size="xs"
-                                                    colorScheme="blue"
-                                                    onClick={() => handleAddCity(city)}
-                                                    isDisabled={selectedCities.length >= 10}
+                                    <VStack align="stretch" spacing={1}>
+                                        {searchResults.map((city, index) => {
+                                            const isSelected = selectedCities.some(c => 
+                                                c.name === city.name && c.country === city.country
+                                            )
+                                            return (
+                                                <Flex
+                                                    key={index}
+                                                    p={2}
+                                                    borderRadius="md"
+                                                    border="1px solid"
+                                                    borderColor={borderColor}
+                                                    justify="space-between"
+                                                    align="center"
+                                                    bg={isSelected ? 'blue.50' : 'transparent'}
+                                                    _hover={{ bg: useColorModeValue('gray.50', 'gray.700') }}
                                                 >
-                                                    Add
-                                                </Button>
-                                            </Flex>
-                                        ))}
+                                                    <Text fontSize="sm" fontWeight="medium">
+                                                        {city.name}{city.state ? `, ${city.state}` : ''}, {city.country}
+                                                    </Text>
+                                                    <Button
+                                                        size="xs"
+                                                        colorScheme={isSelected ? 'red' : 'blue'}
+                                                        onClick={() => isSelected ? handleRemoveCity(selectedCities.findIndex(c => c.name === city.name && c.country === city.country)) : handleAddCity(city)}
+                                                        isDisabled={!isSelected && selectedCities.length >= 10}
+                                                    >
+                                                        {isSelected ? 'Remove' : 'Add'}
+                                                    </Button>
+                                                </Flex>
+                                            )
+                                        })}
                                     </VStack>
                                 </Box>
                             )}
                             
-                            {/* Selected Cities */}
-                            {selectedCities.length > 0 && (
-                                <Box>
-                                    <Text fontSize="sm" fontWeight="semibold" color={textColor} mb={2}>
-                                        Selected Cities ({selectedCities.length}/10):
-                                    </Text>
-                                    <VStack align="stretch" spacing={2}>
-                                        {selectedCities.map((city, index) => (
-                                            <Flex
-                                                key={index}
-                                                p={2}
-                                                borderRadius="md"
-                                                border="1px solid"
-                                                borderColor={borderColor}
-                                                justify="space-between"
-                                                align="center"
-                                            >
-                                                <Text fontSize="sm" color={textColor}>
-                                                    {city.name}, {city.country}
-                                                </Text>
-                                                <IconButton
-                                                    aria-label="Remove city"
-                                                    icon={<DeleteIcon />}
-                                                    size="sm"
-                                                    onClick={() => handleRemoveCity(index)}
-                                                    colorScheme="red"
-                                                    variant="ghost"
-                                                />
-                                            </Flex>
-                                        ))}
-                                    </VStack>
-                                </Box>
-                            )}
-                            
-                            {searchQuery.length >= 2 && searchResults.length === 0 && !searchLoading && (
-                                <Text fontSize="sm" color={secondaryTextColor} textAlign="center" py={4}>
-                                    No cities found. Try a different search term.
+                            {/* Selected Cities Count */}
+                            <Flex justify="space-between" align="center">
+                                <Text fontSize="sm" color={secondaryTextColor}>
+                                    Selected: {selectedCities.length}/10 cities
                                 </Text>
-                            )}
+                                {selectedCities.length > 0 && (
+                                    <Button
+                                        colorScheme="blue"
+                                        size="sm"
+                                        onClick={handleSavePreferences}
+                                        isLoading={saving}
+                                    >
+                                        Save & Update Feed
+                                    </Button>
+                                )}
+                            </Flex>
                         </VStack>
-                    </ModalBody>
-                    <ModalFooter>
-                        <Button variant="ghost" mr={3} onClick={onClose}>
-                            Cancel
-                        </Button>
-                        <Button
-                            colorScheme="blue"
-                            onClick={handleSavePreferences}
-                            isLoading={saving}
-                            isDisabled={selectedCities.length === 0}
-                        >
-                            Save Preferences
-                        </Button>
-                    </ModalFooter>
-                </ModalContent>
-            </Modal>
+                    </Box>
+                )}
+                
+                <Divider />
+                
+                {/* Weather Table */}
+                <Box
+                    bg={bgColor}
+                    borderRadius="lg"
+                    border="1px solid"
+                    borderColor={borderColor}
+                    overflow="hidden"
+                >
+                    {loading ? (
+                        <Flex justify="center" py={10}>
+                            <Spinner size="xl" />
+                        </Flex>
+                    ) : weatherData.length > 0 ? (
+                        <TableContainer>
+                            <Table variant="simple">
+                                <Thead bg={useColorModeValue('gray.50', 'gray.700')}>
+                                    <Tr>
+                                        {user && <Th width="50px"></Th>}
+                                        <Th>Location</Th>
+                                        <Th>Temperature</Th>
+                                        <Th>Condition</Th>
+                                        <Th>Humidity</Th>
+                                        <Th>Wind</Th>
+                                        <Th>Last Updated</Th>
+                                    </Tr>
+                                </Thead>
+                                <Tbody>
+                                    {weatherData.map((weather, index) => {
+                                        const cityName = weather.location?.city
+                                        const isSelected = selectedCities.some(c => c.name === cityName)
+                                        
+                                        return (
+                                            <Tr key={weather._id || index} _hover={{ bg: useColorModeValue('gray.50', 'gray.700') }}>
+                                                {user && (
+                                                    <Td>
+                                                        <Checkbox
+                                                            isChecked={isSelected}
+                                                            onChange={(e) => {
+                                                                if (e.target.checked) {
+                                                                    if (selectedCities.length < 10) {
+                                                                        handleAddCity({
+                                                                            name: cityName,
+                                                                            country: weather.location?.country,
+                                                                            lat: weather.location?.lat,
+                                                                            lon: weather.location?.lon
+                                                                        })
+                                                                    }
+                                                                } else {
+                                                                    const idx = selectedCities.findIndex(c => c.name === cityName)
+                                                                    if (idx >= 0) handleRemoveCity(idx)
+                                                                }
+                                                            }}
+                                                            isDisabled={!isSelected && selectedCities.length >= 10}
+                                                        />
+                                                    </Td>
+                                                )}
+                                                <Td>
+                                                    <VStack align="start" spacing={0}>
+                                                        <Text fontWeight="semibold" fontSize="md">
+                                                            {cityName}
+                                                        </Text>
+                                                        <Text fontSize="xs" color={secondaryTextColor}>
+                                                            {weather.location?.country}
+                                                        </Text>
+                                                    </VStack>
+                                                </Td>
+                                                <Td>
+                                                    <HStack>
+                                                        {weather.current?.condition?.icon && (
+                                                            <img 
+                                                                src={getWeatherIcon(weather.current.condition.icon)} 
+                                                                alt={weather.current.condition.main}
+                                                                style={{ width: '40px', height: '40px' }}
+                                                            />
+                                                        )}
+                                                        <Text fontSize="xl" fontWeight="bold">
+                                                            {weather.current?.temperature}°C
+                                                        </Text>
+                                                    </HStack>
+                                                </Td>
+                                                <Td>
+                                                    <Text fontSize="sm" textTransform="capitalize">
+                                                        {weather.current?.condition?.description}
+                                                    </Text>
+                                                </Td>
+                                                <Td>
+                                                    <Text fontSize="sm">
+                                                        {weather.current?.humidity}%
+                                                    </Text>
+                                                </Td>
+                                                <Td>
+                                                    <Text fontSize="sm">
+                                                        {weather.current?.windSpeed?.toFixed(1)} m/s
+                                                    </Text>
+                                                </Td>
+                                                <Td>
+                                                    <Text fontSize="xs" color={secondaryTextColor}>
+                                                        {new Date(weather.lastUpdated).toLocaleString('en-US', { 
+                                                            hour: '2-digit', 
+                                                            minute: '2-digit',
+                                                            month: 'short',
+                                                            day: 'numeric'
+                                                        })}
+                                                    </Text>
+                                                </Td>
+                                            </Tr>
+                                        )
+                                    })}
+                                </Tbody>
+                            </Table>
+                        </TableContainer>
+                    ) : (
+                        <Box textAlign="center" py={10}>
+                            <Text fontSize="lg" color={secondaryTextColor} mb={2}>
+                                🌤️ No weather data available
+                            </Text>
+                            <Text fontSize="sm" color={secondaryTextColor}>
+                                Weather updates will appear here soon
+                            </Text>
+                        </Box>
+                    )}
+                </Box>
+            </VStack>
         </Container>
     )
 }

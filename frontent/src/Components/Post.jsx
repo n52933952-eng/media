@@ -63,6 +63,9 @@ const showToast = useShowToast()
   // Check if this is a Weather post
   const isWeatherPost = postedBy?.username === 'Weather' && post?.weatherData
   
+  // Check if this is a Weather onboarding post
+  const isWeatherOnboarding = post?.weatherOnboarding === true
+  
   // Check if this is a Chess game post
   const isChessPost = post?.chessGameData
   
@@ -942,6 +945,23 @@ const showToast = useShowToast()
            onClick={() => setShowFullText(!showFullText)}
          >
            {showFullText ? 'Show less' : 'Show more...'}
+         </Button>
+       )}
+       
+       {/* Weather Onboarding Button */}
+       {isWeatherOnboarding && (
+         <Button
+           mt={3}
+           colorScheme="blue"
+           size="md"
+           width="full"
+           onClick={(e) => {
+             e.preventDefault()
+             e.stopPropagation()
+             navigate('/weather')
+           }}
+         >
+           🌤️ Visit Weather Page
          </Button>
        )}
      </Box>

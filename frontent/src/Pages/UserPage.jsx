@@ -54,39 +54,47 @@ const UserPage = () => {
          console.error('Error checking if Weather account:', e)
        }
        
-       // If following Weather account, trigger weather post creation
+       // If following Weather account, create onboarding post
        if (isWeatherAccount) {
-         console.log('🌤️ [UserPage] Following Weather - creating/fetching weather post')
+         console.log('🌤️ [UserPage] Following Weather - creating onboarding post')
          const baseUrl = import.meta.env.PROD ? window.location.origin : "http://localhost:5000"
          
-         setTimeout(() => {
-           fetch(`${baseUrl}/api/weather/post/manual`, {
-             method: 'POST',
-             credentials: 'include'
-           })
-           .then(res => res.json())
-           .then(postData => {
-             console.log('🌤️ [UserPage] Weather post result:', postData)
+         setTimeout(async () => {
+           try {
+             // Fetch weather account details
+             const userRes = await fetch(
+               `${baseUrl}/api/user/getUserPro/Weather`,
+               { credentials: "include" }
+             )
+             const weatherAccount = await userRes.json()
              
-             if (postData.post) {
+             if (userRes.ok && weatherAccount) {
+               // Create onboarding post
+               const onboardingPost = {
+                 _id: `weather-onboarding-${Date.now()}`,
+                 postedBy: weatherAccount,
+                 text: `🌤️ Welcome to Weather Updates!\n\n👉 Visit the Weather page to select your cities and see personalized weather in your feed.\n\nClick below to get started! ⬇️`,
+                 weatherOnboarding: true, // Special flag for onboarding
+                 createdAt: new Date().toISOString(),
+                 updatedAt: new Date().toISOString(),
+                 likes: [],
+                 replies: []
+               }
+               
                // Save scroll position to prevent page jumping
                const scrollY = window.scrollY
                
-               // Add post to feed immediately
+               // Add onboarding post to feed immediately
                setFollowPost(prev => {
-                 // Check if post already exists
-                 const exists = prev.some(p => {
-                   const prevId = p._id?.toString()
-                   const newId = postData.post._id?.toString()
-                   return prevId === newId
-                 })
+                 // Check if onboarding post already exists
+                 const exists = prev.some(p => p.weatherOnboarding === true)
                  if (exists) {
-                   console.log('⚠️ [UserPage] Weather post already in feed, skipping')
+                   console.log('⚠️ [UserPage] Weather onboarding post already in feed')
                    return prev
                  }
                  // Add to top of feed
-                 console.log('✅ [UserPage] Added Weather post to feed immediately')
-                 return [postData.post, ...prev]
+                 console.log('✅ [UserPage] Added Weather onboarding post to feed')
+                 return [onboardingPost, ...prev]
                })
                
                // Restore scroll position after state update
@@ -94,10 +102,9 @@ const UserPage = () => {
                  window.scrollTo({ top: scrollY, behavior: 'instant' })
                })
              }
-           })
-           .catch(err => {
-             console.error('Weather post error:', err)
-           })
+           } catch (err) {
+             console.error('Weather onboarding post error:', err)
+           }
          }, 500) // 500ms delay to ensure follow is saved
          return
        }

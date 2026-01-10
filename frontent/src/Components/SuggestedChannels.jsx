@@ -456,58 +456,49 @@ const SuggestedChannels = ({ onUserFollowed }) => {
                     })
                 }
                 
-                // If following (not unfollowing), fetch and add Weather post immediately
+                // If following (not unfollowing), create onboarding post
                 if (!wasFollowing) {
                     const baseUrl = import.meta.env.PROD ? window.location.origin : "http://localhost:5000"
                     
-                    // Step 1: Post immediately with available weather data
+                    // Create onboarding post that directs user to Weather page
                     setTimeout(() => {
-                        fetch(`${baseUrl}/api/weather/post/manual`, {
-                            method: 'POST',
-                            credentials: 'include'
-                        })
-                        .then(res => res.json())
-                        .then(postData => {
-                            console.log('🌤️ [SuggestedChannels] Weather post result:', postData)
-                            
-                            if (postData.post) {
-                                // Save scroll position to prevent page jumping
-                                const scrollY = window.scrollY
-                                
-                                // Add post to feed immediately
-                                setFollowPost(prev => {
-                                    // Check if post already exists
-                                    const exists = prev.some(p => {
-                                        const prevId = p._id?.toString()
-                                        const newId = postData.post._id?.toString()
-                                        return prevId === newId
-                                    })
-                                    if (exists) {
-                                        console.log('⚠️ [SuggestedChannels] Weather post already in feed, skipping')
-                                        return prev
-                                    }
-                                    // Add to top of feed
-                                    console.log('✅ [SuggestedChannels] Added Weather post to feed immediately')
-                                    return [postData.post, ...prev]
-                                })
-                                
-                                // Restore scroll position after state update
-                                requestAnimationFrame(() => {
-                                    window.scrollTo({ top: scrollY, behavior: 'instant' })
-                                })
-                                
-                                // Also call onUserFollowed callback if provided
-                                if (onUserFollowed) {
-                                    onUserFollowed(weatherAccount._id)
-                                }
-                            } else {
-                                console.error('❌ [SuggestedChannels] No weather post returned from API')
+                        // Create a simple onboarding post (not from API, just local)
+                        const onboardingPost = {
+                            _id: `weather-onboarding-${Date.now()}`,
+                            postedBy: weatherAccount,
+                            text: `🌤️ Welcome to Weather Updates!\n\n👉 Visit the Weather page to select your cities and see personalized weather in your feed.\n\nClick below to get started! ⬇️`,
+                            weatherOnboarding: true, // Special flag for onboarding
+                            createdAt: new Date().toISOString(),
+                            updatedAt: new Date().toISOString(),
+                            likes: [],
+                            replies: []
+                        }
+                        
+                        // Save scroll position to prevent page jumping
+                        const scrollY = window.scrollY
+                        
+                        // Add onboarding post to feed immediately
+                        setFollowPost(prev => {
+                            // Check if onboarding post already exists
+                            const exists = prev.some(p => p.weatherOnboarding === true)
+                            if (exists) {
+                                console.log('⚠️ [SuggestedChannels] Weather onboarding post already in feed')
+                                return prev
                             }
+                            // Add to top of feed
+                            console.log('✅ [SuggestedChannels] Added Weather onboarding post to feed')
+                            return [onboardingPost, ...prev]
                         })
-                        .catch(err => {
-                            console.error('Weather post error:', err)
-                            showToast('Error', 'Could not create Weather post', 'error')
+                        
+                        // Restore scroll position after state update
+                        requestAnimationFrame(() => {
+                            window.scrollTo({ top: scrollY, behavior: 'instant' })
                         })
+                        
+                        // Also call onUserFollowed callback if provided
+                        if (onUserFollowed) {
+                            onUserFollowed(weatherAccount._id)
+                        }
                     }, 500) // 500ms delay to ensure follow is saved
                 }
                 
