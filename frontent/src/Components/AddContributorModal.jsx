@@ -202,67 +202,96 @@ const AddContributorModal = ({ isOpen, onClose, post, onContributorAdded }) => {
     setIsAdding(true) // Start loading
     
     try {
+      console.log('🔵 [AddContributorModal] Adding contributors:', selectedUsers.map(u => u.username))
+      
       const results = await Promise.all(
         selectedUsers.map(async (selectedUser) => {
-          const res = await fetch(
-            `${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/post/collaborative/${post._id}/contributor`,
-            {
-              method: 'PUT',
-              headers: { 'Content-Type': 'application/json' },
-              credentials: 'include',
-              body: JSON.stringify({ contributorId: selectedUser._id })
-            }
-          )
-          const data = await res.json()
-          return { res, data, username: selectedUser.username }
+          try {
+            const res = await fetch(
+              `${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/post/collaborative/${post._id}/contributor`,
+              {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
+                body: JSON.stringify({ contributorId: selectedUser._id })
+              }
+            )
+            const data = await res.json()
+            console.log(`🔵 [AddContributorModal] Response for ${selectedUser.username}:`, { ok: res.ok, status: res.status, data })
+            return { res, data, username: selectedUser.username, success: res.ok }
+          } catch (error) {
+            console.error(`❌ [AddContributorModal] Error adding ${selectedUser.username}:`, error)
+            return { res: null, data: { message: error.message }, username: selectedUser.username, success: false }
+          }
         })
       )
 
-      const successful = results.filter(r => r.res.ok)
-      const failed = results.filter(r => !r.res.ok)
+      const successful = results.filter(r => r.success)
+      const failed = results.filter(r => !r.success)
 
+      console.log('🔵 [AddContributorModal] Results:', { successful: successful.length, failed: failed.length })
+
+      // Always fetch updated post if at least one succeeded
       if (successful.length > 0) {
-        showToast(
-          'Success',
-          `Added ${successful.length} contributor${successful.length > 1 ? 's' : ''}`,
-          'success'
-        )
-        
-        // Fetch the updated post with populated contributors
         try {
+          console.log('🔵 [AddContributorModal] Fetching updated post...')
           const postRes = await fetch(
             `${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/post/getPost/${post._id}`,
             { credentials: 'include' }
           )
           const postData = await postRes.json()
           
+          console.log('🔵 [AddContributorModal] Updated post data:', postData)
+          
           if (postRes.ok && postData.post) {
+            // Show success toast BEFORE closing modal
+            showToast(
+              'Success',
+              `Added ${successful.length} contributor${successful.length > 1 ? 's' : ''}`,
+              'success'
+            )
+            
             // Call callback with updated post data
             if (onContributorAdded) {
+              console.log('✅ [AddContributorModal] Calling onContributorAdded with updated post')
               onContributorAdded(postData.post)
             }
+            
+            // Close modal and reset
+            onClose()
+            setSelectedUsers([])
+            setSearchQuery('')
+          } else {
+            throw new Error('Failed to fetch updated post')
           }
         } catch (error) {
-          console.error('Error fetching updated post:', error)
-          // Still call callback even if fetch fails
-          if (onContributorAdded) {
-            onContributorAdded()
-          }
+          console.error('❌ [AddContributorModal] Error fetching updated post:', error)
+          // Show success for adding but couldn't refresh
+          showToast('Success', 'Contributors added. Please refresh to see updates.', 'success')
+          onClose()
+          setSelectedUsers([])
+          setSearchQuery('')
         }
-        
-        // Close modal and reset
+      }
+
+      // Only show failed errors if there were actually failures
+      if (failed.length > 0) {
+        console.log('❌ [AddContributorModal] Failed additions:', failed)
+        failed.forEach(({ data, username }) => {
+          const errorMsg = data?.message || data?.error || 'Failed to add'
+          console.error(`❌ Failed to add ${username}:`, errorMsg)
+          showToast('Error', `${username}: ${errorMsg}`, 'error')
+        })
+      }
+      
+      // If all failed, close modal anyway
+      if (successful.length === 0 && failed.length > 0) {
         onClose()
         setSelectedUsers([])
         setSearchQuery('')
       }
-
-      if (failed.length > 0) {
-        failed.forEach(({ data, username }) => {
-          showToast('Error', `${username}: ${data.message || 'Failed to add'}`, 'error')
-        })
-      }
     } catch (error) {
-      console.error('Error adding contributors:', error)
+      console.error('❌ [AddContributorModal] Fatal error adding contributors:', error)
       showToast('Error', 'Failed to add contributors', 'error')
     } finally {
       setIsAdding(false) // Stop loading

@@ -1391,12 +1391,26 @@ const showToast = useShowToast()
       onClose={onAddContributorClose}
       post={post}
       onContributorAdded={(updatedPost) => {
+        console.log('🔵 [Post] onContributorAdded called with:', updatedPost ? 'updated post' : 'no data')
+        
         if (updatedPost) {
           // Immediately update post in feed with the updated data
-          setFollowPost(prev => prev.map(p => p._id === post._id ? updatedPost : p))
-          console.log('✅ [Post] Updated post with new contributors:', updatedPost.contributors?.length)
+          console.log('✅ [Post] Updating post in feed. Contributors:', updatedPost.contributors?.length)
+          console.log('✅ [Post] Contributors data:', updatedPost.contributors)
+          
+          setFollowPost(prev => {
+            const updated = prev.map(p => {
+              if (p._id === post._id) {
+                console.log('✅ [Post] Found and updating post:', post._id)
+                return updatedPost
+              }
+              return p
+            })
+            return updated
+          })
         } else {
           // Fallback: fetch post data if not provided
+          console.log('⚠️ [Post] No updated post provided, fetching...')
           fetch(
             `${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/post/getPost/${post._id}`,
             { credentials: 'include' }
@@ -1404,10 +1418,11 @@ const showToast = useShowToast()
           .then(res => res.json())
           .then(data => {
             if (data.post) {
+              console.log('✅ [Post] Fetched and updating post')
               setFollowPost(prev => prev.map(p => p._id === post._id ? data.post : p))
             }
           })
-          .catch(error => console.error('Error refreshing post:', error))
+          .catch(error => console.error('❌ [Post] Error refreshing post:', error))
         }
       }}
     />
