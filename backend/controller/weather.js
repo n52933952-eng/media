@@ -286,6 +286,16 @@ export const autoPostWeatherUpdate = async () => {
                 
                 if (result.success && result.data) {
                     const convertedWeather = convertWeatherFormat(result.data, city)
+                    
+                    // Check if temperature changed (for logging)
+                    const existingWeather = await Weather.findOne({
+                        'location.city': convertedWeather.location.city,
+                        'location.country': convertedWeather.location.country
+                    })
+                    
+                    const oldTemp = existingWeather?.current?.temperature
+                    const newTemp = convertedWeather.current.temperature
+                    
                     // Save to database
                     const saved = await Weather.findOneAndUpdate(
                         { 
@@ -296,7 +306,12 @@ export const autoPostWeatherUpdate = async () => {
                         { upsert: true, new: true }
                     )
                     allWeatherData.push(saved)
-                    console.log(`✅ [autoPostWeatherUpdate] Fetched ${city.name}: ${saved.current.temperature}°C`)
+                    
+                    if (oldTemp !== undefined && oldTemp !== newTemp) {
+                        console.log(`✅ [autoPostWeatherUpdate] ${city.name}: ${oldTemp}°C → ${newTemp}°C (${newTemp > oldTemp ? '↑' : '↓'} ${Math.abs(newTemp - oldTemp)}°C)`)
+                    } else {
+                        console.log(`✅ [autoPostWeatherUpdate] ${city.name}: ${newTemp}°C (${convertedWeather.current.condition.description})`)
+                    }
                 }
                 
                 // Rate limit protection: 60 calls/minute = 1 call per second
@@ -464,6 +479,16 @@ export const manualPostWeather = async (req, res) => {
                 
                 if (result.success && result.data) {
                     const convertedWeather = convertWeatherFormat(result.data, city)
+                    
+                    // Check if temperature changed (for logging)
+                    const existingWeather = await Weather.findOne({
+                        'location.city': convertedWeather.location.city,
+                        'location.country': convertedWeather.location.country
+                    })
+                    
+                    const oldTemp = existingWeather?.current?.temperature
+                    const newTemp = convertedWeather.current.temperature
+                    
                     // Save to database
                     const saved = await Weather.findOneAndUpdate(
                         { 
@@ -474,7 +499,12 @@ export const manualPostWeather = async (req, res) => {
                         { upsert: true, new: true }
                     )
                     allWeatherData.push(saved)
-                    console.log(`✅ [manualPostWeather] Fetched ${city.name}: ${saved.current.temperature}°C`)
+                    
+                    if (oldTemp !== undefined && oldTemp !== newTemp) {
+                        console.log(`✅ [manualPostWeather] ${city.name}: ${oldTemp}°C → ${newTemp}°C (${newTemp > oldTemp ? '↑' : '↓'} ${Math.abs(newTemp - oldTemp)}°C)`)
+                    } else {
+                        console.log(`✅ [manualPostWeather] ${city.name}: ${newTemp}°C (${convertedWeather.current.condition.description})`)
+                    }
                 }
                 
                 // Rate limit protection: 60 calls/minute = 1 call per second
