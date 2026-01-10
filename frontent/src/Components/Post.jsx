@@ -156,6 +156,9 @@ const showToast = useShowToast()
   const [matchesData, setMatchesData] = useState([])
   const [weatherDataArray, setWeatherDataArray] = useState([])
   const [weatherLoading, setWeatherLoading] = useState(false)
+  const [showFullText, setShowFullText] = useState(false)
+  const textRef = React.useRef(null)
+  const [shouldTruncate, setShouldTruncate] = useState(false)
   
   // Parse initial football data (use API time directly, no client-side calculation)
   useEffect(() => {
@@ -918,7 +921,30 @@ const showToast = useShowToast()
       </Flex>
     )}
     
-     <Text>{post.text}</Text>
+     {/* Post Text with truncation */}
+     <Box>
+       <Text
+         ref={textRef}
+         noOfLines={shouldTruncate && !showFullText ? 4 : undefined}
+         style={{
+           wordBreak: 'break-word',
+           whiteSpace: 'pre-wrap'
+         }}
+       >
+         {post.text}
+       </Text>
+       {shouldTruncate && (
+         <Button
+           size="xs"
+           variant="link"
+           colorScheme="blue"
+           mt={1}
+           onClick={() => setShowFullText(!showFullText)}
+         >
+           {showFullText ? 'Show less' : 'Show more...'}
+         </Button>
+       )}
+     </Box>
   
   {/* Football Match Cards - Visual Table */}
   {isFootballPost && matchesData.length > 0 && (

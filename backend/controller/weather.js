@@ -313,11 +313,45 @@ export const autoPostWeatherUpdate = async () => {
         }))
         
         if (existingPost) {
-            // Update existing post
-            existingPost.weatherData = JSON.stringify(weatherDataArray)
-            existingPost.text = `🌤️ Weather Update - ${new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}`
-            await existingPost.save()
-            console.log('✅ [autoPostWeatherUpdate] Updated existing weather post')
+            // Check if weather data actually changed
+            const existingWeatherData = existingPost.weatherData ? JSON.parse(existingPost.weatherData) : []
+            const weatherDataChanged = JSON.stringify(existingWeatherData) !== JSON.stringify(weatherDataArray)
+            
+            if (weatherDataChanged) {
+                // Update existing post only if data changed
+                existingPost.weatherData = JSON.stringify(weatherDataArray)
+                existingPost.text = `🌤️ Weather Update - ${new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}`
+                existingPost.updatedAt = new Date() // Update timestamp
+                await existingPost.save()
+                
+                // Emit postUpdated event for real-time update
+                const io = getIO()
+                if (io && weatherAccount.followers && weatherAccount.followers.length > 0) {
+                    const { getUserSocketMap } = await import('../socket/socket.js')
+                    const userSocketMap = getUserSocketMap()
+                    const onlineFollowers = []
+                    
+                    weatherAccount.followers.forEach(followerId => {
+                        const followerIdStr = followerId.toString()
+                        if (userSocketMap[followerIdStr]) {
+                            onlineFollowers.push(userSocketMap[followerIdStr].socketId)
+                        }
+                    })
+                    
+                    if (onlineFollowers.length > 0) {
+                        await existingPost.populate("postedBy", "username profilePic name")
+                        const postObj = existingPost.toObject ? existingPost.toObject() : JSON.parse(JSON.stringify(existingPost))
+                        onlineFollowers.forEach(socketId => {
+                            io.to(socketId).emit("postUpdated", { postId: existingPost._id.toString(), post: postObj })
+                        })
+                        console.log(`✅ [autoPostWeatherUpdate] Emitted postUpdated to ${onlineFollowers.length} followers`)
+                    }
+                }
+                
+                console.log('✅ [autoPostWeatherUpdate] Updated existing weather post (data changed)')
+            } else {
+                console.log('ℹ️ [autoPostWeatherUpdate] Weather data unchanged, skipping update')
+            }
         } else {
             // Create new post
             const newPost = new Post({
@@ -410,30 +444,11 @@ export const manualPostWeather = async (req, res) => {
             return res.status(404).json({ error: 'Weather account not found' })
         }
         
-        const now = new Date()
-        const todayStart = new Date(now.setHours(0, 0, 0, 0))
-        const todayEnd = new Date(now.setHours(23, 59, 59, 999))
-        
-        // Check if post already exists for today
+        // Get latest weather post (not just today - find most recent one)
         const existingPost = await Post.findOne({
             postedBy: weatherAccount._id,
-            weatherData: { $exists: true, $ne: null },
-            createdAt: { 
-                $gte: todayStart,
-                $lte: todayEnd
-            }
+            weatherData: { $exists: true, $ne: null }
         }).sort({ createdAt: -1 })
-        
-        if (existingPost) {
-            // Post already exists, return it
-            return res.status(200).json({ 
-                posted: false,
-                alreadyExists: true,
-                postId: existingPost._id,
-                post: existingPost,
-                message: 'Weather post already exists for today'
-            })
-        }
         
         // Get latest weather for default cities
         const weatherData = await Weather.find({
@@ -463,10 +478,71 @@ export const manualPostWeather = async (req, res) => {
             windSpeed: w.current.windSpeed
         }))
         
-        // Create new post
+        if (existingPost) {
+            // Check if weather data actually changed
+            const existingWeatherData = existingPost.weatherData ? JSON.parse(existingPost.weatherData) : []
+            const weatherDataChanged = JSON.stringify(existingWeatherData) !== JSON.stringify(weatherDataArray)
+            
+            if (weatherDataChanged) {
+                // Update existing post only if data changed
+                existingPost.weatherData = JSON.stringify(weatherDataArray)
+                existingPost.text = `🌤️ Weather Update - ${new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}`
+                existingPost.updatedAt = new Date() // Update timestamp
+                await existingPost.save()
+                
+                // Populate postedBy for response
+                await existingPost.populate('postedBy', 'username name profilePic')
+                
+                // Emit postUpdated event for real-time update
+                const io = getIO()
+                if (io && weatherAccount.followers && weatherAccount.followers.length > 0) {
+                    const { getUserSocketMap } = await import('../socket/socket.js')
+                    const userSocketMap = getUserSocketMap()
+                    const onlineFollowers = []
+                    
+                    weatherAccount.followers.forEach(followerId => {
+                        const followerIdStr = followerId.toString()
+                        if (userSocketMap[followerIdStr]) {
+                            onlineFollowers.push(userSocketMap[followerIdStr].socketId)
+                        }
+                    })
+                    
+                    if (onlineFollowers.length > 0) {
+                        const postObj = existingPost.toObject ? existingPost.toObject() : JSON.parse(JSON.stringify(existingPost))
+                        onlineFollowers.forEach(socketId => {
+                            io.to(socketId).emit("postUpdated", { postId: existingPost._id.toString(), post: postObj })
+                        })
+                        console.log(`✅ [manualPostWeather] Emitted postUpdated to ${onlineFollowers.length} followers`)
+                    }
+                }
+                
+                console.log('✅ [manualPostWeather] Updated existing weather post (data changed)')
+                
+                return res.status(200).json({ 
+                    posted: true,
+                    updated: true,
+                    post: existingPost,
+                    message: 'Weather post updated successfully'
+                })
+            } else {
+                // Data unchanged, just return existing post
+                await existingPost.populate('postedBy', 'username name profilePic')
+                console.log('ℹ️ [manualPostWeather] Weather data unchanged, returning existing post')
+                
+                return res.status(200).json({ 
+                    posted: false,
+                    alreadyExists: true,
+                    postId: existingPost._id,
+                    post: existingPost,
+                    message: 'Weather data unchanged, post not updated'
+                })
+            }
+        }
+        
+        // Create new post if none exists
         const newPost = new Post({
             postedBy: weatherAccount._id,
-            text: `🌤️ Weather Update - ${new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}`,
+            text: `🌤️ Weather Update - ${new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}`,
             weatherData: JSON.stringify(weatherDataArray)
         })
         
@@ -475,7 +551,7 @@ export const manualPostWeather = async (req, res) => {
         // Populate postedBy for response
         await newPost.populate('postedBy', 'username name profilePic')
         
-        console.log('✅ [manualPostWeather] Created weather post:', newPost._id)
+        console.log('✅ [manualPostWeather] Created new weather post:', newPost._id)
         
         res.status(200).json({ 
             posted: true,

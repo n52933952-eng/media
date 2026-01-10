@@ -344,6 +344,27 @@ export const updatePost = async(req,res) => {
                             }
                         }
                         
+                        // Notify all contributors if the owner edited the post
+                        const isOwnerEdit = isOwner && post.isCollaborative && post.contributors && post.contributors.length > 0
+                        if (isOwnerEdit) {
+                            try {
+                                const { createNotification } = await import('./notification.js')
+                                // Notify each contributor
+                                for (const contributor of post.contributors) {
+                                    const contributorId = (contributor._id || contributor).toString()
+                                    if (contributorId !== userId.toString()) { // Don't notify yourself
+                                        await createNotification(contributorId, 'post_edit', userId.toString(), {
+                                            postId: post._id.toString(),
+                                            postText: post.text?.substring(0, 50) || 'your collaborative post'
+                                        })
+                                        console.log(`📬 [updatePost] Created edit notification for contributor ${contributorId}`)
+                                    }
+                                }
+                            } catch (err) {
+                                console.error('❌ [updatePost] Error creating contributor edit notifications:', err)
+                            }
+                        }
+                        
                         // Emit update to followers, post owner, and all contributors
                         const io = getIO()
                         if (io) {
@@ -436,6 +457,27 @@ export const updatePost = async(req,res) => {
                 console.log(`📬 [updatePost] Created edit notification for post owner ${postOwnerId}`)
             } catch (err) {
                 console.error('❌ [updatePost] Error creating edit notification:', err)
+            }
+        }
+        
+        // Notify all contributors if the owner edited the post
+        const isOwnerEdit = isOwner && post.isCollaborative && post.contributors && post.contributors.length > 0
+        if (isOwnerEdit) {
+            try {
+                const { createNotification } = await import('./notification.js')
+                // Notify each contributor
+                for (const contributor of post.contributors) {
+                    const contributorId = (contributor._id || contributor).toString()
+                    if (contributorId !== userId.toString()) { // Don't notify yourself
+                        await createNotification(contributorId, 'post_edit', userId.toString(), {
+                            postId: post._id.toString(),
+                            postText: post.text?.substring(0, 50) || 'your collaborative post'
+                        })
+                        console.log(`📬 [updatePost] Created edit notification for contributor ${contributorId}`)
+                    }
+                }
+            } catch (err) {
+                console.error('❌ [updatePost] Error creating contributor edit notifications:', err)
             }
         }
         
