@@ -712,6 +712,32 @@ export const getBusyChessUsers = async (req, res) => {
     }
 }
 
+// Get users that current user is following
+export const getFollowingUsers = async (req, res) => {
+    try {
+        const userId = req.user._id
+        const currentUser = await User.findById(userId).select('following')
+        
+        if (!currentUser) {
+            return res.status(400).json({ error: "User not found" })
+        }
+        
+        if (!currentUser.following || currentUser.following.length === 0) {
+            return res.status(200).json([])
+        }
+        
+        // Get all users that current user is following
+        const followingUsers = await User.find({
+            _id: { $in: currentUser.following }
+        }).select('username name profilePic bio').limit(50)
+        
+        res.status(200).json(followingUsers)
+    } catch (error) {
+        console.error('Error getting following users:', error)
+        res.status(500).json({ error: error.message || "Failed to get following users" })
+    }
+}
+
 
 
 

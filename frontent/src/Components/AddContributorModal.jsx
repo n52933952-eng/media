@@ -24,7 +24,9 @@ import useShowToast from '../hooks/useShowToast'
 const AddContributorModal = ({ isOpen, onClose, post, onContributorAdded }) => {
   const [searchQuery, setSearchQuery] = useState('')
   const [searchResults, setSearchResults] = useState([])
+  const [followingUsers, setFollowingUsers] = useState([])
   const [isSearching, setIsSearching] = useState(false)
+  const [isLoadingFollowing, setIsLoadingFollowing] = useState(false)
   const [selectedUsers, setSelectedUsers] = useState([])
   const { user } = useContext(UserContext)
   const showToast = useShowToast()
@@ -39,6 +41,18 @@ const AddContributorModal = ({ isOpen, onClose, post, onContributorAdded }) => {
   const existingContributorIds = post?.contributors?.map(c => (c._id || c).toString()) || []
   const postOwnerId = post?.postedBy?._id?.toString()
 
+  // Load following users when modal opens
+  useEffect(() => {
+    if (isOpen && user?._id) {
+      fetchFollowingUsers()
+    } else {
+      // Reset when modal closes
+      setFollowingUsers([])
+      setSearchQuery('')
+      setSearchResults([])
+    }
+  }, [isOpen, user?._id])
+
   useEffect(() => {
     if (searchQuery.trim().length >= 2) {
       const timeoutId = setTimeout(() => {
@@ -50,6 +64,38 @@ const AddContributorModal = ({ isOpen, onClose, post, onContributorAdded }) => {
       setSearchResults([])
     }
   }, [searchQuery])
+
+  const fetchFollowingUsers = async () => {
+    setIsLoadingFollowing(true)
+    try {
+      const res = await fetch(
+        `${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/user/following`,
+        { credentials: 'include' }
+      )
+      const data = await res.json()
+      
+      if (res.ok && Array.isArray(data)) {
+        // Filter out:
+        // - Current user
+        // - Post owner (already a contributor)
+        // - Already existing contributors
+        const filtered = data.filter(u => {
+          const userId = u._id?.toString()
+          return userId !== user?._id?.toString() &&
+                 userId !== postOwnerId &&
+                 !existingContributorIds.includes(userId)
+        })
+        setFollowingUsers(filtered)
+      } else {
+        setFollowingUsers([])
+      }
+    } catch (error) {
+      console.error('Error fetching following users:', error)
+      setFollowingUsers([])
+    } finally {
+      setIsLoadingFollowing(false)
+    }
+  }
 
   const searchUsers = async (query) => {
     setIsSearching(true)
@@ -211,8 +257,61 @@ const AddContributorModal = ({ isOpen, onClose, post, onContributorAdded }) => {
               </Box>
             )}
 
-            {/* Search Results */}
-            {searchResults.length > 0 && (
+            {/* Following Users - Show when no search query */}
+            {!searchQuery && followingUsers.length > 0 && (
+              <Box>
+                <Text fontSize="sm" fontWeight="bold" mb={2}>
+                  People You Follow:
+                </Text>
+                {isLoadingFollowing ? (
+                  <Flex justify="center" py={4}>
+                    <Spinner size="sm" />
+                  </Flex>
+                ) : (
+                  <VStack spacing={2} align="stretch" maxH="300px" overflowY="auto">
+                    {followingUsers.map((followingUser) => (
+                      <HStack
+                        key={followingUser._id}
+                        p={3}
+                        bg={hoverBg}
+                        borderRadius="md"
+                        cursor="pointer"
+                        _hover={{ bg: useColorModeValue('gray.100', '#3d4558') }}
+                        onClick={() => handleSelectUser(followingUser)}
+                        justify="space-between"
+                      >
+                        <HStack>
+                          <Avatar
+                            src={followingUser.profilePic}
+                            name={followingUser.name || followingUser.username}
+                            size="md"
+                          />
+                          <VStack align="start" spacing={0}>
+                            <Text fontSize="sm" fontWeight="bold">
+                              {followingUser.name}
+                            </Text>
+                            <Text fontSize="xs" color={secondaryTextColor}>
+                              @{followingUser.username}
+                            </Text>
+                            {followingUser.bio && (
+                              <Text fontSize="xs" color={secondaryTextColor} noOfLines={1}>
+                                {followingUser.bio}
+                              </Text>
+                            )}
+                          </VStack>
+                        </HStack>
+                        <Button size="sm" colorScheme="blue" variant="outline">
+                          Add
+                        </Button>
+                      </HStack>
+                    ))}
+                  </VStack>
+                )}
+              </Box>
+            )}
+
+            {/* Search Results - Show when searching */}
+            {searchQuery && searchResults.length > 0 && (
               <Box>
                 <Text fontSize="sm" fontWeight="bold" mb={2}>
                   Search Results:
@@ -258,9 +357,15 @@ const AddContributorModal = ({ isOpen, onClose, post, onContributorAdded }) => {
               </Box>
             )}
 
-            {searchQuery.length >= 2 && searchResults.length === 0 && !isSearching && (
+            {searchQuery && searchQuery.length >= 2 && searchResults.length === 0 && !isSearching && (
               <Text fontSize="sm" color={secondaryTextColor} textAlign="center" py={4}>
                 No users found
+              </Text>
+            )}
+
+            {!searchQuery && !isLoadingFollowing && followingUsers.length === 0 && (
+              <Text fontSize="sm" color={secondaryTextColor} textAlign="center" py={4}>
+                You're not following anyone yet. Search for users to add as contributors.
               </Text>
             )}
 
