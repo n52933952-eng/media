@@ -1390,20 +1390,24 @@ const showToast = useShowToast()
       isOpen={isAddContributorOpen}
       onClose={onAddContributorClose}
       post={post}
-      onContributorAdded={async () => {
-        // Refresh post data
-        try {
-          const postRes = await fetch(
-            `${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/post/${post._id}`,
+      onContributorAdded={(updatedPost) => {
+        if (updatedPost) {
+          // Immediately update post in feed with the updated data
+          setFollowPost(prev => prev.map(p => p._id === post._id ? updatedPost : p))
+          console.log('✅ [Post] Updated post with new contributors:', updatedPost.contributors?.length)
+        } else {
+          // Fallback: fetch post data if not provided
+          fetch(
+            `${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/post/getPost/${post._id}`,
             { credentials: 'include' }
           )
-          const postData = await postRes.json()
-          if (postRes.ok && postData) {
-            // Update post in feed
-            setFollowPost(prev => prev.map(p => p._id === post._id ? postData : p))
-          }
-        } catch (error) {
-          console.error('Error refreshing post:', error)
+          .then(res => res.json())
+          .then(data => {
+            if (data.post) {
+              setFollowPost(prev => prev.map(p => p._id === post._id ? data.post : p))
+            }
+          })
+          .catch(error => console.error('Error refreshing post:', error))
         }
       }}
     />
@@ -1427,20 +1431,24 @@ const showToast = useShowToast()
       isOpen={isManageContributorsOpen}
       onClose={onManageContributorsClose}
       post={post}
-      onContributorRemoved={async () => {
-        // Refresh post data
-        try {
-          const postRes = await fetch(
-            `${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/post/${post._id}`,
+      onContributorRemoved={(updatedPost) => {
+        if (updatedPost) {
+          // Immediately update post in feed with the updated data
+          setFollowPost(prev => prev.map(p => p._id === post._id ? updatedPost : p))
+          console.log('✅ [Post] Updated post after removing contributor:', updatedPost.contributors?.length)
+        } else {
+          // Fallback: fetch post data if not provided
+          fetch(
+            `${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/post/getPost/${post._id}`,
             { credentials: 'include' }
           )
-          const postData = await postRes.json()
-          if (postRes.ok && postData) {
-            // Update post in feed
-            setFollowPost(prev => prev.map(p => p._id === post._id ? postData : p))
-          }
-        } catch (error) {
-          console.error('Error refreshing post:', error)
+          .then(res => res.json())
+          .then(data => {
+            if (data.post) {
+              setFollowPost(prev => prev.map(p => p._id === post._id ? data.post : p))
+            }
+          })
+          .catch(error => console.error('Error refreshing post:', error))
         }
       }}
     />

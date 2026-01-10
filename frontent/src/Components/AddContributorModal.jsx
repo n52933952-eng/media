@@ -39,14 +39,16 @@ const AddContributorModal = ({ isOpen, onClose, post, onContributorAdded }) => {
   const secondaryTextColor = useColorModeValue('gray.600', 'gray.400')
   const hoverBg = useColorModeValue('gray.50', '#2d3548')
 
-  // Get existing contributor IDs
+  // Get existing contributor IDs - always use the latest from post prop
   const existingContributorIds = post?.contributors?.map(c => (c._id || c).toString()) || []
   const postOwnerId = post?.postedBy?._id?.toString()
 
   // Load following users when modal opens and reset when closes
   useEffect(() => {
     if (isOpen && user?._id) {
+      // Fetch fresh following users list
       fetchFollowingUsers()
+      console.log('🔵 [AddContributorModal] Modal opened, existing contributors:', existingContributorIds)
     } else {
       // Reset ALL states when modal closes
       setFollowingUsers([])
@@ -55,17 +57,24 @@ const AddContributorModal = ({ isOpen, onClose, post, onContributorAdded }) => {
       setSelectedUsers([]) // Clear selected users
       setIsAdding(false)
     }
-  }, [isOpen, user?._id])
+  }, [isOpen, user?._id, post?._id]) // Also depend on post._id to refresh when post changes
 
   useEffect(() => {
     const query = searchQuery.trim()
     
     if (query.length >= 1) {
+      // Get fresh contributor list
+      const currentContributorIds = post?.contributors?.map(c => (c._id || c).toString()) || []
+      
       // First, filter following users by search query (instant, no API call)
       const filteredFollowing = followingUsers.filter(u => {
+        const userId = u._id?.toString()
         const nameMatch = u.name?.toLowerCase().includes(query.toLowerCase())
         const usernameMatch = u.username?.toLowerCase().includes(query.toLowerCase())
-        return nameMatch || usernameMatch
+        const isAlreadySelected = selectedUsers.some(su => su._id === userId)
+        const isAlreadyContributor = currentContributorIds.includes(userId)
+        
+        return (nameMatch || usernameMatch) && !isAlreadySelected && !isAlreadyContributor
       })
       
       // If we have filtered results from following, show them immediately
@@ -88,7 +97,12 @@ const AddContributorModal = ({ isOpen, onClose, post, onContributorAdded }) => {
     } else {
       setSearchResults([])
     }
-  }, [searchQuery, followingUsers])
+  }, [searchQuery, followingUsers, selectedUsers, post?.contributors])
+
+  // System accounts to exclude from contributor selection
+  const systemAccounts = ['Weather', 'Football', 'AlJazeera', 'NBCNews', 'BeinSportsNews', 
+                          'SkyNews', 'Cartoonito', 'NatGeoKids', 'SciShowKids', 
+                          'JJAnimalTime', 'KidsArabic', 'NatGeoAnimals', 'MBCDrama', 'Fox11']
 
   const fetchFollowingUsers = async () => {
     setIsLoadingFollowing(true)
@@ -104,11 +118,14 @@ const AddContributorModal = ({ isOpen, onClose, post, onContributorAdded }) => {
         // - Current user
         // - Post owner (already a contributor)
         // - Already existing contributors
+        // - System accounts (Weather, Football, channels)
         const filtered = data.filter(u => {
           const userId = u._id?.toString()
+          const isSystemAccount = systemAccounts.includes(u.username)
           return userId !== user?._id?.toString() &&
                  userId !== postOwnerId &&
-                 !existingContributorIds.includes(userId)
+                 !existingContributorIds.includes(userId) &&
+                 !isSystemAccount
         })
         setFollowingUsers(filtered)
       } else {
@@ -132,15 +149,25 @@ const AddContributorModal = ({ isOpen, onClose, post, onContributorAdded }) => {
       const data = await res.json()
       
       if (res.ok && Array.isArray(data)) {
+        // Get fresh contributor list from post
+        const currentContributorIds = post?.contributors?.map(c => (c._id || c).toString()) || []
+        
         // Filter out:
         // - Current user
         // - Post owner (already a contributor)
-        // - Already existing contributors
+        // - Already existing contributors (use fresh list)
+        // - Already selected users
+        // - System accounts (Weather, Football, channels)
         const filtered = data.filter(u => {
           const userId = u._id?.toString()
+          const isSystemAccount = systemAccounts.includes(u.username)
+          const isAlreadySelected = selectedUsers.some(su => su._id === userId)
+          
           return userId !== user?._id?.toString() &&
                  userId !== postOwnerId &&
-                 !existingContributorIds.includes(userId)
+                 !currentContributorIds.includes(userId) &&
+                 !isAlreadySelected &&
+                 !isSystemAccount
         })
         setSearchResults(filtered)
       } else {
@@ -201,9 +228,26 @@ const AddContributorModal = ({ isOpen, onClose, post, onContributorAdded }) => {
           'success'
         )
         
-        // Call callback to refresh post data
-        if (onContributorAdded) {
-          onContributorAdded()
+        // Fetch the updated post with populated contributors
+        try {
+          const postRes = await fetch(
+            `${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/post/getPost/${post._id}`,
+            { credentials: 'include' }
+          )
+          const postData = await postRes.json()
+          
+          if (postRes.ok && postData.post) {
+            // Call callback with updated post data
+            if (onContributorAdded) {
+              onContributorAdded(postData.post)
+            }
+          }
+        } catch (error) {
+          console.error('Error fetching updated post:', error)
+          // Still call callback even if fetch fails
+          if (onContributorAdded) {
+            onContributorAdded()
+          }
         }
         
         // Close modal and reset

@@ -53,7 +53,28 @@ const ManageContributorsModal = ({ isOpen, onClose, post, onContributorRemoved }
 
       if (res.ok) {
         showToast('Success', `Removed ${contributorName}`, 'success')
-        onContributorRemoved?.()
+        
+        // Fetch the updated post with populated contributors
+        try {
+          const postRes = await fetch(
+            `${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/post/getPost/${post._id}`,
+            { credentials: 'include' }
+          )
+          const postData = await postRes.json()
+          
+          if (postRes.ok && postData.post) {
+            // Call callback with updated post data
+            onContributorRemoved?.(postData.post)
+          } else {
+            // Still call callback even if fetch fails
+            onContributorRemoved?.()
+          }
+        } catch (error) {
+          console.error('Error fetching updated post:', error)
+          // Still call callback even if fetch fails
+          onContributorRemoved?.()
+        }
+        
         onClose()
       } else {
         showToast('Error', data.message || 'Failed to remove contributor', 'error')
