@@ -5,6 +5,7 @@ import {
   ModalContent,
   ModalHeader,
   ModalBody,
+  ModalFooter,
   ModalCloseButton,
   Input,
   VStack,
@@ -212,12 +213,12 @@ const AddContributorModal = ({ isOpen, onClose, post, onContributorAdded }) => {
   }
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} size="md">
+    <Modal isOpen={isOpen} onClose={onClose} size="md" isCentered>
       <ModalOverlay />
-      <ModalContent bg={bgColor}>
+      <ModalContent bg={bgColor} maxH="90vh" display="flex" flexDirection="column">
         <ModalHeader>Add Contributors</ModalHeader>
         <ModalCloseButton />
-        <ModalBody pb={6}>
+        <ModalBody pb={6} overflowY="auto" flex="1">
           <VStack spacing={4} align="stretch">
             {/* Search Input */}
             <Box>
@@ -289,7 +290,7 @@ const AddContributorModal = ({ isOpen, onClose, post, onContributorAdded }) => {
                     <Spinner size="sm" />
                   </Flex>
                 ) : (
-                  <VStack spacing={2} align="stretch" maxH="300px" overflowY="auto">
+                  <VStack spacing={2} align="stretch" maxH="200px" overflowY="auto">
                     {followingUsers.map((followingUser) => (
                       <HStack
                         key={followingUser._id}
@@ -337,7 +338,7 @@ const AddContributorModal = ({ isOpen, onClose, post, onContributorAdded }) => {
                 <Text fontSize="sm" fontWeight="bold" mb={2}>
                   Search Results:
                 </Text>
-                <VStack spacing={2} align="stretch" maxH="300px" overflowY="auto">
+                <VStack spacing={2} align="stretch" maxH="200px" overflowY="auto">
                   {searchResults.map((result) => (
                     <HStack
                       key={result._id}
@@ -392,21 +393,22 @@ const AddContributorModal = ({ isOpen, onClose, post, onContributorAdded }) => {
               </Text>
             )}
 
-            {/* Action Buttons */}
-            <HStack justify="flex-end" pt={4}>
-              <Button variant="ghost" onClick={onClose}>
-                Cancel
-              </Button>
-              <Button
-                colorScheme="blue"
-                onClick={handleAddContributors}
-                isDisabled={selectedUsers.length === 0}
-              >
-                Add {selectedUsers.length > 0 ? `${selectedUsers.length} ` : ''}Contributor{selectedUsers.length !== 1 ? 's' : ''}
-              </Button>
-            </HStack>
           </VStack>
         </ModalBody>
+        <ModalFooter>
+          <HStack justify="flex-end" w="full">
+            <Button variant="ghost" onClick={onClose}>
+              Cancel
+            </Button>
+            <Button
+              colorScheme="blue"
+              onClick={handleAddContributors}
+              isDisabled={selectedUsers.length === 0}
+            >
+              Add {selectedUsers.length > 0 ? `${selectedUsers.length} ` : ''}Contributor{selectedUsers.length !== 1 ? 's' : ''}
+            </Button>
+          </HStack>
+        </ModalFooter>
       </ModalContent>
     </Modal>
   )
