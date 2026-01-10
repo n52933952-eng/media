@@ -103,13 +103,6 @@ const WeatherPage = () => {
         loadPreferences()
     }, [user, loadPreferences])
     
-    // Reload preferences when modal opens to ensure fresh data
-    useEffect(() => {
-        if (isOpen && user) {
-            loadPreferences()
-        }
-    }, [isOpen, user, loadPreferences])
-    
     // Check if user follows Weather account
     useEffect(() => {
         const checkFollowStatus = async () => {
@@ -473,8 +466,6 @@ const WeatherPage = () => {
                 } catch (e) {
                     console.error('Error clearing localStorage cache:', e)
                 }
-                
-                onClose()
                 
                 // Fetch weather immediately for selected cities (will cache for Post component)
                 fetchWeather(false, selectedCities)
