@@ -468,8 +468,9 @@ const SuggestedChannels = ({ onUserFollowed }) => {
                         })
                         .then(res => res.json())
                         .then(postData => {
-                            console.log('🌤️ Weather post result:', postData)
-                            if (postData.posted && postData.post) {
+                            console.log('🌤️ [SuggestedChannels] Weather post result:', postData)
+                            
+                            if (postData.post) {
                                 // Save scroll position to prevent page jumping
                                 const scrollY = window.scrollY
                                 
@@ -499,38 +500,8 @@ const SuggestedChannels = ({ onUserFollowed }) => {
                                 if (onUserFollowed) {
                                     onUserFollowed(weatherAccount._id)
                                 }
-                            } else if (postData.alreadyExists || postData.postId) {
-                                // Post already exists, fetch it and add to feed
-                                console.log('ℹ️ Weather post already exists for today, fetching and adding to feed...')
-                                
-                                // Fetch the existing post
-                                fetch(`${baseUrl}/api/post/getPost/${postData.postId}`, {
-                                    credentials: 'include'
-                                })
-                                .then(res => res.json())
-                                .then(postRes => {
-                                    if (postRes && postRes.post) {
-                                        // Save scroll position to prevent page jumping
-                                        const scrollY = window.scrollY
-                                        
-                                        setFollowPost(prev => {
-                                            const exists = prev.some(p => {
-                                                const prevId = p._id?.toString()
-                                                const newId = postRes.post._id?.toString()
-                                                return prevId === newId
-                                            })
-                                            if (exists) return prev
-                                            console.log('✅ [SuggestedChannels] Added existing Weather post to feed')
-                                            return [postRes.post, ...prev]
-                                        })
-                                        
-                                        // Restore scroll position after state update
-                                        requestAnimationFrame(() => {
-                                            window.scrollTo({ top: scrollY, behavior: 'instant' })
-                                        })
-                                    }
-                                })
-                                .catch(err => console.error('Error fetching existing Weather post:', err))
+                            } else {
+                                console.error('❌ [SuggestedChannels] No weather post returned from API')
                             }
                         })
                         .catch(err => {

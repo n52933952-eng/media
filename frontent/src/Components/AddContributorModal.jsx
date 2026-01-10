@@ -29,6 +29,7 @@ const AddContributorModal = ({ isOpen, onClose, post, onContributorAdded }) => {
   const [isSearching, setIsSearching] = useState(false)
   const [isLoadingFollowing, setIsLoadingFollowing] = useState(false)
   const [selectedUsers, setSelectedUsers] = useState([])
+  const [isAdding, setIsAdding] = useState(false) // Loading state for Add button
   const { user } = useContext(UserContext)
   const showToast = useShowToast()
 
@@ -42,15 +43,17 @@ const AddContributorModal = ({ isOpen, onClose, post, onContributorAdded }) => {
   const existingContributorIds = post?.contributors?.map(c => (c._id || c).toString()) || []
   const postOwnerId = post?.postedBy?._id?.toString()
 
-  // Load following users when modal opens
+  // Load following users when modal opens and reset when closes
   useEffect(() => {
     if (isOpen && user?._id) {
       fetchFollowingUsers()
     } else {
-      // Reset when modal closes
+      // Reset ALL states when modal closes
       setFollowingUsers([])
       setSearchQuery('')
       setSearchResults([])
+      setSelectedUsers([]) // Clear selected users
+      setIsAdding(false)
     }
   }, [isOpen, user?._id])
 
@@ -169,6 +172,8 @@ const AddContributorModal = ({ isOpen, onClose, post, onContributorAdded }) => {
       return
     }
 
+    setIsAdding(true) // Start loading
+    
     try {
       const results = await Promise.all(
         selectedUsers.map(async (selectedUser) => {
@@ -195,7 +200,13 @@ const AddContributorModal = ({ isOpen, onClose, post, onContributorAdded }) => {
           `Added ${successful.length} contributor${successful.length > 1 ? 's' : ''}`,
           'success'
         )
-        onContributorAdded?.()
+        
+        // Call callback to refresh post data
+        if (onContributorAdded) {
+          onContributorAdded()
+        }
+        
+        // Close modal and reset
         onClose()
         setSelectedUsers([])
         setSearchQuery('')
@@ -209,6 +220,8 @@ const AddContributorModal = ({ isOpen, onClose, post, onContributorAdded }) => {
     } catch (error) {
       console.error('Error adding contributors:', error)
       showToast('Error', 'Failed to add contributors', 'error')
+    } finally {
+      setIsAdding(false) // Stop loading
     }
   }
 
@@ -404,6 +417,8 @@ const AddContributorModal = ({ isOpen, onClose, post, onContributorAdded }) => {
               colorScheme="blue"
               onClick={handleAddContributors}
               isDisabled={selectedUsers.length === 0}
+              isLoading={isAdding}
+              loadingText="Adding..."
             >
               Add {selectedUsers.length > 0 ? `${selectedUsers.length} ` : ''}Contributor{selectedUsers.length !== 1 ? 's' : ''}
             </Button>

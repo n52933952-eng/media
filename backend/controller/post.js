@@ -1547,6 +1547,63 @@ export const removeContributorFromPost = async(req, res) => {
         await post.populate("contributors", "username profilePic name")
         await post.populate("postedBy", "username profilePic name")
 
+        // Emit real-time post update to post owner, all contributors, and followers
+        const io = getIO()
+        if (io) {
+            const userSocketMap = getUserSocketMap()
+            const recipients = [] // Socket IDs to receive the update
+            
+            // 1. Add post owner
+            const postOwnerId = post.postedBy._id?.toString() || post.postedBy.toString()
+            const ownerSocketData = userSocketMap[postOwnerId]
+            if (ownerSocketData) {
+                recipients.push(ownerSocketData.socketId)
+                console.log(`📤 [removeContributorFromPost] Adding post owner ${postOwnerId} to postUpdated recipients`)
+            }
+            
+            // 2. Add all remaining contributors
+            if (post.contributors && post.contributors.length > 0) {
+                post.contributors.forEach(c => {
+                    const cId = (c._id || c).toString()
+                    if (cId !== postOwnerId) { // Don't duplicate owner
+                        const contributorSocketData = userSocketMap[cId]
+                        if (contributorSocketData) {
+                            recipients.push(contributorSocketData.socketId)
+                            console.log(`📤 [removeContributorFromPost] Adding contributor ${cId} to postUpdated recipients`)
+                        }
+                    }
+                })
+            }
+            
+            // 3. Add followers of the post owner
+            const poster = await User.findById(postOwnerId).select('followers')
+            if (poster && poster.followers && poster.followers.length > 0) {
+                poster.followers.forEach(followerId => {
+                    const followerIdStr = followerId.toString()
+                    // Don't duplicate owner/contributors
+                    if (followerIdStr !== postOwnerId && 
+                        !post.contributors.some(c => (c._id || c).toString() === followerIdStr)) {
+                        const followerSocketData = userSocketMap[followerIdStr]
+                        if (followerSocketData) {
+                            recipients.push(followerSocketData.socketId)
+                        }
+                    }
+                })
+            }
+            
+            // Emit to all recipients (owner, contributors, followers)
+            const uniqueRecipients = [...new Set(recipients)] // Remove duplicates
+            if (uniqueRecipients.length > 0) {
+                const postObject = post.toObject() // Convert Mongoose document to plain object
+                uniqueRecipients.forEach(socketId => {
+                    io.to(socketId).emit("postUpdated", { postId: postObject._id.toString(), post: postObject })
+                })
+                console.log(`📤 [removeContributorFromPost] Emitted postUpdated to ${uniqueRecipients.length} recipients (owner, contributors, followers)`)
+            } else {
+                console.log(`⚠️ [removeContributorFromPost] No online recipients found for postUpdated event for post ${post._id}`)
+            }
+        }
+
         res.status(200).json({
             message: "Contributor removed successfully",
             post: post
