@@ -17,8 +17,19 @@ import FootballIcon from './FootballIcon'
 
 
 
-const Post = ({post,postedBy, onDelete}) => {
+const Post = ({post: initialPost, postedBy, onDelete}) => {
     
+  // Local state for this specific post (used when not in feed context)
+  const [localPost, setLocalPost] = useState(initialPost)
+  
+  // Use local post or initial post
+  const post = localPost || initialPost
+  
+  // Update local post when initialPost changes (e.g., from parent re-fetch)
+  useEffect(() => {
+    console.log('🔄 [Post] Initial post prop changed, updating local state')
+    setLocalPost(initialPost)
+  }, [initialPost])
 
   const navigate = useNavigate()
 
@@ -26,23 +37,42 @@ const showToast = useShowToast()
 
  console.log({"postby":postedBy})
 
-  // Debug: Log collaborative post data
+  // Debug: Log when post prop changes (CRITICAL for debugging re-renders)
+  useEffect(() => {
+    console.log('🔥🔥🔥 [Post] ============ COMPONENT RE-RENDER ============')
+    console.log('🔥 [Post] Timestamp:', new Date().toISOString())
+    console.log('🔥 [Post] Post ID:', post?._id)
+    console.log('🔥 [Post] isCollaborative:', post?.isCollaborative)
+    console.log('🔥 [Post] Contributors count:', post?.contributors?.length)
+    if (post?.contributors) {
+      console.log('🔥 [Post] Contributors:', JSON.stringify(post.contributors.map(c => ({
+        id: (c._id || c)?.toString()?.substring(0, 8),
+        name: c.name,
+        username: c.username
+      })), null, 2))
+    }
+  }, [post]) // Triggered whenever the post prop changes
+  
+  // Debug: Log collaborative post data (with key to force re-render detection)
   useEffect(() => {
     if (post?.isCollaborative) {
-      console.log('🔵 Collaborative Post Data:', {
-        postId: post._id,
-        owner: post.postedBy,
-        contributors: post.contributors,
+      const contributorsKey = post.contributors?.map(c => (c?._id || c)?.toString()).join(',')
+      console.log('🔵 [Post] Collaborative Post Data UPDATE:', {
+        postId: post._id?.substring(0, 8),
+        isCollaborative: post.isCollaborative,
         contributorsCount: post.contributors?.length,
+        contributorsKey: contributorsKey?.substring(0, 20),
         contributorsData: post.contributors?.map(c => ({
-          id: c?._id || c,
+          id: (c?._id || c)?.toString()?.substring(0, 8),
           name: c?.name,
           username: c?.username,
-          profilePic: c?.profilePic
-        }))
+          hasProfilePic: !!c?.profilePic
+        })),
+        ownerId: (post.postedBy?._id || post.postedBy)?.toString()?.substring(0, 8),
+        ownerName: post.postedBy?.name || postedBy?.name
       })
     }
-  }, [post?.isCollaborative, post?.contributors])
+  }, [post?.isCollaborative, post?.contributors, post?._id]) // Added post._id to force re-run
 
   const{user}=useContext(UserContext)
   const{followPost,setFollowPost}=useContext(PostContext)
@@ -855,17 +885,48 @@ const showToast = useShowToast()
           Collaborative Post
         </Text>
         {post?.contributors && Array.isArray(post.contributors) && post.contributors.length > 0 && (() => {
+          console.log('🟢🟢🟢 [Post] ============ RENDERING CONTRIBUTORS BADGE ============')
+          console.log('🟢 [Post] Contributors array length:', post.contributors.length)
+          console.log('🟢 [Post] Full contributors array:', JSON.stringify(post.contributors, null, 2))
+          
           // Filter out the owner from contributors list for display (owner is shown separately)
           // Handle both cases: postedBy as object with _id, or as direct ID
           const ownerId = postedBy?._id?.toString() || post.postedBy?._id?.toString() || post.postedBy?.toString() || postedBy?.toString()
+          console.log('🟢 [Post] Owner ID for filtering:', ownerId)
+          console.log('🟢 [Post] postedBy:', postedBy)
+          console.log('🟢 [Post] post.postedBy:', post.postedBy)
+          
           const displayContributors = post.contributors.filter((contributor) => {
             const contributorId = (contributor?._id || contributor)?.toString()
+            const isOwner = contributorId === ownerId
+            console.log('🟢 [Post] Checking contributor:', {
+              contributorId: contributorId,
+              contributorIdShort: contributorId?.substring(0, 8),
+              name: contributor?.name,
+              username: contributor?.username,
+              ownerId: ownerId,
+              ownerIdShort: ownerId?.substring(0, 8),
+              isOwner: isOwner,
+              willInclude: !isOwner
+            })
             // Skip if this contributor is the owner
-            return contributorId && contributorId !== ownerId
+            return contributorId && !isOwner
           }).slice(0, 5)
           
+          console.log('🟢🟢🟢 [Post] Display contributors AFTER FILTER:', displayContributors.length)
+          console.log('🟢 [Post] Filtered contributors:', JSON.stringify(displayContributors.map(c => ({
+            id: (c._id || c)?.toString()?.substring(0, 8),
+            name: c.name,
+            username: c.username
+          })), null, 2))
+          
           // If no contributors after filtering (only owner), don't show contributors section
-          if (displayContributors.length === 0) return null
+          if (displayContributors.length === 0) {
+            console.log('⚠️⚠️⚠️ [Post] NO CONTRIBUTORS TO DISPLAY after filtering (all filtered out)')
+            return null
+          }
+          
+          console.log('🟢🟢🟢 [Post] Will display', displayContributors.length, 'contributors')
           
           return (
             <Flex align="center" gap={1} ml="auto" flexWrap="wrap">
@@ -873,6 +934,7 @@ const showToast = useShowToast()
                 Contributors:
               </Text>
               {displayContributors.map((contributor, idx) => {
+                console.log('🔵 [Post] Rendering contributor avatar:', contributor?.name || contributor?.username)
                 // Ensure we have a proper contributor object with populated data
                 const contributorId = (contributor?._id || contributor)?.toString()
                 const contributorName = contributor?.name || contributor?.username || null
@@ -1319,97 +1381,212 @@ const showToast = useShowToast()
         1. Post owner (for both regular and collaborative posts)
         2. Contributors (for collaborative posts only)
     */}
-    {(user?._id?.toString() === postedBy?._id?.toString() || 
-      (post?.isCollaborative && post?.contributors && Array.isArray(post.contributors) && 
-       post.contributors.some(c => (c._id || c).toString() === user?._id?.toString()))) && (
-      <HStack spacing={2}>
-        <Button
-          size="xs"
-          variant="outline"
-          colorScheme="blue"
-          onClick={(e) => {
-            e.preventDefault()
-            e.stopPropagation()
-            onEditPostOpen()
-          }}
-        >
-          ✏️ Edit Post
-        </Button>
+    {(() => {
+      const isOwner = user?._id?.toString() === postedBy?._id?.toString()
+      const isContributor = post?.isCollaborative && post?.contributors && Array.isArray(post.contributors) && 
+        post.contributors.some(c => (c._id || c).toString() === user?._id?.toString())
+      const canEdit = isOwner || isContributor
+      
+      console.log('🔵 [Post] Edit button check:', {
+        postId: post?._id?.substring(0, 8),
+        isOwner: isOwner,
+        isContributor: isContributor,
+        canEdit: canEdit,
+        userId: user?._id?.toString()?.substring(0, 8),
+        postedById: postedBy?._id?.toString()?.substring(0, 8),
+        contributorsArray: post?.contributors?.map(c => ({
+          id: (c._id || c)?.toString()?.substring(0, 8),
+          name: c?.name
+        }))
+      })
+      
+      if (!canEdit) return null
+      
+      return (
+        <HStack spacing={2}>
+          <Button
+            size="xs"
+            variant="outline"
+            colorScheme="blue"
+            onClick={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
+              onEditPostOpen()
+            }}
+          >
+            ✏️ Edit Post
+          </Button>
         
         {/* Collaborative Post Actions - Only show for collaborative posts */}
-        {post?.isCollaborative && (
-          <>
-            <Button
-              size="xs"
-              variant="outline"
-              colorScheme="blue"
-              onClick={(e) => {
-                e.preventDefault()
-                e.stopPropagation()
-                onAddContributorOpen()
-              }}
-            >
-              + Add Contributor
-            </Button>
-            
-            {/* Manage Contributors Menu (only for owner of collaborative post) */}
-            {user?._id === postedBy?._id && (
-              <Menu>
-                <MenuButton
-                  as={IconButton}
-                  icon={<BsThreeDotsVertical />}
-                  size="xs"
-                  variant="ghost"
-                  aria-label="Manage contributors"
-                  onClick={(e) => {
-                    e.preventDefault()
-                    e.stopPropagation()
-                  }}
-                />
-                <MenuList>
-                  <MenuItem
-                    icon={<MdPersonRemove />}
+        {(() => {
+          const isOwner = user?._id?.toString() === postedBy?._id?.toString()
+          const isCollab = post?.isCollaborative
+          const hasContributors = post?.contributors && Array.isArray(post.contributors) && post.contributors.length > 0
+          
+          console.log('🔵 [Post] Collaborative actions check:', {
+            postId: post?._id?.substring(0, 8),
+            isCollaborative: isCollab,
+            isOwner: isOwner,
+            hasContributors: hasContributors,
+            contributorsCount: post?.contributors?.length,
+            userId: user?._id?.toString(),
+            postedById: postedBy?._id?.toString(),
+            userIdMatch: user?._id?.toString() === postedBy?._id?.toString()
+          })
+          
+          if (!isCollab) {
+            console.log('⚠️ [Post] Not a collaborative post, hiding actions')
+            return null
+          }
+          
+          return (
+            <>
+              <Button
+                size="xs"
+                variant="outline"
+                colorScheme="blue"
+                onClick={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  onAddContributorOpen()
+                }}
+              >
+                + Add Contributor
+              </Button>
+              
+              {/* Manage Contributors Menu (only for owner of collaborative post) */}
+              {(() => {
+                console.log('🔵 [Post] Three-dot menu check:', {
+                  isOwner: isOwner,
+                  hasContributors: hasContributors,
+                  willShow: isOwner && hasContributors
+                })
+                
+                if (!isOwner) {
+                  console.log('⚠️ [Post] User is not owner, hiding three dots')
+                  return null
+                }
+                
+                if (!hasContributors) {
+                  console.log('⚠️ [Post] No contributors yet, hiding three dots')
+                  return null
+                }
+                
+                console.log('✅ [Post] Showing three-dot menu!')
+                return (
+                <Menu>
+                  <MenuButton
+                    as={IconButton}
+                    icon={<BsThreeDotsVertical />}
+                    size="xs"
+                    variant="ghost"
+                    aria-label="Manage contributors"
                     onClick={(e) => {
                       e.preventDefault()
                       e.stopPropagation()
-                      onManageContributorsOpen()
+                      console.log('🔵 [Post] Three dots clicked')
                     }}
-                  >
-                    Manage Contributors
-                  </MenuItem>
-                </MenuList>
-              </Menu>
-            )}
-          </>
-        )}
+                  />
+                  <MenuList>
+                    <MenuItem
+                      icon={<MdPersonRemove />}
+                      onClick={(e) => {
+                        e.preventDefault()
+                        e.stopPropagation()
+                        console.log('🔵 [Post] Manage Contributors clicked')
+                        onManageContributorsOpen()
+                      }}
+                    >
+                      Manage Contributors
+                    </MenuItem>
+                  </MenuList>
+                </Menu>
+                )
+              })()}
+            </>
+          )
+        })()}
       </HStack>
-    )}
+      )
+    })()}
     
     {/* Add Contributor Modal */}
     <AddContributorModal
       isOpen={isAddContributorOpen}
       onClose={onAddContributorClose}
-      post={post}
+      post={(() => {
+        console.log('🔵 [Post] Passing post to AddContributorModal:', {
+          postId: post?._id?.substring(0, 8),
+          isCollaborative: post?.isCollaborative,
+          contributorsCount: post?.contributors?.length
+        })
+        return post
+      })()}
       onContributorAdded={(updatedPost) => {
-        console.log('🔵 [Post] onContributorAdded called with:', updatedPost ? 'updated post' : 'no data')
+        console.log('🔥🔥🔥 [Post] ============ onContributorAdded CALLBACK TRIGGERED ============')
+        console.log('🔥🔥🔥 [Post] Timestamp:', new Date().toISOString())
+        console.log('🔥 [Post] Updated post received:', updatedPost ? 'YES' : 'NO')
+        console.log('🔥 [Post] Current post._id:', post._id)
         
         if (updatedPost) {
-          // Immediately update post in feed with the updated data
-          console.log('✅ [Post] Updating post in feed. Contributors:', updatedPost.contributors?.length)
-          console.log('✅ [Post] Contributors data:', updatedPost.contributors)
+          console.log('🔥🔥🔥 [Post] UPDATED POST DATA:')
+          console.log('🔥 [Post] - Post ID:', updatedPost._id)
+          console.log('🔥 [Post] - isCollaborative:', updatedPost.isCollaborative)
+          console.log('🔥 [Post] - Contributors count:', updatedPost.contributors?.length)
+          console.log('🔥 [Post] - Contributors array:', updatedPost.contributors)
+          console.log('🔥 [Post] Full contributors JSON:', JSON.stringify(updatedPost.contributors?.map(c => ({
+            id: (c._id || c)?.toString()?.substring(0, 8),
+            name: c.name,
+            username: c.username
+          })), null, 2))
           
-          setFollowPost(prev => {
-            const updated = prev.map(p => {
+          // Force immediate state update with completely new array reference
+          setFollowPost(prevPosts => {
+            console.log('🔥🔥🔥 [Post] ============ UPDATING FEED STATE ============')
+            console.log('🔥 [Post] Current feed has', prevPosts.length, 'posts')
+            console.log('🔥 [Post] Looking for post ID:', post._id)
+            
+            let foundPost = false
+            const newPosts = []
+            
+            for (const p of prevPosts) {
               if (p._id === post._id) {
-                console.log('✅ [Post] Found and updating post:', post._id)
-                return updatedPost
+                console.log('🔥🔥🔥 [Post] FOUND POST IN FEED! Replacing...')
+                console.log('🔥 [Post] OLD post contributors:', p.contributors?.length || 0)
+                console.log('🔥 [Post] NEW post contributors:', updatedPost.contributors?.length || 0)
+                console.log('🔥 [Post] NEW contributors data:', JSON.stringify(updatedPost.contributors?.map(c => ({
+                  id: (c._id || c)?.toString()?.substring(0, 8),
+                  name: c.name,
+                  username: c.username
+                })), null, 2))
+                
+                // Push completely new object with spread to ensure new reference
+                newPosts.push({ ...updatedPost })
+                foundPost = true
+              } else {
+                newPosts.push(p)
               }
-              return p
-            })
-            return updated
+            }
+            
+            if (foundPost) {
+              console.log('🔥🔥🔥 [Post] POST REPLACED IN FEED! Returning new array...')
+            } else {
+              console.error('❌❌❌ [Post] POST NOT FOUND IN FEED!')
+              console.log('🔄 [Post] Updating local post state instead...')
+              // If post not in feed, update local post state
+              setLocalPost(updatedPost)
+            }
+            console.log('🔥 [Post] Returning array of length:', newPosts.length)
+            
+            // Return completely new array reference
+            return [...newPosts]
           })
+          
+          // Force a small delay and check if update happened
+          setTimeout(() => {
+            console.log('🔍 [Post] Checking if post updated in 100ms...')
+          }, 100)
         } else {
-          // Fallback: fetch post data if not provided
           console.log('⚠️ [Post] No updated post provided, fetching...')
           fetch(
             `${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/post/getPost/${post._id}`,
@@ -1419,7 +1596,7 @@ const showToast = useShowToast()
           .then(data => {
             if (data.post) {
               console.log('✅ [Post] Fetched and updating post')
-              setFollowPost(prev => prev.map(p => p._id === post._id ? data.post : p))
+              setFollowPost(prev => prev.map(p => p._id === post._id ? { ...data.post } : p))
             }
           })
           .catch(error => console.error('❌ [Post] Error refreshing post:', error))
@@ -1447,9 +1624,18 @@ const showToast = useShowToast()
       onClose={onManageContributorsClose}
       post={post}
       onContributorRemoved={(updatedPost) => {
+        console.log('🔥 [Post] onContributorRemoved called')
         if (updatedPost) {
-          // Immediately update post in feed with the updated data
-          setFollowPost(prev => prev.map(p => p._id === post._id ? updatedPost : p))
+          // Update post in feed
+          setFollowPost(prev => {
+            const updated = prev.map(p => p._id === post._id ? updatedPost : p)
+            const foundInFeed = prev.some(p => p._id === post._id)
+            if (!foundInFeed) {
+              console.log('🔄 [Post] Post not in feed, updating local state')
+              setLocalPost(updatedPost)
+            }
+            return updated
+          })
           console.log('✅ [Post] Updated post after removing contributor:', updatedPost.contributors?.length)
         } else {
           // Fallback: fetch post data if not provided
@@ -1460,7 +1646,15 @@ const showToast = useShowToast()
           .then(res => res.json())
           .then(data => {
             if (data.post) {
-              setFollowPost(prev => prev.map(p => p._id === post._id ? data.post : p))
+              setFollowPost(prev => {
+                const updated = prev.map(p => p._id === post._id ? data.post : p)
+                const foundInFeed = prev.some(p => p._id === post._id)
+                if (!foundInFeed) {
+                  console.log('🔄 [Post] Post not in feed, updating local state')
+                  setLocalPost(data.post)
+                }
+                return updated
+              })
             }
           })
           .catch(error => console.error('Error refreshing post:', error))

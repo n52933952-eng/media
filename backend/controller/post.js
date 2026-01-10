@@ -989,6 +989,7 @@ export const getUserPostsById = async(req,res)=>{
         
         const posts = await Post.find({postedBy:userId})
             .populate("postedBy","-password")
+            .populate("contributors", "username profilePic name")
             .sort({createdAt:-1})
             .limit(limit)
             .skip(skip)
@@ -1022,6 +1023,7 @@ export const getUserPosts = async(req,res)=>{
          
          const posts = await Post.find({postedBy:user._id})
             .populate("postedBy","-password")
+            .populate("contributors", "username profilePic name")
             .sort({createdAt:-1})
             .limit(limit)
             .skip(skip)
@@ -1396,6 +1398,9 @@ export const addContributorToPost = async (req, res) => {
             return res.status(400).json({ message: "Post not found" })
         }
 
+        // Get post owner ID BEFORE any operations
+        const postOwnerId = post.postedBy.toString()
+
         // Check if post is collaborative
         if (!post.isCollaborative) {
             return res.status(400).json({ message: "This post is not collaborative" })
@@ -1426,6 +1431,15 @@ export const addContributorToPost = async (req, res) => {
 
         await post.populate("contributors", "username profilePic name")
         await post.populate("postedBy", "username profilePic name")
+        
+        // Log populated data to verify it's correct
+        console.log('✅ [addContributorToPost] Post populated. Contributors:', post.contributors?.length)
+        console.log('✅ [addContributorToPost] Contributors data:', JSON.stringify(post.contributors.map(c => ({
+            id: c._id?.toString()?.substring(0, 8),
+            name: c.name,
+            username: c.username,
+            hasProfilePic: !!c.profilePic
+        })), null, 2))
 
         // Notify the new contributor (with real-time socket notification)
         try {
@@ -1494,6 +1508,16 @@ export const addContributorToPost = async (req, res) => {
                 console.log(`📤 [addContributorToPost] Emitted postUpdated to ${uniqueRecipients.length} recipients (owner, contributors, followers)`)
             }
         }
+
+        // Final check: Log what we're sending back
+        console.log('📤 [addContributorToPost] Sending response with contributors:', post.contributors?.length)
+        console.log('📤 [addContributorToPost] Response contributors data:', JSON.stringify(post.contributors.map(c => ({
+            id: c._id?.toString()?.substring(0, 8) || (typeof c === 'string' ? c.substring(0, 8) : 'unknown'),
+            name: c.name || 'NO NAME',
+            username: c.username || 'NO USERNAME',
+            type: typeof c,
+            isString: typeof c === 'string'
+        })), null, 2))
 
         res.status(200).json({
             message: "Contributor added successfully",

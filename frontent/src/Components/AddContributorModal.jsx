@@ -217,7 +217,17 @@ const AddContributorModal = ({ isOpen, onClose, post, onContributorAdded }) => {
               }
             )
             const data = await res.json()
-            console.log(`🔵 [AddContributorModal] Response for ${selectedUser.username}:`, { ok: res.ok, status: res.status, data })
+            console.log(`🔵 [AddContributorModal] Response for ${selectedUser.username}:`, { ok: res.ok, status: res.status })
+            console.log(`🔵 [AddContributorModal] Response data.post:`, data.post)
+            console.log(`🔵 [AddContributorModal] Response contributors:`, data.post?.contributors)
+            console.log(`🔵 [AddContributorModal] Contributors type check:`, data.post?.contributors?.map(c => ({
+              value: c,
+              type: typeof c,
+              isString: typeof c === 'string',
+              isObject: typeof c === 'object',
+              hasId: !!c._id,
+              hasName: !!c.name
+            })))
             return { res, data, username: selectedUser.username, success: res.ok }
           } catch (error) {
             console.error(`❌ [AddContributorModal] Error adding ${selectedUser.username}:`, error)
@@ -244,19 +254,32 @@ const AddContributorModal = ({ isOpen, onClose, post, onContributorAdded }) => {
         // Check if backend returned the updated post in the response
         if (successResponse.data && successResponse.data.post) {
           console.log('✅ [AddContributorModal] Backend returned updated post directly')
+          console.log('✅ [AddContributorModal] POST DATA:', JSON.stringify({
+            postId: successResponse.data.post._id?.substring(0, 8),
+            contributorsCount: successResponse.data.post.contributors?.length,
+            contributors: successResponse.data.post.contributors?.map(c => ({
+              id: (c._id || c)?.toString()?.substring(0, 8),
+              name: c.name,
+              username: c.username,
+              hasProfilePic: !!c.profilePic
+            }))
+          }, null, 2))
           
           // Show success toast
           showToast(
             'Success',
-            `Added ${successful.length} contributor${successful.length > 1 ? 's' : ''}`,
+            `Added ${successful.length} contributor${successful.length > 1 ? 's' : ''}. Contributors: ${successResponse.data.post.contributors?.length}`,
             'success'
           )
           
           // Call callback with updated post data from response
           if (onContributorAdded) {
-            console.log('✅ [AddContributorModal] Calling onContributorAdded with post from response')
+            console.log('✅✅✅ [AddContributorModal] CALLING onContributorAdded NOW!')
             console.log('✅ [AddContributorModal] Contributors in response:', successResponse.data.post.contributors?.length)
             onContributorAdded(successResponse.data.post)
+            console.log('✅✅✅ [AddContributorModal] onContributorAdded CALLED!')
+          } else {
+            console.error('❌❌❌ [AddContributorModal] onContributorAdded callback is NULL!')
           }
           
           // Close modal and reset
