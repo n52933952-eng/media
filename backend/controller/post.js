@@ -212,14 +212,40 @@ export const updatePost = async(req,res) => {
         const { text } = req.body
         const userId = req.user._id
         
-        const post = await Post.findById(id).populate('contributors', '_id')
+        // Fetch post without populating postedBy (we need the ObjectId, not the object)
+        const post = await Post.findById(id)
+            .populate('contributors', '_id')
+            .select('+postedBy') // Ensure postedBy is included
         
         if(!post){
             return res.status(400).json({error:"Post not found"})
         }
         
-        // Get post owner ID BEFORE populating (postedBy might be ObjectId or populated object)
-        const postOwnerId = post.postedBy._id?.toString() || post.postedBy.toString()
+        // Get post owner ID BEFORE populating - use Mongoose's lean or direct access
+        // postedBy should be ObjectId, but handle if it's already populated
+        let postOwnerId
+        try {
+            // Try to get the _id if it's populated, otherwise it's already an ObjectId
+            if (post.postedBy && post.postedBy._id) {
+                // Already populated
+                postOwnerId = post.postedBy._id.toString()
+            } else if (post.postedBy && post.postedBy.toString) {
+                // ObjectId - call toString() directly (not String() which might serialize the object)
+                postOwnerId = post.postedBy.toString()
+            } else {
+                // Fallback
+                postOwnerId = String(post.postedBy)
+            }
+            // Validate it's a proper ObjectId string (24 hex chars)
+            if (!/^[0-9a-fA-F]{24}$/.test(postOwnerId)) {
+                throw new Error('Invalid ObjectId format')
+            }
+        } catch (err) {
+            console.error('⚠️ Error extracting postOwnerId:', err, 'postedBy:', post.postedBy)
+            // If all else fails, get the raw value from the document
+            const rawPost = post.toObject ? post.toObject() : post
+            postOwnerId = rawPost.postedBy?.toString() || String(rawPost.postedBy)
+        }
         
         // Check if user is owner
         const isOwner = postOwnerId === userId.toString()
@@ -398,11 +424,12 @@ export const updatePost = async(req,res) => {
         if (isContributorEdit) {
             try {
                 const { createNotification } = await import('./notification.js')
-                await createNotification(post.postedBy.toString(), 'post_edit', userId.toString(), {
+                // Use postOwnerId we got earlier (before populate)
+                await createNotification(postOwnerId, 'post_edit', userId.toString(), {
                     postId: post._id.toString(),
                     postText: post.text?.substring(0, 50) || 'your collaborative post'
                 })
-                console.log(`📬 [updatePost] Created edit notification for post owner ${post.postedBy}`)
+                console.log(`📬 [updatePost] Created edit notification for post owner ${postOwnerId}`)
             } catch (err) {
                 console.error('❌ [updatePost] Error creating edit notification:', err)
             }
@@ -414,8 +441,7 @@ export const updatePost = async(req,res) => {
             const userSocketMap = getUserSocketMap()
             const recipients = [] // Socket IDs to receive the update
             
-            // 1. Add post owner (always include them)
-            const postOwnerId = post.postedBy.toString()
+            // 1. Add post owner (always include them) - use postOwnerId we got earlier
             const ownerSocketData = userSocketMap[postOwnerId]
             if (ownerSocketData) {
                 recipients.push(ownerSocketData.socketId)
