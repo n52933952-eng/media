@@ -390,10 +390,14 @@ export const updatePost = async(req,res) => {
                             // Emit to all recipients (owner, contributors, followers)
                             const uniqueRecipients = [...new Set(recipients)] // Remove duplicates
                             if (uniqueRecipients.length > 0) {
+                                // Convert Mongoose document to plain object for socket emission
+                                const postObj = post.toObject ? post.toObject() : JSON.parse(JSON.stringify(post))
                                 uniqueRecipients.forEach(socketId => {
-                                    io.to(socketId).emit("postUpdated", { postId: post._id.toString(), post })
+                                    io.to(socketId).emit("postUpdated", { postId: post._id.toString(), post: postObj })
                                 })
                                 console.log(`📤 [updatePost] Emitted postUpdated to ${uniqueRecipients.length} recipients (owner, contributors, followers)`)
+                            } else {
+                                console.log(`⚠️ [updatePost] No recipients found for post update (post owner ${postOwnerId} might not be online)`)
                             }
                         }
                         
@@ -481,10 +485,14 @@ export const updatePost = async(req,res) => {
             // Emit to all recipients (owner, contributors, followers)
             const uniqueRecipients = [...new Set(recipients)] // Remove duplicates
             if (uniqueRecipients.length > 0) {
+                // Convert Mongoose document to plain object for socket emission
+                const postObj = post.toObject ? post.toObject() : JSON.parse(JSON.stringify(post))
                 uniqueRecipients.forEach(socketId => {
-                    io.to(socketId).emit("postUpdated", { postId: post._id.toString(), post })
+                    io.to(socketId).emit("postUpdated", { postId: post._id.toString(), post: postObj })
                 })
                 console.log(`📤 [updatePost] Emitted postUpdated to ${uniqueRecipients.length} recipients (owner, contributors, followers)`)
+            } else {
+                console.log(`⚠️ [updatePost] No recipients found for post update (post owner ${postOwnerId} might not be online)`)
             }
         }
         
