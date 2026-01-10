@@ -229,66 +229,98 @@ const AddContributorModal = ({ isOpen, onClose, post, onContributorAdded }) => {
       const successful = results.filter(r => r.success)
       const failed = results.filter(r => !r.success)
 
-      console.log('🔵 [AddContributorModal] Results:', { successful: successful.length, failed: failed.length })
+      console.log('🔵 [AddContributorModal] Results:', { 
+        successful: successful.length, 
+        failed: failed.length,
+        successfulUsers: successful.map(r => r.username),
+        failedUsers: failed.map(r => r.username)
+      })
 
-      // Always fetch updated post if at least one succeeded
+      // Check if ANY succeeded
       if (successful.length > 0) {
-        try {
-          console.log('🔵 [AddContributorModal] Fetching updated post...')
-          const postRes = await fetch(
-            `${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/post/getPost/${post._id}`,
-            { credentials: 'include' }
+        // Use the post data from the first successful response (backend returns updated post)
+        const successResponse = successful[0]
+        
+        // Check if backend returned the updated post in the response
+        if (successResponse.data && successResponse.data.post) {
+          console.log('✅ [AddContributorModal] Backend returned updated post directly')
+          
+          // Show success toast
+          showToast(
+            'Success',
+            `Added ${successful.length} contributor${successful.length > 1 ? 's' : ''}`,
+            'success'
           )
-          const postData = await postRes.json()
           
-          console.log('🔵 [AddContributorModal] Updated post data:', postData)
+          // Call callback with updated post data from response
+          if (onContributorAdded) {
+            console.log('✅ [AddContributorModal] Calling onContributorAdded with post from response')
+            console.log('✅ [AddContributorModal] Contributors in response:', successResponse.data.post.contributors?.length)
+            onContributorAdded(successResponse.data.post)
+          }
           
-          if (postRes.ok && postData.post) {
-            // Show success toast BEFORE closing modal
-            showToast(
-              'Success',
-              `Added ${successful.length} contributor${successful.length > 1 ? 's' : ''}`,
-              'success'
+          // Close modal and reset
+          onClose()
+          setSelectedUsers([])
+          setSearchQuery('')
+        } else {
+          // Fallback: Fetch updated post if not in response
+          try {
+            console.log('🔵 [AddContributorModal] Fetching updated post from API...')
+            const postRes = await fetch(
+              `${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/post/getPost/${post._id}`,
+              { credentials: 'include' }
             )
+            const postData = await postRes.json()
             
-            // Call callback with updated post data
-            if (onContributorAdded) {
-              console.log('✅ [AddContributorModal] Calling onContributorAdded with updated post')
-              onContributorAdded(postData.post)
+            if (postRes.ok && postData.post) {
+              console.log('✅ [AddContributorModal] Fetched updated post, contributors:', postData.post.contributors?.length)
+              
+              // Show success toast
+              showToast(
+                'Success',
+                `Added ${successful.length} contributor${successful.length > 1 ? 's' : ''}`,
+                'success'
+              )
+              
+              // Call callback with updated post data
+              if (onContributorAdded) {
+                onContributorAdded(postData.post)
+              }
+              
+              // Close modal and reset
+              onClose()
+              setSelectedUsers([])
+              setSearchQuery('')
+            } else {
+              throw new Error('Failed to fetch updated post')
             }
-            
-            // Close modal and reset
+          } catch (error) {
+            console.error('❌ [AddContributorModal] Error fetching updated post:', error)
+            showToast('Success', 'Contributors added. Refresh to see updates.', 'success')
             onClose()
             setSelectedUsers([])
             setSearchQuery('')
-          } else {
-            throw new Error('Failed to fetch updated post')
           }
-        } catch (error) {
-          console.error('❌ [AddContributorModal] Error fetching updated post:', error)
-          // Show success for adding but couldn't refresh
-          showToast('Success', 'Contributors added. Please refresh to see updates.', 'success')
+        }
+      }
+
+      // Only show failed errors if there were actually failures AND no successes
+      if (failed.length > 0) {
+        console.log('❌ [AddContributorModal] Failed additions:', failed.map(f => ({ user: f.username, reason: f.data })))
+        
+        // Only show error toast if ALL failed (if some succeeded, we already showed success)
+        if (successful.length === 0) {
+          failed.forEach(({ data, username }) => {
+            const errorMsg = data?.message || data?.error || 'Failed to add'
+            showToast('Error', `${username}: ${errorMsg}`, 'error')
+          })
+          
+          // Close modal even if all failed
           onClose()
           setSelectedUsers([])
           setSearchQuery('')
         }
-      }
-
-      // Only show failed errors if there were actually failures
-      if (failed.length > 0) {
-        console.log('❌ [AddContributorModal] Failed additions:', failed)
-        failed.forEach(({ data, username }) => {
-          const errorMsg = data?.message || data?.error || 'Failed to add'
-          console.error(`❌ Failed to add ${username}:`, errorMsg)
-          showToast('Error', `${username}: ${errorMsg}`, 'error')
-        })
-      }
-      
-      // If all failed, close modal anyway
-      if (successful.length === 0 && failed.length > 0) {
-        onClose()
-        setSelectedUsers([])
-        setSearchQuery('')
       }
     } catch (error) {
       console.error('❌ [AddContributorModal] Fatal error adding contributors:', error)

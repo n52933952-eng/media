@@ -1352,8 +1352,8 @@ const showToast = useShowToast()
               + Add Contributor
             </Button>
             
-            {/* Manage Contributors Menu (only for owner) */}
-            {user?._id === postedBy?._id && post?.contributors && post.contributors.length > 0 && (
+            {/* Manage Contributors Menu (only for owner of collaborative post) */}
+            {user?._id === postedBy?._id && (
               <Menu>
                 <MenuButton
                   as={IconButton}
