@@ -726,10 +726,10 @@ export const getFollowingUsers = async (req, res) => {
             return res.status(200).json([])
         }
         
-        // Get all users that current user is following
+        // Get users that current user is following (limit to 30 for performance)
         const followingUsers = await User.find({
             _id: { $in: currentUser.following }
-        }).select('username name profilePic bio').limit(50)
+        }).select('username name profilePic bio').limit(30).sort({ username: 1 })
         
         res.status(200).json(followingUsers)
     } catch (error) {

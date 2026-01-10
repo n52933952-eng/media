@@ -54,16 +54,37 @@ const AddContributorModal = ({ isOpen, onClose, post, onContributorAdded }) => {
   }, [isOpen, user?._id])
 
   useEffect(() => {
-    if (searchQuery.trim().length >= 2) {
-      const timeoutId = setTimeout(() => {
-        searchUsers(searchQuery)
-      }, 300) // Debounce search
+    const query = searchQuery.trim()
+    
+    if (query.length >= 1) {
+      // First, filter following users by search query (instant, no API call)
+      const filteredFollowing = followingUsers.filter(u => {
+        const nameMatch = u.name?.toLowerCase().includes(query.toLowerCase())
+        const usernameMatch = u.username?.toLowerCase().includes(query.toLowerCase())
+        return nameMatch || usernameMatch
+      })
+      
+      // If we have filtered results from following, show them immediately
+      if (filteredFollowing.length > 0 && query.length < 2) {
+        setSearchResults(filteredFollowing)
+        return
+      }
+      
+      // For 2+ characters, also search globally via API
+      if (query.length >= 2) {
+        const timeoutId = setTimeout(() => {
+          searchUsers(query)
+        }, 300) // Debounce search
 
-      return () => clearTimeout(timeoutId)
+        return () => clearTimeout(timeoutId)
+      } else {
+        // 1 character: show filtered following users
+        setSearchResults(filteredFollowing)
+      }
     } else {
       setSearchResults([])
     }
-  }, [searchQuery])
+  }, [searchQuery, followingUsers])
 
   const fetchFollowingUsers = async () => {
     setIsLoadingFollowing(true)
@@ -257,7 +278,7 @@ const AddContributorModal = ({ isOpen, onClose, post, onContributorAdded }) => {
               </Box>
             )}
 
-            {/* Following Users - Show when no search query */}
+            {/* Following Users - Show only when no search query */}
             {!searchQuery && followingUsers.length > 0 && (
               <Box>
                 <Text fontSize="sm" fontWeight="bold" mb={2}>
@@ -310,8 +331,8 @@ const AddContributorModal = ({ isOpen, onClose, post, onContributorAdded }) => {
               </Box>
             )}
 
-            {/* Search Results - Show when searching */}
-            {searchQuery && searchResults.length > 0 && (
+            {/* Search Results - Show when searching (1+ characters) */}
+            {searchQuery && searchQuery.trim().length >= 1 && searchResults.length > 0 && (
               <Box>
                 <Text fontSize="sm" fontWeight="bold" mb={2}>
                   Search Results:
@@ -357,9 +378,11 @@ const AddContributorModal = ({ isOpen, onClose, post, onContributorAdded }) => {
               </Box>
             )}
 
-            {searchQuery && searchQuery.length >= 2 && searchResults.length === 0 && !isSearching && (
+            {searchQuery && searchQuery.trim().length >= 1 && searchResults.length === 0 && !isSearching && (
               <Text fontSize="sm" color={secondaryTextColor} textAlign="center" py={4}>
-                No users found
+                {searchQuery.trim().length === 1 
+                  ? 'No matching users found. Type more characters to search globally.'
+                  : 'No users found'}
               </Text>
             )}
 
