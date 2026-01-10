@@ -218,8 +218,11 @@ export const updatePost = async(req,res) => {
             return res.status(400).json({error:"Post not found"})
         }
         
+        // Get post owner ID BEFORE populating (postedBy might be ObjectId or populated object)
+        const postOwnerId = post.postedBy._id?.toString() || post.postedBy.toString()
+        
         // Check if user is owner
-        const isOwner = post.postedBy.toString() === userId.toString()
+        const isOwner = postOwnerId === userId.toString()
         
         // Check if user is a contributor (for collaborative posts)
         const isContributor = post.isCollaborative && 
@@ -304,8 +307,7 @@ export const updatePost = async(req,res) => {
                         if (isContributorEdit) {
                             try {
                                 const { createNotification } = await import('./notification.js')
-                                // Get post owner ID - after populate, postedBy might be an object
-                                const postOwnerId = post.postedBy._id?.toString() || post.postedBy.toString()
+                                // Use postOwnerId we got earlier (before populate)
                                 await createNotification(postOwnerId, 'post_edit', userId.toString(), {
                                     postId: post._id.toString(),
                                     postText: post.text?.substring(0, 50) || 'your collaborative post'
@@ -322,8 +324,7 @@ export const updatePost = async(req,res) => {
                             const userSocketMap = getUserSocketMap()
                             const recipients = [] // Socket IDs to receive the update
                             
-                            // 1. Add post owner (always include them)
-                            const postOwnerId = post.postedBy._id?.toString() || post.postedBy.toString()
+                            // 1. Add post owner (always include them) - use postOwnerId we got earlier
                             const ownerSocketData = userSocketMap[postOwnerId]
                             if (ownerSocketData) {
                                 recipients.push(ownerSocketData.socketId)
@@ -1366,11 +1367,10 @@ export const addContributorToPost = async (req, res) => {
         const io = getIO()
         if (io) {
             const userSocketMap = getUserSocketMap()
-            const recipients = [] // Socket IDs to receive the update
-            
-            // 1. Add post owner (always include them)
-            const postOwnerId = post.postedBy._id?.toString() || post.postedBy.toString()
-            const ownerSocketData = userSocketMap[postOwnerId]
+                            const recipients = [] // Socket IDs to receive the update
+                            
+                            // 1. Add post owner (always include them) - use postOwnerId we got earlier
+                            const ownerSocketData = userSocketMap[postOwnerId]
             if (ownerSocketData) {
                 recipients.push(ownerSocketData.socketId)
                 console.log(`📤 [addContributorToPost] Adding post owner ${postOwnerId} to postUpdated recipients`)
