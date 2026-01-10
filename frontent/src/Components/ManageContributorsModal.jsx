@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import {
   Modal,
   ModalOverlay,
@@ -24,7 +24,11 @@ import useShowToast from '../hooks/useShowToast'
 
 const ManageContributorsModal = ({ isOpen, onClose, post, onContributorRemoved }) => {
   const [removing, setRemoving] = useState(null)
+  const [loadingPost, setLoadingPost] = useState(false)
+  const [populatedPost, setPopulatedPost] = useState(null)
   const showToast = useShowToast()
+  
+  console.log('🔵 [ManageContributorsModal] Component render - isOpen:', isOpen, 'post:', post?._id?.substring(0, 8))
 
   const bgColor = useColorModeValue('white', '#252b3b')
   const borderColor = useColorModeValue('#e1e4ea', '#2d3548')
@@ -32,8 +36,52 @@ const ManageContributorsModal = ({ isOpen, onClose, post, onContributorRemoved }
   const secondaryTextColor = useColorModeValue('gray.600', 'gray.400')
   const hoverBg = useColorModeValue('gray.50', '#2d3548')
 
-  const postOwnerId = post?.postedBy?._id?.toString()
-  const contributors = post?.contributors || []
+  // Use populated post if available, otherwise use the passed post
+  const currentPost = populatedPost || post
+  const postOwnerId = currentPost?.postedBy?._id?.toString()
+  const contributors = currentPost?.contributors || []
+  
+  // Fetch populated post when modal opens if contributors are strings
+  useEffect(() => {
+    if (isOpen && post?._id) {
+      const firstContributor = post.contributors?.[0]
+      const contributorsAreStrings = typeof firstContributor === 'string'
+      
+      console.log('🔵 [ManageContributorsModal] Modal opened:', {
+        postId: post._id?.substring(0, 8),
+        contributorsCount: post.contributors?.length,
+        firstContributorType: typeof firstContributor,
+        contributorsAreStrings: contributorsAreStrings
+      })
+      
+      if (contributorsAreStrings || !firstContributor?.name) {
+        console.log('⚠️ [ManageContributorsModal] Contributors not populated, fetching...')
+        setLoadingPost(true)
+        fetch(
+          `${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/post/getPost/${post._id}`,
+          { credentials: 'include' }
+        )
+        .then(res => res.json())
+        .then(data => {
+          if (data.post) {
+            console.log('✅ [ManageContributorsModal] Fetched populated post:', {
+              contributors: data.post.contributors?.map(c => ({
+                id: c._id?.substring(0, 8),
+                name: c.name,
+                username: c.username
+              }))
+            })
+            setPopulatedPost(data.post)
+          }
+        })
+        .catch(error => console.error('❌ [ManageContributorsModal] Error fetching post:', error))
+        .finally(() => setLoadingPost(false))
+      } else {
+        console.log('✅ [ManageContributorsModal] Contributors already populated')
+        setPopulatedPost(post)
+      }
+    }
+  }, [isOpen, post?._id])
 
   const handleRemoveContributor = async (contributorId, contributorName) => {
     if (!window.confirm(`Remove ${contributorName} from this collaborative post?`)) {
@@ -43,7 +91,7 @@ const ManageContributorsModal = ({ isOpen, onClose, post, onContributorRemoved }
     setRemoving(contributorId)
     try {
       const res = await fetch(
-        `${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/post/collaborative/${post._id}/contributor/${contributorId}`,
+        `${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/post/collaborative/${currentPost._id}/contributor/${contributorId}`,
         {
           method: 'DELETE',
           credentials: 'include'
@@ -57,7 +105,7 @@ const ManageContributorsModal = ({ isOpen, onClose, post, onContributorRemoved }
         // Fetch the updated post with populated contributors
         try {
           const postRes = await fetch(
-            `${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/post/getPost/${post._id}`,
+            `${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/post/getPost/${currentPost._id}`,
             { credentials: 'include' }
           )
           const postData = await postRes.json()
@@ -87,6 +135,14 @@ const ManageContributorsModal = ({ isOpen, onClose, post, onContributorRemoved }
     }
   }
 
+  // Reset state when modal closes
+  useEffect(() => {
+    if (!isOpen) {
+      setPopulatedPost(null)
+      setRemoving(null)
+    }
+  }, [isOpen])
+
   return (
     <Modal isOpen={isOpen} onClose={onClose} size="md">
       <ModalOverlay />
@@ -94,9 +150,16 @@ const ManageContributorsModal = ({ isOpen, onClose, post, onContributorRemoved }
         <ModalHeader>Manage Contributors</ModalHeader>
         <ModalCloseButton />
         <ModalBody pb={6}>
+          {loadingPost && (
+            <Text fontSize="sm" color={secondaryTextColor} textAlign="center" py={4}>
+              Loading contributors...
+            </Text>
+          )}
+          
+          {!loadingPost && (
           <VStack spacing={4} align="stretch">
             {/* Post Owner */}
-            {post?.postedBy && (
+            {currentPost?.postedBy && (
               <Box>
                 <Text fontSize="sm" fontWeight="bold" mb={2} color={secondaryTextColor}>
                   Post Owner
@@ -109,14 +172,14 @@ const ManageContributorsModal = ({ isOpen, onClose, post, onContributorRemoved }
                 >
                   <HStack>
                     <Avatar
-                      src={post.postedBy.profilePic}
-                      name={post.postedBy.name || post.postedBy.username}
+                      src={currentPost.postedBy.profilePic}
+                      name={currentPost.postedBy.name || currentPost.postedBy.username}
                       size="md"
                     />
                     <VStack align="start" spacing={0}>
                       <HStack>
                         <Text fontSize="sm" fontWeight="bold">
-                          {post.postedBy.name}
+                          {currentPost.postedBy.name}
                         </Text>
                         <Badge colorScheme="yellow" fontSize="xs">
                           <HStack spacing={1}>
@@ -126,7 +189,7 @@ const ManageContributorsModal = ({ isOpen, onClose, post, onContributorRemoved }
                         </Badge>
                       </HStack>
                       <Text fontSize="xs" color={secondaryTextColor}>
-                        @{post.postedBy.username}
+                        @{currentPost.postedBy.username}
                       </Text>
                     </VStack>
                   </HStack>
@@ -194,6 +257,7 @@ const ManageContributorsModal = ({ isOpen, onClose, post, onContributorRemoved }
               </Text>
             )}
           </VStack>
+          )}
         </ModalBody>
       </ModalContent>
     </Modal>

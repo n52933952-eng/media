@@ -1404,18 +1404,18 @@ const showToast = useShowToast()
       
       return (
         <HStack spacing={2}>
-          <Button
-            size="xs"
-            variant="outline"
-            colorScheme="blue"
-            onClick={(e) => {
-              e.preventDefault()
-              e.stopPropagation()
-              onEditPostOpen()
-            }}
-          >
-            ✏️ Edit Post
-          </Button>
+        <Button
+          size="xs"
+          variant="outline"
+          colorScheme="blue"
+          onClick={(e) => {
+            e.preventDefault()
+            e.stopPropagation()
+            onEditPostOpen()
+          }}
+        >
+          ✏️ Edit Post
+        </Button>
         
         {/* Collaborative Post Actions - Only show for collaborative posts */}
         {(() => {
@@ -1481,19 +1481,12 @@ const showToast = useShowToast()
                     size="xs"
                     variant="ghost"
                     aria-label="Manage contributors"
-                    onClick={(e) => {
-                      e.preventDefault()
-                      e.stopPropagation()
-                      console.log('🔵 [Post] Three dots clicked')
-                    }}
                   />
-                  <MenuList>
+                  <MenuList zIndex={1500}>
                     <MenuItem
                       icon={<MdPersonRemove />}
-                      onClick={(e) => {
-                        e.preventDefault()
-                        e.stopPropagation()
-                        console.log('🔵 [Post] Manage Contributors clicked')
+                      onClick={() => {
+                        console.log('🔵 [Post] Manage Contributors clicked!')
                         onManageContributorsOpen()
                       }}
                     >
@@ -1701,7 +1694,24 @@ const showToast = useShowToast()
   }
 
   return (
-    <Link to={`/${postedBy?.username}/post/${post._id}`}>
+    <Link 
+      to={`/${postedBy?.username}/post/${post._id}`}
+      onClick={(e) => {
+        // Check if clicked element should prevent navigation
+        const target = e.target
+        
+        // Check if the click is on a button, input, or has data-no-navigate
+        if (
+          target.closest('button') ||
+          target.closest('[data-no-navigate="true"]') ||
+          target.closest('.chakra-menu__menu-button') ||
+          target.closest('.chakra-menu__menu-list')
+        ) {
+          console.log('🔵 [Post] Preventing navigation - clicked on interactive element')
+          e.preventDefault()
+        }
+      }}
+    >
       {postContent}
     </Link>
   )
