@@ -7,7 +7,7 @@ import{UserContext} from '../context/UserContext'
 import {Link} from 'react-router-dom'
 import useShowToast from '../hooks/useShowToast.js'
 
-const UserHeader = ({users, activeTab, setActiveTab}) => {
+const UserHeader = ({users, activeTab, setActiveTab, onUserFollowed}) => {
    
     const toast =useToast()
     
@@ -148,6 +148,11 @@ const UserHeader = ({users, activeTab, setActiveTab}) => {
          }else{
           showToast("Success",`you Followed ${users.name}`,"success")
           users.followers.push(currentUser._id)
+          
+          // Call onUserFollowed callback to fetch user's posts and add to feed
+          if (onUserFollowed && users._id) {
+            onUserFollowed(users._id)
+          }
          }
 
            if(data.current){

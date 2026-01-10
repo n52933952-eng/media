@@ -33,20 +33,25 @@ const HomePage = () => {
   // Fetch last 3 posts from a specific user (when they're followed)
   const fetchUserPosts = useCallback(async (userId) => {
     try {
-      // First, check if this is the Football account by fetching user profile
+      // First, check if this is the Football or Weather account by fetching user profile
       // The getUserPro endpoint accepts both username and userId
       let isFootballAccount = false
+      let isWeatherAccount = false
       try {
         const userRes = await fetch(
           `${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/user/getUserPro/${userId}`,
           { credentials: "include" }
         )
         const userData = await userRes.json()
-        if (userRes.ok && userData.username === 'Football') {
-          isFootballAccount = true
+        if (userRes.ok) {
+          if (userData.username === 'Football') {
+            isFootballAccount = true
+          } else if (userData.username === 'Weather') {
+            isWeatherAccount = true
+          }
         }
       } catch (e) {
-        console.error('Error checking if Football account:', e)
+        console.error('Error checking account type:', e)
       }
       
       // If following Football account, add Football posts smoothly without refreshing entire feed
@@ -55,6 +60,13 @@ const HomePage = () => {
         console.log('⚽ [fetchUserPosts] Following Football - posts will be added by SuggestedChannels component')
         // Don't refresh entire feed - let SuggestedChannels handle it smoothly
         // This prevents page jumping
+        return
+      }
+      
+      // If following Weather account, SuggestedChannels already handles it
+      if (isWeatherAccount) {
+        console.log('🌤️ [fetchUserPosts] Following Weather - posts will be added by SuggestedChannels component')
+        // Don't refresh entire feed - let SuggestedChannels handle it smoothly
         return
       }
       

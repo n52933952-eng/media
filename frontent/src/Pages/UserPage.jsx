@@ -1,4 +1,4 @@
-import React,{useState,useEffect,useContext} from 'react'
+import React,{useState,useEffect,useContext,useCallback} from 'react'
 import UserHeader from '../Components/UserHeader'
 import UserPost from '../Components/UserPost'
 import{useParams} from 'react-router-dom'
@@ -22,7 +22,7 @@ const UserPage = () => {
 
    const{username}=useParams()
    const{user:currentUser}=useContext(UserContext)
-   const{followPost}=useContext(PostContext)
+   const{followPost,setFollowPost}=useContext(PostContext)
     
    const showToast = useShowToast()
    
@@ -35,6 +35,116 @@ const UserPage = () => {
   const[commentsSkip,setCommentsSkip]=useState(0)
   const COMMENTS_PER_PAGE = 9
    
+   
+   // Fetch last 3 posts from a specific user (when they're followed)
+   const fetchFollowedUserPosts = useCallback(async (userId) => {
+     try {
+       // First, check if this is the Weather account
+       let isWeatherAccount = false
+       try {
+         const userRes = await fetch(
+           `${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/user/getUserPro/${userId}`,
+           { credentials: "include" }
+         )
+         const userData = await userRes.json()
+         if (userRes.ok && userData.username === 'Weather') {
+           isWeatherAccount = true
+         }
+       } catch (e) {
+         console.error('Error checking if Weather account:', e)
+       }
+       
+       // If following Weather account, trigger weather post creation
+       if (isWeatherAccount) {
+         console.log('🌤️ [UserPage] Following Weather - creating/fetching weather post')
+         const baseUrl = import.meta.env.PROD ? window.location.origin : "http://localhost:5000"
+         
+         setTimeout(() => {
+           fetch(`${baseUrl}/api/weather/post/manual`, {
+             method: 'POST',
+             credentials: 'include'
+           })
+           .then(res => res.json())
+           .then(postData => {
+             console.log('🌤️ [UserPage] Weather post result:', postData)
+             
+             if (postData.post) {
+               // Save scroll position to prevent page jumping
+               const scrollY = window.scrollY
+               
+               // Add post to feed immediately
+               setFollowPost(prev => {
+                 // Check if post already exists
+                 const exists = prev.some(p => {
+                   const prevId = p._id?.toString()
+                   const newId = postData.post._id?.toString()
+                   return prevId === newId
+                 })
+                 if (exists) {
+                   console.log('⚠️ [UserPage] Weather post already in feed, skipping')
+                   return prev
+                 }
+                 // Add to top of feed
+                 console.log('✅ [UserPage] Added Weather post to feed immediately')
+                 return [postData.post, ...prev]
+               })
+               
+               // Restore scroll position after state update
+               requestAnimationFrame(() => {
+                 window.scrollTo({ top: scrollY, behavior: 'instant' })
+               })
+             }
+           })
+           .catch(err => {
+             console.error('Weather post error:', err)
+           })
+         }, 500) // 500ms delay to ensure follow is saved
+         return
+       }
+       
+       const res = await fetch(
+         `${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/post/user/id/${userId}?limit=3`,
+         {
+           credentials: "include",
+         }
+       )
+
+       const data = await res.json()
+
+       if (res.ok && data.posts && data.posts.length > 0) {
+         // Save current scroll position to prevent page jumping
+         const scrollY = window.scrollY
+         
+         // Add posts to feed and sort by date (newest first)
+         setFollowPost(prev => {
+           // Combine existing posts with new posts
+           const combined = [...prev, ...data.posts]
+           
+           // Remove duplicates (in case post already exists)
+           const unique = combined.filter((post, index, self) => 
+             index === self.findIndex(p => p._id === post._id)
+           )
+           
+           // Sort by updatedAt (or createdAt if no updatedAt) - matches backend sorting logic
+           unique.sort((a, b) => {
+             const dateA = new Date(a.updatedAt || a.createdAt).getTime()
+             const dateB = new Date(b.updatedAt || b.createdAt).getTime()
+             return dateB - dateA // Newest first
+           })
+           
+           return unique
+         })
+         
+         // Restore scroll position after state update to prevent page jumping
+         requestAnimationFrame(() => {
+           window.scrollTo({ top: scrollY, behavior: 'instant' })
+         })
+       }
+     } catch (error) {
+       // Silently fail - don't show error for background fetch
+       console.error('Error fetching user posts:', error)
+     }
+   }, [setFollowPost])
    
    const fetchUser = async() => {
        setLoading(true)
@@ -219,7 +329,7 @@ if(!user && loading){
    
    <Box minH="100vh">
     
-      <UserHeader users={user} activeTab={activeTab} setActiveTab={setActiveTab}/>
+      <UserHeader users={user} activeTab={activeTab} setActiveTab={setActiveTab} onUserFollowed={fetchFollowedUserPosts}/>
       
       {activeTab === 'posts' ? (
         <>
