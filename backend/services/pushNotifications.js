@@ -179,17 +179,79 @@ async function sendFootballScoreNotification(userId, matchInfo) {
  */
 async function sendCallNotification(userId, callerName, callerId, callType = 'video') {
   const title = callType === 'video' ? 'Incoming Video Call 📹' : 'Incoming Voice Call 📞';
-  return await sendNotificationToUser(
-    userId,
-    title,
-    `${callerName} is calling you...`,
-    { 
+  
+  // Create notification with sound, priority, and action buttons
+  const notification = {
+    app_id: ONESIGNAL_APP_ID,
+    target_channel: 'push',
+    include_aliases: {
+      external_id: [userId]
+    },
+    headings: { en: title },
+    contents: { en: `${callerName} is calling you...` },
+    data: { 
       type: 'call', 
       callType,
       callerId,
       callerName 
+    },
+    // High priority for call notifications
+    priority: 10,
+    // Android: Play default notification sound (ringtone-like)
+    android_sound: 'default',
+    // iOS: Play default notification sound
+    ios_sound: 'default',
+    // iOS: Critical alert (bypasses silent mode - requires special permission)
+    ios_interruption_level: 'critical',
+    // Android: Make notification persistent and full-screen
+    android_channel_id: 'call_notifications',
+    // Action buttons for Android
+    buttons: [
+      {
+        id: 'answer_call',
+        text: '📞 Answer',
+        icon: 'ic_menu_call'
+      },
+      {
+        id: 'decline_call',
+        text: '✖️ Decline',
+        icon: 'ic_menu_close_clear_cancel'
+      }
+    ],
+    // iOS: Category for call actions
+    ios_category: 'CALL_CATEGORY',
+  };
+
+  try {
+    console.log('📤 [OneSignal] Sending call notification with ringtone...');
+    console.log('📤 [OneSignal] Notification:', JSON.stringify(notification, null, 2));
+    
+    const response = await fetch('https://api.onesignal.com/notifications', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Key ${ONESIGNAL_REST_API_KEY}`,
+      },
+      body: JSON.stringify(notification),
+    });
+
+    console.log('📤 [OneSignal] Response status:', response.status);
+    const result = await response.json();
+    console.log('📤 [OneSignal] Response body:', JSON.stringify(result, null, 2));
+    
+    if (result.errors) {
+      console.error('❌ [OneSignal] API returned errors:', result.errors);
+      return { success: false, error: result.errors };
     }
-  );
+
+    console.log('✅ [OneSignal] Call notification sent successfully');
+    console.log('✅ [OneSignal] Recipients:', result.recipients);
+    return { success: true, data: result };
+  } catch (error) {
+    console.error('❌ [OneSignal] Error sending call notification:', error);
+    console.error('❌ [OneSignal] Error stack:', error.stack);
+    return { success: false, error: error.message };
+  }
 }
 
 /**
