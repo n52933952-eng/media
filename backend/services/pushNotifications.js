@@ -197,29 +197,17 @@ async function sendCallNotification(userId, callerName, callerId, callType = 'vi
     },
     // High priority for call notifications
     priority: 10,
-    // Android: Play default notification sound (ringtone-like)
-    android_sound: 'default',
-    // iOS: Play default notification sound
-    ios_sound: 'default',
-    // iOS: Critical alert (bypasses silent mode - requires special permission)
-    ios_interruption_level: 'critical',
-    // Android: Make notification persistent and full-screen
-    android_channel_id: 'call_notifications',
-    // Action buttons for Android
+    // Action buttons for Android and iOS
     buttons: [
       {
         id: 'answer_call',
-        text: '📞 Answer',
-        icon: 'ic_menu_call'
+        text: '📞 Answer'
       },
       {
         id: 'decline_call',
-        text: '✖️ Decline',
-        icon: 'ic_menu_close_clear_cancel'
+        text: '✖️ Decline'
       }
     ],
-    // iOS: Category for call actions
-    ios_category: 'CALL_CATEGORY',
   };
 
   try {
