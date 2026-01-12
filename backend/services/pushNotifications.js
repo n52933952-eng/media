@@ -2,7 +2,7 @@
 // Sends push notifications to mobile app users
 
 const ONESIGNAL_APP_ID = process.env.ONESIGNAL_APP_ID || '63af553f-4dfb-449d-9f22-38d6e006094b';
-const ONESIGNAL_REST_API_KEY = process.env.ONESIGNAL_REST_API_KEY || 'hlm3hzfrlujruutceiccxa46t';
+const ONESIGNAL_REST_API_KEY = process.env.ONESIGNAL_REST_API_KEY || 'os_v2_app_moxvkp2n7ncj3hzchdloabqjjphqka221zvukimumihykx6461n3w3d2ecv7xh6ey4hualeb62ys4kb41a2fc16juw5bl73jxut7aqy';
 
 /**
  * Send a push notification to a specific user
@@ -21,7 +21,10 @@ async function sendNotificationToUser(userId, title, message, data = {}) {
     
     const notification = {
       app_id: ONESIGNAL_APP_ID,
-      include_external_user_ids: [userId],
+      target_channel: 'push',
+      include_aliases: {
+        external_id: [userId]
+      },
       headings: { en: title },
       contents: { en: message },
       data: data,
@@ -31,11 +34,11 @@ async function sendNotificationToUser(userId, title, message, data = {}) {
     console.log('📤 [OneSignal] Notification payload:', JSON.stringify(notification, null, 2));
     console.log('📤 [OneSignal] Using API Key:', ONESIGNAL_REST_API_KEY.substring(0, 20) + '...');
 
-    const response = await fetch('https://onesignal.com/api/v1/notifications', {
+    const response = await fetch('https://api.onesignal.com/notifications', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Basic ${ONESIGNAL_REST_API_KEY}`,
+        'Authorization': `key ${ONESIGNAL_REST_API_KEY}`,
       },
       body: JSON.stringify(notification),
     });
