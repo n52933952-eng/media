@@ -1,8 +1,12 @@
 // OneSignal Push Notification Service
 // Sends push notifications to mobile app users
 
-const ONESIGNAL_APP_ID = process.env.ONESIGNAL_APP_ID || '63af553f-4dfb-449d-9f22-38d6e006094b';
-const ONESIGNAL_REST_API_KEY = process.env.ONESIGNAL_REST_API_KEY || 'os_v2_app_moxvkp2n7ncj3hzchdloabqjjphqka221zvukimumihykx6461n3w3d2ecv7xh6ey4hualeb62ys4kb41a2fc16juw5bl73jxut7aqy';
+const ONESIGNAL_APP_ID = process.env.ONESIGNAL_APP_ID;
+const ONESIGNAL_REST_API_KEY = process.env.ONESIGNAL_REST_API_KEY;
+
+if (!ONESIGNAL_APP_ID || !ONESIGNAL_REST_API_KEY) {
+  console.error('❌ [OneSignal] Missing ONESIGNAL_APP_ID or ONESIGNAL_REST_API_KEY in environment variables!');
+}
 
 /**
  * Send a push notification to a specific user
