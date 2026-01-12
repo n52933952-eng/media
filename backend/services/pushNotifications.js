@@ -38,7 +38,7 @@ async function sendNotificationToUser(userId, title, message, data = {}) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `key ${ONESIGNAL_REST_API_KEY}`,
+        'Authorization': `Key ${ONESIGNAL_REST_API_KEY}`,
       },
       body: JSON.stringify(notification),
     });
