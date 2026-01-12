@@ -522,7 +522,14 @@ export const initializeSocket = async (app) => {
             const senderData = await getUserSocket(from)
             const senderSocketId = senderData?.socketId
 
+            console.log(`📞 [callUser] Caller: ${name} (${from})`)
+            console.log(`📞 [callUser] Receiver: ${userToCall}`)
+            console.log(`📞 [callUser] Receiver socket data:`, receiverData)
+            console.log(`📞 [callUser] Receiver socketId:`, receiverSocketId)
+
             if (receiverSocketId) {
+                // User is online - send socket event
+                console.log(`✅ [callUser] User ${userToCall} is ONLINE, sending socket event`)
                 io.to(receiverSocketId).emit("callUser", { 
                     signal: signalData, 
                     from, 
@@ -530,6 +537,18 @@ export const initializeSocket = async (app) => {
                     userToCall,
                     callType
                 })
+            } else {
+                // User is offline - send push notification
+                console.log(`📱 [callUser] User ${userToCall} is OFFLINE, sending push notification`)
+                try {
+                    const { sendCallNotification } = require('../services/pushNotifications')
+                    console.log(`📤 [callUser] Calling sendCallNotification(${userToCall}, ${name}, ${from}, ${callType})`)
+                    const result = await sendCallNotification(userToCall, name, from, callType)
+                    console.log('✅ [callUser] Push notification result:', result)
+                } catch (error) {
+                    console.error('❌ [callUser] Error sending call push notification:', error)
+                    console.error('❌ [callUser] Error stack:', error.stack)
+                }
             }
 
             if (senderSocketId) {

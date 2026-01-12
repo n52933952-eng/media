@@ -13,6 +13,12 @@ const ONESIGNAL_REST_API_KEY = 'r16pjffbruyi4gudkmogbo3c';
  */
 async function sendNotificationToUser(userId, title, message, data = {}) {
   try {
+    console.log('📤 [OneSignal] Preparing notification...');
+    console.log('📤 [OneSignal] User ID:', userId);
+    console.log('📤 [OneSignal] Title:', title);
+    console.log('📤 [OneSignal] Message:', message);
+    console.log('📤 [OneSignal] Data:', data);
+    
     const notification = {
       app_id: ONESIGNAL_APP_ID,
       include_external_user_ids: [userId],
@@ -20,6 +26,9 @@ async function sendNotificationToUser(userId, title, message, data = {}) {
       contents: { en: message },
       data: data,
     };
+
+    console.log('📤 [OneSignal] Sending request to OneSignal API...');
+    console.log('📤 [OneSignal] Notification payload:', JSON.stringify(notification, null, 2));
 
     const response = await fetch('https://onesignal.com/api/v1/notifications', {
       method: 'POST',
@@ -30,17 +39,21 @@ async function sendNotificationToUser(userId, title, message, data = {}) {
       body: JSON.stringify(notification),
     });
 
+    console.log('📤 [OneSignal] Response status:', response.status);
     const result = await response.json();
+    console.log('📤 [OneSignal] Response body:', JSON.stringify(result, null, 2));
     
     if (result.errors) {
-      console.error('❌ OneSignal error:', result.errors);
+      console.error('❌ [OneSignal] API returned errors:', result.errors);
       return { success: false, error: result.errors };
     }
 
-    console.log('✅ Push notification sent to user:', userId);
+    console.log('✅ [OneSignal] Push notification sent successfully to user:', userId);
+    console.log('✅ [OneSignal] Recipients:', result.recipients);
     return { success: true, data: result };
   } catch (error) {
-    console.error('❌ Error sending push notification:', error);
+    console.error('❌ [OneSignal] Error sending push notification:', error);
+    console.error('❌ [OneSignal] Error stack:', error.stack);
     return { success: false, error: error.message };
   }
 }
@@ -153,6 +166,40 @@ async function sendFootballScoreNotification(userId, matchInfo) {
   );
 }
 
+/**
+ * Send notification for incoming call
+ */
+async function sendCallNotification(userId, callerName, callerId, callType = 'video') {
+  const title = callType === 'video' ? 'Incoming Video Call 📹' : 'Incoming Voice Call 📞';
+  return await sendNotificationToUser(
+    userId,
+    title,
+    `${callerName} is calling you...`,
+    { 
+      type: 'call', 
+      callType,
+      callerId,
+      callerName 
+    }
+  );
+}
+
+/**
+ * Send notification for missed call
+ */
+async function sendMissedCallNotification(userId, callerName, callType = 'video') {
+  return await sendNotificationToUser(
+    userId,
+    'Missed Call 📵',
+    `You missed a ${callType} call from ${callerName}`,
+    { 
+      type: 'missed_call', 
+      callType,
+      callerName 
+    }
+  );
+}
+
 module.exports = {
   sendNotificationToUser,
   sendLikeNotification,
@@ -164,4 +211,6 @@ module.exports = {
   sendContributorAddedNotification,
   sendWeatherAlertNotification,
   sendFootballScoreNotification,
+  sendCallNotification,
+  sendMissedCallNotification,
 };
