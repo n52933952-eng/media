@@ -2,7 +2,7 @@
 // Sends push notifications to mobile app users
 
 const ONESIGNAL_APP_ID = process.env.ONESIGNAL_APP_ID || '63af553f-4dfb-449d-9f22-38d6e006094b';
-const ONESIGNAL_REST_API_KEY = process.env.ONESIGNAL_REST_API_KEY || 'os_v2_org_eaomevzyu5gjzgtkluyxcbelvohibludbn5eg4m62msxcx2xvqcfcpzff55dshnfkfcru26tuuskv7lkf3bbshop5nj4iaj4j2xkini';
+const ONESIGNAL_REST_API_KEY = process.env.ONESIGNAL_REST_API_KEY || 'os_v2_app_moxvkp2n7ncj3hzchdloabqjjphl6gvrkoggoodyffkbgypslk6o235qx5b6dwf4fnrr5ts6xtcutqj6ejj63x6sn7xolhvsokko764wq';
 
 /**
  * Send a push notification to a specific user
