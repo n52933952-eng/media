@@ -21,7 +21,10 @@ async function sendNotificationToUser(userId, title, message, data = {}) {
     
     const notification = {
       app_id: ONESIGNAL_APP_ID,
-      include_external_user_ids: [userId],
+      target_channel: 'push',
+      include_aliases: {
+        external_id: [userId]
+      },
       headings: { en: title },
       contents: { en: message },
       data: data,
@@ -35,7 +38,7 @@ async function sendNotificationToUser(userId, title, message, data = {}) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Key ${ONESIGNAL_REST_API_KEY}`,
+        'Authorization': `key ${ONESIGNAL_REST_API_KEY}`,
       },
       body: JSON.stringify(notification),
     });
