@@ -194,31 +194,28 @@ async function sendCallNotification(userId, callerName, callerId, callType = 'vi
       callType,
       callerId,
       callerName,
-      // Deep link to open directly to call screen
       screen: 'CallScreen',
-      autoAnswer: false, // User must click Answer button
     },
     // High priority for call notifications
     priority: 10,
-    // Sound - use default notification sound (will ring)
-    sound: 'default',
-    // Action buttons for Android and iOS
+    // Sound - will ring on both platforms
+    // For Android: Use default system sound
+    // For iOS: Use default notification sound
+    // Action buttons - simplified format
     buttons: [
       {
         id: 'answer_call',
-        text: 'Answer',
-        icon: 'ic_menu_call'
+        text: 'Answer'
       },
       {
         id: 'decline_call',
-        text: 'Decline',
-        icon: 'ic_menu_close_clear_cancel'
+        text: 'Decline'
       }
     ],
-    // Make notification persistent (won't auto-dismiss)
-    ttl: 60, // Show for 60 seconds
-    // Android: Use full-screen intent for incoming calls (shows even on lock screen)
-    android_accent_color: 'FF0000', // Red accent for urgency
+    // Make notification persistent (60 seconds)
+    ttl: 60,
+    // iOS: Critical alert (bypasses Do Not Disturb)
+    ios_interruption_level: 'time_sensitive',
   };
 
   try {
