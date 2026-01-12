@@ -6,6 +6,7 @@ import Conversation from '../models/conversation.js'
 import User from '../models/user.js'
 import { createChessGamePost, deleteChessGamePost } from '../controller/post.js'
 import * as redisService from '../services/redis.js'
+import { sendCallNotification, sendMissedCallNotification } from '../services/pushNotifications.js'
 // Use redisService namespace for all Redis functions to avoid import issues
 const { getRedis, isRedisAvailable } = redisService
 
@@ -541,7 +542,6 @@ export const initializeSocket = async (app) => {
                 // User is offline - send push notification
                 console.log(`📱 [callUser] User ${userToCall} is OFFLINE, sending push notification`)
                 try {
-                    const { sendCallNotification } = require('../services/pushNotifications')
                     console.log(`📤 [callUser] Calling sendCallNotification(${userToCall}, ${name}, ${from}, ${callType})`)
                     const result = await sendCallNotification(userToCall, name, from, callType)
                     console.log('✅ [callUser] Push notification result:', result)

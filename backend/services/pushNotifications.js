@@ -200,7 +200,7 @@ async function sendMissedCallNotification(userId, callerName, callType = 'video'
   );
 }
 
-module.exports = {
+export {
   sendNotificationToUser,
   sendLikeNotification,
   sendCommentNotification,
