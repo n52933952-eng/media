@@ -572,6 +572,36 @@ export const initializeSocket = async (app) => {
             io.emit("callBusy", { userToCall, from })
         })
 
+        // WebRTC: Handle request call signal (when user comes online after receiving push notification)
+        socket.on("requestCallSignal", async ({ callerId, receiverId }) => {
+            console.log(`📞 [requestCallSignal] Requesting call signal for ${receiverId} from ${callerId}`)
+            
+            // Check if there's an active call between these users
+            const callId1 = `${callerId}-${receiverId}`
+            const callId2 = `${receiverId}-${callerId}`
+            const activeCall1 = await getActiveCall(callId1)
+            const activeCall2 = await getActiveCall(callId2)
+            
+            if (activeCall1 || activeCall2) {
+                // There's an active call - we need to get the original signal
+                // For now, we'll re-emit the callUser event which will trigger the full flow
+                // The caller should still have the signal, so we'll ask them to re-send
+                console.log(`✅ [requestCallSignal] Active call found, requesting caller to re-send signal`)
+                
+                const callerData = await getUserSocket(callerId)
+                const callerSocketId = callerData?.socketId
+                
+                if (callerSocketId) {
+                    // Ask caller to re-send the call signal
+                    io.to(callerSocketId).emit("resendCallSignal", { receiverId })
+                } else {
+                    console.log(`⚠️ [requestCallSignal] Caller ${callerId} is not online`)
+                }
+            } else {
+                console.log(`⚠️ [requestCallSignal] No active call found between ${callerId} and ${receiverId}`)
+            }
+        })
+
         // WebRTC: Handle answer call
         socket.on("answerCall", async (data) => {
             const callerData = await getUserSocket(data.to)
