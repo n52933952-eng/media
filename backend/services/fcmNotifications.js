@@ -74,13 +74,15 @@ export function initializeFCM() {
           }
         }
         
-        // Verify and fix private_key if needed (ensure it has \n not actual newlines)
+        // Fix private_key: Firebase Admin SDK needs actual newlines, not \n strings
         if (serviceAccount.private_key) {
-          // Check if private_key has actual newlines (should have \n instead)
-          if (serviceAccount.private_key.includes('\n') && !serviceAccount.private_key.includes('\\n')) {
-            console.log('🔥 [FCM] Step 2: Fixing private_key: replacing actual newlines with \\n');
-            serviceAccount.private_key = serviceAccount.private_key.replace(/\n/g, '\\n').replace(/\r/g, '');
+          // If private_key has literal \n (backslash-n), convert to actual newlines
+          if (serviceAccount.private_key.includes('\\n')) {
+            console.log('🔥 [FCM] Step 2: Converting \\n to actual newlines in private_key');
+            serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, '\n');
           }
+          // Ensure no carriage returns
+          serviceAccount.private_key = serviceAccount.private_key.replace(/\r/g, '');
         }
         
         console.log('✅ [FCM] Step 2: Environment variable parsed successfully');
