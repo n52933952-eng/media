@@ -73,7 +73,14 @@ mongoose.connect(process.env.MONGO, {
     await initRedis()
     
     // Initialize Firebase Cloud Messaging for call notifications
-    initializeFCM()
+    console.log('🔥 [Index] About to initialize FCM...');
+    try {
+      initializeFCM();
+      console.log('🔥 [Index] FCM initialization call completed');
+    } catch (error) {
+      console.error('❌ [Index] Error calling initializeFCM:', error);
+      console.error('❌ [Index] Error stack:', error.stack);
+    }
 })
 .catch((error) => {
     console.error("❌ MongoDB connection error:", error)

@@ -22,11 +22,13 @@ export function initializeFCM() {
     const serviceAccountPath = join(__dirname, '../firebase-service-account.json');
     console.log('🔥 [FCM] Service account path:', serviceAccountPath);
     
-    if (!readFileSync(serviceAccountPath, 'utf8')) {
+    // Check if file exists first
+    const fileContent = readFileSync(serviceAccountPath, 'utf8');
+    if (!fileContent || fileContent.trim().length === 0) {
       throw new Error('Service account file is empty');
     }
     
-    const serviceAccount = JSON.parse(readFileSync(serviceAccountPath, 'utf8'));
+    const serviceAccount = JSON.parse(fileContent);
     console.log('🔥 [FCM] Service account loaded, project_id:', serviceAccount.project_id);
     
     if (!admin.apps.length) {
@@ -35,6 +37,7 @@ export function initializeFCM() {
       });
       isInitialized = true;
       console.log('✅ [FCM] Firebase Admin initialized successfully');
+      console.log('✅ [FCM] Admin apps count:', admin.apps.length);
     } else {
       isInitialized = true;
       console.log('✅ [FCM] Firebase Admin already initialized');
