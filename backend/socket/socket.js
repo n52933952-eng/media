@@ -561,9 +561,15 @@ export const initializeSocket = async (app) => {
                 })
             }
 
-            // Mark both users as busy - Store in Redis
+            // Mark both users as busy - Store in Redis with signal data
             const callId = `${from}-${userToCall}`
-            await setActiveCall(callId, { user1: from, user2: userToCall })
+            await setActiveCall(callId, { 
+                user1: from, 
+                user2: userToCall,
+                signal: signalData, // Store the signal so we can re-send it
+                name: name,
+                callType: callType
+            })
             
             // Update database - mark users as in call (persistent across refreshes)
             User.findByIdAndUpdate(from, { inCall: true }).catch(err => console.log('Error updating caller inCall status:', err))
@@ -582,20 +588,35 @@ export const initializeSocket = async (app) => {
             const activeCall1 = await getActiveCall(callId1)
             const activeCall2 = await getActiveCall(callId2)
             
-            if (activeCall1 || activeCall2) {
-                // There's an active call - we need to get the original signal
-                // For now, we'll re-emit the callUser event which will trigger the full flow
-                // The caller should still have the signal, so we'll ask them to re-send
-                console.log(`✅ [requestCallSignal] Active call found, requesting caller to re-send signal`)
+            const activeCall = activeCall1 || activeCall2
+            
+            if (activeCall) {
+                console.log(`✅ [requestCallSignal] Active call found, re-sending signal directly`)
                 
-                const callerData = await getUserSocket(callerId)
-                const callerSocketId = callerData?.socketId
+                // Get receiver's socket
+                const receiverData = await getUserSocket(receiverId)
+                const receiverSocketId = receiverData?.socketId
                 
-                if (callerSocketId) {
-                    // Ask caller to re-send the call signal
-                    io.to(callerSocketId).emit("resendCallSignal", { receiverId })
-                } else {
-                    console.log(`⚠️ [requestCallSignal] Caller ${callerId} is not online`)
+                if (receiverSocketId && activeCall.signal) {
+                    // Re-send the call signal directly from stored data
+                    io.to(receiverSocketId).emit("callUser", {
+                        userToCall: receiverId,
+                        signalData: activeCall.signal,
+                        from: callerId,
+                        name: activeCall.name || 'Unknown',
+                        callType: activeCall.callType || 'video'
+                    })
+                    console.log(`✅ [requestCallSignal] Call signal re-sent to receiver`)
+                } else if (!receiverSocketId) {
+                    console.log(`⚠️ [requestCallSignal] Receiver ${receiverId} is not online`)
+                } else if (!activeCall.signal) {
+                    console.log(`⚠️ [requestCallSignal] No signal stored for this call`)
+                    // Fallback: ask caller to re-send
+                    const callerData = await getUserSocket(callerId)
+                    const callerSocketId = callerData?.socketId
+                    if (callerSocketId) {
+                        io.to(callerSocketId).emit("resendCallSignal", { receiverId })
+                    }
                 }
             } else {
                 console.log(`⚠️ [requestCallSignal] No active call found between ${callerId} and ${receiverId}`)
