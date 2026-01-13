@@ -189,90 +189,25 @@ async function sendFootballScoreNotification(userId, matchInfo) {
 
 /**
  * Send notification for incoming call
- * Uses FCM for automatic ringing (WhatsApp-like)
- * Falls back to OneSignal if FCM not available
+ * Uses FCM ONLY for automatic ringing (WhatsApp-like behavior)
+ * FCM is required for automatic ringing when app is closed
  */
 async function sendCallNotification(userId, callerName, callerId, callType = 'video') {
-  // Try FCM first (for automatic ringing)
   try {
     const { sendCallNotificationToUser } = await import('./fcmNotifications.js');
     const fcmResult = await sendCallNotificationToUser(userId, callerName, callerId, callType);
     
     if (fcmResult.success) {
-      console.log('✅ [CallNotification] Sent via FCM (automatic ringing)');
+      console.log('✅ [CallNotification] Sent via FCM (automatic ringing enabled)');
       return fcmResult;
+    } else {
+      console.error('❌ [CallNotification] FCM failed:', fcmResult.error);
+      return { success: false, error: fcmResult.error || 'FCM notification failed' };
     }
   } catch (error) {
-    console.log('⚠️ [CallNotification] FCM not available, falling back to OneSignal:', error.message);
-  }
-  
-  // Fallback to OneSignal (original implementation)
-  const title = callType === 'video' ? 'Incoming Video Call 📹' : 'Incoming Voice Call 📞';
-  
-  // Create notification with MAXIMUM priority for automatic ringing (like WhatsApp)
-  const notification = {
-    app_id: ONESIGNAL_APP_ID,
-    target_channel: 'push',
-    include_aliases: {
-      external_id: [userId]
-    },
-    headings: { en: title },
-    contents: { en: `${callerName} is calling you...` },
-    data: { 
-      type: 'call', 
-      callType,
-      callerId,
-      callerName,
-      screen: 'CallScreen',
-    },
-    // MAXIMUM priority (10) for automatic full-screen display and ringing
-    priority: 10,
-    // Android: Use the notification channel we created
-    android_channel_id: 'call_notifications',
-    // Action buttons - these will show on the notification
-    buttons: [
-      {
-        id: 'answer_call',
-        text: 'Answer'
-      },
-      {
-        id: 'decline_call',
-        text: 'Decline'
-      }
-    ],
-    // Make notification persistent (60 seconds)
-    ttl: 60,
-  };
-
-  try {
-    console.log('📤 [OneSignal] Sending call notification with ringtone...');
-    console.log('📤 [OneSignal] Notification:', JSON.stringify(notification, null, 2));
-    
-    const response = await fetch('https://api.onesignal.com/notifications', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Key ${ONESIGNAL_REST_API_KEY}`,
-      },
-      body: JSON.stringify(notification),
-    });
-
-    console.log('📤 [OneSignal] Response status:', response.status);
-    const result = await response.json();
-    console.log('📤 [OneSignal] Response body:', JSON.stringify(result, null, 2));
-    
-    if (result.errors) {
-      console.error('❌ [OneSignal] API returned errors:', result.errors);
-      return { success: false, error: result.errors };
-    }
-
-    console.log('✅ [OneSignal] Call notification sent successfully');
-    console.log('✅ [OneSignal] Recipients:', result.recipients);
-    return { success: true, data: result };
-  } catch (error) {
-    console.error('❌ [OneSignal] Error sending call notification:', error);
-    console.error('❌ [OneSignal] Error stack:', error.stack);
-    return { success: false, error: error.message };
+    console.error('❌ [CallNotification] Error sending FCM notification:', error);
+    console.error('❌ [CallNotification] Error details:', error.message);
+    return { success: false, error: error.message || 'Failed to send FCM notification' };
   }
 }
 

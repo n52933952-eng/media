@@ -1,24 +1,40 @@
 // Firebase Cloud Messaging Service for Call Notifications
 // Sends FCM push notifications for incoming calls (WhatsApp-like)
 
+import admin from 'firebase-admin';
+import { readFileSync } from 'fs';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
+
 // Firebase Admin SDK will be initialized here
-let admin = null;
+let isInitialized = false;
+
+// Get __dirname equivalent for ES modules
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 // Initialize Firebase Admin (will be called from index.js)
 export function initializeFCM() {
   try {
-    const serviceAccount = require('../firebase-service-account.json');
-    admin = require('firebase-admin');
+    // Read service account file using ES modules
+    const serviceAccountPath = join(__dirname, '../firebase-service-account.json');
+    const serviceAccount = JSON.parse(readFileSync(serviceAccountPath, 'utf8'));
     
     if (!admin.apps.length) {
       admin.initializeApp({
         credential: admin.credential.cert(serviceAccount)
       });
+      isInitialized = true;
       console.log('✅ [FCM] Firebase Admin initialized');
+    } else {
+      isInitialized = true;
+      console.log('✅ [FCM] Firebase Admin already initialized');
     }
   } catch (error) {
     console.error('❌ [FCM] Error initializing Firebase Admin:', error);
     console.error('⚠️ [FCM] Make sure firebase-service-account.json exists in backend folder');
+    console.error('❌ [FCM] Error details:', error.message);
+    isInitialized = false;
   }
 }
 
@@ -31,7 +47,7 @@ export function initializeFCM() {
  * @param {string} callId - Unique call ID
  */
 export async function sendCallNotification(fcmToken, callerName, callerId, callType = 'video', callId = null) {
-  if (!admin) {
+  if (!isInitialized || !admin.apps.length) {
     console.error('❌ [FCM] Firebase Admin not initialized');
     return { success: false, error: 'FCM not initialized' };
   }
