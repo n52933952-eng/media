@@ -1,6 +1,8 @@
 // Firebase Cloud Messaging Service for Call Notifications
 // Sends FCM push notifications for incoming calls (WhatsApp-like)
 
+console.log('🔥 [FCM] Module loaded - fcmNotifications.js');
+
 import admin from 'firebase-admin';
 import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
@@ -8,6 +10,7 @@ import { dirname, join } from 'path';
 
 // Firebase Admin SDK will be initialized here
 let isInitialized = false;
+let initializationAttempted = false;
 
 // Get __dirname equivalent for ES modules
 const __filename = fileURLToPath(import.meta.url);
@@ -15,6 +18,8 @@ const __dirname = dirname(__filename);
 
 // Initialize Firebase Admin (will be called from index.js)
 export function initializeFCM() {
+  initializationAttempted = true;
+  console.log('🔥 [FCM] initializeFCM() called');
   try {
     console.log('🔥 [FCM] Starting initialization...');
     
@@ -61,11 +66,19 @@ export function initializeFCM() {
  */
 export async function sendCallNotification(fcmToken, callerName, callerId, callType = 'video', callId = null) {
   console.log('🔥 [FCM] sendCallNotification called');
+  console.log('🔥 [FCM] initializationAttempted:', initializationAttempted);
   console.log('🔥 [FCM] isInitialized:', isInitialized);
   console.log('🔥 [FCM] admin.apps.length:', admin.apps.length);
   
+  if (!initializationAttempted) {
+    console.error('❌ [FCM] initializeFCM() was never called!');
+    console.error('❌ [FCM] Please restart the server to initialize FCM');
+    return { success: false, error: 'FCM initialization never called' };
+  }
+  
   if (!isInitialized || !admin.apps.length) {
     console.error('❌ [FCM] Firebase Admin not initialized');
+    console.error('❌ [FCM] initializationAttempted:', initializationAttempted);
     console.error('❌ [FCM] isInitialized:', isInitialized);
     console.error('❌ [FCM] admin.apps.length:', admin.apps.length);
     return { success: false, error: 'FCM not initialized' };
