@@ -25,34 +25,48 @@ export function initializeFCM() {
   try {
     console.log('🔥 [FCM] Step 1: Starting initialization...');
     
-    // Read service account file using ES modules
-    const serviceAccountPath = join(__dirname, '../firebase-service-account.json');
-    console.log('🔥 [FCM] Step 2: Service account path:', serviceAccountPath);
-    console.log('🔥 [FCM] Step 2: __dirname:', __dirname);
+    let serviceAccount;
     
-    // Check if file exists first
-    console.log('🔥 [FCM] Step 3: Reading service account file...');
-    const fileContent = readFileSync(serviceAccountPath, 'utf8');
-    console.log('🔥 [FCM] Step 3: File read successfully, length:', fileContent.length);
-    
-    if (!fileContent || fileContent.trim().length === 0) {
-      throw new Error('Service account file is empty');
+    // Try environment variable first (for cloud deployments like Render)
+    if (process.env.FIREBASE_SERVICE_ACCOUNT) {
+      console.log('🔥 [FCM] Step 2: Using FIREBASE_SERVICE_ACCOUNT environment variable...');
+      try {
+        serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+        console.log('✅ [FCM] Step 2: Environment variable parsed, project_id:', serviceAccount.project_id);
+      } catch (parseError) {
+        throw new Error('Failed to parse FIREBASE_SERVICE_ACCOUNT environment variable: ' + parseError.message);
+      }
+    } else {
+      // Fallback to file (for local development)
+      console.log('🔥 [FCM] Step 2: Using firebase-service-account.json file...');
+      const serviceAccountPath = join(__dirname, '../firebase-service-account.json');
+      console.log('🔥 [FCM] Step 2: Service account path:', serviceAccountPath);
+      
+      try {
+        const fileContent = readFileSync(serviceAccountPath, 'utf8');
+        console.log('🔥 [FCM] Step 3: File read successfully, length:', fileContent.length);
+        
+        if (!fileContent || fileContent.trim().length === 0) {
+          throw new Error('Service account file is empty');
+        }
+        
+        serviceAccount = JSON.parse(fileContent);
+        console.log('✅ [FCM] Step 3: JSON parsed, project_id:', serviceAccount.project_id);
+      } catch (fileError) {
+        throw new Error('Failed to read service account file: ' + fileError.message);
+      }
     }
     
-    console.log('🔥 [FCM] Step 4: Parsing JSON...');
-    const serviceAccount = JSON.parse(fileContent);
-    console.log('🔥 [FCM] Step 4: JSON parsed, project_id:', serviceAccount.project_id);
-    
-    console.log('🔥 [FCM] Step 5: Checking admin apps...');
-    console.log('🔥 [FCM] Step 5: admin.apps.length:', admin.apps.length);
+    console.log('🔥 [FCM] Step 4: Checking admin apps...');
+    console.log('🔥 [FCM] Step 4: admin.apps.length:', admin.apps.length);
     
     if (!admin.apps.length) {
-      console.log('🔥 [FCM] Step 6: Initializing Firebase Admin...');
+      console.log('🔥 [FCM] Step 5: Initializing Firebase Admin...');
       admin.initializeApp({
         credential: admin.credential.cert(serviceAccount)
       });
       isInitialized = true;
-      console.log('✅ [FCM] Step 6: Firebase Admin initialized successfully');
+      console.log('✅ [FCM] Step 5: Firebase Admin initialized successfully');
       console.log('✅ [FCM] Admin apps count:', admin.apps.length);
     } else {
       isInitialized = true;
@@ -66,7 +80,9 @@ export function initializeFCM() {
     console.error('❌ [FCM] Error message:', error.message);
     console.error('❌ [FCM] Error code:', error.code);
     console.error('❌ [FCM] Error stack:', error.stack);
-    console.error('⚠️ [FCM] Make sure firebase-service-account.json exists in backend folder');
+    console.error('⚠️ [FCM] Options:');
+    console.error('   1. Set FIREBASE_SERVICE_ACCOUNT environment variable (for cloud)');
+    console.error('   2. Or place firebase-service-account.json in backend folder (for local)');
     isInitialized = false;
     console.error('❌ [FCM] ========== END ERROR ==========');
   }
