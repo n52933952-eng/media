@@ -36,32 +36,57 @@ export function initializeFCM() {
         // Try to parse the JSON string
         let envVarValue = process.env.FIREBASE_SERVICE_ACCOUNT.trim();
         
-        // Fix: Replace actual newlines with \n in private_key (Render might convert \n to real newlines)
+        // Fix: Handle case where Render converts \n to actual newlines in the private_key
         // First, try to parse as-is
         try {
           serviceAccount = JSON.parse(envVarValue);
         } catch (firstParseError) {
-          // If parsing fails, try to fix newlines in private_key
-          console.log('🔥 [FCM] Step 2: First parse failed, attempting to fix newlines...');
+          // If parsing fails, the private_key might have actual newlines instead of \n
+          console.log('🔥 [FCM] Step 2: First parse failed, attempting to fix private key format...');
+          console.log('🔥 [FCM] Step 2: Parse error:', firstParseError.message);
           
-          // Replace actual newlines with \n in the private_key field
-          envVarValue = envVarValue.replace(/"private_key"\s*:\s*"([^"]*(?:\n[^"]*)*)"/g, (match, keyValue) => {
-            // Replace actual newlines with \n
-            const fixedKey = keyValue.replace(/\n/g, '\\n').replace(/\r/g, '');
-            return `"private_key":"${fixedKey}"`;
-          });
-          
-          serviceAccount = JSON.parse(envVarValue);
-          console.log('✅ [FCM] Step 2: Fixed newlines and parsed successfully');
+          // Try to fix: Find the private_key field and replace actual newlines with \n
+          // This regex handles multi-line private keys
+          const privateKeyMatch = envVarValue.match(/"private_key"\s*:\s*"([\s\S]*?)"\s*,/);
+          if (privateKeyMatch) {
+            const originalKey = privateKeyMatch[1];
+            // Replace actual newlines and carriage returns with \n
+            const fixedKey = originalKey
+              .replace(/\r\n/g, '\\n')  // Windows newlines
+              .replace(/\n/g, '\\n')     // Unix newlines
+              .replace(/\r/g, '\\n');     // Old Mac newlines
+            
+            // Replace the original private_key with the fixed one
+            envVarValue = envVarValue.replace(
+              /"private_key"\s*:\s*"[\s\S]*?"\s*,/,
+              `"private_key":"${fixedKey}",`
+            );
+            
+            try {
+              serviceAccount = JSON.parse(envVarValue);
+              console.log('✅ [FCM] Step 2: Fixed private key newlines and parsed successfully');
+            } catch (secondParseError) {
+              console.error('❌ [FCM] Step 2: Still failed after fixing newlines:', secondParseError.message);
+              throw firstParseError; // Throw original error
+            }
+          } else {
+            throw firstParseError;
+          }
+        }
+        
+        // Verify and fix private_key if needed (ensure it has \n not actual newlines)
+        if (serviceAccount.private_key) {
+          // Check if private_key has actual newlines (should have \n instead)
+          if (serviceAccount.private_key.includes('\n') && !serviceAccount.private_key.includes('\\n')) {
+            console.log('🔥 [FCM] Step 2: Fixing private_key: replacing actual newlines with \\n');
+            serviceAccount.private_key = serviceAccount.private_key.replace(/\n/g, '\\n').replace(/\r/g, '');
+          }
         }
         
         console.log('✅ [FCM] Step 2: Environment variable parsed successfully');
         console.log('✅ [FCM] Step 2: project_id:', serviceAccount.project_id);
-        
-        // Verify private_key has proper format
-        if (serviceAccount.private_key && !serviceAccount.private_key.includes('\\n')) {
-          console.warn('⚠️ [FCM] Step 2: private_key might be missing \\n characters');
-        }
+        console.log('✅ [FCM] Step 2: private_key length:', serviceAccount.private_key?.length || 0);
+        console.log('✅ [FCM] Step 2: private_key starts with:', serviceAccount.private_key?.substring(0, 50) || 'N/A');
       } catch (parseError) {
         console.error('❌ [FCM] Step 2: Failed to parse environment variable');
         console.error('❌ [FCM] Step 2: Parse error:', parseError.message);
