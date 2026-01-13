@@ -184,8 +184,8 @@ export async function sendCallNotification(fcmToken, callerName, callerId, callT
   try {
     const message = {
       token: fcmToken,
-      // Use DATA-ONLY message (no notification field) so our app handles it
-      // This prevents system notification and lets us show native UI
+      // Data-only message - our native service will handle it
+      // This ensures onMessageReceived is called even when app is killed
       data: {
         type: 'incoming_call',
         callId: callId || `call_${Date.now()}`,
@@ -196,7 +196,8 @@ export async function sendCallNotification(fcmToken, callerName, callerId, callT
       // Android-specific settings for data-only messages
       android: {
         priority: 'high', // Critical for automatic ringing
-        // NO notification field - this is data-only so our app handles it
+        // No notification field - pure data message
+        // This ensures onMessageReceived is always called
       },
       // APNs settings (for iOS if you add it later)
       apns: {
