@@ -34,10 +34,34 @@ export function initializeFCM() {
       console.log('🔥 [FCM] Step 2: Env var first 100 chars:', process.env.FIREBASE_SERVICE_ACCOUNT.substring(0, 100));
       try {
         // Try to parse the JSON string
-        const envVarValue = process.env.FIREBASE_SERVICE_ACCOUNT.trim();
-        serviceAccount = JSON.parse(envVarValue);
+        let envVarValue = process.env.FIREBASE_SERVICE_ACCOUNT.trim();
+        
+        // Fix: Replace actual newlines with \n in private_key (Render might convert \n to real newlines)
+        // First, try to parse as-is
+        try {
+          serviceAccount = JSON.parse(envVarValue);
+        } catch (firstParseError) {
+          // If parsing fails, try to fix newlines in private_key
+          console.log('🔥 [FCM] Step 2: First parse failed, attempting to fix newlines...');
+          
+          // Replace actual newlines with \n in the private_key field
+          envVarValue = envVarValue.replace(/"private_key"\s*:\s*"([^"]*(?:\n[^"]*)*)"/g, (match, keyValue) => {
+            // Replace actual newlines with \n
+            const fixedKey = keyValue.replace(/\n/g, '\\n').replace(/\r/g, '');
+            return `"private_key":"${fixedKey}"`;
+          });
+          
+          serviceAccount = JSON.parse(envVarValue);
+          console.log('✅ [FCM] Step 2: Fixed newlines and parsed successfully');
+        }
+        
         console.log('✅ [FCM] Step 2: Environment variable parsed successfully');
         console.log('✅ [FCM] Step 2: project_id:', serviceAccount.project_id);
+        
+        // Verify private_key has proper format
+        if (serviceAccount.private_key && !serviceAccount.private_key.includes('\\n')) {
+          console.warn('⚠️ [FCM] Step 2: private_key might be missing \\n characters');
+        }
       } catch (parseError) {
         console.error('❌ [FCM] Step 2: Failed to parse environment variable');
         console.error('❌ [FCM] Step 2: Parse error:', parseError.message);
