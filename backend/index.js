@@ -18,6 +18,7 @@ import { initializeWeatherCron } from './services/weatherCron.js'
 import { initializeChessPostCleanup } from './services/chessPostCleanup.js'
 import { initializeActivityCleanup } from './services/activityCleanup.js'
 import { initRedis, isRedisAvailable } from './services/redis.js'
+import { initializeFCM } from './services/fcmNotifications.js'
 import path from 'path'
 import { fileURLToPath } from 'url'
 
@@ -70,6 +71,9 @@ mongoose.connect(process.env.MONGO, {
     
     // Initialize Redis after MongoDB connection
     await initRedis()
+    
+    // Initialize Firebase Cloud Messaging for call notifications
+    initializeFCM()
 })
 .catch((error) => {
     console.error("❌ MongoDB connection error:", error)

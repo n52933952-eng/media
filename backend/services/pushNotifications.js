@@ -23,6 +23,9 @@ async function sendNotificationToUser(userId, title, message, data = {}) {
     console.log('📤 [OneSignal] Message:', message);
     console.log('📤 [OneSignal] Data:', data);
     
+    // For call notifications, use high priority and full-screen intent
+    const isCallNotification = data.type === 'call';
+    
     const notification = {
       app_id: ONESIGNAL_APP_ID,
       target_channel: 'push',
@@ -32,6 +35,16 @@ async function sendNotificationToUser(userId, title, message, data = {}) {
       headings: { en: title },
       contents: { en: message },
       data: data,
+      // High priority for call notifications (like WhatsApp)
+      priority: isCallNotification ? 10 : undefined,
+      // Android-specific settings for call notifications
+      android_channel_id: isCallNotification ? 'call_notifications' : undefined,
+      // Sound and vibration for calls
+      ...(isCallNotification && {
+        android_sound: 'default',
+        android_led_color: 'FF0000FF',
+        android_accent_color: 'FF0000FF',
+      }),
     };
 
     console.log('📤 [OneSignal] Sending request to OneSignal API...');
@@ -176,11 +189,27 @@ async function sendFootballScoreNotification(userId, matchInfo) {
 
 /**
  * Send notification for incoming call
+ * Uses FCM for automatic ringing (WhatsApp-like)
+ * Falls back to OneSignal if FCM not available
  */
 async function sendCallNotification(userId, callerName, callerId, callType = 'video') {
+  // Try FCM first (for automatic ringing)
+  try {
+    const { sendCallNotificationToUser } = await import('./fcmNotifications.js');
+    const fcmResult = await sendCallNotificationToUser(userId, callerName, callerId, callType);
+    
+    if (fcmResult.success) {
+      console.log('✅ [CallNotification] Sent via FCM (automatic ringing)');
+      return fcmResult;
+    }
+  } catch (error) {
+    console.log('⚠️ [CallNotification] FCM not available, falling back to OneSignal:', error.message);
+  }
+  
+  // Fallback to OneSignal (original implementation)
   const title = callType === 'video' ? 'Incoming Video Call 📹' : 'Incoming Voice Call 📞';
   
-  // Create notification with sound, priority, and action buttons
+  // Create notification with MAXIMUM priority for automatic ringing (like WhatsApp)
   const notification = {
     app_id: ONESIGNAL_APP_ID,
     target_channel: 'push',
@@ -196,12 +225,11 @@ async function sendCallNotification(userId, callerName, callerId, callType = 'vi
       callerName,
       screen: 'CallScreen',
     },
-    // High priority for call notifications
+    // MAXIMUM priority (10) for automatic full-screen display and ringing
     priority: 10,
-    // Sound - will ring on both platforms
-    // For Android: Use default system sound
-    // For iOS: Use default notification sound
-    // Action buttons - simplified format
+    // Android: Use the notification channel we created
+    android_channel_id: 'call_notifications',
+    // Action buttons - these will show on the notification
     buttons: [
       {
         id: 'answer_call',
@@ -214,8 +242,6 @@ async function sendCallNotification(userId, callerName, callerId, callType = 'vi
     ],
     // Make notification persistent (60 seconds)
     ttl: 60,
-    // iOS: Critical alert (bypasses Do Not Disturb)
-    ios_interruption_level: 'time_sensitive',
   };
 
   try {

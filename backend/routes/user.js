@@ -4,6 +4,7 @@ const router = express.Router()
 import{SignUp,LoginUser,LogOut,FollowAndUnfollow,getUserProfile,UpdateUser,searchUsers,getSuggestedUsers,getBusyChessUsers,getFollowingUsers} from '../controller/user.js'
 import protectRoute  from '../middlware/protectRoute.js'
 import upload from '../middlware/upload.js'
+import User from '../models/user.js'
 
 router.post("/signup", SignUp)
 router.post("/login",LoginUser)
@@ -19,5 +20,17 @@ router.get("/search",protectRoute,searchUsers)  // GET /api/user/search?search=j
 router.get("/suggested",protectRoute,getSuggestedUsers)  // GET /api/user/suggested
 router.get("/following",protectRoute,getFollowingUsers)  // GET /api/user/following
 router.get("/busyChessUsers",protectRoute,getBusyChessUsers)  // GET /api/user/busyChessUsers
+router.post("/save-fcm-token",protectRoute,async (req,res) => {
+  try {
+    const { fcmToken } = req.body
+    const userId = req.user._id
+    
+    await User.findByIdAndUpdate(userId, { fcmToken })
+    res.status(200).json({ success: true, message: 'FCM token saved' })
+  } catch (error) {
+    console.error('Error saving FCM token:', error)
+    res.status(500).json({ error: 'Failed to save FCM token' })
+  }
+})
 
 export default router

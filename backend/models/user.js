@@ -73,6 +73,12 @@ const UserSchema = mongoose.Schema({
             lon: Number
         }],
         default:[]
+    },
+
+    // FCM token for push notifications (for calls)
+    fcmToken: {
+        type: String,
+        default: ""
     }
 
 },{timestamps:true})
