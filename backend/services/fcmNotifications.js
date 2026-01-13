@@ -16,24 +16,34 @@ const __dirname = dirname(__filename);
 // Initialize Firebase Admin (will be called from index.js)
 export function initializeFCM() {
   try {
+    console.log('🔥 [FCM] Starting initialization...');
+    
     // Read service account file using ES modules
     const serviceAccountPath = join(__dirname, '../firebase-service-account.json');
+    console.log('🔥 [FCM] Service account path:', serviceAccountPath);
+    
+    if (!readFileSync(serviceAccountPath, 'utf8')) {
+      throw new Error('Service account file is empty');
+    }
+    
     const serviceAccount = JSON.parse(readFileSync(serviceAccountPath, 'utf8'));
+    console.log('🔥 [FCM] Service account loaded, project_id:', serviceAccount.project_id);
     
     if (!admin.apps.length) {
       admin.initializeApp({
         credential: admin.credential.cert(serviceAccount)
       });
       isInitialized = true;
-      console.log('✅ [FCM] Firebase Admin initialized');
+      console.log('✅ [FCM] Firebase Admin initialized successfully');
     } else {
       isInitialized = true;
       console.log('✅ [FCM] Firebase Admin already initialized');
     }
   } catch (error) {
     console.error('❌ [FCM] Error initializing Firebase Admin:', error);
+    console.error('❌ [FCM] Error message:', error.message);
+    console.error('❌ [FCM] Error stack:', error.stack);
     console.error('⚠️ [FCM] Make sure firebase-service-account.json exists in backend folder');
-    console.error('❌ [FCM] Error details:', error.message);
     isInitialized = false;
   }
 }
@@ -47,8 +57,14 @@ export function initializeFCM() {
  * @param {string} callId - Unique call ID
  */
 export async function sendCallNotification(fcmToken, callerName, callerId, callType = 'video', callId = null) {
+  console.log('🔥 [FCM] sendCallNotification called');
+  console.log('🔥 [FCM] isInitialized:', isInitialized);
+  console.log('🔥 [FCM] admin.apps.length:', admin.apps.length);
+  
   if (!isInitialized || !admin.apps.length) {
     console.error('❌ [FCM] Firebase Admin not initialized');
+    console.error('❌ [FCM] isInitialized:', isInitialized);
+    console.error('❌ [FCM] admin.apps.length:', admin.apps.length);
     return { success: false, error: 'FCM not initialized' };
   }
 
@@ -104,6 +120,13 @@ export async function sendCallNotification(fcmToken, callerName, callerId, callT
     console.error('❌ [FCM] Error sending call notification:', error);
     return { success: false, error: error.message };
   }
+}
+
+/**
+ * Check if FCM is initialized
+ */
+export function isFCMInitialized() {
+  return isInitialized && admin.apps.length > 0;
 }
 
 /**
