@@ -30,10 +30,18 @@ export function initializeFCM() {
     // Try environment variable first (for cloud deployments like Render)
     if (process.env.FIREBASE_SERVICE_ACCOUNT) {
       console.log('🔥 [FCM] Step 2: Using FIREBASE_SERVICE_ACCOUNT environment variable...');
+      console.log('🔥 [FCM] Step 2: Env var length:', process.env.FIREBASE_SERVICE_ACCOUNT.length);
+      console.log('🔥 [FCM] Step 2: Env var first 100 chars:', process.env.FIREBASE_SERVICE_ACCOUNT.substring(0, 100));
       try {
-        serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
-        console.log('✅ [FCM] Step 2: Environment variable parsed, project_id:', serviceAccount.project_id);
+        // Try to parse the JSON string
+        const envVarValue = process.env.FIREBASE_SERVICE_ACCOUNT.trim();
+        serviceAccount = JSON.parse(envVarValue);
+        console.log('✅ [FCM] Step 2: Environment variable parsed successfully');
+        console.log('✅ [FCM] Step 2: project_id:', serviceAccount.project_id);
       } catch (parseError) {
+        console.error('❌ [FCM] Step 2: Failed to parse environment variable');
+        console.error('❌ [FCM] Step 2: Parse error:', parseError.message);
+        console.error('❌ [FCM] Step 2: Env var value (first 200 chars):', process.env.FIREBASE_SERVICE_ACCOUNT.substring(0, 200));
         throw new Error('Failed to parse FIREBASE_SERVICE_ACCOUNT environment variable: ' + parseError.message);
       }
     } else {
