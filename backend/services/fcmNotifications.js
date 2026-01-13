@@ -178,6 +178,19 @@ export function isFCMInitialized() {
 }
 
 /**
+ * Get FCM initialization status (for debugging)
+ */
+export function getFCMStatus() {
+  return {
+    initializationAttempted,
+    isInitialized,
+    adminAppsCount: admin.apps.length,
+    hasEnvVar: !!process.env.FIREBASE_SERVICE_ACCOUNT,
+    envVarLength: process.env.FIREBASE_SERVICE_ACCOUNT?.length || 0
+  };
+}
+
+/**
  * Send FCM notification to user by MongoDB user ID
  * Looks up the user's FCM token and sends notification
  */

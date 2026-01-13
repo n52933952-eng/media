@@ -18,7 +18,7 @@ import { initializeWeatherCron } from './services/weatherCron.js'
 import { initializeChessPostCleanup } from './services/chessPostCleanup.js'
 import { initializeActivityCleanup } from './services/activityCleanup.js'
 import { initRedis, isRedisAvailable } from './services/redis.js'
-import { initializeFCM } from './services/fcmNotifications.js'
+import { initializeFCM, getFCMStatus } from './services/fcmNotifications.js'
 import path from 'path'
 import { fileURLToPath } from 'url'
 
@@ -74,9 +74,17 @@ mongoose.connect(process.env.MONGO, {
     
     // Initialize Firebase Cloud Messaging for call notifications
     console.log('🔥 [Index] About to initialize FCM...');
+    console.log('🔥 [Index] FIREBASE_SERVICE_ACCOUNT exists:', !!process.env.FIREBASE_SERVICE_ACCOUNT);
+    console.log('🔥 [Index] FIREBASE_SERVICE_ACCOUNT length:', process.env.FIREBASE_SERVICE_ACCOUNT?.length || 0);
     try {
       initializeFCM();
       console.log('🔥 [Index] FCM initialization call completed');
+      
+      // Check status after initialization
+      setTimeout(async () => {
+        const status = getFCMStatus();
+        console.log('🔥 [Index] FCM Status after init:', JSON.stringify(status, null, 2));
+      }, 1000);
     } catch (error) {
       console.error('❌ [Index] Error calling initializeFCM:', error);
       console.error('❌ [Index] Error stack:', error.stack);
