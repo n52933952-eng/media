@@ -93,6 +93,7 @@ export function initializeFCM() {
     console.error('   2. Or place firebase-service-account.json in backend folder (for local)');
     isInitialized = false;
     console.error('❌ [FCM] ========== END ERROR ==========');
+    // Don't throw - let the app continue, but FCM won't work
   }
 }
 
