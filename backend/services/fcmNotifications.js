@@ -19,40 +19,56 @@ const __dirname = dirname(__filename);
 // Initialize Firebase Admin (will be called from index.js)
 export function initializeFCM() {
   initializationAttempted = true;
+  console.log('🔥 [FCM] ========== INITIALIZATION START ==========');
   console.log('🔥 [FCM] initializeFCM() called');
+  
   try {
-    console.log('🔥 [FCM] Starting initialization...');
+    console.log('🔥 [FCM] Step 1: Starting initialization...');
     
     // Read service account file using ES modules
     const serviceAccountPath = join(__dirname, '../firebase-service-account.json');
-    console.log('🔥 [FCM] Service account path:', serviceAccountPath);
+    console.log('🔥 [FCM] Step 2: Service account path:', serviceAccountPath);
+    console.log('🔥 [FCM] Step 2: __dirname:', __dirname);
     
     // Check if file exists first
+    console.log('🔥 [FCM] Step 3: Reading service account file...');
     const fileContent = readFileSync(serviceAccountPath, 'utf8');
+    console.log('🔥 [FCM] Step 3: File read successfully, length:', fileContent.length);
+    
     if (!fileContent || fileContent.trim().length === 0) {
       throw new Error('Service account file is empty');
     }
     
+    console.log('🔥 [FCM] Step 4: Parsing JSON...');
     const serviceAccount = JSON.parse(fileContent);
-    console.log('🔥 [FCM] Service account loaded, project_id:', serviceAccount.project_id);
+    console.log('🔥 [FCM] Step 4: JSON parsed, project_id:', serviceAccount.project_id);
+    
+    console.log('🔥 [FCM] Step 5: Checking admin apps...');
+    console.log('🔥 [FCM] Step 5: admin.apps.length:', admin.apps.length);
     
     if (!admin.apps.length) {
+      console.log('🔥 [FCM] Step 6: Initializing Firebase Admin...');
       admin.initializeApp({
         credential: admin.credential.cert(serviceAccount)
       });
       isInitialized = true;
-      console.log('✅ [FCM] Firebase Admin initialized successfully');
+      console.log('✅ [FCM] Step 6: Firebase Admin initialized successfully');
       console.log('✅ [FCM] Admin apps count:', admin.apps.length);
     } else {
       isInitialized = true;
       console.log('✅ [FCM] Firebase Admin already initialized');
     }
+    
+    console.log('✅ [FCM] ========== INITIALIZATION SUCCESS ==========');
   } catch (error) {
-    console.error('❌ [FCM] Error initializing Firebase Admin:', error);
+    console.error('❌ [FCM] ========== INITIALIZATION FAILED ==========');
+    console.error('❌ [FCM] Error type:', error.constructor.name);
     console.error('❌ [FCM] Error message:', error.message);
+    console.error('❌ [FCM] Error code:', error.code);
     console.error('❌ [FCM] Error stack:', error.stack);
     console.error('⚠️ [FCM] Make sure firebase-service-account.json exists in backend folder');
     isInitialized = false;
+    console.error('❌ [FCM] ========== END ERROR ==========');
   }
 }
 
