@@ -601,7 +601,7 @@ export const initializeSocket = async (app) => {
                     // Re-send the call signal directly from stored data
                     io.to(receiverSocketId).emit("callUser", {
                         userToCall: receiverId,
-                        signalData: activeCall.signal,
+                        signal: activeCall.signal,
                         from: callerId,
                         name: activeCall.name || 'Unknown',
                         callType: activeCall.callType || 'video'
