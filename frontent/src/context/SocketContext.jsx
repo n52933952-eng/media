@@ -532,11 +532,21 @@ export const SocketContextProvider = ({ children }) => {
       setStream(currentStream);
     }
 
-    const peer = new Peer({ initiator: true, trickle: false, stream: currentStream });
+    // Use trickle: true to support mobile app (which uses trickle: true)
+    // This allows separate ICE candidate events, which is needed for NAT traversal
+    const peer = new Peer({ initiator: true, trickle: true, stream: currentStream });
     peerRef.current = peer;
 
     peer.on('signal', (data) => {
-      socket.emit('callUser', { userToCall: id, signalData: data, from: me, name: user.username, callType: type });
+      // With trickle: true, signal events include both SDP and ICE candidates
+      // Check if this is an SDP (offer/answer) or an ICE candidate
+      if (data.type === 'offer' || data.type === 'answer') {
+        // This is the SDP offer/answer
+        socket.emit('callUser', { userToCall: id, signalData: data, from: me, name: user.username, callType: type });
+      } else if (data.candidate) {
+        // This is an ICE candidate - send separately
+        socket.emit('iceCandidate', { userToCall: id, candidate: data, from: me });
+      }
     });
 
     peer.on('stream', (currentStream) => {
@@ -587,6 +597,20 @@ export const SocketContextProvider = ({ children }) => {
         }
       } catch (err) {
         console.error('❌ [Web] Error processing ICE restart offer:', err);
+      }
+    });
+
+    // Handle ICE candidates from mobile app (now that we use trickle: true)
+    socket.on('iceCandidate', ({ candidate, from }) => {
+      console.log('🧊 [Web] Received ICE candidate from mobile:', from);
+      if (peer && candidate) {
+        try {
+          // With trickle: true, simple-peer expects ICE candidates via signal()
+          peer.signal(candidate);
+          console.log('✅ [Web] ICE candidate added to peer');
+        } catch (err) {
+          console.warn('⚠️ [Web] Error adding ICE candidate:', err);
+        }
       }
     });
 
@@ -648,11 +672,21 @@ export const SocketContextProvider = ({ children }) => {
       });
     }
     
-    const peer = new Peer({ initiator: false, trickle: false, stream: currentStream });
+    // Use trickle: true to support mobile app (which uses trickle: true)
+    // This allows separate ICE candidate events, which is needed for NAT traversal
+    const peer = new Peer({ initiator: false, trickle: true, stream: currentStream });
     peerRef.current = peer;
 
     peer.on('signal', (data) => {
-      socket.emit('answerCall', { signal: data, to: call.from });
+      // With trickle: true, signal events include both SDP and ICE candidates
+      // Check if this is an SDP (offer/answer) or an ICE candidate
+      if (data.type === 'answer') {
+        // This is the SDP answer
+        socket.emit('answerCall', { signal: data, to: call.from });
+      } else if (data.candidate) {
+        // This is an ICE candidate - send separately
+        socket.emit('iceCandidate', { userToCall: call.from, candidate: data, from: me });
+      }
     });
 
     // Handle ICE restart offer from mobile app (when connection fails)
@@ -667,6 +701,20 @@ export const SocketContextProvider = ({ children }) => {
         }
       } catch (err) {
         console.error('❌ [Web] Error processing ICE restart offer (in answerCall):', err);
+      }
+    });
+
+    // Handle ICE candidates from mobile app (now that we use trickle: true)
+    socket.on('iceCandidate', ({ candidate, from }) => {
+      console.log('🧊 [Web] Received ICE candidate from mobile (in answerCall):', from);
+      if (peer && candidate) {
+        try {
+          // With trickle: true, simple-peer expects ICE candidates via signal()
+          peer.signal(candidate);
+          console.log('✅ [Web] ICE candidate added to peer (in answerCall)');
+        } catch (err) {
+          console.warn('⚠️ [Web] Error adding ICE candidate (in answerCall):', err);
+        }
       }
     });
 
