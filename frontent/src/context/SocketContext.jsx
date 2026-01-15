@@ -575,6 +575,21 @@ export const SocketContextProvider = ({ children }) => {
       }
     });
 
+    // Handle ICE restart offer from mobile app (when connection fails)
+    socket.on('iceRestartOffer', (data) => {
+      console.log('🔄 [Web] Received ICE restart offer from mobile');
+      try {
+        if (peer && peer.signal) {
+          peer.signal(data.signal);
+          console.log('✅ [Web] ICE restart offer processed');
+        } else {
+          console.warn('⚠️ [Web] Peer not available for ICE restart');
+        }
+      } catch (err) {
+        console.error('❌ [Web] Error processing ICE restart offer:', err);
+      }
+    });
+
     connectionRef.current = peer;
   };
 
@@ -638,6 +653,21 @@ export const SocketContextProvider = ({ children }) => {
 
     peer.on('signal', (data) => {
       socket.emit('answerCall', { signal: data, to: call.from });
+    });
+
+    // Handle ICE restart offer from mobile app (when connection fails)
+    socket.on('iceRestartOffer', (data) => {
+      console.log('🔄 [Web] Received ICE restart offer from mobile (in answerCall)');
+      try {
+        if (peer && peer.signal) {
+          peer.signal(data.signal);
+          console.log('✅ [Web] ICE restart offer processed (in answerCall)');
+        } else {
+          console.warn('⚠️ [Web] Peer not available for ICE restart (in answerCall)');
+        }
+      } catch (err) {
+        console.error('❌ [Web] Error processing ICE restart offer (in answerCall):', err);
+      }
     });
 
     peer.on('stream', (currentStream) => {
