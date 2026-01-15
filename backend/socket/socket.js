@@ -721,27 +721,6 @@ export const initializeSocket = async (app) => {
             }
         })
 
-        // WebRTC: Handle ICE candidate
-        socket.on("iceCandidate", async ({ userToCall, candidate, from }) => {
-            const receiverData = await getUserSocket(userToCall)
-            const receiverSocketId = receiverData?.socketId
-            if (receiverSocketId) {
-                io.to(receiverSocketId).emit("iceCandidate", { candidate, from })
-            }
-        })
-
-        // WebRTC: Handle ICE restart offer (from mobile app when connection fails)
-        socket.on("iceRestartOffer", async ({ to, signal }) => {
-            console.log('🔄 [iceRestartOffer] Received ICE restart offer from:', socket.handshake.query.userId, 'to:', to)
-            const receiverData = await getUserSocket(to)
-            const receiverSocketId = receiverData?.socketId
-            if (receiverSocketId) {
-                console.log('🔄 [iceRestartOffer] Forwarding ICE restart offer to:', receiverSocketId)
-                io.to(receiverSocketId).emit("iceRestartOffer", { signal, from: socket.handshake.query.userId })
-            } else {
-                console.log('⚠️ [iceRestartOffer] Receiver not found:', to)
-            }
-        })
 
         // WebRTC: Handle cancel call - match madechess implementation
         socket.on("cancelCall", async ({ conversationId, sender }) => {
