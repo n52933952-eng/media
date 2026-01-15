@@ -416,6 +416,67 @@ export const initializeSocket = async (app) => {
             }
             await setUserSocket(userId, socketData)
             console.log(`✅ [socket] User ${userId} added to socket map (socket: ${socket.id})`)
+            
+            // Check for pending calls when user connects (e.g., after receiving push notification)
+            // This ensures calls are re-sent automatically when user comes online
+            // Check all active calls in Redis to find ones where this user is the receiver
+            try {
+                // Check for active calls where this user is the receiver (format: callerId-receiverId)
+                // Use SCAN instead of KEYS for better performance (non-blocking)
+                const redisClient = redisService.getRedis()
+                if (redisClient) {
+                    let cursor = '0'
+                    const foundCalls = []
+                    
+                    do {
+                        const result = await redisClient.scan(cursor, {
+                            MATCH: `activeCall:*-${userId}`,
+                            COUNT: 100
+                        })
+                        
+                        let nextCursor, keys
+                        if (Array.isArray(result)) {
+                            nextCursor = result[0]
+                            keys = result[1] || []
+                        } else {
+                            nextCursor = result.cursor
+                            keys = result.keys || []
+                        }
+                        
+                        cursor = nextCursor.toString()
+                        
+                        for (const key of keys) {
+                            const callId = key.replace('activeCall:', '')
+                            const activeCall = await getActiveCall(callId)
+                            if (activeCall && activeCall.signal) {
+                                const parts = callId.split('-')
+                                const callerId = parts.slice(0, -1).join('-') // Handle IDs with dashes
+                                foundCalls.push({ callId, callerId, activeCall })
+                            }
+                        }
+                    } while (cursor !== '0')
+                    
+                    // Re-send all found pending calls
+                    for (const { callId, callerId, activeCall } of foundCalls) {
+                        console.log(`📞 [socket] Found pending call for ${userId} from ${callerId}, re-sending signal...`)
+                        
+                        io.to(socket.id).emit("callUser", {
+                            userToCall: userId,
+                            signal: activeCall.signal,
+                            from: callerId,
+                            name: activeCall.name || 'Unknown',
+                            callType: activeCall.callType || 'video'
+                        })
+                        console.log(`✅ [socket] Re-sent pending call signal to ${userId} from ${callerId}`)
+                    }
+                    
+                    if (foundCalls.length > 0) {
+                        console.log(`✅ [socket] Re-sent ${foundCalls.length} pending call(s) to ${userId}`)
+                    }
+                }
+            } catch (error) {
+                console.error(`❌ [socket] Error checking for pending calls when ${userId} connected:`, error.message)
+            }
         } else {
             console.warn("⚠️ [socket] User connected without valid userId:", userId)
         }
