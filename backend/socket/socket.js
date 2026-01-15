@@ -236,6 +236,28 @@ const deleteActiveCall = async (callId) => {
     await redisService.redisDel(`activeCall:${callId}`)
 }
 
+// Helper functions for pending calls (indexed by receiverId for O(1) lookup)
+// This is more scalable than SCAN for 1M+ users
+const setPendingCall = async (receiverId, callData) => {
+    redisService.ensureRedis()
+    await redisService.redisSet(`pendingCall:${receiverId}`, callData, 3600) // 1 hour TTL
+}
+
+const getPendingCall = async (receiverId) => {
+    redisService.ensureRedis()
+    try {
+        return await redisService.redisGet(`pendingCall:${receiverId}`)
+    } catch (error) {
+        console.error(`❌ [socket] Failed to read pending call from Redis for ${receiverId}:`, error.message)
+        return null
+    }
+}
+
+const deletePendingCall = async (receiverId) => {
+    redisService.ensureRedis()
+    await redisService.redisDel(`pendingCall:${receiverId}`)
+}
+
 const getAllActiveCalls = async () => {
     redisService.ensureRedis()
     try {
@@ -419,60 +441,26 @@ export const initializeSocket = async (app) => {
             
             // Check for pending calls when user connects (e.g., after receiving push notification)
             // This ensures calls are re-sent automatically when user comes online
-            // Check all active calls in Redis to find ones where this user is the receiver
+            // Use indexed lookup (O(1)) instead of SCAN for better scalability with 1M+ users
             try {
-                // Check for active calls where this user is the receiver (format: callerId-receiverId)
-                // Use SCAN instead of KEYS for better performance (non-blocking)
-                const redisClient = redisService.getRedis()
-                if (redisClient) {
-                    let cursor = '0'
-                    const foundCalls = []
+                const pendingCall = await getPendingCall(userId)
+                
+                if (pendingCall && pendingCall.signal) {
+                    console.log(`📞 [socket] Found pending call for ${userId} from ${pendingCall.callerId}, re-sending signal...`)
                     
-                    do {
-                        const result = await redisClient.scan(cursor, {
-                            MATCH: `activeCall:*-${userId}`,
-                            COUNT: 100
-                        })
-                        
-                        let nextCursor, keys
-                        if (Array.isArray(result)) {
-                            nextCursor = result[0]
-                            keys = result[1] || []
-                        } else {
-                            nextCursor = result.cursor
-                            keys = result.keys || []
-                        }
-                        
-                        cursor = nextCursor.toString()
-                        
-                        for (const key of keys) {
-                            const callId = key.replace('activeCall:', '')
-                            const activeCall = await getActiveCall(callId)
-                            if (activeCall && activeCall.signal) {
-                                const parts = callId.split('-')
-                                const callerId = parts.slice(0, -1).join('-') // Handle IDs with dashes
-                                foundCalls.push({ callId, callerId, activeCall })
-                            }
-                        }
-                    } while (cursor !== '0')
+                    // Re-send the call signal to the newly connected user
+                    io.to(socket.id).emit("callUser", {
+                        userToCall: userId,
+                        signal: pendingCall.signal,
+                        from: pendingCall.callerId,
+                        name: pendingCall.name || 'Unknown',
+                        callType: pendingCall.callType || 'video'
+                    })
+                    console.log(`✅ [socket] Re-sent pending call signal to ${userId} from ${pendingCall.callerId}`)
                     
-                    // Re-send all found pending calls
-                    for (const { callId, callerId, activeCall } of foundCalls) {
-                        console.log(`📞 [socket] Found pending call for ${userId} from ${callerId}, re-sending signal...`)
-                        
-                        io.to(socket.id).emit("callUser", {
-                            userToCall: userId,
-                            signal: activeCall.signal,
-                            from: callerId,
-                            name: activeCall.name || 'Unknown',
-                            callType: activeCall.callType || 'video'
-                        })
-                        console.log(`✅ [socket] Re-sent pending call signal to ${userId} from ${callerId}`)
-                    }
-                    
-                    if (foundCalls.length > 0) {
-                        console.log(`✅ [socket] Re-sent ${foundCalls.length} pending call(s) to ${userId}`)
-                    }
+                    // Delete the pending call after re-sending (cleanup)
+                    await deletePendingCall(userId)
+                    console.log(`✅ [socket] Cleaned up pending call for ${userId}`)
                 }
             } catch (error) {
                 console.error(`❌ [socket] Error checking for pending calls when ${userId} connected:`, error.message)
@@ -600,12 +588,22 @@ export const initializeSocket = async (app) => {
                     callType
                 })
             } else {
-                // User is offline - send push notification
+                // User is offline - send push notification and store pending call for indexed lookup
                 console.log(`📱 [callUser] User ${userToCall} is OFFLINE, sending push notification`)
                 try {
                     console.log(`📤 [callUser] Calling sendCallNotification(${userToCall}, ${name}, ${from}, ${callType})`)
                     const result = await sendCallNotification(userToCall, name, from, callType)
                     console.log('✅ [callUser] Push notification result:', result)
+                    
+                    // Store pending call indexed by receiverId for O(1) lookup when user connects
+                    // This is more scalable than SCAN for 1M+ users
+                    await setPendingCall(userToCall, {
+                        callerId: from,
+                        signal: signalData,
+                        name: name,
+                        callType: callType
+                    })
+                    console.log(`✅ [callUser] Stored pending call for ${userToCall} (indexed for fast lookup)`)
                 } catch (error) {
                     console.error('❌ [callUser] Error sending call push notification:', error)
                     console.error('❌ [callUser] Error stack:', error.stack)
@@ -680,7 +678,29 @@ export const initializeSocket = async (app) => {
                     }
                 }
             } else {
-                console.log(`⚠️ [requestCallSignal] No active call found between ${callerId} and ${receiverId}`)
+                // Fallback: Check pending calls (indexed lookup) in case active call wasn't found
+                // This handles edge cases where pending call exists but active call wasn't stored
+                const pendingCall = await getPendingCall(receiverId)
+                if (pendingCall && pendingCall.callerId === callerId && pendingCall.signal) {
+                    console.log(`✅ [requestCallSignal] Found pending call, re-sending signal`)
+                    const receiverData = await getUserSocket(receiverId)
+                    const receiverSocketId = receiverData?.socketId
+                    
+                    if (receiverSocketId) {
+                        io.to(receiverSocketId).emit("callUser", {
+                            userToCall: receiverId,
+                            signal: pendingCall.signal,
+                            from: callerId,
+                            name: pendingCall.name || 'Unknown',
+                            callType: pendingCall.callType || 'video'
+                        })
+                        console.log(`✅ [requestCallSignal] Call signal re-sent from pending call`)
+                        // Clean up after sending
+                        await deletePendingCall(receiverId)
+                    }
+                } else {
+                    console.log(`⚠️ [requestCallSignal] No active call or pending call found between ${callerId} and ${receiverId}`)
+                }
             }
         })
 
@@ -691,6 +711,13 @@ export const initializeSocket = async (app) => {
             if (callerSocketId) {
                 io.to(callerSocketId).emit("callAccepted", data.signal)
                 // Call is now active - both users are busy (already marked in callUser)
+                
+                // Clean up pending call (safety measure - should already be deleted when user connected)
+                // This handles edge cases where pending call wasn't cleaned up earlier
+                const receiverId = socket.handshake.query.userId
+                if (receiverId) {
+                    await deletePendingCall(receiverId)
+                }
             }
         })
 
@@ -721,6 +748,9 @@ export const initializeSocket = async (app) => {
             } else if (call2) {
                 await deleteActiveCall(callId2)
             }
+            
+            // Also delete pending call if receiver was offline (cleanup indexed lookup)
+            await deletePendingCall(conversationId)
 
             // Update database - mark users as NOT in call
             User.findByIdAndUpdate(sender, { inCall: false }).catch(err => console.log('Error updating sender inCall status:', err))
@@ -1189,6 +1219,9 @@ export const initializeSocket = async (app) => {
             if (disconnectedUserId) {
                 // Clear inCall status in database for disconnected user
                 User.findByIdAndUpdate(disconnectedUserId, { inCall: false }).catch(err => console.log('Error clearing inCall status on disconnect:', err))
+                
+                // Clean up pending call if user disconnected before answering (cleanup indexed lookup)
+                await deletePendingCall(disconnectedUserId)
                 
                 // Get all active calls from Redis
                 const allActiveCalls = await getAllActiveCalls()
