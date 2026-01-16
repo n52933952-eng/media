@@ -722,6 +722,25 @@ export const initializeSocket = async (app) => {
         })
 
 
+        // WebRTC: Handle ICE candidate (for mobile-to-mobile calls with trickle ICE)
+        // Web uses trickle: false (bundled candidates), so this won't affect web-to-web calls
+        socket.on("iceCandidate", async ({ userToCall, candidate, from }) => {
+            console.log(`🧊 [iceCandidate] Forwarding ICE candidate from ${from} to ${userToCall}`)
+            
+            const receiverData = await getUserSocket(userToCall)
+            const receiverSocketId = receiverData?.socketId
+            
+            if (receiverSocketId) {
+                io.to(receiverSocketId).emit("iceCandidate", {
+                    candidate: candidate,
+                    from: from
+                })
+                console.log(`✅ [iceCandidate] ICE candidate forwarded successfully`)
+            } else {
+                console.log(`⚠️ [iceCandidate] Receiver ${userToCall} is not online, cannot forward ICE candidate`)
+            }
+        })
+
         // WebRTC: Handle cancel call - match madechess implementation
         socket.on("cancelCall", async ({ conversationId, sender }) => {
             const receiverData = await getUserSocket(conversationId)
