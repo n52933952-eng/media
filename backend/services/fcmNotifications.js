@@ -276,8 +276,9 @@ export async function sendCallNotificationToUser(userId, callerName, callerId, c
 /**
  * Send FCM notification to stop ringtone when call is canceled/ended
  * @param {string} userId - MongoDB user ID of the receiver
+ * @param {string} senderId - MongoDB user ID of the sender (caller who canceled) - for tracking which caller canceled
  */
-export async function sendCallEndedNotificationToUser(userId) {
+export async function sendCallEndedNotificationToUser(userId, senderId = null) {
   try {
     const User = (await import('../models/user.js')).default;
     const user = await User.findById(userId);
@@ -297,6 +298,7 @@ export async function sendCallEndedNotificationToUser(userId) {
       data: {
         type: 'call_ended',
         action: 'stop_ringtone',
+        ...(senderId && { callerId: senderId, sender: senderId }), // Include sender ID so client knows which caller canceled
       },
       android: {
         priority: 'high',

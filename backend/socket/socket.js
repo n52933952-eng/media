@@ -808,8 +808,9 @@ export const initializeSocket = async (app) => {
             try {
                 const { sendCallEndedNotificationToUser } = await import('../services/fcmNotifications.js')
                 // Send to receiver (the one who was being called) - ALWAYS send, even if online
+                // Include sender ID so client can track which caller canceled (prevents blocking legitimate new calls)
                 // This ensures ringtone stops if IncomingCallActivity is showing
-                const fcmResult = await sendCallEndedNotificationToUser(conversationId)
+                const fcmResult = await sendCallEndedNotificationToUser(conversationId, sender)
                 if (fcmResult.success) {
                     console.log('✅ [cancelCall] Sent call ended FCM notification to receiver')
                 } else {
