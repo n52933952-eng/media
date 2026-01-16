@@ -272,3 +272,56 @@ export async function sendCallNotificationToUser(userId, callerName, callerId, c
     return { success: false, error: error.message };
   }
 }
+
+/**
+ * Send FCM notification to stop ringtone when call is canceled/ended
+ * @param {string} userId - MongoDB user ID of the receiver
+ */
+export async function sendCallEndedNotificationToUser(userId) {
+  try {
+    const User = (await import('../models/user.js')).default;
+    const user = await User.findById(userId);
+    
+    if (!user || !user.fcmToken) {
+      console.log('⚠️ [FCM] User not found or no FCM token for call ended notification:', userId);
+      return { success: false, error: 'User not found or no FCM token' };
+    }
+
+    if (!isInitialized || !admin.apps.length) {
+      console.error('❌ [FCM] Firebase Admin not initialized for call ended notification');
+      return { success: false, error: 'FCM not initialized' };
+    }
+
+    const message = {
+      token: user.fcmToken,
+      data: {
+        type: 'call_ended',
+        action: 'stop_ringtone',
+      },
+      android: {
+        priority: 'high',
+      },
+      apns: {
+        headers: {
+          'apns-priority': '10',
+        },
+        payload: {
+          aps: {
+            'content-available': 1,
+          },
+        },
+      },
+    };
+
+    console.log('🔕 [FCM] Sending call ended notification to stop ringtone...');
+    console.log('🔕 [FCM] To user:', userId);
+
+    const response = await admin.messaging().send(message);
+    console.log('✅ [FCM] Call ended notification sent successfully:', response);
+    
+    return { success: true, messageId: response };
+  } catch (error) {
+    console.error('❌ [FCM] Error sending call ended notification:', error);
+    return { success: false, error: error.message };
+  }
+}

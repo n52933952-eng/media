@@ -499,10 +499,19 @@ export const initializeSocket = async (app) => {
                 
                 if (socketCount === 0) {
                     // Use in-memory as fallback if Redis is empty
+                    // OPTIMIZED: Get busy users from Redis (active calls) instead of database
+                    const allActiveCalls = await getAllActiveCalls();
+                    const busyUserIds = new Set();
+                    for (const [callId, callData] of Object.entries(allActiveCalls)) {
+                        if (callData.user1) busyUserIds.add(callData.user1);
+                        if (callData.user2) busyUserIds.add(callData.user2);
+                    }
+                    
                     const fallbackArray = Object.entries(userSocketMap).map(([id, data]) => ({
                         userId: id,
                         onlineAt: data.onlineAt,
-                    }))
+                        inCall: busyUserIds.has(id), // Fast Set lookup
+                    }));
                     if (fallbackArray.length > 0) {
                         io.emit("getOnlineUser", fallbackArray)
                         isEmittingOnlineUsers = false
@@ -511,21 +520,41 @@ export const initializeSocket = async (app) => {
                 }
                 
                 // Emit online users as array of objects like madechess
+                // OPTIMIZED FOR 1M+ USERS: Get busy users from Redis (active calls) instead of database queries
+                // Build a Set of busy user IDs from all active calls (single Redis query, not 1M database queries)
+                const allActiveCalls = await getAllActiveCalls();
+                const busyUserIds = new Set();
+                for (const [callId, callData] of Object.entries(allActiveCalls)) {
+                    if (callData.user1) busyUserIds.add(callData.user1);
+                    if (callData.user2) busyUserIds.add(callData.user2);
+                }
+                
+                // Map online users and check busy status from Set (O(1) lookup, no database queries)
                 const onlineArray = Object.entries(allSockets).map(([id, data]) => ({
                     userId: id,
                     onlineAt: data.onlineAt,
-                }))
+                    inCall: busyUserIds.has(id), // Fast Set lookup, no database query
+                }));
                 if (onlineArray.length > 0) {
                     io.emit("getOnlineUser", onlineArray)
                 }
             } catch (error) {
                 console.error('❌ [socket] Error emitting getOnlineUser:', error.message)
                 // Fallback: emit from in-memory cache
+                // OPTIMIZED: Get busy users from Redis (active calls) instead of database
                 try {
+                    const allActiveCalls = await getAllActiveCalls();
+                    const busyUserIds = new Set();
+                    for (const [callId, callData] of Object.entries(allActiveCalls)) {
+                        if (callData.user1) busyUserIds.add(callData.user1);
+                        if (callData.user2) busyUserIds.add(callData.user2);
+                    }
+                    
                     const fallbackArray = Object.entries(userSocketMap).map(([id, data]) => ({
                         userId: id,
                         onlineAt: data.onlineAt,
-                    }))
+                        inCall: busyUserIds.has(id), // Fast Set lookup
+                    }));
                     console.log(`⚠️ [socket] Emitting from in-memory fallback with ${fallbackArray.length} users`)
                     io.emit("getOnlineUser", fallbackArray)
                 } catch (fallbackError) {
@@ -766,6 +795,24 @@ export const initializeSocket = async (app) => {
             // Update database - mark users as NOT in call
             User.findByIdAndUpdate(sender, { inCall: false }).catch(err => console.log('Error updating sender inCall status:', err))
             User.findByIdAndUpdate(conversationId, { inCall: false }).catch(err => console.log('Error updating receiver inCall status:', err))
+
+            // Send FCM notification to stop ringtone if receiver is offline or app is closed
+            // This ensures ringtone stops even if user didn't see the socket event
+            // IMPORTANT: Send even if receiver is online (they might have app closed but notification showing)
+            try {
+                const { sendCallEndedNotificationToUser } = await import('../services/fcmNotifications.js')
+                // Send to receiver (the one who was being called) - ALWAYS send, even if online
+                // This ensures ringtone stops if IncomingCallActivity is showing
+                const fcmResult = await sendCallEndedNotificationToUser(conversationId)
+                if (fcmResult.success) {
+                    console.log('✅ [cancelCall] Sent call ended FCM notification to receiver')
+                } else {
+                    console.log('⚠️ [cancelCall] FCM call ended notification failed:', fcmResult.error)
+                }
+            } catch (fcmError) {
+                console.error('❌ [cancelCall] Error sending FCM call ended notification:', fcmError)
+                console.error('❌ [cancelCall] Error details:', fcmError.message)
+            }
 
             if (receiverSocketId) {
                 io.to(receiverSocketId).emit("CallCanceled")
@@ -1342,10 +1389,19 @@ export const initializeSocket = async (app) => {
 
             // Emit updated online list as array of objects - get from Redis (source of truth)
             const remainingSockets = await getAllUserSockets()
+            // OPTIMIZED FOR 1M+ USERS: Get busy users from Redis (active calls) instead of database queries
+            const allActiveCalls = await getAllActiveCalls();
+            const busyUserIds = new Set();
+            for (const [callId, callData] of Object.entries(allActiveCalls)) {
+                if (callData.user1) busyUserIds.add(callData.user1);
+                if (callData.user2) busyUserIds.add(callData.user2);
+            }
+            
             const updatedOnlineArray = Object.entries(remainingSockets).map(([id, data]) => ({
                 userId: id,
                 onlineAt: data.onlineAt,
-            }))
+                inCall: busyUserIds.has(id), // Fast Set lookup, no database query
+            }));
             console.log(`📤 [socket] Emitting getOnlineUser after disconnect with ${updatedOnlineArray.length} users`)
             io.emit("getOnlineUser", updatedOnlineArray)
         })
