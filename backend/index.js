@@ -12,6 +12,7 @@ import WeatherRoute from './routes/weather.js'
 import NewsRoute from './routes/news.js'
 import NotificationRoute from './routes/notification.js'
 import ActivityRoute from './routes/activity.js'
+import CallRoute from './routes/call.js'
 import { initializeSocket } from './socket/socket.js'
 import { initializeFootballCron } from './services/footballCron.js'
 import { initializeWeatherCron } from './services/weatherCron.js'
@@ -130,6 +131,7 @@ app.use("/api/weather",WeatherRoute)
 app.use("/api/news",NewsRoute)
 app.use("/api/notification",NotificationRoute)
 app.use("/api/activity",ActivityRoute)
+app.use("/api/call",CallRoute)
 
 // 404 handler for API routes (before static files and catch-all)
 app.use('/api/*', (req, res) => {

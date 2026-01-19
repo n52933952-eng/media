@@ -1422,6 +1422,9 @@ export const getRecipientSockedId = async (recipientId) => {
     return userData ? userData.socketId : null
 }
 
+// Export getUserSocket for use in HTTP endpoints
+export { getUserSocket }
+
 // Export getters for io and server
 export const getIO = () => io
 export const getUserSocketMap = () => userSocketMap
