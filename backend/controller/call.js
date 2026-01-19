@@ -57,13 +57,18 @@ export const cancelCall = async (req, res) => {
         }
 
         console.log(`📴 [HTTP cancelCall] Canceling call - conversationId: ${conversationId}, sender: ${sender}`)
+        console.log(`📴 [HTTP cancelCall] Note: conversationId is the CALLER, sender is the RECEIVER (who declined)`)
 
         // Get socket IDs (same logic as socket handler)
-        const receiverData = await getUserSocket(conversationId)
-        const receiverSocketId = receiverData?.socketId
+        // conversationId = caller (who made the call)
+        // sender = receiver (who declined the call)
+        const callerData = await getUserSocket(conversationId)
+        const callerSocketId = callerData?.socketId
 
-        const senderData = await getUserSocket(sender)
-        const senderSocketId = senderData?.socketId
+        const receiverData = await getUserSocket(sender)
+        const receiverSocketId = receiverData?.socketId
+        
+        console.log(`📴 [HTTP cancelCall] Socket IDs - Caller: ${callerSocketId || 'NOT CONNECTED'}, Receiver: ${receiverSocketId || 'NOT CONNECTED'}`)
 
         // Remove from active calls - try both possible call IDs
         const callId1 = `${sender}-${conversationId}`
@@ -79,13 +84,21 @@ export const cancelCall = async (req, res) => {
         // Also delete pending call if receiver was offline
         await deletePendingCall(conversationId)
 
-        // Update database - mark users as NOT in call (non-blocking)
-        User.findByIdAndUpdate(sender, { inCall: false }).catch(err => 
-            console.log('Error updating sender inCall status:', err)
-        )
-        User.findByIdAndUpdate(conversationId, { inCall: false }).catch(err => 
-            console.log('Error updating receiver inCall status:', err)
-        )
+        // Update database - mark users as NOT in call (non-blocking, fire-and-forget)
+        // OPTIMIZATION: Use Promise.all for parallel updates (faster for 1M+ users)
+        // Don't await - fire and forget to ensure immediate cancellation response
+        Promise.all([
+            User.findByIdAndUpdate(sender, { inCall: false }).catch(err => 
+                console.log('⚠️ [HTTP cancelCall] Error updating sender inCall status:', err)
+            ),
+            User.findByIdAndUpdate(conversationId, { inCall: false }).catch(err => 
+                console.log('⚠️ [HTTP cancelCall] Error updating receiver inCall status:', err)
+            )
+        ]).then(() => {
+            console.log('✅ [HTTP cancelCall] Database inCall status updated for both users')
+        }).catch(err => {
+            console.error('❌ [HTTP cancelCall] Error updating database inCall status:', err)
+        })
 
         // Send FCM notification to stop ringtone
         try {
@@ -101,15 +114,28 @@ export const cancelCall = async (req, res) => {
         }
 
         // Emit socket events to notify both users
+        // CRITICAL: Emit to CALLER (conversationId) so they know the call was declined
+        // Also emit to RECEIVER (sender) in case they're online (though they already declined)
         const io = getIO()
         if (io) {
+            // Emit to caller (conversationId) - this is the most important one
+            if (callerSocketId) {
+                console.log(`📴 [HTTP cancelCall] Emitting CallCanceled to CALLER (${conversationId}) at socket ${callerSocketId}`)
+                io.to(callerSocketId).emit("CallCanceled")
+            } else {
+                console.warn(`⚠️ [HTTP cancelCall] Caller (${conversationId}) is NOT CONNECTED - CallCanceled event not sent`)
+            }
+            
+            // Also emit to receiver (sender) - they already declined but good to confirm
             if (receiverSocketId) {
+                console.log(`📴 [HTTP cancelCall] Emitting CallCanceled to RECEIVER (${sender}) at socket ${receiverSocketId}`)
                 io.to(receiverSocketId).emit("CallCanceled")
             }
-            if (senderSocketId) {
-                io.to(senderSocketId).emit("CallCanceled")
-            }
+            
+            // General broadcast (for other listeners if needed)
             io.emit("cancleCall", { userToCall: conversationId, from: sender })
+        } else {
+            console.error('❌ [HTTP cancelCall] Socket.IO instance not available!')
         }
 
         console.log(`✅ [HTTP cancelCall] Call canceled successfully`)
