@@ -8,8 +8,9 @@ const getActiveCall = async (callId) => {
         return null
     }
     try {
+        // redisGet already parses JSON, so we don't need to parse again
         const callData = await redisService.redisGet(`activeCall:${callId}`)
-        return callData ? JSON.parse(callData) : null
+        return callData || null
     } catch (error) {
         console.error(`❌ [call] Error getting active call ${callId}:`, error.message)
         return null
