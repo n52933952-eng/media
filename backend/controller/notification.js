@@ -2,6 +2,13 @@ import Notification from '../models/notification.js'
 import User from '../models/user.js'
 import Post from '../models/post.js'
 import { getIO, getUserSocketMap } from '../socket/socket.js'
+import { 
+    sendLikeNotification, 
+    sendCommentNotification, 
+    sendMentionNotification,
+    sendFollowNotification,
+    sendNotificationToUser
+} from '../services/pushNotifications.js'
 
 // Create a notification
 export const createNotification = async (userId, type, fromUserId, options = {}) => {
@@ -116,6 +123,63 @@ export const createNotification = async (userId, type, fromUserId, options = {})
                 console.log(`⚠️ [createNotification] Socket.IO not initialized`)
             }
         }, 200) // Small delay to ensure socket is ready
+
+        // Send OneSignal push notification (for likes, comments, mentions, follows, etc.)
+        // Note: Call notifications are handled separately via FCM
+        try {
+            // Get the user who triggered the notification (fromUserId)
+            const fromUser = await User.findById(fromUserId).select('username name')
+            if (!fromUser) {
+                console.log(`⚠️ [createNotification] From user not found: ${fromUserId}`)
+                return notification
+            }
+
+            const fromUserName = fromUser.name || fromUser.username || 'Someone'
+            const postId = options.postId?.toString() || notification.post?.toString() || null
+
+            // Send appropriate OneSignal notification based on type
+            switch (type) {
+                case 'like':
+                    await sendLikeNotification(userId.toString(), fromUserName, postId)
+                    console.log(`📤 [createNotification] Sent OneSignal like notification to ${userId}`)
+                    break
+                
+                case 'comment':
+                    await sendCommentNotification(userId.toString(), fromUserName, postId)
+                    console.log(`📤 [createNotification] Sent OneSignal comment notification to ${userId}`)
+                    break
+                
+                case 'mention':
+                    await sendMentionNotification(userId.toString(), fromUserName, postId)
+                    console.log(`📤 [createNotification] Sent OneSignal mention notification to ${userId}`)
+                    break
+                
+                case 'follow':
+                    await sendFollowNotification(userId.toString(), fromUserName, fromUserId.toString())
+                    console.log(`📤 [createNotification] Sent OneSignal follow notification to ${userId}`)
+                    break
+                
+                case 'collaboration':
+                case 'post_edit':
+                    // Use generic notification for collaboration/post_edit
+                    const title = type === 'collaboration' ? 'Collaborative Post 👥' : 'Post Updated ✏️'
+                    const message = type === 'collaboration' 
+                        ? `${fromUserName} added you as a contributor`
+                        : `${fromUserName} edited your collaborative post`
+                    await sendNotificationToUser(userId.toString(), title, message, {
+                        type: type,
+                        postId: postId
+                    })
+                    console.log(`📤 [createNotification] Sent OneSignal ${type} notification to ${userId}`)
+                    break
+                
+                default:
+                    console.log(`⚠️ [createNotification] Unknown notification type: ${type}, skipping OneSignal push`)
+            }
+        } catch (pushError) {
+            // Don't fail notification creation if push fails
+            console.error(`❌ [createNotification] Error sending OneSignal push notification:`, pushError)
+        }
 
         return notification
     } catch (error) {
