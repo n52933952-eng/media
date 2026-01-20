@@ -38,8 +38,8 @@ async function sendNotificationToUser(userId, title, message, data = {}, images 
       include_aliases: {
         external_id: [userId]
       },
-      // Facebook-style notification structure
-      headings: { en: title }, // Header: User's name (bold, prominent - like Facebook)
+      // Facebook/WhatsApp-style notification structure
+      headings: { en: title }, // Header: User's name (bold, prominent)
       contents: { en: message }, // Content: Action description
       subtitle: { en: message }, // iOS: Subtitle (same as content)
       data: data,
@@ -57,8 +57,34 @@ async function sendNotificationToUser(userId, title, message, data = {}, images 
       android_accent_color: 'FF3B82F6', // Blue accent color (like Facebook)
       android_led_color: 'FF3B82F6', // LED color for notification
       android_sound: 'default', // Android notification sound
-      // High priority for call notifications (like WhatsApp)
-      priority: isCallNotification ? 10 : undefined,
+      // High priority for heads-up notifications (peek at top of screen like WhatsApp/Facebook)
+      priority: 10, // High priority so notification "peeks" at top of screen (heads-up notification)
+      // Action buttons (WhatsApp/Facebook-style) - shows buttons like "Reply", "Mark as read"
+      buttons: [
+        ...(data.type === 'like' || data.type === 'comment' || data.type === 'mention' ? [
+          {
+            id: 'view_post',
+            text: 'View Post',
+            icon: 'ic_menu_view'
+          }
+        ] : []),
+        ...(data.type === 'follow' ? [
+          {
+            id: 'view_profile',
+            text: 'View Profile',
+            icon: 'ic_menu_view'
+          }
+        ] : []),
+        {
+          id: 'mark_read',
+          text: 'Mark as read',
+          icon: 'ic_menu_done'
+        }
+      ],
+      // Override priority for call notifications (keep high priority)
+      ...(isCallNotification && {
+        priority: 10,
+      }),
       // Android-specific settings for call notifications
       android_channel_id: isCallNotification ? 'call_notifications' : undefined,
       // Sound and vibration for calls
