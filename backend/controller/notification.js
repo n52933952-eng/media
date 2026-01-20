@@ -127,8 +127,8 @@ export const createNotification = async (userId, type, fromUserId, options = {})
         // Send OneSignal push notification (for likes, comments, mentions, follows, etc.)
         // Note: Call notifications are handled separately via FCM
         try {
-            // Get the user who triggered the notification (fromUserId)
-            const fromUser = await User.findById(fromUserId).select('username name')
+            // Get the user who triggered the notification (fromUserId) with profile picture
+            const fromUser = await User.findById(fromUserId).select('username name profilePic')
             if (!fromUser) {
                 console.log(`⚠️ [createNotification] From user not found: ${fromUserId}`)
                 return notification
@@ -136,26 +136,46 @@ export const createNotification = async (userId, type, fromUserId, options = {})
 
             const fromUserName = fromUser.name || fromUser.username || 'Someone'
             const postId = options.postId?.toString() || notification.post?.toString() || null
+            
+            // Get post image if it's a post-related notification
+            let postImage = null
+            if (postId && (type === 'like' || type === 'comment' || type === 'mention')) {
+                try {
+                    const Post = (await import('../models/post.js')).default
+                    const post = await Post.findById(postId).select('img')
+                    if (post && post.img) {
+                        postImage = post.img
+                    }
+                } catch (postError) {
+                    console.log(`⚠️ [createNotification] Could not fetch post image:`, postError.message)
+                }
+            }
+
+            // Prepare images for rich notifications (Facebook-style)
+            const images = {
+                profilePic: fromUser.profilePic || null,
+                postImage: postImage || null,
+            }
 
             // Send appropriate OneSignal notification based on type
             switch (type) {
                 case 'like':
-                    await sendLikeNotification(userId.toString(), fromUserName, postId)
+                    await sendLikeNotification(userId.toString(), fromUserName, postId, images)
                     console.log(`📤 [createNotification] Sent OneSignal like notification to ${userId}`)
                     break
                 
                 case 'comment':
-                    await sendCommentNotification(userId.toString(), fromUserName, postId)
+                    await sendCommentNotification(userId.toString(), fromUserName, postId, images)
                     console.log(`📤 [createNotification] Sent OneSignal comment notification to ${userId}`)
                     break
                 
                 case 'mention':
-                    await sendMentionNotification(userId.toString(), fromUserName, postId)
+                    await sendMentionNotification(userId.toString(), fromUserName, postId, images)
                     console.log(`📤 [createNotification] Sent OneSignal mention notification to ${userId}`)
                     break
                 
                 case 'follow':
-                    await sendFollowNotification(userId.toString(), fromUserName, fromUserId.toString())
+                    await sendFollowNotification(userId.toString(), fromUserName, fromUserId.toString(), images)
                     console.log(`📤 [createNotification] Sent OneSignal follow notification to ${userId}`)
                     break
                 
@@ -169,7 +189,7 @@ export const createNotification = async (userId, type, fromUserId, options = {})
                     await sendNotificationToUser(userId.toString(), title, message, {
                         type: type,
                         postId: postId
-                    })
+                    }, images)
                     console.log(`📤 [createNotification] Sent OneSignal ${type} notification to ${userId}`)
                     break
                 

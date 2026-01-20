@@ -14,17 +14,23 @@ if (!ONESIGNAL_APP_ID || !ONESIGNAL_REST_API_KEY) {
  * @param {string} title - Notification title
  * @param {string} message - Notification message
  * @param {object} data - Additional data to send with notification
+ * @param {object} images - Optional images: { profilePic, postImage }
  */
-async function sendNotificationToUser(userId, title, message, data = {}) {
+async function sendNotificationToUser(userId, title, message, data = {}, images = {}) {
   try {
     console.log('📤 [OneSignal] Preparing notification...');
     console.log('📤 [OneSignal] User ID:', userId);
     console.log('📤 [OneSignal] Title:', title);
     console.log('📤 [OneSignal] Message:', message);
     console.log('📤 [OneSignal] Data:', data);
+    console.log('📤 [OneSignal] Images:', images);
     
     // For call notifications, use high priority and full-screen intent
     const isCallNotification = data.type === 'call';
+    
+    // Facebook-style rich notifications: Use profile picture as large icon, post image as big picture
+    const profilePic = images.profilePic || images.largeIcon;
+    const postImage = images.postImage || images.bigPicture;
     
     const notification = {
       app_id: ONESIGNAL_APP_ID,
@@ -32,9 +38,25 @@ async function sendNotificationToUser(userId, title, message, data = {}) {
       include_aliases: {
         external_id: [userId]
       },
-      headings: { en: title },
-      contents: { en: message },
+      // Facebook-style notification structure
+      headings: { en: title }, // Header: User's name (bold, prominent - like Facebook)
+      contents: { en: message }, // Content: Action description
+      subtitle: { en: message }, // iOS: Subtitle (same as content)
       data: data,
+      // Rich notifications (Facebook-style)
+      ...(profilePic && {
+        large_icon: profilePic, // Android: Large icon (profile picture) - shows prominently
+        ios_attachments: { id: profilePic }, // iOS: Attachment image
+      }),
+      ...(postImage && {
+        big_picture: postImage, // Android: Large image (post image) - expands when notification is opened
+      }),
+      // Notification sound and vibration (Facebook-style)
+      sound: 'default', // Default notification sound
+      // Android-specific settings
+      android_accent_color: 'FF3B82F6', // Blue accent color (like Facebook)
+      android_led_color: 'FF3B82F6', // LED color for notification
+      android_sound: 'default', // Android notification sound
       // High priority for call notifications (like WhatsApp)
       priority: isCallNotification ? 10 : undefined,
       // Android-specific settings for call notifications
@@ -81,49 +103,57 @@ async function sendNotificationToUser(userId, title, message, data = {}) {
 
 /**
  * Send notification when someone likes a post
+ * Facebook-style: "John Doe liked your post"
  */
-async function sendLikeNotification(postOwnerId, likerName, postId) {
+async function sendLikeNotification(postOwnerId, likerName, postId, images = {}) {
   return await sendNotificationToUser(
     postOwnerId,
-    'New Like ❤️',
-    `${likerName} liked your post`,
-    { type: 'like', postId }
+    likerName, // Header: User's name (like Facebook)
+    'liked your post', // Content: Action description
+    { type: 'like', postId },
+    images
   );
 }
 
 /**
  * Send notification when someone comments on a post
+ * Facebook-style: "John Doe commented on your post"
  */
-async function sendCommentNotification(postOwnerId, commenterName, postId) {
+async function sendCommentNotification(postOwnerId, commenterName, postId, images = {}) {
   return await sendNotificationToUser(
     postOwnerId,
-    'New Comment 💬',
-    `${commenterName} commented on your post`,
-    { type: 'comment', postId }
+    commenterName, // Header: User's name (like Facebook)
+    'commented on your post', // Content: Action description
+    { type: 'comment', postId },
+    images
   );
 }
 
 /**
  * Send notification when someone follows you
+ * Facebook-style: "John Doe started following you"
  */
-async function sendFollowNotification(userId, followerName, followerId) {
+async function sendFollowNotification(userId, followerName, followerId, images = {}) {
   return await sendNotificationToUser(
     userId,
-    'New Follower 👥',
-    `${followerName} started following you`,
-    { type: 'follow', userId: followerId }
+    followerName, // Header: User's name (like Facebook)
+    'started following you', // Content: Action description
+    { type: 'follow', userId: followerId },
+    images
   );
 }
 
 /**
  * Send notification when someone mentions you
+ * Facebook-style: "John Doe mentioned you in a post"
  */
-async function sendMentionNotification(userId, mentionerName, postId) {
+async function sendMentionNotification(userId, mentionerName, postId, images = {}) {
   return await sendNotificationToUser(
     userId,
-    'You were mentioned 📣',
-    `${mentionerName} mentioned you in a post`,
-    { type: 'mention', postId }
+    mentionerName, // Header: User's name (like Facebook)
+    'mentioned you in a post', // Content: Action description
+    { type: 'mention', postId },
+    images
   );
 }
 
