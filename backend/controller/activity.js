@@ -88,6 +88,9 @@ export const getActivities = async (req, res) => {
 
         // Only get activities from last 6 hours
         const sixHoursAgo = new Date(Date.now() - 6 * 60 * 60 * 1000)
+        
+        console.log(`📊 [getActivities] Fetching activities for ${followingIds.length} followed users`)
+        console.log(`📊 [getActivities] Current time: ${new Date().toISOString()}, 6 hours ago: ${sixHoursAgo.toISOString()}`)
 
         // Get activities from users they follow (only recent ones, max 15)
         const activities = await Activity.find({
@@ -106,6 +109,17 @@ export const getActivities = async (req, res) => {
         })
         .sort({ createdAt: -1 })
         .limit(limit)
+        
+        // Log activity timestamps for debugging
+        if (activities.length > 0) {
+            const oldestActivity = activities[activities.length - 1];
+            const newestActivity = activities[0];
+            console.log(`📊 [getActivities] Found ${activities.length} activities:`);
+            console.log(`   Oldest: ${oldestActivity.createdAt?.toISOString()} (${Math.round((Date.now() - new Date(oldestActivity.createdAt).getTime()) / (1000 * 60 * 60))}h ago)`);
+            console.log(`   Newest: ${newestActivity.createdAt?.toISOString()} (${Math.round((Date.now() - new Date(newestActivity.createdAt).getTime()) / (1000 * 60))}m ago)`);
+        } else {
+            console.log(`📊 [getActivities] No activities found in last 6 hours`);
+        }
 
         res.status(200).json({ activities })
     } catch (error) {
@@ -149,16 +163,23 @@ export const deleteActivity = async (req, res) => {
 export const cleanupOldActivities = async () => {
     try {
         const sixHoursAgo = new Date(Date.now() - 6 * 60 * 60 * 1000)
+        const sixHoursAgoISO = sixHoursAgo.toISOString()
+        
+        console.log(`🧹 [cleanupOldActivities] Starting cleanup - deleting activities older than 6 hours (before ${sixHoursAgoISO})`)
+        
         const result = await Activity.deleteMany({
             createdAt: { $lt: sixHoursAgo }
         })
         
         if (result.deletedCount > 0) {
-            console.log(`🧹 [cleanupOldActivities] Deleted ${result.deletedCount} old activities (older than 6 hours)`)
+            console.log(`✅ [cleanupOldActivities] Deleted ${result.deletedCount} old activities (older than 6 hours)`)
+        } else {
+            console.log(`✅ [cleanupOldActivities] No old activities to delete (all activities are within last 6 hours)`)
         }
         
         // Also ensure each user has max 15 activities (delete oldest if more)
         const usersWithActivities = await Activity.distinct('userId')
+        let totalDeletedForLimit = 0
         
         for (const userId of usersWithActivities) {
             const count = await Activity.countDocuments({ userId: userId })
@@ -170,10 +191,18 @@ export const cleanupOldActivities = async () => {
                 const idsToDelete = activitiesToDelete.map(a => a._id)
                 if (idsToDelete.length > 0) {
                     await Activity.deleteMany({ _id: { $in: idsToDelete } })
-                    console.log(`🧹 [cleanupOldActivities] Deleted ${idsToDelete.length} old activities for user ${userId} (kept 15 most recent)`)
+                    totalDeletedForLimit += idsToDelete.length
+                    console.log(`🧹 [cleanupOldActivities] Deleted ${idsToDelete.length} old activities for user ${userId} (kept 15 most recent, had ${count} total)`)
                 }
             }
         }
+        
+        if (totalDeletedForLimit > 0) {
+            console.log(`✅ [cleanupOldActivities] Total deleted for 15-activity limit: ${totalDeletedForLimit} activities`)
+        }
+        
+        const remainingCount = await Activity.countDocuments({})
+        console.log(`📊 [cleanupOldActivities] Cleanup complete - ${remainingCount} activities remaining in database`)
     } catch (error) {
         console.error('Error cleaning up old activities:', error)
     }

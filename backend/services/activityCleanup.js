@@ -5,9 +5,10 @@ import { cleanupOldActivities } from '../controller/activity.js'
 export const initializeActivityCleanup = () => {
     console.log('🧹 Initializing Activity Cleanup Cron Job...')
     
-    // Cleanup old activities every hour
+    // Cleanup old activities every hour (at minute 0 of every hour)
     cron.schedule('0 * * * *', async () => {
-        console.log('🧹 [CRON] Running activity cleanup...')
+        const timestamp = new Date().toISOString()
+        console.log(`🧹 [CRON] Running activity cleanup... ${timestamp}`)
         await cleanupOldActivities()
     })
     
