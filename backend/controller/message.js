@@ -3,6 +3,7 @@ import Message from '../models/message.js'
 import { getRecipientSockedId, getIO } from '../socket/socket.js'
 import { v2 as cloudinary } from 'cloudinary'
 import { Readable } from 'stream'
+import mongoose from 'mongoose'
 
 
 export const sendMessaeg = async(req,res) => {
@@ -321,88 +322,121 @@ export const mycon = async(req,res) => {
     const limit = parseInt(req.query.limit) || 20 // Default to 20 conversations
     const beforeId = req.query.beforeId // Conversation ID to fetch conversations before (for pagination)
     
-    // Build query
-    let query = { participants: userId }
-    
-    // If beforeId is provided, fetch conversations updated before that conversation
-    // CRITICAL: Use updatedAt to match our sort order, not createdAt
+    // If beforeId is provided, fetch its updatedAt once (used for pagination)
+    let beforeUpdatedAt = null
     if (beforeId) {
-      const beforeConversation = await Conversation.findById(beforeId)
-      if (beforeConversation) {
-        query.updatedAt = { $lt: beforeConversation.updatedAt }
-      }
+      const beforeConversation = await Conversation.findById(beforeId).select('updatedAt').lean()
+      if (beforeConversation?.updatedAt) beforeUpdatedAt = beforeConversation.updatedAt
     }
-    
-    // Get total count for pagination
-    const totalCount = await Conversation.countDocuments({ participants: userId })
-    
-    // Fetch conversations with pagination
-    const conversations = await Conversation.find(query)
-      .populate({
-        path: "participants",
-        select: "username profilePic name inCall",
-      })
-      .sort({updatedAt: -1}) // Sort by updatedAt (last message time) instead of createdAt
-      .limit(limit + 1) // Fetch one extra to check if there are more
 
-    // Check if there are more conversations
-    const hasMore = conversations.length > limit
-    const conversationsToReturn = hasMore ? conversations.slice(0, limit) : conversations
+    /**
+     * OPTIMIZED: Single aggregation instead of N+1 queries per conversation.
+     * - Fetch conversations (sorted by updatedAt)
+     * - Populate participants (and drop current user from participants array)
+     * - Join last message (with populated sender)
+     * - Compute unreadCount via lookup + $count
+     */
+    const matchStage = {
+      participants: new mongoose.Types.ObjectId(userId),
+      ...(beforeUpdatedAt ? { updatedAt: { $lt: beforeUpdatedAt } } : {}),
+    }
 
-    // Calculate unread counts and populate last message sender for each conversation
-    const conversationsWithUnread = await Promise.all(
-      conversationsToReturn.map(async (conversation) => {
-        // Filter participants to get the other user
-			conversation.participants = conversation.participants.filter(
-          (participant) => participant._id.toString() !== userId.toString()
-        );
+    const conversationsAgg = await Conversation.aggregate([
+      { $match: matchStage },
+      { $sort: { updatedAt: -1 } },
+      { $limit: limit + 1 },
+      {
+        $lookup: {
+          from: 'users',
+          localField: 'participants',
+          foreignField: '_id',
+          as: 'participants',
+          pipeline: [
+            { $project: { username: 1, profilePic: 1, name: 1, inCall: 1 } },
+          ],
+        },
+      },
+      // Remove current user from participants (keep the other user(s))
+      {
+        $addFields: {
+          participants: {
+            $filter: {
+              input: '$participants',
+              as: 'p',
+              cond: { $ne: ['$$p._id', new mongoose.Types.ObjectId(userId)] },
+            },
+          },
+        },
+      },
+      // Lookup last message (newest by createdAt) and populate sender
+      {
+        $lookup: {
+          from: 'messages',
+          let: { convId: '$_id' },
+          as: '__lastMessageDoc',
+          pipeline: [
+            { $match: { $expr: { $eq: ['$conversationId', '$$convId'] } } },
+            { $sort: { createdAt: -1 } },
+            { $limit: 1 },
+            {
+              $lookup: {
+                from: 'users',
+                localField: 'sender',
+                foreignField: '_id',
+                as: 'sender',
+                pipeline: [{ $project: { username: 1, name: 1, profilePic: 1 } }],
+              },
+            },
+            { $addFields: { sender: { $arrayElemAt: ['$sender', 0] } } },
+            { $project: { text: 1, sender: 1, createdAt: 1 } },
+          ],
+        },
+      },
+      {
+        $addFields: {
+          lastMessage: { $arrayElemAt: ['$__lastMessageDoc', 0] },
+        },
+      },
+      // Lookup unread count (seen=false AND sender != current user)
+      {
+        $lookup: {
+          from: 'messages',
+          let: { convId: '$_id' },
+          as: '__unread',
+          pipeline: [
+            {
+              $match: {
+                $expr: {
+                  $and: [
+                    { $eq: ['$conversationId', '$$convId'] },
+                    { $eq: ['$seen', false] },
+                    { $ne: ['$sender', new mongoose.Types.ObjectId(userId)] },
+                  ],
+                },
+              },
+            },
+            { $count: 'count' },
+          ],
+        },
+      },
+      {
+        $addFields: {
+          unreadCount: {
+            $ifNull: [{ $arrayElemAt: ['$__unread.count', 0] }, 0],
+          },
+        },
+      },
+      { $project: { __lastMessageDoc: 0, __unread: 0 } },
+    ])
 
-        // Count unread messages (messages not seen and not sent by current user)
-        const unreadCount = await Message.countDocuments({
-          conversationId: conversation._id,
-          seen: false,
-          sender: { $ne: userId }
-        });
+    const hasMore = conversationsAgg.length > limit
+    const conversationsToReturn = hasMore ? conversationsAgg.slice(0, limit) : conversationsAgg
 
-        // Get the actual last message to populate sender info
-        const lastMessageDoc = await Message.findOne({
-          conversationId: conversation._id
-        })
-        .populate('sender', 'username name profilePic')
-        .sort({ createdAt: -1 })
-        .limit(1);
-
-        // Convert to plain object and add unreadCount
-        const convObj = conversation.toObject();
-        convObj.unreadCount = unreadCount;
-        
-        // Update lastMessage with populated sender if we found a message
-        if (lastMessageDoc) {
-          convObj.lastMessage = {
-            text: lastMessageDoc.text || '',
-            sender: lastMessageDoc.sender,
-            createdAt: lastMessageDoc.createdAt
-          };
-        } else if (convObj.lastMessage && convObj.lastMessage.sender) {
-          // If lastMessage exists but sender is just an ID, populate it
-          // Try to find sender in participants or fetch it
-          const senderInParticipants = conversation.participants.find(
-            p => p._id.toString() === (convObj.lastMessage.sender._id || convObj.lastMessage.sender).toString()
-          );
-          if (senderInParticipants) {
-            convObj.lastMessage.sender = senderInParticipants;
-          }
-        }
-        
-        return convObj;
-      })
-    );
-
-res.status(200).json({ 
-  conversations: conversationsWithUnread, 
-  hasMore,
-  totalCount
-});
+    // NOTE: totalCount removed (expensive). Use hasMore for pagination (same as mobile/web usage).
+    res.status(200).json({
+      conversations: conversationsToReturn,
+      hasMore,
+    });
 	} catch (error) {
 		res.status(500).json({ error: error.message });
 	}
