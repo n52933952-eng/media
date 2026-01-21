@@ -29,6 +29,26 @@ const SUPPORTED_LEAGUES = [
     { id: 'CL', name: 'UEFA Champions League', country: 'Europe' }
 ]
 
+// football-data.org competition numeric IDs for common competitions (used when `competition.code` is missing)
+// Source: football-data.org v4 competition IDs
+const COMPETITION_ID_TO_CODE = {
+    2021: 'PL',  // Premier League
+    2014: 'PD',  // La Liga
+    2019: 'SA',  // Serie A
+    2002: 'BL1', // Bundesliga
+    2015: 'FL1', // Ligue 1
+    2001: 'CL'   // UEFA Champions League
+}
+
+const getCompetitionCode = (matchData) => {
+    const comp = matchData?.competition || matchData?.league || {}
+    const code = comp.code || comp.id || comp.leagueCode
+    if (typeof code === 'string') return code
+    if (typeof code === 'number') return COMPETITION_ID_TO_CODE[code] || null
+    if (typeof comp?.id === 'number') return COMPETITION_ID_TO_CODE[comp.id] || null
+    return null
+}
+
 // Status code mapping
 const STATUS_MAP = {
     'SCHEDULED': { short: 'NS', long: 'Not Started' },
@@ -423,11 +443,13 @@ const fetchAndUpdateLiveMatches = async () => {
             result = { success: true, data: cachedMatches }
         }
         
-        // Filter for supported leagues only (competition codes)
-        const supportedLeagueIds = SUPPORTED_LEAGUES.map(l => l.id)
+        // Filter for supported leagues only.
+        // IMPORTANT: football-data.org sometimes returns `competition.id` (number) and sometimes `competition.code` (string).
+        // We accept both by mapping known numeric IDs -> codes.
+        const supportedLeagueCodes = new Set(SUPPORTED_LEAGUES.map(l => l.id))
         const filteredMatches = result.data.filter(match => {
-            const competitionId = match.competition?.id || match.competition?.code || ''
-            return supportedLeagueIds.includes(competitionId)
+            const compCode = getCompetitionCode(match)
+            return !!compCode && supportedLeagueCodes.has(compCode)
         })
         
         if (isDev && filteredMatches.length > 0) {
@@ -748,12 +770,16 @@ const fetchTodayFixtures = async () => {
                 
                 for (const matchData of result.data) {
                     const convertedMatch = convertMatchFormat(matchData)
-                    await Match.findOneAndUpdate(
+                    const updatedMatch = await Match.findOneAndUpdate(
                         { fixtureId: convertedMatch.fixtureId },
                         convertedMatch,
                         { upsert: true, new: true }
                     )
                     totalFetched++
+                    // Log first few matches to verify database updates
+                    if (totalFetched <= 3) {
+                        console.log(`  ✅ [fetchTodayFixtures] Saved match to DB: ${convertedMatch.teams?.home?.name} vs ${convertedMatch.teams?.away?.name} (${convertedMatch.fixture?.status?.short})`)
+                    }
                 }
             }
             
@@ -761,9 +787,19 @@ const fetchTodayFixtures = async () => {
             await new Promise(resolve => setTimeout(resolve, 7000))
         }
         
-        console.log(`✅ Fetched ${totalFetched} fixtures (past 3 days + next 7 days)`)
+        console.log(`✅ [fetchTodayFixtures] Fetched ${totalFetched} fixtures (past 3 days + next 7 days)`)
+        
+        // Verify database has matches
+        const dbMatchCount = await Match.countDocuments({
+            'fixture.date': { 
+                $gte: new Date(startDateStr),
+                $lte: new Date(endDateStr)
+            }
+        })
+        console.log(`✅ [fetchTodayFixtures] Database now has ${dbMatchCount} matches in date range`)
         
         // Emit real-time update to Football page after fetching fixtures
+        console.log(`📡 [fetchTodayFixtures] Emitting footballPageUpdate to clients...`)
         await emitFootballPageUpdate()
         
     } catch (error) {
