@@ -1,6 +1,7 @@
 import { Match, League } from '../models/football.js'
 import User from '../models/user.js'
 import Post from '../models/post.js'
+import Follow from '../models/follow.js'
 import { getIO, getUserSocketMap } from '../socket/socket.js'
 
 // football-data.org API configuration
@@ -693,21 +694,32 @@ export const postMatchUpdate = async (req, res) => {
         match.postId = newPost._id
         await match.save()
         
-        // Emit to followers of football account
+        // Emit to followers of football account (using scalable Follow collection)
         const io = getIO()
-        if (io && footballAccount.followers && footballAccount.followers.length > 0) {
-            const userSocketMap = getUserSocketMap()
-            const onlineFollowers = []
+        if (io) {
+            // Use scalable Follow collection instead of footballAccount.followers array
+            const followerDocs = await Follow.find({ followeeId: footballAccount._id }).select('followerId').limit(5000).lean()
+            const followerIds = followerDocs.map(doc => doc.followerId.toString())
             
-            footballAccount.followers.forEach(followerId => {
-                const followerIdStr = followerId.toString()
-                if (userSocketMap[followerIdStr]) {
-                    onlineFollowers.push(userSocketMap[followerIdStr].socketId)
+            if (followerIds.length > 0) {
+                const userSocketMap = getUserSocketMap()
+                const onlineFollowers = []
+                
+                followerIds.forEach(followerId => {
+                    const socketData = userSocketMap[followerId]
+                    if (socketData && socketData.socketId) {
+                        onlineFollowers.push(socketData.socketId)
+                    }
+                })
+                
+                if (onlineFollowers.length > 0) {
+                    io.to(onlineFollowers).emit("newPost", newPost)
+                    console.log(`✅ [postMatchUpdate] Emitted to ${onlineFollowers.length} online followers (out of ${followerIds.length} total)`)
+                } else {
+                    console.log(`📭 [postMatchUpdate] No online followers (${followerIds.length} total followers, 0 online)`)
                 }
-            })
-            
-            if (onlineFollowers.length > 0) {
-                io.to(onlineFollowers).emit("newPost", newPost)
+            } else {
+                console.log(`📭 [postMatchUpdate] No followers found for Football account`)
             }
         }
         
@@ -1164,25 +1176,33 @@ export const autoPostTodayMatches = async () => {
             
             console.log('✅ [autoPostTodayMatches] Created "no matches" post:', noMatchesPost._id)
             
-            // Emit to followers
+            // Emit to followers (using scalable Follow collection)
             try {
-                const freshFootballAccount = await User.findById(footballAccount._id).select('followers')
                 const io = getIO()
-                
-                if (io && freshFootballAccount && freshFootballAccount.followers && freshFootballAccount.followers.length > 0) {
-                    const userSocketMap = getUserSocketMap()
-                    const onlineFollowers = []
+                if (io) {
+                    // Use scalable Follow collection instead of footballAccount.followers array
+                    const followerDocs = await Follow.find({ followeeId: footballAccount._id }).select('followerId').limit(5000).lean()
+                    const followerIds = followerDocs.map(doc => doc.followerId.toString())
                     
-                    freshFootballAccount.followers.forEach(followerId => {
-                        const followerIdStr = followerId.toString()
-                        if (userSocketMap[followerIdStr]) {
-                            onlineFollowers.push(userSocketMap[followerIdStr].socketId)
+                    if (followerIds.length > 0) {
+                        const userSocketMap = getUserSocketMap()
+                        const onlineFollowers = []
+                        
+                        followerIds.forEach(followerId => {
+                            const socketData = userSocketMap[followerId]
+                            if (socketData && socketData.socketId) {
+                                onlineFollowers.push(socketData.socketId)
+                            }
+                        })
+                        
+                        if (onlineFollowers.length > 0) {
+                            io.to(onlineFollowers).emit("newPost", noMatchesPost)
+                            console.log(`✅ [autoPostTodayMatches] Emitted "no matches" post to ${onlineFollowers.length} online followers (out of ${followerIds.length} total)`)
+                        } else {
+                            console.log(`📭 [autoPostTodayMatches] No online followers for "no matches" post (${followerIds.length} total followers, 0 online)`)
                         }
-                    })
-                    
-                    if (onlineFollowers.length > 0) {
-                        io.to(onlineFollowers).emit("newPost", noMatchesPost)
-                        console.log('✅ [autoPostTodayMatches] Emitted to followers')
+                    } else {
+                        console.log(`📭 [autoPostTodayMatches] No followers found for Football account`)
                     }
                 }
             } catch (emitError) {
@@ -1255,25 +1275,33 @@ export const autoPostTodayMatches = async () => {
             console.error('❌ [autoPostTodayMatches] ERROR: Post was NOT saved to database!')
         }
         
-        // Emit to followers
+        // Emit to followers (using scalable Follow collection)
         try {
-            const freshFootballAccount = await User.findById(footballAccount._id).select('followers')
-        const io = getIO()
-            
-            if (io && freshFootballAccount && freshFootballAccount.followers && freshFootballAccount.followers.length > 0) {
-            const userSocketMap = getUserSocketMap()
-            const onlineFollowers = []
-            
-                freshFootballAccount.followers.forEach(followerId => {
-                const followerIdStr = followerId.toString()
-                if (userSocketMap[followerIdStr]) {
-                    onlineFollowers.push(userSocketMap[followerIdStr].socketId)
-                }
-            })
-            
-            if (onlineFollowers.length > 0) {
-                io.to(onlineFollowers).emit("newPost", newPost)
-                    console.log(`✅ [autoPostTodayMatches] Emitted to ${onlineFollowers.length} online followers`)
+            const io = getIO()
+            if (io) {
+                // Use scalable Follow collection instead of footballAccount.followers array
+                const followerDocs = await Follow.find({ followeeId: footballAccount._id }).select('followerId').limit(5000).lean()
+                const followerIds = followerDocs.map(doc => doc.followerId.toString())
+                
+                if (followerIds.length > 0) {
+                    const userSocketMap = getUserSocketMap()
+                    const onlineFollowers = []
+                    
+                    followerIds.forEach(followerId => {
+                        const socketData = userSocketMap[followerId]
+                        if (socketData && socketData.socketId) {
+                            onlineFollowers.push(socketData.socketId)
+                        }
+                    })
+                    
+                    if (onlineFollowers.length > 0) {
+                        io.to(onlineFollowers).emit("newPost", newPost)
+                        console.log(`✅ [autoPostTodayMatches] Emitted post to ${onlineFollowers.length} online followers (out of ${followerIds.length} total)`)
+                    } else {
+                        console.log(`📭 [autoPostTodayMatches] No online followers (${followerIds.length} total followers, 0 online)`)
+                    }
+                } else {
+                    console.log(`📭 [autoPostTodayMatches] No followers found for Football account`)
                 }
             }
         } catch (emitError) {

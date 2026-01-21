@@ -1,6 +1,7 @@
 import Weather from '../models/weather.js'
 import User from '../models/user.js'
 import Post from '../models/post.js'
+import Follow from '../models/follow.js'
 import { getIO } from '../socket/socket.js'
 
 // OpenWeatherMap API configuration
@@ -327,10 +328,19 @@ export const autoPostWeatherUpdate = async () => {
         }
         
         // Find the MOST RECENT weather post (no date filter - could be from any day)
+        // IMPORTANT: Use updatedAt to find the most recently updated one (not just created)
+        // This ensures we update the same post that's currently in feeds
         const existingPost = await Post.findOne({
             postedBy: weatherAccount._id,
             weatherData: { $exists: true, $ne: null }
-        }).sort({ createdAt: -1 }) // Get the most recent one
+        }).sort({ updatedAt: -1, createdAt: -1 }) // Get the most recently updated one first
+        
+        // Log which post we found (for debugging)
+        if (existingPost) {
+            console.log(`🔍 [autoPostWeatherUpdate] Found existing post: ID=${existingPost._id}, createdAt=${existingPost.createdAt}, updatedAt=${existingPost.updatedAt}`)
+        } else {
+            console.log(`📭 [autoPostWeatherUpdate] No existing weather post found, will create new one`)
+        }
         
         const weatherDataArray = allWeatherData.map(w => ({
             city: w.location.city,
@@ -345,34 +355,67 @@ export const autoPostWeatherUpdate = async () => {
         
         if (existingPost) {
             // ALWAYS update the existing post with fresh data and new timestamp
+            const oldWeatherData = existingPost.weatherData
             existingPost.weatherData = JSON.stringify(weatherDataArray)
             existingPost.text = `🌤️ Weather Update - ${new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}`
             existingPost.updatedAt = new Date() // Update timestamp to bring to top of feed
-            await existingPost.save()
+            
+            // Verify save worked
+            const savedPost = await existingPost.save()
+            
+            // Double-check database has updated data
+            const verifyPost = await Post.findById(existingPost._id)
+            const dataChanged = verifyPost.weatherData !== oldWeatherData
+            
+            // Log weather data preview to verify update
+            let weatherPreview = 'N/A'
+            try {
+                const parsedData = JSON.parse(verifyPost.weatherData || '[]')
+                if (parsedData.length > 0) {
+                    weatherPreview = `${parsedData[0].city}: ${parsedData[0].temperature}°C (${parsedData[0].description})`
+                }
+            } catch (e) {}
             
             console.log(`✅ [autoPostWeatherUpdate] Updated existing weather post (ID: ${existingPost._id})`)
+            console.log(`   📊 Data changed: ${dataChanged ? 'YES' : 'NO'}, UpdatedAt: ${verifyPost.updatedAt}`)
+            console.log(`   🌤️ Weather preview: ${weatherPreview}`)
+            
+            if (!dataChanged) {
+                console.warn(`   ⚠️ [autoPostWeatherUpdate] WARNING: Weather data did not change in database!`)
+                console.warn(`   🔍 Old data preview: ${oldWeatherData?.substring(0, 150)}...`)
+                console.warn(`   🔍 New data preview: ${verifyPost.weatherData?.substring(0, 150)}...`)
+            }
             
             // Emit postUpdated event for real-time update
             const io = getIO()
-            if (io && weatherAccount.followers && weatherAccount.followers.length > 0) {
-                const { getUserSocketMap } = await import('../socket/socket.js')
-                const userSocketMap = getUserSocketMap()
-                const onlineFollowers = []
+            if (io) {
+                // Use scalable Follow collection instead of weatherAccount.followers array
+                const followerDocs = await Follow.find({ followeeId: weatherAccount._id }).select('followerId').limit(5000).lean()
+                const followerIds = followerDocs.map(doc => doc.followerId.toString())
                 
-                weatherAccount.followers.forEach(followerId => {
-                    const followerIdStr = followerId.toString()
-                    if (userSocketMap[followerIdStr]) {
-                        onlineFollowers.push(userSocketMap[followerIdStr].socketId)
-                    }
-                })
-                
-                if (onlineFollowers.length > 0) {
-                    await existingPost.populate("postedBy", "username profilePic name")
-                    const postObj = existingPost.toObject ? existingPost.toObject() : JSON.parse(JSON.stringify(existingPost))
-                    onlineFollowers.forEach(socketId => {
-                        io.to(socketId).emit("postUpdated", { postId: existingPost._id.toString(), post: postObj })
+                if (followerIds.length > 0) {
+                    const { getUserSocketMap } = await import('../socket/socket.js')
+                    const userSocketMap = getUserSocketMap()
+                    const onlineFollowers = []
+                    
+                    followerIds.forEach(followerId => {
+                        if (userSocketMap[followerId]) {
+                            onlineFollowers.push(userSocketMap[followerId].socketId)
+                        }
                     })
-                    console.log(`✅ [autoPostWeatherUpdate] Emitted postUpdated to ${onlineFollowers.length} followers`)
+                    
+                    if (onlineFollowers.length > 0) {
+                        await existingPost.populate("postedBy", "username profilePic name")
+                        const postObj = existingPost.toObject ? existingPost.toObject() : JSON.parse(JSON.stringify(existingPost))
+                        onlineFollowers.forEach(socketId => {
+                            io.to(socketId).emit("postUpdated", { postId: existingPost._id.toString(), post: postObj })
+                        })
+                        console.log(`✅ [autoPostWeatherUpdate] Emitted postUpdated to ${onlineFollowers.length} followers (out of ${followerIds.length} total)`)
+                    } else {
+                        console.log(`📭 [autoPostWeatherUpdate] No online followers (${followerIds.length} total followers, 0 online)`)
+                    }
+                } else {
+                    console.log(`📭 [autoPostWeatherUpdate] No followers found for Weather account`)
                 }
             }
         } else {
@@ -390,21 +433,30 @@ export const autoPostWeatherUpdate = async () => {
             
             // Emit to followers
             const io = getIO()
-            if (io && weatherAccount.followers && weatherAccount.followers.length > 0) {
-                const { getUserSocketMap } = await import('../socket/socket.js')
-                const userSocketMap = getUserSocketMap()
-                const onlineFollowers = []
+            if (io) {
+                // Use scalable Follow collection instead of weatherAccount.followers array
+                const followerDocs = await Follow.find({ followeeId: weatherAccount._id }).select('followerId').limit(5000).lean()
+                const followerIds = followerDocs.map(doc => doc.followerId.toString())
                 
-                weatherAccount.followers.forEach(followerId => {
-                    const followerIdStr = followerId.toString()
-                    if (userSocketMap[followerIdStr]) {
-                        onlineFollowers.push(userSocketMap[followerIdStr].socketId)
+                if (followerIds.length > 0) {
+                    const { getUserSocketMap } = await import('../socket/socket.js')
+                    const userSocketMap = getUserSocketMap()
+                    const onlineFollowers = []
+                    
+                    followerIds.forEach(followerId => {
+                        if (userSocketMap[followerId]) {
+                            onlineFollowers.push(userSocketMap[followerId].socketId)
+                        }
+                    })
+                    
+                    if (onlineFollowers.length > 0) {
+                        io.to(onlineFollowers).emit("newPost", newPost)
+                        console.log(`✅ [autoPostWeatherUpdate] Emitted newPost to ${onlineFollowers.length} online followers (out of ${followerIds.length} total)`)
+                    } else {
+                        console.log(`📭 [autoPostWeatherUpdate] No online followers (${followerIds.length} total followers, 0 online)`)
                     }
-                })
-                
-                if (onlineFollowers.length > 0) {
-                    io.to(onlineFollowers).emit("newPost", newPost)
-                    console.log(`✅ Emitted weather update to ${onlineFollowers.length} online followers`)
+                } else {
+                    console.log(`📭 [autoPostWeatherUpdate] No followers found for Weather account`)
                 }
             }
         }
@@ -523,10 +575,11 @@ export const manualPostWeather = async (req, res) => {
         }
         
         // Get latest weather post (not just today - find most recent one)
+        // IMPORTANT: Use updatedAt to find the most recently updated one (not just created)
         const existingPost = await Post.findOne({
             postedBy: weatherAccount._id,
             weatherData: { $exists: true, $ne: null }
-        }).sort({ createdAt: -1 })
+        }).sort({ updatedAt: -1, createdAt: -1 }) // Get the most recently updated one first
         
         const weatherDataArray = allWeatherData.map(w => ({
             city: w.location.city,
@@ -553,24 +606,33 @@ export const manualPostWeather = async (req, res) => {
             
             // Emit postUpdated event for real-time update
             const io = getIO()
-            if (io && weatherAccount.followers && weatherAccount.followers.length > 0) {
-                const { getUserSocketMap } = await import('../socket/socket.js')
-                const userSocketMap = getUserSocketMap()
-                const onlineFollowers = []
+            if (io) {
+                // Use scalable Follow collection instead of weatherAccount.followers array
+                const followerDocs = await Follow.find({ followeeId: weatherAccount._id }).select('followerId').limit(5000).lean()
+                const followerIds = followerDocs.map(doc => doc.followerId.toString())
                 
-                weatherAccount.followers.forEach(followerId => {
-                    const followerIdStr = followerId.toString()
-                    if (userSocketMap[followerIdStr]) {
-                        onlineFollowers.push(userSocketMap[followerIdStr].socketId)
-                    }
-                })
-                
-                if (onlineFollowers.length > 0) {
-                    const postObj = existingPost.toObject ? existingPost.toObject() : JSON.parse(JSON.stringify(existingPost))
-                    onlineFollowers.forEach(socketId => {
-                        io.to(socketId).emit("postUpdated", { postId: existingPost._id.toString(), post: postObj })
+                if (followerIds.length > 0) {
+                    const { getUserSocketMap } = await import('../socket/socket.js')
+                    const userSocketMap = getUserSocketMap()
+                    const onlineFollowers = []
+                    
+                    followerIds.forEach(followerId => {
+                        if (userSocketMap[followerId]) {
+                            onlineFollowers.push(userSocketMap[followerId].socketId)
+                        }
                     })
-                    console.log(`✅ [manualPostWeather] Emitted postUpdated to ${onlineFollowers.length} followers`)
+                    
+                    if (onlineFollowers.length > 0) {
+                        const postObj = existingPost.toObject ? existingPost.toObject() : JSON.parse(JSON.stringify(existingPost))
+                        onlineFollowers.forEach(socketId => {
+                            io.to(socketId).emit("postUpdated", { postId: existingPost._id.toString(), post: postObj })
+                        })
+                        console.log(`✅ [manualPostWeather] Emitted postUpdated to ${onlineFollowers.length} followers (out of ${followerIds.length} total)`)
+                    } else {
+                        console.log(`📭 [manualPostWeather] No online followers (${followerIds.length} total followers, 0 online)`)
+                    }
+                } else {
+                    console.log(`📭 [manualPostWeather] No followers found for Weather account`)
                 }
             }
             

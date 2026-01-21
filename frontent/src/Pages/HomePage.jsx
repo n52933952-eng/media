@@ -340,16 +340,33 @@ const HomePage = () => {
       const updatedPost = data.post || data
       
       console.log('✏️ Post updated via socket:', postId)
-      setFollowPost(prev => 
-        prev.map(p => {
-          const postIdStr = p._id?.toString()
-          const updatedPostIdStr = postId?.toString()
-          if (postIdStr === updatedPostIdStr) {
-            return updatedPost
-          }
-          return p
+      setFollowPost(prev => {
+        const updatedPostIdStr = postId?.toString()
+        if (!updatedPostIdStr) return prev
+
+        const idx = prev.findIndex(p => p._id?.toString() === updatedPostIdStr)
+        if (idx === -1) {
+          // Post not in feed yet; don't add it here (new posts come via newPost or initial fetch)
+          return prev
+        }
+
+        // Replace, then move/sort by updatedAt to make the update visible (Weather/Football updates)
+        const replaced = {
+          ...prev[idx],
+          ...updatedPost,
+        }
+
+        const next = [replaced, ...prev.filter((_, i) => i !== idx)]
+
+        next.sort((a, b) => {
+          const dateA = new Date(a.updatedAt || a.createdAt).getTime()
+          const dateB = new Date(b.updatedAt || b.createdAt).getTime()
+          return dateB - dateA
         })
-      )
+
+        followPostCountRef.current = next.length
+        return next
+      })
     }
 
     // Handle real-time football match updates

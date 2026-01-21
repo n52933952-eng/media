@@ -2,7 +2,8 @@ import cron from 'node-cron'
 import { Match } from '../models/football.js'
 import User from '../models/user.js'
 import Post from '../models/post.js'
-import { getIO, getAllUserSockets } from '../socket/socket.js'
+import Follow from '../models/follow.js'
+import { getIO, getAllUserSockets, getUserSocketMap } from '../socket/socket.js'
 import mongoose from 'mongoose'
 import { autoPostTodayMatches, getFootballAccount, fetchMatchDetails } from '../controller/football.js'
 import { 
@@ -345,25 +346,32 @@ const autoPostMatchUpdate = async (match, updateType) => {
             await match.save()
         }
         
-        // Emit to followers
-        // Fetch fresh account data to get updated followers list
-        const freshFootballAccount = await User.findById(footballAccount._id).select('followers')
+        // Emit to followers (using scalable Follow collection)
         const io = getIO()
-        
-        if (io && freshFootballAccount && freshFootballAccount.followers && freshFootballAccount.followers.length > 0) {
-            const userSocketMap = getUserSocketMap()
-            const onlineFollowers = []
+        if (io) {
+            // Use scalable Follow collection instead of footballAccount.followers array
+            const followerDocs = await Follow.find({ followeeId: footballAccount._id }).select('followerId').limit(5000).lean()
+            const followerIds = followerDocs.map(doc => doc.followerId.toString())
             
-            freshFootballAccount.followers.forEach(followerId => {
-                const followerIdStr = followerId.toString()
-                if (userSocketMap[followerIdStr]) {
-                    onlineFollowers.push(userSocketMap[followerIdStr].socketId)
+            if (followerIds.length > 0) {
+                const userSocketMap = getUserSocketMap()
+                const onlineFollowers = []
+                
+                followerIds.forEach(followerId => {
+                    const socketData = userSocketMap[followerId]
+                    if (socketData && socketData.socketId) {
+                        onlineFollowers.push(socketData.socketId)
+                    }
+                })
+                
+                if (onlineFollowers.length > 0) {
+                    io.to(onlineFollowers).emit("newPost", newPost)
+                    console.log(`✅ Emitted match update to ${onlineFollowers.length} online followers (out of ${followerIds.length} total)`)
+                } else {
+                    console.log(`📭 No online followers for match update (${followerIds.length} total followers, 0 online)`)
                 }
-            })
-            
-            if (onlineFollowers.length > 0) {
-                io.to(onlineFollowers).emit("newPost", newPost)
-                console.log(`✅ Emitted match update to ${onlineFollowers.length} online followers`)
+            } else {
+                console.log(`📭 No followers found for Football account`)
             }
         }
         
