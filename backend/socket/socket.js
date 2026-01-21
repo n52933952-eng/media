@@ -27,6 +27,58 @@ let server = null
     let isEmittingOnlineUsers = false
     let emitOnlineUsersTimeout = null
 
+// ============================================================
+// Presence optimization (backwards-compatible)
+// - New: clients can subscribe to presence updates for a subset of userIds
+// - Server emits `presenceUpdate` events to rooms: `presence:<userId>`
+// - Old behavior (`getOnlineUser` full broadcast) remains for legacy clients
+// ============================================================
+const PRESENCE_ROOM_PREFIX = 'presence:'
+const DISABLE_GLOBAL_ONLINE_BROADCAST =
+    (process.env.DISABLE_GLOBAL_ONLINE_BROADCAST || '').toString().toLowerCase() === 'true'
+
+const normalizeUserId = (id) => {
+    if (!id) return null
+    const s = typeof id === 'string' ? id : (id.toString ? id.toString() : String(id))
+    const trimmed = s.trim()
+    if (!trimmed || trimmed === 'undefined' || trimmed === 'null') return null
+    return trimmed
+}
+
+const uniqueUserIds = (ids) => {
+    const out = []
+    const seen = new Set()
+    for (const raw of Array.isArray(ids) ? ids : []) {
+        const id = normalizeUserId(raw)
+        if (!id) continue
+        if (seen.has(id)) continue
+        seen.add(id)
+        out.push(id)
+    }
+    return out
+}
+
+const getOnlineSnapshotForUserIds = async (userIds) => {
+    redisService.ensureRedis()
+    const client = redisService.getRedis()
+    const ids = uniqueUserIds(userIds)
+    if (ids.length === 0) return []
+
+    // We store socketData at `userSocket:<userId>` as JSON
+    const keys = ids.map((id) => `userSocket:${id}`)
+    const values = await client.mGet(keys)
+
+    // Return minimal objects that mobile already understands: { userId }
+    const online = []
+    for (let i = 0; i < ids.length; i++) {
+        const v = values?.[i]
+        if (v) {
+            online.push({ userId: ids[i] })
+        }
+    }
+    return online
+}
+
 // Helper functions for userSocketMap - Redis only (required for 1M+ users)
 const setUserSocket = async (userId, socketData) => {
     redisService.ensureRedis() // Redis is required
@@ -430,6 +482,8 @@ export const initializeSocket = async (app) => {
         
         const userId = socket.handshake.query.userId
         console.log("🔌 [socket] User connecting with userId:", userId)
+        // Presence subscription support (clients can subscribe to specific userIds)
+        socket.data.presenceSubscriptions = []
         // Store socket info as object like madechess (dual-write: in-memory + Redis)
         if (userId && userId !== "undefined") {
             const socketData = {
@@ -438,6 +492,20 @@ export const initializeSocket = async (app) => {
             }
             await setUserSocket(userId, socketData)
             console.log(`✅ [socket] User ${userId} added to socket map (socket: ${socket.id})`)
+
+            // Emit targeted presence update for this userId (for subscribed clients)
+            try {
+                const normalized = normalizeUserId(userId)
+                if (normalized) {
+                    io.to(`${PRESENCE_ROOM_PREFIX}${normalized}`).emit('presenceUpdate', {
+                        userId: normalized,
+                        online: true,
+                        onlineAt: socketData.onlineAt,
+                    })
+                }
+            } catch (e) {
+                console.error('❌ [socket] Failed to emit presenceUpdate (online):', e.message)
+            }
             
             // Check for pending calls when user connects (e.g., after receiving push notification)
             // This ensures calls are re-sent automatically when user comes online
@@ -468,14 +536,44 @@ export const initializeSocket = async (app) => {
         } else {
             console.warn("⚠️ [socket] User connected without valid userId:", userId)
         }
+
+        // New: allow clients to subscribe to presence updates for a subset of users
+        // Payload: { userIds: string[] }
+        socket.on('presenceSubscribe', async (payload = {}) => {
+            try {
+                const requested = uniqueUserIds(payload.userIds || [])
+
+                // Leave previous rooms first to avoid unbounded growth on re-subscribe
+                const prev = Array.isArray(socket.data.presenceSubscriptions)
+                    ? socket.data.presenceSubscriptions
+                    : []
+                for (const prevId of prev) {
+                    socket.leave(`${PRESENCE_ROOM_PREFIX}${prevId}`)
+                }
+
+                // Join new rooms
+                for (const id of requested) {
+                    socket.join(`${PRESENCE_ROOM_PREFIX}${id}`)
+                }
+                socket.data.presenceSubscriptions = requested
+
+                // Send a snapshot so UI can paint immediately
+                const snapshot = await getOnlineSnapshotForUserIds(requested)
+                socket.emit('presenceSnapshot', { onlineUsers: snapshot })
+            } catch (e) {
+                console.error('❌ [socket] presenceSubscribe error:', e.message)
+            }
+        })
         
         // Emit online users to ALL clients after ANY connection (with or without userId)
         // Use debouncing to prevent infinite loops - only emit once every 500ms
-        if (emitOnlineUsersTimeout) {
-            clearTimeout(emitOnlineUsersTimeout)
-        }
-        
-        emitOnlineUsersTimeout = setTimeout(async () => {
+        // NOTE: In production at scale, disable this with DISABLE_GLOBAL_ONLINE_BROADCAST=true
+        if (!DISABLE_GLOBAL_ONLINE_BROADCAST) {
+            if (emitOnlineUsersTimeout) {
+                clearTimeout(emitOnlineUsersTimeout)
+            }
+            
+            emitOnlineUsersTimeout = setTimeout(async () => {
             // Prevent concurrent emissions
             if (isEmittingOnlineUsers) {
                 console.log('⚠️ [socket] Already emitting online users, skipping...')
@@ -563,7 +661,8 @@ export const initializeSocket = async (app) => {
             } finally {
                 isEmittingOnlineUsers = false
             }
-        }, 500) // Debounce: wait 500ms before emitting to prevent spam
+            }, 500) // Debounce: wait 500ms before emitting to prevent spam
+        }
 
         // Helper function to check if user is busy
         const isUserBusy = async (userId) => {
@@ -1280,6 +1379,19 @@ export const initializeSocket = async (app) => {
                 }
             }
 
+            // Emit targeted presence update for this userId (for subscribed clients)
+            try {
+                const normalized = normalizeUserId(disconnectedUserId)
+                if (normalized) {
+                    io.to(`${PRESENCE_ROOM_PREFIX}${normalized}`).emit('presenceUpdate', {
+                        userId: normalized,
+                        online: false,
+                    })
+                }
+            } catch (e) {
+                console.error('❌ [socket] Failed to emit presenceUpdate (offline):', e.message)
+            }
+
             // Clean up active calls for disconnected user
             if (disconnectedUserId) {
                 // Clear inCall status in database for disconnected user
@@ -1409,8 +1521,10 @@ export const initializeSocket = async (app) => {
                 onlineAt: data.onlineAt,
                 inCall: busyUserIds.has(id), // Fast Set lookup, no database query
             }));
-            console.log(`📤 [socket] Emitting getOnlineUser after disconnect with ${updatedOnlineArray.length} users`)
-            io.emit("getOnlineUser", updatedOnlineArray)
+            if (!DISABLE_GLOBAL_ONLINE_BROADCAST) {
+                console.log(`📤 [socket] Emitting getOnlineUser after disconnect with ${updatedOnlineArray.length} users`)
+                io.emit("getOnlineUser", updatedOnlineArray)
+            }
         })
     })
 

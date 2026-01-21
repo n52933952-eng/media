@@ -1,5 +1,6 @@
 import User from '../models/user.js'
 import Post from '../models/post.js'
+import Follow from '../models/follow.js'
 import bcryptjs from 'bcryptjs' 
 import GenerateToken from '../utils/GenerateToken.js'
 import mongoose from 'mongoose'
@@ -127,12 +128,23 @@ export const FollowAndUnfollow = async(req,res) => {
          }
 
     
-         const isFollowing = currentUser.following.includes(id)
+         // Read-from-Follow (scalable): determine follow state from Follow collection
+         const followExists = await Follow.findOne({
+            followerId: req.user._id,
+            followeeId: id
+         }).select('_id').lean()
+         const isFollowing = !!followExists
 
          if(isFollowing){
              
            await User.findByIdAndUpdate(req.user._id,{$pull:{following:id}})
            await User.findByIdAndUpdate(id,{$pull:{followers:req.user._id}})
+          // Dual-write: remove from follows collection (ignore errors to stay non-breaking)
+          try {
+            await Follow.deleteOne({ followerId: req.user._id, followeeId: id })
+          } catch (e) {
+            console.error('⚠️ [FollowAndUnfollow] Failed to delete follow doc:', e.message)
+          }
           
            // Delete follow notification when user unfollows
            const { deleteFollowNotification } = await import('./notification.js')
@@ -180,6 +192,16 @@ export const FollowAndUnfollow = async(req,res) => {
          }else{
             await User.findByIdAndUpdate(req.user._id,{$push:{following:id}})
             await User.findByIdAndUpdate(id,{$push:{followers:req.user._id}})
+           // Dual-write: add to follows collection (ignore errors to stay non-breaking)
+           try {
+             await Follow.create({ followerId: req.user._id, followeeId: id })
+           } catch (e) {
+             if (e?.code === 11000) {
+               // duplicate follow, safe to ignore
+             } else {
+               console.error('⚠️ [FollowAndUnfollow] Failed to create follow doc:', e.message)
+             }
+           }
            
             // REMOVED: Don't update Football post's updatedAt when following
             // This was causing Football posts to jump to top for ALL users who follow Football
@@ -478,7 +500,43 @@ export const getUserProfile = async(req,res) => {
         return res.status(404).json({error:"User not found"})
       }
 
-      res.status(200).json(user)
+      // Read-from-Follow (scalable) with backwards-compatible payload:
+      // - keep `followers`/`following` arrays for current app (but cap them)
+      // - add counts + `isFollowedByMe` for correctness when arrays are capped
+      const LIMIT_LIST = 5000
+      const viewerId = req.user?._id
+
+      const [followersCount, followingCount] = await Promise.all([
+        Follow.countDocuments({ followeeId: user._id }),
+        Follow.countDocuments({ followerId: user._id }),
+      ])
+
+      let isFollowedByMe = false
+      if (viewerId) {
+        const exists = await Follow.findOne({ followerId: viewerId, followeeId: user._id })
+          .select('_id')
+          .lean()
+        isFollowedByMe = !!exists
+      }
+
+      const [followersDocs, followingDocs] = await Promise.all([
+        Follow.find({ followeeId: user._id }).select('followerId').limit(LIMIT_LIST).lean(),
+        Follow.find({ followerId: user._id }).select('followeeId').limit(LIMIT_LIST).lean(),
+      ])
+
+      const followers = followersDocs.map((d) => d.followerId?.toString?.() ?? String(d.followerId))
+      const following = followingDocs.map((d) => d.followeeId?.toString?.() ?? String(d.followeeId))
+
+      // Merge onto the user object (strip mongoose internals by using toObject)
+      const userObj = user.toObject ? user.toObject() : user
+      res.status(200).json({
+        ...userObj,
+        followers,
+        following,
+        followersCount,
+        followingCount,
+        isFollowedByMe,
+      })
 
     }
     catch(error){
@@ -524,15 +582,10 @@ export const searchUsers = async(req, res) => {
 export const getSuggestedUsers = async(req, res) => {
     try {
         const userId = req.user._id
-        const currentUser = await User.findById(userId).select('country following')
+        const currentUser = await User.findById(userId).select('country')
         
         if (!currentUser) {
             return res.status(400).json({ error: "User not found" })
-        }
-        
-        // Ensure following is an array
-        if (!currentUser.following) {
-            currentUser.following = []
         }
 
         const suggestedUsers = []
@@ -559,16 +612,17 @@ export const getSuggestedUsers = async(req, res) => {
             excludeIds.push(new mongoose.Types.ObjectId(account._id))
         })
         
-        if (currentUser.following && currentUser.following.length > 0) {
-            currentUser.following.forEach(id => {
+        // Read-from-Follow: exclude already-followed users (cap for safety)
+        const followingDocs = await Follow.find({ followerId: userId }).select('followeeId').limit(5000).lean()
+        if (followingDocs && followingDocs.length > 0) {
+            followingDocs.forEach(d => {
+                const idStr = d.followeeId?.toString?.() ?? String(d.followeeId)
                 try {
-                    const objectId = id instanceof mongoose.Types.ObjectId 
-                        ? id 
-                        : new mongoose.Types.ObjectId(id.toString())
+                    const objectId = new mongoose.Types.ObjectId(idStr)
                     excludeIds.push(objectId)
-                    followingIdsStrings.add(id.toString()) // Store string for fast filtering
+                    followingIdsStrings.add(idStr)
                 } catch (error) {
-                    // Silently skip invalid IDs in production
+                    // ignore invalid ids
                 }
             })
         }
@@ -716,19 +770,21 @@ export const getBusyChessUsers = async (req, res) => {
 export const getFollowingUsers = async (req, res) => {
     try {
         const userId = req.user._id
-        const currentUser = await User.findById(userId).select('following')
-        
-        if (!currentUser) {
-            return res.status(400).json({ error: "User not found" })
-        }
-        
-        if (!currentUser.following || currentUser.following.length === 0) {
+        // Read-from-Follow: get followee IDs (limit to 30 for performance)
+        const followingDocs = await Follow.find({ followerId: userId })
+            .select('followeeId')
+            .sort({ createdAt: -1 })
+            .limit(30)
+            .lean()
+
+        if (!followingDocs || followingDocs.length === 0) {
             return res.status(200).json([])
         }
-        
-        // Get users that current user is following (limit to 30 for performance)
+
+        const followeeIds = followingDocs.map(d => d.followeeId)
+
         const followingUsers = await User.find({
-            _id: { $in: currentUser.following }
+            _id: { $in: followeeIds }
         }).select('username name profilePic bio').limit(30).sort({ username: 1 })
         
         res.status(200).json(followingUsers)

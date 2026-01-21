@@ -1,6 +1,7 @@
 import Activity from '../models/activity.js'
 import { getIO, getAllUserSockets } from '../socket/socket.js'
 import User from '../models/user.js'
+import Follow from '../models/follow.js'
 
 // Create an activity and emit to followers
 export const createActivity = async (userId, type, options = {}) => {
@@ -53,12 +54,13 @@ export const createActivity = async (userId, type, options = {}) => {
         // Emit to user's followers (for activity feed)
         const io = getIO()
         if (io) {
-            const user = await User.findById(userId).select('followers')
-            if (user && user.followers && user.followers.length > 0) {
+            // Read-from-Follow: get follower ids (cap to reduce worst-case load)
+            const followerDocs = await Follow.find({ followeeId: userId }).select('followerId').limit(5000).lean()
+            if (followerDocs && followerDocs.length > 0) {
                 const socketMap = await getAllUserSockets()
                 
-                user.followers.forEach(followerId => {
-                    const followerIdStr = followerId.toString()
+                followerDocs.forEach(d => {
+                    const followerIdStr = d.followerId?.toString?.() ?? String(d.followerId)
                     const socketData = socketMap[followerIdStr]
                     if (socketData && socketData.socketId) {
                         io.to(socketData.socketId).emit('newActivity', activity)
@@ -80,9 +82,9 @@ export const getActivities = async (req, res) => {
         const userId = req.user._id
         const limit = 15 // Always limit to 15 activities
 
-        // Get user's following list
-        const user = await User.findById(userId).select('following')
-        const followingIds = user?.following?.map(f => f.toString()) || []
+        // Read-from-Follow: Get user's following list (cap for safety)
+        const followingDocs = await Follow.find({ followerId: userId }).select('followeeId').limit(5000).lean()
+        const followingIds = followingDocs.map(d => d.followeeId?.toString?.() ?? String(d.followeeId))
 
         // Only get activities from last 6 hours
         const sixHoursAgo = new Date(Date.now() - 6 * 60 * 60 * 1000)
@@ -124,9 +126,9 @@ export const deleteActivity = async (req, res) => {
             return res.status(404).json({ error: 'Activity not found' })
         }
 
-        // Check if user is following the activity creator (they can only delete activities from users they follow)
-        const user = await User.findById(userId).select('following')
-        const followingIds = user?.following?.map(f => f.toString()) || []
+        // Read-from-Follow: Check if user is following the activity creator
+        const followingDocs = await Follow.find({ followerId: userId }).select('followeeId').limit(5000).lean()
+        const followingIds = followingDocs.map(d => d.followeeId?.toString?.() ?? String(d.followeeId))
         const activityUserId = activity.userId?.toString() || activity.userId
 
         if (!followingIds.includes(activityUserId)) {

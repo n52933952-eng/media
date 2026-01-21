@@ -1,9 +1,10 @@
 
 import User from '../models/user.js'
 import Post from '../models/post.js'
+import Follow from '../models/follow.js'
 import { v2 as cloudinary } from 'cloudinary'
 import { Readable } from 'stream'
-import { getIO, getUserSocketMap } from '../socket/socket.js'
+import { getIO, getAllUserSockets } from '../socket/socket.js'
 
 
 export const createPost = async(req,res) => {
@@ -75,25 +76,29 @@ export const createPost = async(req,res) => {
                  // OPTIMIZED: Emit new post only to online followers (not all users)
                  const io = getIO()
                  if (io) {
-                   // Get poster's followers
-                   const poster = await User.findById(postedBy).select('followers')
-                   if (poster && poster.followers && poster.followers.length > 0) {
-                     const userSocketMap = getUserSocketMap()
+                   // Read-from-Follow: Get poster's followers (cap for safety)
+                   const followerDocs = await Follow.find({ followeeId: postedBy })
+                     .select('followerId')
+                     .limit(10000)
+                     .lean()
+                   if (followerDocs && followerDocs.length > 0) {
+                     const socketMap = await getAllUserSockets()
                      const onlineFollowers = []
                      
-                     // Find which followers are online
-                     poster.followers.forEach(followerId => {
-                       const followerIdStr = followerId.toString()
-                       if (userSocketMap[followerIdStr]) {
-                         onlineFollowers.push(userSocketMap[followerIdStr].socketId)
+                     followerDocs.forEach(d => {
+                       const followerIdStr = d.followerId?.toString?.() ?? String(d.followerId)
+                       const socketData = socketMap[followerIdStr]
+                       if (socketData && socketData.socketId) {
+                         onlineFollowers.push(socketData.socketId)
                        }
                      })
                      
-                 // Only emit to online followers (not all users)
-                 if (onlineFollowers.length > 0) {
-                   io.to(onlineFollowers).emit("newPost", newPost)
+                     // Only emit to online followers (not all users)
+                     if (onlineFollowers.length > 0) {
+                       io.to(onlineFollowers).emit("newPost", newPost)
+                     }
+                   }
                  }
-               }
                
                // Create activity for activity feed
                const { createActivity } = await import('./activity.js')
@@ -103,13 +108,12 @@ export const createPost = async(req,res) => {
                }).catch(err => {
                    console.error('Error creating activity:', err)
                })
-             }
-             
-             if (!res.headersSent) {
-               res.status(200).json({message:"post created sufully", post: newPost})
-             }
-                 resolve()
-               } catch (error) {
+               
+               if (!res.headersSent) {
+                 res.status(200).json({message:"post created sufully", post: newPost})
+               }
+               resolve()
+              } catch (error) {
                  console.error('Error creating post after upload:', error)
                  if (!res.headersSent) {
                    res.status(500).json({ 
@@ -143,17 +147,20 @@ export const createPost = async(req,res) => {
        // OPTIMIZED: Emit new post only to online followers (not all users)
        const io = getIO()
        if (io) {
-         // Get poster's followers
-         const poster = await User.findById(postedBy).select('followers')
-         if (poster && poster.followers && poster.followers.length > 0) {
-           const userSocketMap = getUserSocketMap()
+         // Read-from-Follow: Get poster's followers (cap for safety)
+         const followerDocs = await Follow.find({ followeeId: postedBy })
+           .select('followerId')
+           .limit(10000)
+           .lean()
+         if (followerDocs && followerDocs.length > 0) {
+           const socketMap = await getAllUserSockets()
            const onlineFollowers = []
            
-           // Find which followers are online
-           poster.followers.forEach(followerId => {
-             const followerIdStr = followerId.toString()
-             if (userSocketMap[followerIdStr]) {
-               onlineFollowers.push(userSocketMap[followerIdStr].socketId)
+           followerDocs.forEach(d => {
+             const followerIdStr = d.followerId?.toString?.() ?? String(d.followerId)
+             const socketData = socketMap[followerIdStr]
+             if (socketData && socketData.socketId) {
+               onlineFollowers.push(socketData.socketId)
              }
            })
            
@@ -368,7 +375,7 @@ export const updatePost = async(req,res) => {
                         // Emit update to followers, post owner, and all contributors
                         const io = getIO()
                         if (io) {
-                            const userSocketMap = getUserSocketMap()
+                            const userSocketMap = await getAllUserSockets()
                             const recipients = [] // Socket IDs to receive the update
                             
                             // 1. Add post owner (always include them) - use postOwnerId we got earlier
@@ -393,10 +400,13 @@ export const updatePost = async(req,res) => {
                             }
                             
                             // 3. Add followers
-                            const poster = await User.findById(postOwnerId).select('followers')
-                            if (poster && poster.followers && poster.followers.length > 0) {
-                                poster.followers.forEach(followerId => {
-                                    const followerIdStr = followerId.toString()
+                            const followerDocs = await Follow.find({ followeeId: postOwnerId })
+                              .select('followerId')
+                              .limit(10000)
+                              .lean()
+                            if (followerDocs && followerDocs.length > 0) {
+                                followerDocs.forEach(d => {
+                                    const followerIdStr = d.followerId?.toString?.() ?? String(d.followerId)
                                     // Don't duplicate owner/contributors
                                     if (followerIdStr !== postOwnerId && 
                                         !post.contributors?.some(c => (c._id || c).toString() === followerIdStr)) {
@@ -484,7 +494,7 @@ export const updatePost = async(req,res) => {
         // Emit update to followers, post owner, and all contributors
         const io = getIO()
         if (io) {
-            const userSocketMap = getUserSocketMap()
+            const userSocketMap = await getAllUserSockets()
             const recipients = [] // Socket IDs to receive the update
             
             // 1. Add post owner (always include them) - use postOwnerId we got earlier
@@ -509,10 +519,13 @@ export const updatePost = async(req,res) => {
             }
             
             // 3. Add followers
-            const poster = await User.findById(postOwnerId).select('followers')
-            if (poster && poster.followers && poster.followers.length > 0) {
-                poster.followers.forEach(followerId => {
-                    const followerIdStr = followerId.toString()
+            const followerDocs = await Follow.find({ followeeId: postOwnerId })
+              .select('followerId')
+              .limit(10000)
+              .lean()
+            if (followerDocs && followerDocs.length > 0) {
+                followerDocs.forEach(d => {
+                    const followerIdStr = d.followerId?.toString?.() ?? String(d.followerId)
                     // Don't duplicate owner/contributors
                     if (followerIdStr !== postOwnerId && 
                         !post.contributors?.some(c => (c._id || c).toString() === followerIdStr)) {
@@ -620,19 +633,22 @@ export const deletePost = async(req,res) => {
 
       // OPTIMIZED: Get followers before deleting post
       const postAuthorId = post.postedBy.toString()
-      const author = await User.findById(postAuthorId).select('followers')
+      const followerDocs = await Follow.find({ followeeId: postAuthorId })
+        .select('followerId')
+        .limit(10000)
+        .lean()
       
       // Delete the post from MongoDB
       await Post.findByIdAndDelete(req.params.id)
 
       // OPTIMIZED: Emit post deleted only to online followers
       const io = getIO()
-      if (io && author && author.followers && author.followers.length > 0) {
-        const userSocketMap = getUserSocketMap()
+      if (io && followerDocs && followerDocs.length > 0) {
+        const userSocketMap = await getAllUserSockets()
         const onlineFollowers = []
         
-        author.followers.forEach(followerId => {
-          const followerIdStr = followerId.toString()
+        followerDocs.forEach(d => {
+          const followerIdStr = d.followerId?.toString?.() ?? String(d.followerId)
           if (userSocketMap[followerIdStr]) {
             onlineFollowers.push(userSocketMap[followerIdStr].socketId)
           }
@@ -810,14 +826,12 @@ export const ReplyPost = async(req,res) => {
 export const getFeedPost = async(req,res) => {
     try{
         const userId = req.user._id 
-        // Fetch user fresh from database to ensure we have latest following array
-        const user = await User.findById(userId).select('following')
-
-        if(!user){
-            return res.status(400).json({error:"no user"})
-        }
-
-        const following = user.following || []
+        // Read-from-Follow: get following list (cap for safety)
+        const followingDocs = await Follow.find({ followerId: userId })
+            .select('followeeId')
+            .limit(5000)
+            .lean()
+        const following = followingDocs.map(d => d.followeeId)
         
         // If user follows no one, return empty feed
         if (following.length === 0) {
@@ -1236,7 +1250,7 @@ export const createChessGamePost = async (player1Id, player2Id, roomId) => {
         console.log('🔍 [createChessGamePost] Checking IO instance:', !!io)
         
         if (io) {
-            const userSocketMap = getUserSocketMap()
+            const userSocketMap = await getAllUserSockets()
             console.log('🔍 [createChessGamePost] User socket map size:', Object.keys(userSocketMap).length)
             
             // Emit each post only to followers of that post's author
@@ -1260,24 +1274,25 @@ export const createChessGamePost = async (player1Id, player2Id, roomId) => {
                 console.log(`🔍 [createChessGamePost] Post author ID: ${postAuthorId}`)
                 
                 // Get followers of this specific post's author
-                const postAuthor = await User.findById(postAuthorId).select('followers')
+                const followerDocs = await Follow.find({ followeeId: postAuthorId })
+                  .select('followerId')
+                  .limit(10000)
+                  .lean()
                 
-                if (!postAuthor || !postAuthor.followers || postAuthor.followers.length === 0) {
+                if (!followerDocs || followerDocs.length === 0) {
                     console.log(`ℹ️ [createChessGamePost] Post author ${postAuthorId} has no followers`)
                     continue
                 }
                 
                 // Find online followers of this post's author
                 const onlineFollowers = []
-                console.log(`🔍 [createChessGamePost] Checking ${postAuthor.followers.length} followers of ${postAuthorId}`)
-                console.log(`🔍 [createChessGamePost] Follower IDs (raw):`, postAuthor.followers)
-                console.log(`🔍 [createChessGamePost] Follower IDs (stringified):`, postAuthor.followers.map(f => f.toString()))
+                console.log(`🔍 [createChessGamePost] Checking ${followerDocs.length} followers of ${postAuthorId}`)
                 console.log(`🔍 [createChessGamePost] Available user IDs in socket map:`, Object.keys(userSocketMap))
                 console.log(`🔍 [createChessGamePost] Socket map entries:`, Object.entries(userSocketMap).map(([id, data]) => ({ userId: id, socketId: data.socketId })))
                 
-                postAuthor.followers.forEach(followerId => {
+                followerDocs.forEach(d => {
                     // Use same simple approach as postDeleted (which works)
-                    const followerIdStr = followerId.toString()
+                    const followerIdStr = d.followerId?.toString?.() ?? String(d.followerId)
                     if (userSocketMap[followerIdStr]) {
                         onlineFollowers.push(userSocketMap[followerIdStr].socketId)
                         console.log(`✅ [createChessGamePost] Found online follower of ${postAuthorId}: ${followerIdStr} (socket: ${userSocketMap[followerIdStr].socketId})`)
@@ -1307,7 +1322,7 @@ export const createChessGamePost = async (player1Id, player2Id, roomId) => {
                     console.log(`✅ [createChessGamePost] Emitted newPost event to ${onlineFollowers.length} sockets for post: ${post._id}`)
                 } else {
                     console.log(`ℹ️ [createChessGamePost] No online followers for post author ${postAuthorId}`)
-                    console.log(`🔍 [createChessGamePost] All followers of ${postAuthorId}:`, postAuthor.followers.map(f => f.toString()))
+                    console.log(`🔍 [createChessGamePost] All followers of ${postAuthorId}:`, followerDocs.map(d => d.followerId?.toString?.() ?? String(d.followerId)))
                     console.log(`🔍 [createChessGamePost] Online user IDs in socket map:`, Object.keys(userSocketMap))
                 }
             }
@@ -1343,7 +1358,10 @@ export const deleteChessGamePost = async (roomId) => {
                     if (chessData.roomId === roomId) {
                         // Get followers before deleting
                         const postAuthorId = post.postedBy.toString()
-                        const author = await User.findById(postAuthorId).select('followers')
+                        const followerDocs = await Follow.find({ followeeId: postAuthorId })
+                          .select('followerId')
+                          .limit(10000)
+                          .lean()
                         
                         // Delete the post
                         await Post.findByIdAndDelete(post._id)
@@ -1352,12 +1370,12 @@ export const deleteChessGamePost = async (roomId) => {
 
                         // Emit post deleted to online followers
                         const io = getIO()
-                        if (io && author && author.followers && author.followers.length > 0) {
-                            const userSocketMap = getUserSocketMap()
+                        if (io && followerDocs && followerDocs.length > 0) {
+                            const userSocketMap = await getAllUserSockets()
                             const onlineFollowers = []
                             
-                            author.followers.forEach(followerId => {
-                                const followerIdStr = followerId.toString()
+                            followerDocs.forEach(d => {
+                                const followerIdStr = d.followerId?.toString?.() ?? String(d.followerId)
                                 if (userSocketMap[followerIdStr]) {
                                     onlineFollowers.push(userSocketMap[followerIdStr].socketId)
                                 }
@@ -1456,7 +1474,7 @@ export const addContributorToPost = async (req, res) => {
         // Emit real-time post update to post owner, all contributors, and followers
         const io = getIO()
         if (io) {
-            const userSocketMap = getUserSocketMap()
+            const userSocketMap = await getAllUserSockets()
                             const recipients = [] // Socket IDs to receive the update
                             
                             // 1. Add post owner (always include them) - use postOwnerId we got earlier
@@ -1481,10 +1499,13 @@ export const addContributorToPost = async (req, res) => {
             }
             
             // 3. Add followers
-            const poster = await User.findById(post.postedBy).select('followers')
-            if (poster && poster.followers && poster.followers.length > 0) {
-                poster.followers.forEach(followerId => {
-                    const followerIdStr = followerId.toString()
+            const followerDocs = await Follow.find({ followeeId: post.postedBy })
+              .select('followerId')
+              .limit(10000)
+              .lean()
+            if (followerDocs && followerDocs.length > 0) {
+                followerDocs.forEach(d => {
+                    const followerIdStr = d.followerId?.toString?.() ?? String(d.followerId)
                     // Don't duplicate owner/contributors
                     if (followerIdStr !== postOwnerId && 
                         !post.contributors?.some(c => {
@@ -1574,7 +1595,7 @@ export const removeContributorFromPost = async(req, res) => {
         // Emit real-time post update to post owner, all contributors, and followers
         const io = getIO()
         if (io) {
-            const userSocketMap = getUserSocketMap()
+            const userSocketMap = await getAllUserSockets()
             const recipients = [] // Socket IDs to receive the update
             
             // 1. Add post owner
@@ -1600,10 +1621,13 @@ export const removeContributorFromPost = async(req, res) => {
             }
             
             // 3. Add followers of the post owner
-            const poster = await User.findById(postOwnerId).select('followers')
-            if (poster && poster.followers && poster.followers.length > 0) {
-                poster.followers.forEach(followerId => {
-                    const followerIdStr = followerId.toString()
+            const followerDocs = await Follow.find({ followeeId: postOwnerId })
+              .select('followerId')
+              .limit(10000)
+              .lean()
+            if (followerDocs && followerDocs.length > 0) {
+                followerDocs.forEach(d => {
+                    const followerIdStr = d.followerId?.toString?.() ?? String(d.followerId)
                     // Don't duplicate owner/contributors
                     if (followerIdStr !== postOwnerId && 
                         !post.contributors.some(c => (c._id || c).toString() === followerIdStr)) {
