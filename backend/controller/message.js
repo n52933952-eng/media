@@ -224,6 +224,18 @@ if(recipentSockedId && recipientId && io){
   }
 }
 
+// If recipient is offline (no socket), send OneSignal push notification
+// This mirrors web behavior: realtime via socket when online, push when offline
+if (!recipentSockedId && recipientId) {
+  try {
+    const { sendMessageNotification } = await import('../services/pushNotifications.js')
+    // newMessage.sender is populated with { username, profilePic, name }
+    await sendMessageNotification(recipientId, newMessage.sender, conversation._id.toString())
+  } catch (e) {
+    console.log('❌ Error sending OneSignal message notification:', e?.message || e)
+  }
+}
+
 
 // Send message with conversation timestamp to sender for accurate sorting
 const responseData = {

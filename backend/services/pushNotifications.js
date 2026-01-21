@@ -60,25 +60,32 @@ async function sendNotificationToUser(userId, title, message, data = {}, images 
       // High priority for heads-up notifications (peek at top of screen like WhatsApp/Facebook)
       priority: 10, // High priority so notification "peeks" at top of screen (heads-up notification)
       // Action buttons (WhatsApp/Facebook-style) - shows buttons like "Reply", "Mark as read"
+      // Native Android intents for action buttons (like FCM)
       buttons: [
         ...(data.type === 'like' || data.type === 'comment' || data.type === 'mention' ? [
           {
             id: 'view_post',
             text: 'View Post',
-            icon: 'ic_menu_view'
+            icon: 'ic_menu_view',
+            // Native Android intent action for native handling (like FCM)
+            action: 'com.compnay.ONESIGNAL_VIEW_POST'
           }
         ] : []),
         ...(data.type === 'follow' ? [
           {
             id: 'view_profile',
             text: 'View Profile',
-            icon: 'ic_menu_view'
+            icon: 'ic_menu_view',
+            // Native Android intent action for native handling (like FCM)
+            action: 'com.compnay.ONESIGNAL_VIEW_PROFILE'
           }
         ] : []),
         {
           id: 'mark_read',
           text: 'Mark as read',
-          icon: 'ic_menu_done'
+          icon: 'ic_menu_done',
+          // Native Android intent action for native handling (like FCM)
+          action: 'com.compnay.ONESIGNAL_MARK_READ'
         }
       ],
       // Override priority for call notifications (keep high priority)
@@ -180,6 +187,29 @@ async function sendMentionNotification(userId, mentionerName, postId, images = {
     'mentioned you in a post', // Content: Action description
     { type: 'mention', postId },
     images
+  );
+}
+
+/**
+ * Send notification when someone sends you a message (when you're offline / not in app)
+ * Facebook-style: "John Doe sent you a message"
+ */
+async function sendMessageNotification(recipientUserId, senderUser, conversationId) {
+  const senderName = senderUser?.name || senderUser?.username || 'Someone'
+  return await sendNotificationToUser(
+    recipientUserId,
+    senderName,
+    'sent you a message',
+    {
+      type: 'message',
+      conversationId,
+      // include sender so mobile can open chat by otherUserId (mobile fetch is /api/message/:otherUserId)
+      senderId: senderUser?._id?.toString?.() ?? senderUser?._id,
+      senderName: senderUser?.name,
+      senderUsername: senderUser?.username,
+      senderProfilePic: senderUser?.profilePic,
+    },
+    { profilePic: senderUser?.profilePic }
   );
 }
 
@@ -289,6 +319,7 @@ export {
   sendCommentNotification,
   sendFollowNotification,
   sendMentionNotification,
+  sendMessageNotification,
   sendChessChallengeNotification,
   sendChessMoveNotification,
   sendContributorAddedNotification,
