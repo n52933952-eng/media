@@ -146,12 +146,40 @@ export const getWeatherAccount = async () => {
     }
 }
 
-// 1. Fetch and store current weather for default cities
+// 1. Fetch and store current weather for default cities + all user-selected cities
 export const fetchCurrentWeather = async (req, res) => {
     try {
         const allWeatherData = []
         
+        // Get all unique cities from Weather collection (includes default + user-selected)
+        const existingWeatherDocs = await Weather.find({}).select('location').lean()
+        const allCitiesToUpdate = new Map()
+        
+        // Add default cities
         for (const city of DEFAULT_CITIES) {
+            const key = `${city.name.toLowerCase()}_${city.country.toLowerCase()}`
+            allCitiesToUpdate.set(key, city)
+        }
+        
+        // Add user-selected cities from Weather collection
+        for (const doc of existingWeatherDocs) {
+            if (doc.location && doc.location.city && doc.location.lat && doc.location.lon) {
+                const key = `${doc.location.city.toLowerCase()}_${(doc.location.country || '').toLowerCase()}`
+                if (!allCitiesToUpdate.has(key)) {
+                    allCitiesToUpdate.set(key, {
+                        name: doc.location.city,
+                        country: doc.location.country || '',
+                        lat: doc.location.lat,
+                        lon: doc.location.lon
+                    })
+                }
+            }
+        }
+        
+        const citiesToUpdate = Array.from(allCitiesToUpdate.values())
+        console.log(`🌤️ [fetchCurrentWeather] Updating weather for ${citiesToUpdate.length} cities (${DEFAULT_CITIES.length} default + ${citiesToUpdate.length - DEFAULT_CITIES.length} user-selected)`)
+        
+        for (const city of citiesToUpdate) {
             // OpenWeatherMap: Get current weather by coordinates (more reliable)
             const endpoint = `/weather?lat=${city.lat}&lon=${city.lon}`
             const result = await fetchFromWeatherAPI(endpoint)
@@ -266,6 +294,7 @@ export const getWeather = async (req, res) => {
     }
 }
 
+
 // 4. Auto-post weather update to feed
 export const autoPostWeatherUpdate = async () => {
     try {
@@ -278,9 +307,37 @@ export const autoPostWeatherUpdate = async () => {
         console.log('🌤️ [autoPostWeatherUpdate] Fetching fresh weather data from API...')
         
         // FETCH FRESH WEATHER DATA FROM API (not from database cache)
+        // Get all cities from Weather collection (default + user-selected)
+        const existingWeatherDocs = await Weather.find({}).select('location').lean()
+        const allCitiesToUpdate = new Map()
+        
+        // Add default cities
+        for (const city of DEFAULT_CITIES) {
+            const key = `${city.name.toLowerCase()}_${city.country.toLowerCase()}`
+            allCitiesToUpdate.set(key, city)
+        }
+        
+        // Add user-selected cities from Weather collection
+        for (const doc of existingWeatherDocs) {
+            if (doc.location && doc.location.city && doc.location.lat && doc.location.lon) {
+                const key = `${doc.location.city.toLowerCase()}_${(doc.location.country || '').toLowerCase()}`
+                if (!allCitiesToUpdate.has(key)) {
+                    allCitiesToUpdate.set(key, {
+                        name: doc.location.city,
+                        country: doc.location.country || '',
+                        lat: doc.location.lat,
+                        lon: doc.location.lon
+                    })
+                }
+            }
+        }
+        
+        const citiesToUpdate = Array.from(allCitiesToUpdate.values())
+        console.log(`🌤️ [autoPostWeatherUpdate] Updating weather for ${citiesToUpdate.length} cities`)
+        
         const allWeatherData = []
         
-        for (const city of DEFAULT_CITIES) {
+        for (const city of citiesToUpdate) {
             try {
                 const endpoint = `/weather?lat=${city.lat}&lon=${city.lon}`
                 const result = await fetchFromWeatherAPI(endpoint)
@@ -723,13 +780,59 @@ export const saveWeatherPreferences = async (req, res) => {
             return res.status(400).json({ error: 'Maximum 10 cities allowed' })
         }
         
-        // Validate city structure
-        const validCities = cities.filter(city => 
-            city.name && 
-            city.country && 
-            typeof city.lat === 'number' && 
-            typeof city.lon === 'number'
-        )
+        // Handle both formats: array of strings (city names) or array of objects
+        const validCities = []
+        
+        for (const city of cities) {
+            if (typeof city === 'string') {
+                // If it's just a city name, try to find it in the Weather collection
+                const weatherDoc = await Weather.findOne({ 
+                    'location.city': new RegExp(`^${city}$`, 'i') 
+                }).lean()
+                
+                if (weatherDoc && weatherDoc.location) {
+                    validCities.push({
+                        name: weatherDoc.location.city,
+                        country: weatherDoc.location.country,
+                        lat: weatherDoc.location.lat,
+                        lon: weatherDoc.location.lon
+                    })
+                } else {
+                    // If not found, try to match with DEFAULT_CITIES
+                    const defaultCity = DEFAULT_CITIES.find(c => 
+                        c.name.toLowerCase() === city.toLowerCase()
+                    )
+                    if (defaultCity) {
+                        validCities.push(defaultCity)
+                    }
+                }
+            } else if (city.name && city.country && typeof city.lat === 'number' && typeof city.lon === 'number') {
+                // Already in correct format
+                validCities.push(city)
+            } else if (city.name) {
+                // Has name but missing other fields - try to find in Weather collection
+                const weatherDoc = await Weather.findOne({ 
+                    'location.city': new RegExp(`^${city.name}$`, 'i') 
+                }).lean()
+                
+                if (weatherDoc && weatherDoc.location) {
+                    validCities.push({
+                        name: weatherDoc.location.city,
+                        country: weatherDoc.location.country || city.country || '',
+                        lat: weatherDoc.location.lat || city.lat || 0,
+                        lon: weatherDoc.location.lon || city.lon || 0
+                    })
+                } else {
+                    // Try DEFAULT_CITIES
+                    const defaultCity = DEFAULT_CITIES.find(c => 
+                        c.name.toLowerCase() === city.name.toLowerCase()
+                    )
+                    if (defaultCity) {
+                        validCities.push(defaultCity)
+                    }
+                }
+            }
+        }
         
         const user = await User.findByIdAndUpdate(
             userId,
@@ -802,7 +905,14 @@ export const getWeatherPreferences = async (req, res) => {
             return res.status(404).json({ error: 'User not found' })
         }
         
-        res.status(200).json({ cities: user.weatherCities || [] })
+        // Return both formats for compatibility (mobile expects selectedCities as array of city names)
+        const weatherCities = user.weatherCities || []
+        const selectedCities = weatherCities.map(city => city.name || city) // Extract city names
+        
+        res.status(200).json({ 
+            cities: weatherCities, // Full city objects (for web)
+            selectedCities: selectedCities // City names only (for mobile)
+        })
         
     } catch (error) {
         console.error('Error getting weather preferences:', error)

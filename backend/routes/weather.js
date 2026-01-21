@@ -19,7 +19,7 @@ router.post('/fetch/current', protectRoute, fetchCurrentWeather)
 // Fetch weather forecast for specific city
 router.get('/forecast', fetchWeatherForecast)
 
-// Get cached weather data (for users)
+// Get cached weather data (for users) - web uses ?limit=50, mobile can use same
 router.get('/', getWeather)
 
 // Manual trigger to fetch weather (for testing)
