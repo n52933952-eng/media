@@ -91,8 +91,18 @@ const convertMatchFormat = (matchData) => {
     const homeScore = fullTime.home !== null && fullTime.home !== undefined ? fullTime.home : null
     const awayScore = fullTime.away !== null && fullTime.away !== undefined ? fullTime.away : null
     
+    // Ensure fixtureId is always a number (football-data.org API returns numbers)
+    // Handle case where it might be a string (e.g., from database or conversion)
+    const fixtureId = typeof matchData.id === 'string' 
+        ? parseInt(matchData.id, 10) 
+        : Number(matchData.id)
+    
+    if (isNaN(fixtureId)) {
+        console.warn(`⚠️ [convertMatchFormat] Invalid fixtureId from matchData.id: ${matchData.id}`)
+    }
+    
     return {
-        fixtureId: matchData.id,
+        fixtureId: fixtureId,
         league: {
             id: competition.id || competition.code || '',
             name: competition.name || 'Unknown League',
@@ -482,12 +492,22 @@ const fetchAndUpdateLiveMatches = async () => {
         
         for (const dbMatch of previouslyLiveMatches) {
             // If match was live but not in current live response, it finished
-            if (!liveFixtureIds.has(dbMatch.fixtureId)) {
+            // Ensure fixtureId is a number for comparison
+            const dbFixtureId = typeof dbMatch.fixtureId === 'string' 
+                ? parseInt(dbMatch.fixtureId, 10) 
+                : Number(dbMatch.fixtureId)
+            
+            if (isNaN(dbFixtureId)) {
+                console.warn(`⚠️ [fetchAndUpdateLiveMatches] Invalid dbMatch.fixtureId: ${dbMatch.fixtureId}, skipping`)
+                continue
+            }
+            
+            if (!liveFixtureIds.has(dbFixtureId)) {
                 console.log(`  🏁 Match finished (not in live response): ${dbMatch.teams?.home?.name} vs ${dbMatch.teams?.away?.name}`)
                 
                 // Update database status to FT
                 await Match.findOneAndUpdate(
-                    { fixtureId: dbMatch.fixtureId },
+                    { fixtureId: dbFixtureId },
                     { 
                         'fixture.status.short': 'FT',
                         'fixture.status.long': 'Full Time',
@@ -501,7 +521,18 @@ const fetchAndUpdateLiveMatches = async () => {
         for (const matchData of filteredMatches) {
             // Get previous state
             const convertedMatch = convertMatchFormat(matchData)
-            const previousMatch = await Match.findOne({ fixtureId: convertedMatch.fixtureId })
+            
+            // Ensure fixtureId is a number (not a string/ObjectId)
+            const fixtureIdNum = typeof convertedMatch.fixtureId === 'string' 
+                ? parseInt(convertedMatch.fixtureId, 10) 
+                : Number(convertedMatch.fixtureId)
+            
+            if (isNaN(fixtureIdNum)) {
+                console.warn(`⚠️ [fetchAndUpdateLiveMatches] Invalid fixtureId: ${convertedMatch.fixtureId}, skipping match`)
+                continue
+            }
+            
+            const previousMatch = await Match.findOne({ fixtureId: fixtureIdNum })
             
             const previousGoalsHome = previousMatch?.goals?.home || 0
             const previousGoalsAway = previousMatch?.goals?.away || 0
@@ -511,9 +542,15 @@ const fetchAndUpdateLiveMatches = async () => {
             // IMPORTANT: Don't fetch events/scorers for live matches (only for finished)
             convertedMatch.events = []
             
+            // Ensure convertedMatch has numeric fixtureId
+            const matchToSave = {
+                ...convertedMatch,
+                fixtureId: fixtureIdNum
+            }
+            
             const updatedMatch = await Match.findOneAndUpdate(
-                { fixtureId: convertedMatch.fixtureId },
-                convertedMatch,
+                { fixtureId: fixtureIdNum },
+                matchToSave,
                 { upsert: true, new: true }
             )
             
@@ -778,9 +815,26 @@ const fetchTodayFixtures = async () => {
                 
                 for (const matchData of result.data) {
                     const convertedMatch = convertMatchFormat(matchData)
+                    
+                    // Ensure fixtureId is a number
+                    const fixtureIdNum = typeof convertedMatch.fixtureId === 'string' 
+                        ? parseInt(convertedMatch.fixtureId, 10) 
+                        : Number(convertedMatch.fixtureId)
+                    
+                    if (isNaN(fixtureIdNum)) {
+                        console.warn(`⚠️ [fetchTodayFixtures] Invalid fixtureId: ${convertedMatch.fixtureId}, skipping match`)
+                        continue
+                    }
+                    
+                    // Ensure convertedMatch has numeric fixtureId
+                    const matchToSave = {
+                        ...convertedMatch,
+                        fixtureId: fixtureIdNum
+                    }
+                    
                     const updatedMatch = await Match.findOneAndUpdate(
-                        { fixtureId: convertedMatch.fixtureId },
-                        convertedMatch,
+                        { fixtureId: fixtureIdNum },
+                        matchToSave,
                         { upsert: true, new: true }
                     )
                     totalFetched++
