@@ -556,13 +556,22 @@ export const searchUsers = async(req, res) => {
             return res.status(200).json([])  // Return empty array if no search term
         }
 
+        // List of system accounts/channels to exclude from search
+        const systemAccounts = [
+            'Football', 'Weather', 'AlJazeera', 'NBCNews', 'BeinSportsNews', 
+            'SkyNews', 'Cartoonito', 'NatGeoKids', 'SciShowKids', 'JJAnimalTime',
+            'KidsArabic', 'NatGeoAnimals', 'MBCDrama', 'Fox11'
+        ]
+
         // Enhanced search: matches username OR name (case-insensitive, partial match)
         const searchRegex = new RegExp(query.trim(), 'i')
         const users = await User.find({
             $or: [
                 { username: searchRegex },
                 { name: searchRegex }
-            ]
+            ],
+            // Exclude system accounts/channels
+            username: { $nin: systemAccounts }
         })
         .select('username name profilePic bio')  // Include bio for better results
         .limit(20)  // Increased limit for contributor search
