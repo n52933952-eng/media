@@ -558,6 +558,18 @@ const ChessGamePage = () => {
             if (import.meta.env.DEV) {
                 console.log('♟️ Opponent move received:', data)
             }
+            
+            // CRITICAL: Only process moves for the current room (prevent interference from other games)
+            if (data.roomId && data.roomId !== roomId) {
+                if (import.meta.env.DEV) {
+                    console.log('⚠️ [ChessGamePage] Ignoring opponentMove - roomId mismatch:', {
+                        received: data.roomId,
+                        current: roomId
+                    })
+                }
+                return
+            }
+            
             // The move object from madechess has from, to, color, piece, etc.
             // chess.move() can accept this full move object
             if (data && data.move) {

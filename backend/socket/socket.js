@@ -1124,6 +1124,23 @@ export const initializeSocket = async (app) => {
         // Join chess room for spectators
         socket.on("joinChessRoom", async ({ roomId }) => {
             if (roomId) {
+                // CRITICAL: Leave all other chess rooms first to prevent receiving events from multiple games
+                // Get all rooms the socket is currently in
+                const socketRooms = Array.from(socket.rooms)
+                for (const currentRoom of socketRooms) {
+                    // Only leave chess rooms (format: chess_player1_player2_timestamp)
+                    if (currentRoom.startsWith('chess_') && currentRoom !== roomId) {
+                        console.log(`♟️ [joinChessRoom] Leaving old chess room: ${currentRoom} (socket: ${socket.id})`)
+                        socket.leave(currentRoom)
+                        // Also remove from Redis tracking
+                        const oldRoom = await getChessRoom(currentRoom)
+                        if (oldRoom && Array.isArray(oldRoom)) {
+                            const updatedRoom = oldRoom.filter(id => id !== socket.id)
+                            await setChessRoom(currentRoom, updatedRoom)
+                        }
+                    }
+                }
+                
                 // Get or create chess room from Redis
                 let room = await getChessRoom(roomId)
                 if (!room) {
@@ -1222,7 +1239,8 @@ export const initializeSocket = async (app) => {
             if (recipientSocketId) {
                 console.log(`♟️ Forwarding move to ${to} (socket: ${recipientSocketId})`)
                 // Send move in same format as madechess: { move: moveObject }
-                io.to(recipientSocketId).emit("opponentMove", { move })
+                // Include roomId so client can verify they're viewing the correct game
+                io.to(recipientSocketId).emit("opponentMove", { move, roomId })
             } else {
                 console.log(`⚠️ Recipient ${to} not found in socket map`)
             }
@@ -1235,7 +1253,8 @@ export const initializeSocket = async (app) => {
                 if (room && room.size > 0) {
                     console.log(`👁️ Broadcasting move to ${room.size} sockets in room ${roomId}`)
                     // Emit to all sockets in the room (including players and spectators)
-                    io.to(roomId).emit("opponentMove", { move })
+                    // Include roomId in data so clients can verify they're viewing the correct game
+                    io.to(roomId).emit("opponentMove", { move, roomId })
                 } else {
                     console.log(`⚠️ Room ${roomId} doesn't exist or is empty`)
                 }
