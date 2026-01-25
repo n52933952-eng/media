@@ -1513,18 +1513,88 @@ export const initializeSocket = async (app) => {
                 console.log(`⚠️ Accepter ${from} not found in socket map`)
             }
 
-            // Broadcast busy status to ALL online users so they know these users are in a game
-            io.emit("userBusyCard", { userId: from })
-            io.emit("userBusyCard", { userId: to })
-            
-            // Initialize Go Fish game state in Redis
+            // Initialize Go Fish game state in Redis FIRST (before emitting events)
+            let gameState = null
             if (roomId) {
                 const { initializeGoFishGame } = await import('../utils/goFishGame.js')
-                const gameState = initializeGoFishGame(to, from)
+                gameState = initializeGoFishGame(to, from)
                 
                 await setCardGameState(roomId, gameState)
                 console.log(`💾 Initialized Go Fish game state for room ${roomId} in Redis`)
                 console.log(`🃏 Player 1 (${to}) score: ${gameState.players[0].score}, Player 2 (${from}) score: ${gameState.players[1].score}`)
+            }
+
+            // Broadcast busy status to ALL online users so they know these users are in a game
+            io.emit("userBusyCard", { userId: from })
+            io.emit("userBusyCard", { userId: to })
+
+            // Emit game state to both players immediately after initialization
+            if (roomId && gameState) {
+                // Send game state to challenger
+                if (challengerSocketId) {
+                    const challengerPlayerIndex = gameState.players.findIndex((p) => p.userId === to)
+                    const challengerState = {
+                        roomId,
+                        players: gameState.players.map((p, index) => {
+                            if (index === challengerPlayerIndex) {
+                                return {
+                                    userId: p.userId,
+                                    hand: p.hand,
+                                    score: p.score,
+                                    books: p.books || []
+                                }
+                            } else {
+                                return {
+                                    userId: p.userId,
+                                    handCount: p.hand?.length || 0,
+                                    score: p.score,
+                                    books: p.books || []
+                                }
+                            }
+                        }),
+                        deckCount: gameState.deck?.length || 0,
+                        table: gameState.table,
+                        turn: gameState.turn,
+                        gameStatus: gameState.gameStatus,
+                        winner: gameState.winner,
+                        lastMove: gameState.lastMove
+                    }
+                    io.to(challengerSocketId).emit("cardGameState", challengerState)
+                    console.log(`📤 Sent initial game state to challenger ${to}`)
+                }
+
+                // Send game state to accepter
+                if (accepterSocketId) {
+                    const accepterPlayerIndex = gameState.players.findIndex((p) => p.userId === from)
+                    const accepterState = {
+                        roomId,
+                        players: gameState.players.map((p, index) => {
+                            if (index === accepterPlayerIndex) {
+                                return {
+                                    userId: p.userId,
+                                    hand: p.hand,
+                                    score: p.score,
+                                    books: p.books || []
+                                }
+                            } else {
+                                return {
+                                    userId: p.userId,
+                                    handCount: p.hand?.length || 0,
+                                    score: p.score,
+                                    books: p.books || []
+                                }
+                            }
+                        }),
+                        deckCount: gameState.deck?.length || 0,
+                        table: gameState.table,
+                        turn: gameState.turn,
+                        gameStatus: gameState.gameStatus,
+                        winner: gameState.winner,
+                        lastMove: gameState.lastMove
+                    }
+                    io.to(accepterSocketId).emit("cardGameState", accepterState)
+                    console.log(`📤 Sent initial game state to accepter ${from}`)
+                }
             }
             
             // Create card game post in feed for followers
