@@ -1972,21 +1972,68 @@ export const initializeSocket = async (app) => {
         socket.on("requestCardGameState", async ({ roomId }) => {
             if (roomId) {
                 const gameState = await getCardGameState(roomId)
-                if (gameState) {
-                    // Send only public state (not private hands)
-                    const publicState = {
+                if (gameState && gameState.players && gameState.players.length > 0) {
+                    const userId = socket.handshake.query.userId
+                    const playerIndex = gameState.players.findIndex((p) => {
+                        const pId = p.userId?.toString()
+                        const uId = userId?.toString()
+                        return pId === uId
+                    })
+                    
+                    console.log(`📤 [requestCardGameState] Processing request for ${userId}`, {
                         roomId,
-                        players: gameState.players.map((p) => ({
-                            userId: p.userId,
-                            score: p.score,
-                            handCount: p.hand?.length || 0
-                        })),
-                        table: gameState.table,
-                        turn: gameState.turn,
-                        gameStatus: gameState.gameStatus,
-                        winner: gameState.winner
+                        playerIndex,
+                        gameStatePlayers: gameState.players.map((p, idx) => ({
+                            index: idx,
+                            userId: p.userId?.toString(),
+                            handLength: p.hand?.length || 0
+                        }))
+                    })
+                    
+                    if (playerIndex >= 0) {
+                        // Send state with player's own hand (private) and opponent's hand count only
+                        const publicState = {
+                            roomId,
+                            players: gameState.players.map((p, index) => {
+                                if (index === playerIndex) {
+                                    // Send full hand to the player (their own cards)
+                                    return {
+                                        userId: p.userId,
+                                        hand: p.hand || [],
+                                        score: p.score,
+                                        books: p.books || []
+                                    }
+                                } else {
+                                    // Send only count for opponent (privacy)
+                                    return {
+                                        userId: p.userId,
+                                        handCount: p.hand?.length || 0,
+                                        score: p.score,
+                                        books: p.books || []
+                                    }
+                                }
+                            }),
+                            deckCount: gameState.deck?.length || 0,
+                            table: gameState.table,
+                            turn: gameState.turn,
+                            gameStatus: gameState.gameStatus,
+                            winner: gameState.winner,
+                            lastMove: gameState.lastMove
+                        }
+                        io.to(socket.id).emit("cardGameState", publicState)
+                        console.log(`📤 [requestCardGameState] Sent game state to ${userId}`, {
+                            playerIndex,
+                            handLength: gameState.players[playerIndex]?.hand?.length || 0,
+                            sentHandLength: publicState.players[playerIndex]?.hand?.length || 0
+                        })
+                    } else {
+                        console.warn(`⚠️ [requestCardGameState] Player ${userId} not found in game state`, {
+                            roomId,
+                            gameStatePlayers: gameState.players.map((p) => p.userId?.toString())
+                        })
                     }
-                    io.to(socket.id).emit("cardGameState", publicState)
+                } else {
+                    console.log(`⚠️ [requestCardGameState] No game state found for room ${roomId}`)
                 }
             }
         })
