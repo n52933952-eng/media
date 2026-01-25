@@ -775,6 +775,58 @@ export const getBusyChessUsers = async (req, res) => {
     }
 }
 
+// Get all users who are currently in active card games
+export const getBusyCardUsers = async (req, res) => {
+    try {
+        redisService.ensureRedis()
+        const client = redisService.getRedis()
+        const busyUserIds = []
+        let cursor = '0'
+        let scanCount = 0
+        const maxIterations = 100
+        
+        do {
+            scanCount++
+            if (scanCount > maxIterations) {
+                console.error('❌ [getBusyCardUsers] Max iterations reached, breaking loop')
+                break
+            }
+            
+            const result = await client.scan(cursor, {
+                MATCH: 'activeCardGame:*',
+                COUNT: 100
+            })
+            
+            // Handle both array [cursor, keys] and object {cursor, keys} formats
+            let nextCursor, keys
+            if (Array.isArray(result)) {
+                nextCursor = result[0]
+                keys = result[1] || []
+            } else if (result && typeof result === 'object') {
+                nextCursor = result.cursor
+                keys = result.keys || []
+            } else {
+                break
+            }
+            
+            cursor = nextCursor.toString()
+            
+            // Extract user IDs from keys (format: activeCardGame:userId)
+            keys.forEach(key => {
+                const userId = key.replace('activeCardGame:', '')
+                if (userId) {
+                    busyUserIds.push(userId)
+                }
+            })
+        } while (cursor !== '0')
+        
+        res.status(200).json({ busyUserIds })
+    } catch (error) {
+        console.error('Error in getBusyCardUsers:', error)
+        res.status(500).json({ error: error.message || "Failed to get busy card users" })
+    }
+}
+
 // Get users that current user is following
 export const getFollowingUsers = async (req, res) => {
     try {

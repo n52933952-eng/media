@@ -4,7 +4,7 @@ import http from 'http'
 import Message from '../models/message.js'
 import Conversation from '../models/conversation.js'
 import User from '../models/user.js'
-import { createChessGamePost, deleteChessGamePost } from '../controller/post.js'
+import { createChessGamePost, deleteChessGamePost, createCardGamePost, deleteCardGamePost } from '../controller/post.js'
 import * as redisService from '../services/redis.js'
 import { sendCallNotification, sendMissedCallNotification } from '../services/pushNotifications.js'
 // Use redisService namespace for all Redis functions to avoid import issues
@@ -264,6 +264,62 @@ const deleteActiveChessGame = async (userId) => {
 const hasActiveChessGame = async (userId) => {
     redisService.ensureRedis()
     const roomId = await getActiveChessGame(userId)
+    return roomId !== null
+}
+
+// Helper functions for cardGameStates - Redis only
+const setCardGameState = async (roomId, gameState) => {
+    redisService.ensureRedis()
+    await redisService.redisSet(`cardGameState:${roomId}`, gameState, 7200) // 2 hour TTL
+}
+
+const getCardGameState = async (roomId) => {
+    redisService.ensureRedis()
+    try {
+        const redisData = await redisService.redisGet(`cardGameState:${roomId}`)
+        if (redisData) {
+            return redisData
+        }
+    } catch (error) {
+        console.error(`❌ [socket] Failed to read card game state from Redis for ${roomId}:`, error.message)
+        throw error
+    }
+    return null
+}
+
+const deleteCardGameState = async (roomId) => {
+    redisService.ensureRedis()
+    await redisService.redisDel(`cardGameState:${roomId}`)
+}
+
+// Helper functions for activeCardGames - Redis only
+const setActiveCardGame = async (userId, roomId) => {
+    redisService.ensureRedis()
+    await redisService.redisSet(`activeCardGame:${userId}`, roomId, 7200) // 2 hour TTL
+}
+
+const getActiveCardGame = async (userId) => {
+    redisService.ensureRedis()
+    try {
+        const redisData = await redisService.redisGet(`activeCardGame:${userId}`)
+        if (redisData) {
+            return redisData
+        }
+    } catch (error) {
+        console.error(`❌ [socket] Failed to read active card game from Redis for ${userId}:`, error.message)
+        throw error
+    }
+    return null
+}
+
+const deleteActiveCardGame = async (userId) => {
+    redisService.ensureRedis()
+    await redisService.redisDel(`activeCardGame:${userId}`)
+}
+
+const hasActiveCardGame = async (userId) => {
+    redisService.ensureRedis()
+    const roomId = await getActiveCardGame(userId)
     return roomId !== null
 }
 
@@ -1383,6 +1439,442 @@ export const initializeSocket = async (app) => {
             }
         })
 
+        // Card Game Challenge Events (Same pattern as Chess)
+        socket.on("cardChallenge", async ({ from, to, fromName, fromUsername, fromProfilePic }) => {
+            console.log(`🃏 Card challenge from ${from} to ${to}`)
+            const recipientData = await getUserSocket(to)
+            const recipientSocketId = recipientData?.socketId
+            if (recipientSocketId) {
+                io.to(recipientSocketId).emit("cardChallenge", {
+                    from,
+                    fromName,
+                    fromUsername,
+                    fromProfilePic
+                })
+            }
+        })
+
+        socket.on("acceptCardChallenge", async ({ from, to, roomId }) => {
+            console.log(`🃏 Card challenge accepted: ${roomId}`)
+            console.log(`🃏 Challenger (to): ${to}`)
+            console.log(`🃏 Accepter (from): ${from}`)
+            
+            const challengerData = await getUserSocket(to)
+            const challengerSocketId = challengerData?.socketId
+            const accepterData = await getUserSocket(from)
+            const accepterSocketId = accepterData?.socketId
+
+            // Create card game room and join both players to Socket.IO room
+            if (roomId) {
+                // Track active games for both players (Redis)
+                await setActiveCardGame(to, roomId)
+                await setActiveCardGame(from, roomId)
+                
+                // Join challenger to room
+                if (challengerSocketId) {
+                    const challengerSocket = io.sockets.sockets.get(challengerSocketId)
+                    if (challengerSocket) {
+                        challengerSocket.join(roomId)
+                        console.log(`🃏 Challenger ${to} joined room: ${roomId}`)
+                    }
+                }
+                // Join accepter to room
+                if (accepterSocketId) {
+                    const accepterSocket = io.sockets.sockets.get(accepterSocketId)
+                    if (accepterSocket) {
+                        accepterSocket.join(roomId)
+                        console.log(`🃏 Accepter ${from} joined room: ${roomId}`)
+                    }
+                }
+                console.log(`🃏 Created card game room: ${roomId} with both players`)
+            }
+
+            if (challengerSocketId) {
+                console.log(`🃏 Sending data to challenger: ${to} (socket: ${challengerSocketId})`)
+                const challengerData = {
+                    roomId,
+                    opponentId: from
+                }
+                console.log(`🃏 Challenger data:`, challengerData)
+                io.to(challengerSocketId).emit("acceptCardChallenge", challengerData)
+            } else {
+                console.log(`⚠️ Challenger ${to} not found in socket map`)
+            }
+
+            if (accepterSocketId) {
+                console.log(`🃏 Sending data to accepter: ${from} (socket: ${accepterSocketId})`)
+                const accepterData = {
+                    roomId,
+                    opponentId: to
+                }
+                console.log(`🃏 Accepter data:`, accepterData)
+                io.to(accepterSocketId).emit("acceptCardChallenge", accepterData)
+            } else {
+                console.log(`⚠️ Accepter ${from} not found in socket map`)
+            }
+
+            // Broadcast busy status to ALL online users so they know these users are in a game
+            io.emit("userBusyCard", { userId: from })
+            io.emit("userBusyCard", { userId: to })
+            
+            // Initialize Go Fish game state in Redis
+            if (roomId) {
+                const { initializeGoFishGame } = await import('../utils/goFishGame.js')
+                const gameState = initializeGoFishGame(to, from)
+                
+                await setCardGameState(roomId, gameState)
+                console.log(`💾 Initialized Go Fish game state for room ${roomId} in Redis`)
+                console.log(`🃏 Player 1 (${to}) score: ${gameState.players[0].score}, Player 2 (${from}) score: ${gameState.players[1].score}`)
+            }
+            
+            // Create card game post in feed for followers
+            setTimeout(() => {
+                createCardGamePost(to, from, roomId).catch(err => {
+                    console.error('❌ [socket] Error creating card game post:', err)
+                })
+            }, 500)
+        })
+
+        socket.on("declineCardChallenge", async ({ from, to }) => {
+            console.log(`🃏 Card challenge declined by ${from}`)
+            const challengerData = await getUserSocket(to)
+            const challengerSocketId = challengerData?.socketId
+            if (challengerSocketId) {
+                io.to(challengerSocketId).emit("cardDeclined", { from })
+            }
+        })
+
+        // Join card room for spectators
+        socket.on("joinCardRoom", async ({ roomId, userId }) => {
+            if (roomId) {
+                // CRITICAL: Leave all other card rooms first
+                const socketRooms = Array.from(socket.rooms)
+                for (const currentRoom of socketRooms) {
+                    if (currentRoom.startsWith('card_') && currentRoom !== roomId) {
+                        console.log(`🃏 [joinCardRoom] Leaving old card room: ${currentRoom} (socket: ${socket.id})`)
+                        socket.leave(currentRoom)
+                    }
+                }
+                
+                // Join the Socket.IO room
+                socket.join(roomId)
+                console.log(`🃏 User joined card room: ${roomId} (socket: ${socket.id})`)
+                
+                // Send current game state when joining (for catch-up)
+                const gameState = await getCardGameState(roomId)
+                
+                if (gameState) {
+                    const userId = socket.handshake.query.userId
+                    const playerIndex = gameState.players.findIndex((p) => p.userId === userId)
+                    
+                    console.log(`📤 Sending card game state to user for catch-up:`, {
+                        roomId,
+                        gameStatus: gameState.gameStatus,
+                        turn: gameState.turn,
+                        playerIndex,
+                        lastUpdated: new Date(gameState.lastUpdated).toISOString()
+                    })
+                    
+                    // Send state with player's own hand (private) and opponent's hand count only
+                    const publicState = {
+                        roomId,
+                        players: gameState.players.map((p, index) => {
+                            if (index === playerIndex) {
+                                // Send full hand to the player (their own cards)
+                                return {
+                                    userId: p.userId,
+                                    hand: p.hand, // Private - only for this player
+                                    score: p.score,
+                                    books: p.books || []
+                                }
+                            } else {
+                                // Send only count for opponent (privacy)
+                                return {
+                                    userId: p.userId,
+                                    handCount: p.hand?.length || 0,
+                                    score: p.score,
+                                    books: p.books || []
+                                }
+                            }
+                        }),
+                        deckCount: gameState.deck?.length || 0,
+                        table: gameState.table,
+                        turn: gameState.turn,
+                        gameStatus: gameState.gameStatus,
+                        winner: gameState.winner,
+                        lastMove: gameState.lastMove
+                    }
+                    io.to(socket.id).emit("cardGameState", publicState)
+                } else {
+                    console.log(`⚠️ No game state found for room ${roomId}`)
+                }
+            }
+        })
+
+        socket.on("cardMove", async ({ roomId, move, to }) => {
+            console.log(`🃏 Card move received from ${socket.handshake.query.userId} to ${to}`)
+            console.log(`🃏 Move data:`, move)
+            
+            // Update game state in backend (for spectator catch-up) - Redis
+            if (roomId) {
+                const currentState = await getCardGameState(roomId)
+                if (currentState) {
+                    const userId = socket.handshake.query.userId
+                    const playerIndex = currentState.players.findIndex((p) => p.userId === userId)
+                    
+                    if (playerIndex === -1) {
+                        console.error(`❌ [cardMove] Player ${userId} not found in game state`)
+                        return
+                    }
+                    
+                    // Validate it's player's turn
+                    if (currentState.turn !== playerIndex) {
+                        console.warn(`⚠️ [cardMove] Not player's turn. Current turn: ${currentState.turn}, Player index: ${playerIndex}`)
+                        return
+                    }
+                    
+                    try {
+                        const { processAskMove, checkGameOver } = await import('../utils/goFishGame.js')
+                        
+                        // Process Go Fish "ask" move
+                        if (move.action === 'ask' && move.rank) {
+                            const result = processAskMove(currentState, playerIndex, move.rank)
+                            
+                            // Update turn
+                            currentState.turn = result.nextTurn
+                            currentState.lastMove = {
+                                playerId: userId,
+                                action: 'ask',
+                                rank: move.rank,
+                                gotCards: result.gotCards,
+                                cardsReceived: result.cardsReceived || 0,
+                                newBooks: result.newBooks || 0,
+                                timestamp: Date.now()
+                            }
+                            
+                            // Check for game over
+                            const gameOverCheck = checkGameOver(currentState)
+                            if (gameOverCheck.gameOver) {
+                                currentState.gameStatus = 'finished'
+                                currentState.winner = gameOverCheck.winner
+                            }
+                            
+                            currentState.lastUpdated = Date.now()
+                            
+                            await setCardGameState(roomId, currentState)
+                            console.log(`💾 Updated Go Fish game state for room ${roomId}`)
+                            console.log(`🃏 Scores: P1=${currentState.players[0].score}, P2=${currentState.players[1].score}`)
+                            
+                            // If game over, emit game end event
+                            if (gameOverCheck.gameOver) {
+                                const player1Data = await getUserSocket(currentState.players[0].userId)
+                                const player2Data = await getUserSocket(currentState.players[1].userId)
+                                const player1SocketId = player1Data?.socketId
+                                const player2SocketId = player2Data?.socketId
+                                
+                                const winnerName = gameOverCheck.winner === currentState.players[0].userId 
+                                    ? 'Player 1' 
+                                    : gameOverCheck.winner === currentState.players[1].userId 
+                                    ? 'Player 2' 
+                                    : 'Tie'
+                                
+                                const endMessage = gameOverCheck.winner 
+                                    ? `${winnerName} wins! (${gameOverCheck.scores.player1} - ${gameOverCheck.scores.player2})`
+                                    : `Tie game! (${gameOverCheck.scores.player1} - ${gameOverCheck.scores.player2})`
+                                
+                                if (player1SocketId) {
+                                    io.to(player1SocketId).emit("cardGameEnded", { 
+                                        roomId,
+                                        reason: 'finished',
+                                        message: endMessage
+                                    })
+                                }
+                                if (player2SocketId) {
+                                    io.to(player2SocketId).emit("cardGameEnded", { 
+                                        roomId,
+                                        reason: 'finished',
+                                        message: endMessage
+                                    })
+                                }
+                                
+                                // Notify spectators
+                                const room = io.sockets.adapter.rooms.get(roomId)
+                                if (room && room.size > 0) {
+                                    io.to(roomId).emit("cardGameEnded", { 
+                                        reason: 'finished',
+                                        message: endMessage
+                                    })
+                                }
+                                
+                                // Delete card game post
+                                deleteCardGamePost(roomId).catch(err => {
+                                    console.error('❌ Error deleting card game post:', err)
+                                })
+                                
+                                // Clean up Redis
+                                await deleteActiveCardGame(currentState.players[0].userId)
+                                await deleteActiveCardGame(currentState.players[1].userId)
+                                await deleteCardGameState(roomId)
+                                
+                                // Make users available
+                                io.emit("userAvailableCard", { userId: currentState.players[0].userId })
+                                io.emit("userAvailableCard", { userId: currentState.players[1].userId })
+                            }
+                        }
+                    } catch (error) {
+                        console.error(`❌ [cardMove] Error processing move:`, error)
+                        // Don't update state if move is invalid
+                        return
+                    }
+                }
+            }
+            
+            // Emit to the opponent (specific user)
+            const recipientData = await getUserSocket(to)
+            const recipientSocketId = recipientData?.socketId
+            if (recipientSocketId) {
+                console.log(`🃏 Forwarding move to ${to} (socket: ${recipientSocketId})`)
+                io.to(recipientSocketId).emit("opponentMove", { move, roomId })
+            } else {
+                console.log(`⚠️ Recipient ${to} not found in socket map`)
+            }
+            
+            // ALSO emit to all spectators in the room
+            if (roomId) {
+                const room = io.sockets.adapter.rooms.get(roomId)
+                if (room && room.size > 0) {
+                    console.log(`👁️ Broadcasting move to ${room.size} sockets in room ${roomId}`)
+                    io.to(roomId).emit("opponentMove", { move, roomId })
+                }
+            }
+        })
+
+        socket.on("resignCard", async ({ roomId, to }) => {
+            const recipientData = await getUserSocket(to)
+            const recipientSocketId = recipientData?.socketId
+            const resignerData = await getUserSocket(socket.handshake.query.userId)
+            const resignerSocketId = resignerData?.socketId
+            const userId = socket.handshake.query.userId
+            
+            if (recipientSocketId) {
+                io.to(recipientSocketId).emit("opponentResigned")
+            }
+            
+            // Emit cleanup event to both players
+            if (resignerSocketId) {
+                io.to(resignerSocketId).emit("cardGameCleanup")
+            }
+            if (recipientSocketId) {
+                io.to(recipientSocketId).emit("cardGameCleanup")
+            }
+            
+            // Notify all spectators in the room that game ended
+            if (roomId) {
+                const room = io.sockets.adapter.rooms.get(roomId)
+                if (room && room.size > 0) {
+                    console.log(`👁️ Notifying ${room.size} spectators that game ended (resign)`)
+                    io.to(roomId).emit("cardGameEnded", { reason: 'resigned' })
+                }
+            }
+            
+            // Delete card game post immediately
+            if (roomId) {
+                deleteCardGamePost(roomId).catch(err => {
+                    console.error('❌ Error deleting card game post on resign:', err)
+                })
+                // Remove from active games tracking (Redis)
+                await deleteActiveCardGame(userId)
+                await deleteActiveCardGame(to)
+                // Clean up game state (Redis)
+                await deleteCardGameState(roomId)
+                console.log(`🗑️ Cleaned up card game state for room ${roomId}`)
+            }
+            
+            // Make users available again
+            if (resignerSocketId) {
+                io.emit("userAvailableCard", { userId })
+                io.emit("userAvailableCard", { userId: to })
+            }
+        })
+
+        socket.on("cardGameEnd", async ({ roomId, player1, player2, reason }) => {
+            const currentUserId = socket.handshake.query.userId
+            const player1Data = await getUserSocket(player1)
+            const player1SocketId = player1Data?.socketId
+            const player2Data = await getUserSocket(player2)
+            const player2SocketId = player2Data?.socketId
+            
+            // If game ended normally, notify both players
+            if (reason === 'game_over' || reason === 'finished') {
+                if (player1SocketId) {
+                    io.to(player1SocketId).emit("cardGameCleanup")
+                }
+                if (player2SocketId) {
+                    io.to(player2SocketId).emit("cardGameCleanup")
+                }
+            } else {
+                // Player left - notify the other player
+                const otherPlayerId = currentUserId === player1 ? player2 : player1
+                const otherPlayerSocketId = currentUserId === player1 ? player2SocketId : player1SocketId
+                
+                if (otherPlayerSocketId) {
+                    io.to(otherPlayerSocketId).emit("opponentLeftGame")
+                    io.to(otherPlayerSocketId).emit("cardGameCleanup")
+                }
+            }
+            
+            // Notify all spectators in the room that game ended
+            if (roomId) {
+                const room = io.sockets.adapter.rooms.get(roomId)
+                if (room && room.size > 0) {
+                    const endReason = reason || 'player_left'
+                    console.log(`👁️ Notifying ${room.size} spectators that game ended (${endReason})`)
+                    io.to(roomId).emit("cardGameEnded", { reason: endReason })
+                }
+            }
+            
+            // Delete card game post immediately
+            if (roomId) {
+                deleteCardGamePost(roomId).catch(err => {
+                    console.error('❌ Error deleting card game post on game end:', err)
+                })
+                // Remove from active games tracking (Redis)
+                await deleteActiveCardGame(player1)
+                await deleteActiveCardGame(player2)
+                // Clean up game state (Redis)
+                await deleteCardGameState(roomId)
+                console.log(`🗑️ Cleaned up card game state for room ${roomId}`)
+            }
+            
+            // Make users available again
+            if (player1SocketId) {
+                io.emit("userAvailableCard", { userId: player1 })
+                io.emit("userAvailableCard", { userId: player2 })
+            }
+        })
+
+        socket.on("requestCardGameState", async ({ roomId }) => {
+            if (roomId) {
+                const gameState = await getCardGameState(roomId)
+                if (gameState) {
+                    // Send only public state (not private hands)
+                    const publicState = {
+                        roomId,
+                        players: gameState.players.map((p) => ({
+                            userId: p.userId,
+                            score: p.score,
+                            handCount: p.hand?.length || 0
+                        })),
+                        table: gameState.table,
+                        turn: gameState.turn,
+                        gameStatus: gameState.gameStatus,
+                        winner: gameState.winner
+                    }
+                    io.to(socket.id).emit("cardGameState", publicState)
+                }
+            }
+        })
+
         socket.on("disconnect", async () => {
             console.log("user disconnected", socket.id)
             
@@ -1503,6 +1995,78 @@ export const initializeSocket = async (app) => {
                     // Clean up game state (Redis)
                     await deleteChessGameState(gameRoomId)
                     console.log(`🗑️ Cleaned up game state for room ${gameRoomId}`)
+                }, 10000) // Wait 10 seconds before ending game
+            }
+
+            // Handle card game disconnection (same pattern as chess)
+            if (disconnectedUserId && await hasActiveCardGame(disconnectedUserId)) {
+                const gameRoomId = await getActiveCardGame(disconnectedUserId)
+                console.log(`🃏 User ${disconnectedUserId} disconnected while in card game: ${gameRoomId}`)
+                console.log(`⏳ Waiting 10 seconds to see if user reconnects (page refresh)...`)
+                
+                // Find the other player from game state
+                let otherPlayerId = null
+                const gameState = await getCardGameState(gameRoomId)
+                if (gameState && gameState.players) {
+                    const otherPlayer = gameState.players.find((p) => p.userId !== disconnectedUserId)
+                    if (otherPlayer) {
+                        otherPlayerId = otherPlayer.userId
+                    }
+                }
+                
+                // Wait 10 seconds before ending the game (allows time for page refresh reconnect)
+                setTimeout(async () => {
+                    // Check if user reconnected
+                    const stillInGame = await hasActiveCardGame(disconnectedUserId)
+                    const reconnectedSocket = await getUserSocket(disconnectedUserId)
+                    
+                    if (stillInGame && reconnectedSocket) {
+                        console.log(`✅ User ${disconnectedUserId} reconnected - card game continues!`)
+                        return // User reconnected, don't end the game
+                    }
+                    
+                    // User didn't reconnect - end the game
+                    console.log(`❌ User ${disconnectedUserId} did not reconnect - ending card game`)
+                    
+                    // Notify the other player
+                    if (otherPlayerId) {
+                        const otherPlayerData = await getUserSocket(otherPlayerId)
+                        const otherPlayerSocketId = otherPlayerData?.socketId
+                        if (otherPlayerSocketId) {
+                            io.to(otherPlayerSocketId).emit("opponentLeftGame")
+                            io.to(otherPlayerSocketId).emit("cardGameCleanup")
+                        }
+                    }
+                    
+                    // Notify all spectators in the room
+                    if (gameRoomId) {
+                        const room = io.sockets.adapter.rooms.get(gameRoomId)
+                        if (room && room.size > 0) {
+                            console.log(`👁️ Notifying ${room.size} spectators that card game ended (player disconnected)`)
+                            io.to(gameRoomId).emit("cardGameEnded", { reason: 'player_disconnected' })
+                        }
+                    }
+                    
+                    // Delete card game post
+                    deleteCardGamePost(gameRoomId).catch(err => {
+                        console.error('❌ Error deleting card game post on disconnect:', err)
+                    })
+                    
+                    // Remove from active games tracking (Redis)
+                    await deleteActiveCardGame(disconnectedUserId)
+                    if (otherPlayerId) {
+                        await deleteActiveCardGame(otherPlayerId)
+                    }
+                    
+                    // Clean up game state (Redis)
+                    await deleteCardGameState(gameRoomId)
+                    console.log(`🗑️ Cleaned up card game state for room ${gameRoomId}`)
+                    
+                    // Make users available again
+                    io.emit("userAvailableCard", { userId: disconnectedUserId })
+                    if (otherPlayerId) {
+                        io.emit("userAvailableCard", { userId: otherPlayerId })
+                    }
                 }, 10000) // Wait 10 seconds before ending game
             }
             

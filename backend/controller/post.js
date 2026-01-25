@@ -1337,6 +1337,185 @@ export const createChessGamePost = async (player1Id, player2Id, roomId) => {
     }
 }
 
+// Create card game post when two players start a game
+export const createCardGamePost = async (player1Id, player2Id, roomId) => {
+    try {
+        // Get both players' info
+        const player1 = await User.findById(player1Id).select('username name profilePic')
+        const player2 = await User.findById(player2Id).select('username name profilePic')
+        
+        if (!player1 || !player2) {
+            console.error('❌ [createCardGamePost] Player not found:', { player1Id, player2Id })
+            return null
+        }
+        
+        // Create card game data
+        const cardGameData = {
+            player1: {
+                _id: player1._id.toString(),
+                username: player1.username,
+                name: player1.name,
+                profilePic: player1.profilePic
+            },
+            player2: {
+                _id: player2._id.toString(),
+                username: player2.username,
+                name: player2.name,
+                profilePic: player2.profilePic
+            },
+            roomId: roomId,
+            gameStatus: 'active',
+            gameType: 'goFish',
+            createdAt: new Date()
+        }
+        
+        // Create posts for both players
+        const posts = []
+        
+        // Post from player1's perspective
+        const post1 = new Post({
+            postedBy: player1Id,
+            text: `Playing Go Fish with ${player2.name} 🃏`,
+            cardGameData: JSON.stringify(cardGameData)
+        })
+        await post1.save()
+        await post1.populate("postedBy", "username profilePic name")
+        posts.push(post1)
+        
+        // Post from player2's perspective
+        if (player1Id.toString() !== player2Id.toString()) {
+            const post2 = new Post({
+                postedBy: player2Id,
+                text: `Playing Go Fish with ${player1.name} 🃏`,
+                cardGameData: JSON.stringify(cardGameData)
+            })
+            await post2.save()
+            await post2.populate("postedBy", "username profilePic name")
+            posts.push(post2)
+        }
+        
+        console.log('✅ [createCardGamePost] Created card game posts:', posts.map(p => p._id))
+        
+        // Emit newPost to online followers (same pattern as chess)
+        const io = getIO()
+        if (io) {
+            const { getAllUserSockets } = await import('../socket/socket.js')
+            const userSocketMap = await getAllUserSockets()
+            
+            for (const post of posts) {
+                const postAuthorId = post.postedBy?._id?.toString() || post.postedBy?.toString()
+                if (!postAuthorId) {
+                    console.error(`❌ [createCardGamePost] Post ${post._id} has invalid postedBy field:`, post.postedBy)
+                    continue
+                }
+                
+                try {
+                    const followerDocs = await Follow.find({ followeeId: postAuthorId })
+                        .select('followerId')
+                        .limit(10000)
+                        .lean()
+                    
+                    if (followerDocs.length === 0) {
+                        console.log(`ℹ️ [createCardGamePost] Post author ${postAuthorId} has no followers`)
+                        continue
+                    }
+                    
+                    const onlineFollowers = []
+                    followerDocs.forEach(d => {
+                        const followerIdStr = d.followerId?.toString?.() ?? String(d.followerId)
+                        if (userSocketMap[followerIdStr]) {
+                            onlineFollowers.push(userSocketMap[followerIdStr].socketId)
+                        }
+                    })
+                    
+                    if (onlineFollowers.length > 0) {
+                        const postObject = post.toObject()
+                        postObject.cardGameData = post.cardGameData
+                        
+                        onlineFollowers.forEach(socketId => {
+                            io.to(socketId).emit("newPost", { postId: post._id, post: postObject })
+                        })
+                    }
+                } catch (err) {
+                    console.error(`❌ [createCardGamePost] Error emitting post ${post._id}:`, err)
+                }
+            }
+        }
+        
+        return posts
+    } catch (error) {
+        console.error('Error creating card game post:', error)
+        throw error
+    }
+}
+
+// Function to delete card game posts by roomId
+export const deleteCardGamePost = async (roomId) => {
+    try {
+        if (!roomId) {
+            console.log('⚠️ No roomId provided for card game post deletion')
+            return
+        }
+
+        // Find all posts with this roomId in cardGameData
+        const posts = await Post.find({
+            cardGameData: { $exists: true, $ne: null }
+        })
+
+        let deletedCount = 0
+        for (const post of posts) {
+            try {
+                if (post.cardGameData) {
+                    const cardData = JSON.parse(post.cardGameData)
+                    if (cardData.roomId === roomId) {
+                        // Get followers before deleting
+                        const postAuthorId = post.postedBy.toString()
+                        const followerDocs = await Follow.find({ followeeId: postAuthorId })
+                          .select('followerId')
+                          .limit(10000)
+                          .lean()
+                        
+                        // Delete the post
+                        await Post.findByIdAndDelete(post._id)
+                        deletedCount++
+                        console.log(`🗑️ Deleted card game post: ${post._id} for roomId: ${roomId}`)
+
+                        // Emit post deleted to online followers
+                        const io = getIO()
+                        if (io && followerDocs && followerDocs.length > 0) {
+                            const { getAllUserSockets } = await import('../socket/socket.js')
+                            const userSocketMap = await getAllUserSockets()
+                            const onlineFollowers = []
+                            
+                            followerDocs.forEach(d => {
+                                const followerIdStr = d.followerId?.toString?.() ?? String(d.followerId)
+                                if (userSocketMap[followerIdStr]) {
+                                    onlineFollowers.push(userSocketMap[followerIdStr].socketId)
+                                }
+                            })
+                            
+                            if (onlineFollowers.length > 0) {
+                                io.to(onlineFollowers).emit("postDeleted", { postId: post._id })
+                            }
+                        }
+                    }
+                }
+            } catch (parseError) {
+                console.error(`Error parsing cardGameData for post ${post._id}:`, parseError)
+            }
+        }
+
+        if (deletedCount > 0) {
+            console.log(`✅ Deleted ${deletedCount} card game post(s) for roomId: ${roomId}`)
+        } else {
+            console.log(`⚠️ No card game posts found for roomId: ${roomId}`)
+        }
+    } catch (error) {
+        console.error('Error deleting card game post:', error)
+        throw error
+    }
+}
+
 // Function to delete chess game posts by roomId
 export const deleteChessGamePost = async (roomId) => {
     try {
