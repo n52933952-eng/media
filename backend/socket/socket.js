@@ -1530,16 +1530,39 @@ export const initializeSocket = async (app) => {
 
             // Emit game state to both players immediately after initialization
             if (roomId && gameState) {
+                console.log(`🃏 [acceptCardChallenge] Game state initialized:`, {
+                    player1Id: gameState.players[0]?.userId,
+                    player1HandLength: gameState.players[0]?.hand?.length || 0,
+                    player2Id: gameState.players[1]?.userId,
+                    player2HandLength: gameState.players[1]?.hand?.length || 0,
+                    challengerId: to,
+                    accepterId: from,
+                    turn: gameState.turn
+                })
+
                 // Send game state to challenger
                 if (challengerSocketId) {
-                    const challengerPlayerIndex = gameState.players.findIndex((p) => p.userId === to)
+                    // Challenger is player1 (index 0) in initializeGoFishGame
+                    const challengerPlayerIndex = gameState.players.findIndex((p) => {
+                        const pId = p.userId?.toString()
+                        const toId = to?.toString()
+                        return pId === toId
+                    })
+                    
+                    console.log(`🃏 [acceptCardChallenge] Challenger player index: ${challengerPlayerIndex}`, {
+                        challengerId: to,
+                        player0Id: gameState.players[0]?.userId?.toString(),
+                        player1Id: gameState.players[1]?.userId?.toString(),
+                        challengerHandLength: challengerPlayerIndex >= 0 ? gameState.players[challengerPlayerIndex]?.hand?.length : 'NOT FOUND'
+                    })
+
                     const challengerState = {
                         roomId,
                         players: gameState.players.map((p, index) => {
-                            if (index === challengerPlayerIndex) {
+                            if (index === challengerPlayerIndex && challengerPlayerIndex >= 0) {
                                 return {
                                     userId: p.userId,
-                                    hand: p.hand,
+                                    hand: p.hand || [],
                                     score: p.score,
                                     books: p.books || []
                                 }
@@ -1560,19 +1583,37 @@ export const initializeSocket = async (app) => {
                         lastMove: gameState.lastMove
                     }
                     io.to(challengerSocketId).emit("cardGameState", challengerState)
-                    console.log(`📤 Sent initial game state to challenger ${to}`)
+                    console.log(`📤 Sent initial game state to challenger ${to}`, {
+                        handLength: challengerPlayerIndex >= 0 ? gameState.players[challengerPlayerIndex]?.hand?.length : 0,
+                        playerIndex: challengerPlayerIndex,
+                        turn: gameState.turn,
+                        sentHandLength: challengerState.players[challengerPlayerIndex]?.hand?.length || 0
+                    })
                 }
 
                 // Send game state to accepter
                 if (accepterSocketId) {
-                    const accepterPlayerIndex = gameState.players.findIndex((p) => p.userId === from)
+                    // Accepter is player2 (index 1) in initializeGoFishGame
+                    const accepterPlayerIndex = gameState.players.findIndex((p) => {
+                        const pId = p.userId?.toString()
+                        const fromId = from?.toString()
+                        return pId === fromId
+                    })
+                    
+                    console.log(`🃏 [acceptCardChallenge] Accepter player index: ${accepterPlayerIndex}`, {
+                        accepterId: from,
+                        player0Id: gameState.players[0]?.userId?.toString(),
+                        player1Id: gameState.players[1]?.userId?.toString(),
+                        accepterHandLength: accepterPlayerIndex >= 0 ? gameState.players[accepterPlayerIndex]?.hand?.length : 'NOT FOUND'
+                    })
+
                     const accepterState = {
                         roomId,
                         players: gameState.players.map((p, index) => {
-                            if (index === accepterPlayerIndex) {
+                            if (index === accepterPlayerIndex && accepterPlayerIndex >= 0) {
                                 return {
                                     userId: p.userId,
-                                    hand: p.hand,
+                                    hand: p.hand || [],
                                     score: p.score,
                                     books: p.books || []
                                 }
@@ -1593,7 +1634,12 @@ export const initializeSocket = async (app) => {
                         lastMove: gameState.lastMove
                     }
                     io.to(accepterSocketId).emit("cardGameState", accepterState)
-                    console.log(`📤 Sent initial game state to accepter ${from}`)
+                    console.log(`📤 Sent initial game state to accepter ${from}`, {
+                        handLength: accepterPlayerIndex >= 0 ? gameState.players[accepterPlayerIndex]?.hand?.length : 0,
+                        playerIndex: accepterPlayerIndex,
+                        turn: gameState.turn,
+                        sentHandLength: accepterState.players[accepterPlayerIndex]?.hand?.length || 0
+                    })
                 }
             }
             

@@ -120,38 +120,44 @@ export const initializeGoFishGame = (player1Id, player2Id) => {
     // Deal 7 cards to each player
     const { hands, deck } = dealCards(fullDeck, 2, 7)
     
+    console.log(`🃏 [initializeGoFishGame] Dealt cards:`, {
+        player1HandLength: hands[0]?.length || 0,
+        player2HandLength: hands[1]?.length || 0,
+        deckLength: deck?.length || 0
+    })
+    
     // Check for initial books (4 of a kind in starting hand)
-    let player1Hand = hands[0]
-    let player2Hand = hands[1]
+    let player1Hand = hands[0] || []
+    let player2Hand = hands[1] || []
     let player1Score = 0
     let player2Score = 0
     
     // Remove initial books from player 1
     const player1Books = removeBooks(player1Hand)
-    player1Hand = player1Books.newHand
+    player1Hand = player1Books.newHand || []
     player1Score = player1Books.books.length
     
     // Remove initial books from player 2
     const player2Books = removeBooks(player2Hand)
-    player2Hand = player2Books.newHand
+    player2Hand = player2Books.newHand || []
     player2Score = player2Books.books.length
     
-    return {
+    const gameState = {
         players: [
             {
                 userId: player1Id,
                 hand: player1Hand,
                 score: player1Score,
-                books: player1Books.books
+                books: player1Books.books || []
             },
             {
                 userId: player2Id,
                 hand: player2Hand,
                 score: player2Score,
-                books: player2Books.books
+                books: player2Books.books || []
             }
         ],
-        deck: deck,
+        deck: deck || [],
         table: [], // Not used in Go Fish, but kept for consistency
         turn: 0, // 0 = player1, 1 = player2
         gameStatus: 'playing',
@@ -160,6 +166,19 @@ export const initializeGoFishGame = (player1Id, player2Id) => {
         createdAt: Date.now(),
         lastUpdated: Date.now()
     }
+    
+    console.log(`🃏 [initializeGoFishGame] Final game state:`, {
+        player1Id: player1Id?.toString(),
+        player1HandLength: gameState.players[0]?.hand?.length || 0,
+        player1Score: gameState.players[0]?.score,
+        player2Id: player2Id?.toString(),
+        player2HandLength: gameState.players[1]?.hand?.length || 0,
+        player2Score: gameState.players[1]?.score,
+        deckLength: gameState.deck?.length || 0,
+        turn: gameState.turn
+    })
+    
+    return gameState
 }
 
 // Process a "ask" move in Go Fish
