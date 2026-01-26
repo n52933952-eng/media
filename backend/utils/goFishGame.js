@@ -267,15 +267,22 @@ export const processAskMove = (gameState, playerIndex, askedRank) => {
 export const checkGameOver = (gameState) => {
     // Game ends when:
     // 1. Both players have no cards left, OR
-    // 2. Deck is empty and no more moves possible
+    // 2. Any player has 0 cards (can't make moves), OR
+    // 3. Deck is empty and both players have no cards
     
     const player1 = gameState.players[0]
     const player2 = gameState.players[1]
     
-    const bothHandsEmpty = player1.hand.length === 0 && player2.hand.length === 0
+    const player1HandEmpty = player1.hand.length === 0
+    const player2HandEmpty = player2.hand.length === 0
+    const bothHandsEmpty = player1HandEmpty && player2HandEmpty
     const deckEmpty = gameState.deck.length === 0
     
-    if (bothHandsEmpty || (deckEmpty && player1.hand.length === 0 && player2.hand.length === 0)) {
+    // Game ends if:
+    // - Both players have no cards, OR
+    // - Any player has 0 cards (they can't ask for a rank - need at least one card to ask)
+    // Note: In Go Fish, you need at least one card of a rank to ask for it, so 0 cards = can't make moves
+    if (bothHandsEmpty || player1HandEmpty || player2HandEmpty) {
         // Determine winner
         if (player1.score > player2.score) {
             return {
