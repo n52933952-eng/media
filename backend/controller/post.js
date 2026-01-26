@@ -1525,10 +1525,13 @@ export const deleteCardGamePost = async (roomId) => {
                         }
                     }
                     
+                    // Store post ID before deleting
+                    const deletedPostId = post._id.toString()
+                    
                     // Delete the post
                     await Post.findByIdAndDelete(post._id)
                     deletedCount++
-                    console.log(`🗑️ Deleted card game post: ${post._id} for roomId: ${roomId}`)
+                    console.log(`🗑️ Deleted card game post: ${deletedPostId} for roomId: ${roomId}`)
 
                     // Emit post deleted to post author, other player, and all followers
                     const io = getIO()
@@ -1538,8 +1541,12 @@ export const deleteCardGamePost = async (roomId) => {
                         const recipients = new Set() // Use Set to avoid duplicates
                         
                         // Add post author (player who created this post)
-                        if (userSocketMap[postAuthorId]) {
-                            recipients.add(userSocketMap[postAuthorId].socketId)
+                        const postAuthorSocket = userSocketMap[postAuthorId]
+                        if (postAuthorSocket) {
+                            recipients.add(postAuthorSocket.socketId)
+                            console.log(`✅ [deleteCardGamePost] Added post author ${postAuthorId} to recipients (socket: ${postAuthorSocket.socketId})`)
+                        } else {
+                            console.log(`⚠️ [deleteCardGamePost] Post author ${postAuthorId} not found in socket map`)
                         }
                         
                         // Add other player (if different from post author)
@@ -1553,8 +1560,14 @@ export const deleteCardGamePost = async (roomId) => {
                             otherPlayerId = postAuthorId === player1Id ? player2Id : player1Id
                         }
                         
-                        if (otherPlayerId && userSocketMap[otherPlayerId]) {
-                            recipients.add(userSocketMap[otherPlayerId].socketId)
+                        if (otherPlayerId) {
+                            const otherPlayerSocket = userSocketMap[otherPlayerId]
+                            if (otherPlayerSocket) {
+                                recipients.add(otherPlayerSocket.socketId)
+                                console.log(`✅ [deleteCardGamePost] Added other player ${otherPlayerId} to recipients (socket: ${otherPlayerSocket.socketId})`)
+                            } else {
+                                console.log(`⚠️ [deleteCardGamePost] Other player ${otherPlayerId} not found in socket map`)
+                            }
                         }
                         
                         // Add all followers
@@ -1570,10 +1583,15 @@ export const deleteCardGamePost = async (roomId) => {
                         // Emit to all recipients
                         if (recipients.size > 0) {
                             recipients.forEach(socketId => {
-                                io.to(socketId).emit("postDeleted", { postId: post._id })
+                                io.to(socketId).emit("postDeleted", { postId: deletedPostId })
+                                console.log(`📤 [deleteCardGamePost] Emitted postDeleted for post ${deletedPostId} to socket: ${socketId}`)
                             })
-                            console.log(`📤 Emitted postDeleted to ${recipients.size} recipients (author, other player, and followers) for post: ${post._id}`)
+                            console.log(`📤 [deleteCardGamePost] Emitted postDeleted to ${recipients.size} recipients (author, other player, and followers) for post: ${deletedPostId}`)
+                        } else {
+                            console.log(`⚠️ [deleteCardGamePost] No recipients found for post ${deletedPostId}`)
                         }
+                    } else {
+                        console.log(`⚠️ [deleteCardGamePost] IO instance not available`)
                     }
                 }
             } catch (parseError) {
