@@ -1866,11 +1866,22 @@ export const initializeSocket = async (app) => {
         })
 
         socket.on("resignCard", async ({ roomId, to }) => {
-            const recipientData = await getUserSocket(to)
+            // Fallback: if "to" is missing, derive opponent from roomId (card_player1_player2_timestamp)
+            let opponentId = to
+            const userId = socket.handshake.query.userId
+            if (!opponentId && roomId && roomId.startsWith('card_')) {
+                const parts = roomId.split('_')
+                if (parts.length >= 3) {
+                    const p1 = parts[1]
+                    const p2 = parts[2]
+                    opponentId = (p1?.toString?.() === userId?.toString?.()) ? p2 : p1
+                }
+            }
+
+            const recipientData = opponentId ? await getUserSocket(opponentId) : null
             const recipientSocketId = recipientData?.socketId
             const resignerData = await getUserSocket(socket.handshake.query.userId)
             const resignerSocketId = resignerData?.socketId
-            const userId = socket.handshake.query.userId
             
             if (recipientSocketId) {
                 io.to(recipientSocketId).emit("opponentResigned")
@@ -1900,16 +1911,21 @@ export const initializeSocket = async (app) => {
                 })
                 // Remove from active games tracking (Redis)
                 await deleteActiveCardGame(userId)
-                await deleteActiveCardGame(to)
+                if (opponentId) {
+                    await deleteActiveCardGame(opponentId)
+                }
                 // Clean up game state (Redis)
                 await deleteCardGameState(roomId)
                 console.log(`🗑️ Cleaned up card game state for room ${roomId}`)
             }
             
-            // Make users available again
-            if (resignerSocketId) {
-                io.emit("userAvailableCard", { userId })
-                io.emit("userAvailableCard", { userId: to })
+            // Make users available again (always emit, even if resigner disconnected)
+            io.emit("userAvailableCard", { userId })
+            if (opponentId) {
+                io.emit("userAvailableCard", { userId: opponentId })
+                console.log(`✅ [resignCard] Made users available: ${userId} and ${opponentId}`)
+            } else {
+                console.log(`⚠️ [resignCard] Made user available but opponentId missing: ${userId}`)
             }
         })
 
