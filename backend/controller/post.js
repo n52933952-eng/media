@@ -1457,48 +1457,125 @@ export const deleteCardGamePost = async (roomId) => {
             return
         }
 
+        // Extract player IDs from roomId (format: card_player1Id_player2Id_timestamp)
+        let player1Id = null
+        let player2Id = null
+        if (roomId && roomId.startsWith('card_')) {
+            const roomIdParts = roomId.split('_')
+            if (roomIdParts.length >= 3) {
+                player1Id = roomIdParts[1]
+                player2Id = roomIdParts[2]
+            }
+        }
+
         // Find all posts with this roomId in cardGameData
         const posts = await Post.find({
-            cardGameData: { $exists: true, $ne: null }
+            $or: [
+                { cardGameData: { $exists: true, $ne: null } },
+                // Fallback: also search by text pattern if cardGameData is missing
+                ...(player1Id && player2Id ? [
+                    { text: { $regex: /Playing Go Fish with.*🃏/i }, postedBy: { $in: [player1Id, player2Id] } }
+                ] : [])
+            ]
         })
 
         let deletedCount = 0
         for (const post of posts) {
             try {
+                let shouldDelete = false
+                
+                // Method 1: Check cardGameData
                 if (post.cardGameData) {
                     const cardData = JSON.parse(post.cardGameData)
                     if (cardData.roomId === roomId) {
-                        // Get followers before deleting
-                        const postAuthorId = post.postedBy.toString()
-                        const followerDocs = await Follow.find({ followeeId: postAuthorId })
-                          .select('followerId')
-                          .limit(10000)
-                          .lean()
-                        
-                        // Delete the post
-                        await Post.findByIdAndDelete(post._id)
-                        deletedCount++
-                        console.log(`🗑️ Deleted card game post: ${post._id} for roomId: ${roomId}`)
+                        shouldDelete = true
+                    }
+                }
+                
+                // Method 2: Fallback - match by text pattern and players
+                if (!shouldDelete && player1Id && player2Id) {
+                    const postAuthorId = post.postedBy?.toString?.() ?? String(post.postedBy)
+                    if ((postAuthorId === player1Id || postAuthorId === player2Id) &&
+                        post.text && post.text.includes('Playing Go Fish with') && post.text.includes('🃏')) {
+                        // Additional check: make sure this post is recent (within last hour)
+                        const postDate = new Date(post.createdAt || post.updatedAt)
+                        const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000)
+                        if (postDate > oneHourAgo) {
+                            shouldDelete = true
+                            console.log(`🔄 [deleteCardGamePost] Using fallback method to delete post: ${post._id}`)
+                        }
+                    }
+                }
+                
+                if (shouldDelete) {
+                    // Get followers before deleting
+                    const postAuthorId = post.postedBy?.toString?.() ?? String(post.postedBy)
+                    const followerDocs = await Follow.find({ followeeId: postAuthorId })
+                      .select('followerId')
+                      .limit(10000)
+                      .lean()
+                    
+                    // Get cardData for player info (if available)
+                    let cardData = null
+                    if (post.cardGameData) {
+                        try {
+                            cardData = JSON.parse(post.cardGameData)
+                        } catch (e) {
+                            console.error(`Error parsing cardGameData for post ${post._id}:`, e)
+                        }
+                    }
+                    
+                    // Delete the post
+                    await Post.findByIdAndDelete(post._id)
+                    deletedCount++
+                    console.log(`🗑️ Deleted card game post: ${post._id} for roomId: ${roomId}`)
 
-                        // Emit post deleted to online followers
-                        const io = getIO()
-                        if (io && followerDocs && followerDocs.length > 0) {
-                            const { getAllUserSockets } = await import('../socket/socket.js')
-                            const userSocketMap = await getAllUserSockets()
-                            const onlineFollowers = []
-                            
+                    // Emit post deleted to post author, other player, and all followers
+                    const io = getIO()
+                    if (io) {
+                        const { getAllUserSockets } = await import('../socket/socket.js')
+                        const userSocketMap = await getAllUserSockets()
+                        const recipients = new Set() // Use Set to avoid duplicates
+                        
+                        // Add post author (player who created this post)
+                        if (userSocketMap[postAuthorId]) {
+                            recipients.add(userSocketMap[postAuthorId].socketId)
+                        }
+                        
+                        // Add other player (if different from post author)
+                        let otherPlayerId = null
+                        if (cardData) {
+                            otherPlayerId = cardData.player1?._id === postAuthorId 
+                                ? cardData.player2?._id 
+                                : cardData.player1?._id
+                        } else if (player1Id && player2Id) {
+                            // Fallback: use extracted IDs from roomId
+                            otherPlayerId = postAuthorId === player1Id ? player2Id : player1Id
+                        }
+                        
+                        if (otherPlayerId && userSocketMap[otherPlayerId]) {
+                            recipients.add(userSocketMap[otherPlayerId].socketId)
+                        }
+                        
+                        // Add all followers
+                        if (followerDocs && followerDocs.length > 0) {
                             followerDocs.forEach(d => {
                                 const followerIdStr = d.followerId?.toString?.() ?? String(d.followerId)
                                 if (userSocketMap[followerIdStr]) {
-                                    onlineFollowers.push(userSocketMap[followerIdStr].socketId)
+                                    recipients.add(userSocketMap[followerIdStr].socketId)
                                 }
                             })
-                            
-                            if (onlineFollowers.length > 0) {
-                                io.to(onlineFollowers).emit("postDeleted", { postId: post._id })
-                            }
+                        }
+                        
+                        // Emit to all recipients
+                        if (recipients.size > 0) {
+                            recipients.forEach(socketId => {
+                                io.to(socketId).emit("postDeleted", { postId: post._id })
+                            })
+                            console.log(`📤 Emitted postDeleted to ${recipients.size} recipients (author, other player, and followers) for post: ${post._id}`)
                         }
                     }
+                }
                 }
             } catch (parseError) {
                 console.error(`Error parsing cardGameData for post ${post._id}:`, parseError)
@@ -1547,21 +1624,41 @@ export const deleteChessGamePost = async (roomId) => {
                         deletedCount++
                         console.log(`🗑️ Deleted chess game post: ${post._id} for roomId: ${roomId}`)
 
-                        // Emit post deleted to online followers
+                        // Emit post deleted to post author, other player, and all followers
                         const io = getIO()
-                        if (io && followerDocs && followerDocs.length > 0) {
+                        if (io) {
                             const userSocketMap = await getAllUserSockets()
-                            const onlineFollowers = []
+                            const recipients = new Set() // Use Set to avoid duplicates
                             
-                            followerDocs.forEach(d => {
-                                const followerIdStr = d.followerId?.toString?.() ?? String(d.followerId)
-                                if (userSocketMap[followerIdStr]) {
-                                    onlineFollowers.push(userSocketMap[followerIdStr].socketId)
-                                }
-                            })
+                            // Add post author (player who created this post)
+                            if (userSocketMap[postAuthorId]) {
+                                recipients.add(userSocketMap[postAuthorId].socketId)
+                            }
                             
-                            if (onlineFollowers.length > 0) {
-                                io.to(onlineFollowers).emit("postDeleted", { postId: post._id })
+                            // Add other player (if different from post author)
+                            const otherPlayerId = chessData.player1?._id === postAuthorId 
+                                ? chessData.player2?._id 
+                                : chessData.player1?._id
+                            if (otherPlayerId && userSocketMap[otherPlayerId]) {
+                                recipients.add(userSocketMap[otherPlayerId].socketId)
+                            }
+                            
+                            // Add all followers
+                            if (followerDocs && followerDocs.length > 0) {
+                                followerDocs.forEach(d => {
+                                    const followerIdStr = d.followerId?.toString?.() ?? String(d.followerId)
+                                    if (userSocketMap[followerIdStr]) {
+                                        recipients.add(userSocketMap[followerIdStr].socketId)
+                                    }
+                                })
+                            }
+                            
+                            // Emit to all recipients
+                            if (recipients.size > 0) {
+                                recipients.forEach(socketId => {
+                                    io.to(socketId).emit("postDeleted", { postId: post._id })
+                                })
+                                console.log(`📤 Emitted postDeleted to ${recipients.size} recipients (author, other player, and followers) for post: ${post._id}`)
                             }
                         }
                     }
