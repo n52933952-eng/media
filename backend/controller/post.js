@@ -1576,7 +1576,6 @@ export const deleteCardGamePost = async (roomId) => {
                         }
                     }
                 }
-                }
             } catch (parseError) {
                 console.error(`Error parsing cardGameData for post ${post._id}:`, parseError)
             }
