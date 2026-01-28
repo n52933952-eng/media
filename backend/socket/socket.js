@@ -58,6 +58,69 @@ const uniqueUserIds = (ids) => {
     return out
 }
 
+// ============================================================
+// Scale optimizations (backward-compatible)
+// - socketUser:<socketId> -> userId (O(1) disconnect mapping)
+// - inCall:<userId> -> { callId, at } (O(1) busy checks)
+// These keys are additive; existing scan-based behavior remains as fallback.
+// ============================================================
+const SOCKET_USER_PREFIX = 'socketUser:'
+const IN_CALL_PREFIX = 'inCall:'
+
+const setSocketUser = async (socketId, userId) => {
+    redisService.ensureRedis()
+    const sid = typeof socketId === 'string' ? socketId : (socketId?.toString?.() ?? null)
+    const uid = normalizeUserId(userId)
+    if (!sid || !uid) return
+    await redisService.redisSet(`${SOCKET_USER_PREFIX}${sid}`, uid, 3600)
+}
+
+const getSocketUser = async (socketId) => {
+    redisService.ensureRedis()
+    const sid = typeof socketId === 'string' ? socketId : (socketId?.toString?.() ?? null)
+    if (!sid) return null
+    try {
+        return await redisService.redisGet(`${SOCKET_USER_PREFIX}${sid}`)
+    } catch (e) {
+        console.error('❌ [socket] Failed to read socketUser mapping:', e.message)
+        return null
+    }
+}
+
+const deleteSocketUser = async (socketId) => {
+    redisService.ensureRedis()
+    const sid = typeof socketId === 'string' ? socketId : (socketId?.toString?.() ?? null)
+    if (!sid) return
+    await redisService.redisDel(`${SOCKET_USER_PREFIX}${sid}`)
+}
+
+const setInCall = async (userId, callId) => {
+    redisService.ensureRedis()
+    const uid = normalizeUserId(userId)
+    if (!uid) return
+    await redisService.redisSet(`${IN_CALL_PREFIX}${uid}`, { callId: callId || null, at: Date.now() }, 3600)
+}
+
+const clearInCall = async (userId) => {
+    redisService.ensureRedis()
+    const uid = normalizeUserId(userId)
+    if (!uid) return
+    await redisService.redisDel(`${IN_CALL_PREFIX}${uid}`)
+}
+
+const isInCallFast = async (userId) => {
+    redisService.ensureRedis()
+    const uid = normalizeUserId(userId)
+    if (!uid) return false
+    try {
+        const v = await redisService.redisGet(`${IN_CALL_PREFIX}${uid}`)
+        return !!v
+    } catch (e) {
+        console.error('❌ [socket] Failed to read inCall key:', e.message)
+        return false
+    }
+}
+
 const getOnlineSnapshotForUserIds = async (userIds) => {
     redisService.ensureRedis()
     const client = redisService.getRedis()
@@ -344,6 +407,10 @@ const deleteActiveCall = async (callId) => {
     await redisService.redisDel(`activeCall:${callId}`)
 }
 
+// Dedupe cancelCall to avoid double FCM + double CallCanceled when both sides cancel
+const cancelProcessedKeys = new Set()
+const CANCEL_DEDUPE_TTL_MS = 6000
+
 // Helper functions for pending calls (indexed by receiverId for O(1) lookup)
 // This is more scalable than SCAN for 1M+ users
 const setPendingCall = async (receiverId, callData) => {
@@ -547,6 +614,8 @@ export const initializeSocket = async (app) => {
                 onlineAt: Date.now(),
             }
             await setUserSocket(userId, socketData)
+            // Reverse mapping for O(1) disconnect handling
+            await setSocketUser(socket.id, userId)
             console.log(`✅ [socket] User ${userId} added to socket map (socket: ${socket.id})`)
 
             // Emit targeted presence update for this userId (for subscribed clients)
@@ -722,11 +791,12 @@ export const initializeSocket = async (app) => {
 
         // Helper function to check if user is busy
         const isUserBusy = async (userId) => {
+            // Prefer O(1) inCall key; fallback to scan-based behavior for safety.
+            const fast = await isInCallFast(userId)
+            if (fast) return true
             const allActiveCalls = await getAllActiveCalls()
             for (const [callId, callData] of Object.entries(allActiveCalls)) {
-                if (callData.user1 === userId || callData.user2 === userId) {
-                    return true
-                }
+                if (callData.user1 === userId || callData.user2 === userId) return true
             }
             return false
         }
@@ -813,6 +883,11 @@ export const initializeSocket = async (app) => {
                 name: name,
                 callType: callType
             })
+            // O(1) busy markers (additive)
+            await Promise.all([
+                setInCall(from, callId).catch(() => {}),
+                setInCall(userToCall, callId).catch(() => {}),
+            ])
             
             // Update database - mark users as in call (persistent across refreshes)
             User.findByIdAndUpdate(from, { inCall: true }).catch(err => console.log('Error updating caller inCall status:', err))
@@ -954,46 +1029,42 @@ export const initializeSocket = async (app) => {
             const callId2 = `${conversationId}-${sender}`
             const call1 = await getActiveCall(callId1)
             const call2 = await getActiveCall(callId2)
-            if (call1) {
-                await deleteActiveCall(callId1)
-            } else if (call2) {
-                await deleteActiveCall(callId2)
-            }
-            
+            if (call1) await deleteActiveCall(callId1)
+            if (call2) await deleteActiveCall(callId2)
+            const hadActiveCall = !!(call1 || call2)
+
             // Also delete pending call if receiver was offline (cleanup indexed lookup) - O(1) Redis operation
             await deletePendingCall(conversationId)
 
-            // Update database - mark users as NOT in call (non-blocking, fire-and-forget)
-            // For 1M+ users: These are background operations, don't block cancellation flow
+            // Update database - mark users as NOT in call (idempotent; ensures both can call again)
             User.findByIdAndUpdate(sender, { inCall: false }).catch(err => console.log('Error updating sender inCall status:', err))
             User.findByIdAndUpdate(conversationId, { inCall: false }).catch(err => console.log('Error updating receiver inCall status:', err))
 
-            // Send FCM notification to stop ringtone if receiver is offline or app is closed
-            // This ensures ringtone stops even if user didn't see the socket event
-            // IMPORTANT: Send even if receiver is online (they might have app closed but notification showing)
-            try {
-                const { sendCallEndedNotificationToUser } = await import('../services/fcmNotifications.js')
-                // Send to receiver (the one who was being called) - ALWAYS send, even if online
-                // Include sender ID so client can track which caller canceled (prevents blocking legitimate new calls)
-                // This ensures ringtone stops if IncomingCallActivity is showing
-                const fcmResult = await sendCallEndedNotificationToUser(conversationId, sender)
-                if (fcmResult.success) {
-                    console.log('✅ [cancelCall] Sent call ended FCM notification to receiver')
-                } else {
-                    console.log('⚠️ [cancelCall] FCM call ended notification failed:', fcmResult.error)
+            // Only send FCM and emit CallCanceled when we actually had an active call.
+            // Avoids duplicate FCM + duplicate CallCanceled when both sides cancel (e.g. decline + caller hang up).
+            if (hadActiveCall) {
+                try {
+                    const { sendCallEndedNotificationToUser } = await import('../services/fcmNotifications.js')
+                    const fcmResult = await sendCallEndedNotificationToUser(conversationId, sender)
+                    if (fcmResult.success) {
+                        console.log('✅ [cancelCall] Sent call ended FCM notification to receiver')
+                    } else {
+                        console.log('⚠️ [cancelCall] FCM call ended notification failed:', fcmResult.error)
+                    }
+                } catch (fcmError) {
+                    console.error('❌ [cancelCall] Error sending FCM call ended notification:', fcmError)
+                    console.error('❌ [cancelCall] Error details:', fcmError.message)
                 }
-            } catch (fcmError) {
-                console.error('❌ [cancelCall] Error sending FCM call ended notification:', fcmError)
-                console.error('❌ [cancelCall] Error details:', fcmError.message)
-            }
 
-            if (receiverSocketId) {
-                io.to(receiverSocketId).emit("CallCanceled")
+                if (receiverSocketId) io.to(receiverSocketId).emit("CallCanceled")
+                if (senderSocketId) io.to(senderSocketId).emit("CallCanceled")
+                io.emit("cancleCall", { userToCall: conversationId, from: sender })
             }
-            if (senderSocketId) {
-                io.to(senderSocketId).emit("CallCanceled")
-            }
-            io.emit("cancleCall", { userToCall: conversationId, from: sender })
+            // Clear O(1) busy markers (safe even if missing)
+            await Promise.all([
+                clearInCall(sender).catch(() => {}),
+                clearInCall(conversationId).catch(() => {}),
+            ])
         })
 
         // Mark messages as seen
@@ -2070,13 +2141,19 @@ export const initializeSocket = async (app) => {
             
             let disconnectedUserId = null
             
-            // Remove user from map by matching socket.id - check Redis first (source of truth)
-            const allSockets = await getAllUserSockets()
-            for (const [id, data] of Object.entries(allSockets)) {
-                if (data.socketId === socket.id) {
-                    disconnectedUserId = id
-                    await deleteUserSocket(id) // Delete from both in-memory and Redis
-                    break
+            // O(1) lookup by reverse mapping (fallback to scan for safety)
+            disconnectedUserId = await getSocketUser(socket.id)
+            if (disconnectedUserId) {
+                await deleteUserSocket(disconnectedUserId) // Delete from both in-memory and Redis
+                await deleteSocketUser(socket.id)
+            } else {
+                const allSockets = await getAllUserSockets()
+                for (const [id, data] of Object.entries(allSockets)) {
+                    if (data.socketId === socket.id) {
+                        disconnectedUserId = id
+                        await deleteUserSocket(id)
+                        break
+                    }
                 }
             }
 
@@ -2097,6 +2174,8 @@ export const initializeSocket = async (app) => {
             if (disconnectedUserId) {
                 // Clear inCall status in database for disconnected user
                 User.findByIdAndUpdate(disconnectedUserId, { inCall: false }).catch(err => console.log('Error clearing inCall status on disconnect:', err))
+                // Clear O(1) busy marker
+                await clearInCall(disconnectedUserId).catch(() => {})
                 
                 // Clean up pending call if user disconnected before answering (cleanup indexed lookup)
                 await deletePendingCall(disconnectedUserId)
@@ -2112,6 +2191,7 @@ export const initializeSocket = async (app) => {
                         
                         // Clear inCall status for the other user too
                         User.findByIdAndUpdate(otherUserId, { inCall: false }).catch(err => console.log('Error clearing other user inCall status:', err))
+                        await clearInCall(otherUserId).catch(() => {})
                         
                         if (otherUserData) {
                             io.to(otherUserData.socketId).emit("CallCanceled")
