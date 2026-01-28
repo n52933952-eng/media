@@ -906,6 +906,17 @@ export const initializeSocket = async (app) => {
         })
 
 
+        // WebRTC: Sync "Connected" + call timer to the other peer so both show same status
+        socket.on("callConnected", async ({ to, startTime }) => {
+            if (!to || typeof startTime !== 'number') return
+            const data = await getUserSocket(to)
+            const targetSocketId = data?.socketId
+            if (targetSocketId) {
+                const from = socket.handshake.query.userId
+                io.to(targetSocketId).emit("callConnected", { startTime, from })
+            }
+        })
+
         // WebRTC: Handle ICE candidate (for mobile-to-mobile calls with trickle ICE)
         // Web uses trickle: false (bundled candidates), so this won't affect web-to-web calls
         socket.on("iceCandidate", async ({ userToCall, candidate, from }) => {
