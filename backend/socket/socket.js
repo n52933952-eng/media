@@ -963,9 +963,7 @@ export const initializeSocket = async (app) => {
                         await deletePendingCall(receiverId)
                     }
                 } else {
-                    // Call was canceled or never existed – tell receiver so they dismiss incoming-call UI immediately
-                    console.log(`⚠️ [requestCallSignal] No active call or pending call – emitting CallCanceled to receiver ${receiverId}`)
-                    io.to(socket.id).emit('CallCanceled', {})
+                    console.log(`⚠️ [requestCallSignal] No active call or pending call found between ${callerId} and ${receiverId}`)
                 }
             }
         })
