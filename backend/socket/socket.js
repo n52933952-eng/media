@@ -433,6 +433,30 @@ const deletePendingCall = async (receiverId) => {
     await redisService.redisDel(`pendingCall:${receiverId}`)
 }
 
+// Helper functions for pending cancels (when receiver was offline/backgrounded)
+// This is critical for WhatsApp-like UX: if caller cancels while receiver socket is disconnected,
+// receiver must clear ringing UI immediately after reconnect.
+const setPendingCancel = async (receiverId, cancelData) => {
+    redisService.ensureRedis()
+    // Short TTL: if user doesn't come back soon, it's not relevant.
+    await redisService.redisSet(`pendingCancel:${receiverId}`, cancelData, 180) // 3 minutes TTL
+}
+
+const getPendingCancel = async (receiverId) => {
+    redisService.ensureRedis()
+    try {
+        return await redisService.redisGet(`pendingCancel:${receiverId}`)
+    } catch (error) {
+        console.error(`❌ [socket] Failed to read pending cancel from Redis for ${receiverId}:`, error.message)
+        return null
+    }
+}
+
+const deletePendingCancel = async (receiverId) => {
+    redisService.ensureRedis()
+    await redisService.redisDel(`pendingCancel:${receiverId}`)
+}
+
 const getAllActiveCalls = async () => {
     redisService.ensureRedis()
     try {
@@ -658,6 +682,19 @@ export const initializeSocket = async (app) => {
             } catch (error) {
                 console.error(`❌ [socket] Error checking for pending calls when ${userId} connected:`, error.message)
             }
+
+            // Deliver any pending cancel to this user (caller canceled while this user was offline/backgrounded)
+            try {
+                const pendingCancel = await getPendingCancel(userId)
+                if (pendingCancel) {
+                    console.log(`📴 [socket] Found pending cancel for ${userId}, emitting CallCanceled...`, pendingCancel)
+                    io.to(socket.id).emit("CallCanceled")
+                    await deletePendingCancel(userId)
+                    console.log(`✅ [socket] Cleaned up pending cancel for ${userId}`)
+                }
+            } catch (error) {
+                console.error(`❌ [socket] Error checking for pending cancels when ${userId} connected:`, error.message)
+            }
         } else {
             console.warn("⚠️ [socket] User connected without valid userId:", userId)
         }
@@ -802,7 +839,7 @@ export const initializeSocket = async (app) => {
         }
 
         // WebRTC: Handle call user - emit to both receiver AND sender like madechess
-        socket.on("callUser", async ({ userToCall, signalData, from, name, callType = 'video' }) => {
+        socket.on("callUser", async ({ userToCall, signalData, from, name, callType = 'video', callId: clientCallId }) => {
             // Check if either user is already in a call
             const userToCallBusy = await isUserBusy(userToCall)
             const fromBusy = await isUserBusy(from)
@@ -813,7 +850,9 @@ export const initializeSocket = async (app) => {
                 if (senderSocketId) {
                     io.to(senderSocketId).emit("callBusyError", { 
                         message: "User is currently in a call",
-                        busyUserId: userToCallBusy ? userToCall : from
+                        busyUserId: userToCallBusy ? userToCall : from,
+                        reason: "busy",
+                        callId: clientCallId
                     })
                 }
                 return
@@ -826,6 +865,9 @@ export const initializeSocket = async (app) => {
             const senderData = await getUserSocket(from)
             const senderSocketId = senderData?.socketId
 
+            const payload = { signal: signalData, from, name, userToCall, callType }
+            if (clientCallId) payload.callId = clientCallId
+
             console.log(`📞 [callUser] Caller: ${name} (${from})`)
             console.log(`📞 [callUser] Receiver: ${userToCall}`)
             console.log(`📞 [callUser] Receiver socket data:`, receiverData)
@@ -834,23 +876,23 @@ export const initializeSocket = async (app) => {
             if (receiverSocketId) {
                 // User is online - send socket event
                 console.log(`✅ [callUser] User ${userToCall} is ONLINE, sending socket event`)
-                io.to(receiverSocketId).emit("callUser", { 
-                    signal: signalData, 
-                    from, 
-                    name, 
-                    userToCall,
-                    callType
-                })
+                io.to(receiverSocketId).emit("callUser", payload)
             } else {
-                // User is offline - send push notification and store pending call for indexed lookup
+                // User is offline - notify caller immediately and send push
+                if (senderSocketId) {
+                    io.to(senderSocketId).emit("callBusyError", {
+                        message: "User is offline",
+                        reason: "offline",
+                        busyUserId: userToCall,
+                        callId: clientCallId
+                    })
+                }
                 console.log(`📱 [callUser] User ${userToCall} is OFFLINE, sending push notification`)
                 try {
                     console.log(`📤 [callUser] Calling sendCallNotification(${userToCall}, ${name}, ${from}, ${callType})`)
                     const result = await sendCallNotification(userToCall, name, from, callType)
                     console.log('✅ [callUser] Push notification result:', result)
                     
-                    // Store pending call indexed by receiverId for O(1) lookup when user connects
-                    // This is more scalable than SCAN for 1M+ users
                     await setPendingCall(userToCall, {
                         callerId: from,
                         signal: signalData,
@@ -862,16 +904,11 @@ export const initializeSocket = async (app) => {
                     console.error('❌ [callUser] Error sending call push notification:', error)
                     console.error('❌ [callUser] Error stack:', error.stack)
                 }
+                return
             }
 
             if (senderSocketId) {
-                io.to(senderSocketId).emit("callUser", { 
-                    signal: signalData, 
-                    from, 
-                    name, 
-                    userToCall,
-                    callType
-                })
+                io.to(senderSocketId).emit("callUser", payload)
             }
 
             // Mark both users as busy - Store in Redis with signal data
@@ -968,7 +1005,9 @@ export const initializeSocket = async (app) => {
             const callerData = await getUserSocket(data.to)
             const callerSocketId = callerData?.socketId
             if (callerSocketId) {
-                io.to(callerSocketId).emit("callAccepted", data.signal)
+                const payload = typeof data.signal === 'object' ? { signal: data.signal } : { signal: data.signal }
+                if (data.callId) payload.callId = data.callId
+                io.to(callerSocketId).emit("callAccepted", Object.keys(payload).length > 1 ? payload : data.signal)
                 // Call is now active - both users are busy (already marked in callUser)
                 
                 // Clean up pending call (safety measure - should already be deleted when user connected)
@@ -982,29 +1021,29 @@ export const initializeSocket = async (app) => {
 
 
         // WebRTC: Sync "Connected" + call timer to the other peer so both show same status
-        socket.on("callConnected", async ({ to, startTime }) => {
+        socket.on("callConnected", async ({ to, startTime, callId: clientCallId }) => {
             if (!to || typeof startTime !== 'number') return
             const data = await getUserSocket(to)
             const targetSocketId = data?.socketId
             if (targetSocketId) {
                 const from = socket.handshake.query.userId
-                io.to(targetSocketId).emit("callConnected", { startTime, from })
+                const payload = { startTime, from }
+                if (clientCallId) payload.callId = clientCallId
+                io.to(targetSocketId).emit("callConnected", payload)
             }
         })
 
         // WebRTC: Handle ICE candidate (for mobile-to-mobile calls with trickle ICE)
-        // Web uses trickle: false (bundled candidates), so this won't affect web-to-web calls
-        socket.on("iceCandidate", async ({ userToCall, candidate, from }) => {
+        socket.on("iceCandidate", async ({ userToCall, candidate, from, callId: clientCallId }) => {
             console.log(`🧊 [iceCandidate] Forwarding ICE candidate from ${from} to ${userToCall}`)
             
             const receiverData = await getUserSocket(userToCall)
             const receiverSocketId = receiverData?.socketId
             
             if (receiverSocketId) {
-                io.to(receiverSocketId).emit("iceCandidate", {
-                    candidate: candidate,
-                    from: from
-                })
+                const payload = { candidate, from }
+                if (clientCallId) payload.callId = clientCallId
+                io.to(receiverSocketId).emit("iceCandidate", payload)
                 console.log(`✅ [iceCandidate] ICE candidate forwarded successfully`)
             } else {
                 console.log(`⚠️ [iceCandidate] Receiver ${userToCall} is not online, cannot forward ICE candidate`)
@@ -1017,12 +1056,14 @@ export const initializeSocket = async (app) => {
         // 2. Database updates are non-blocking (fire-and-forget with .catch)
         // 3. FCM notification is sent asynchronously
         // 4. Socket events are broadcast instantly via Redis-backed socket map
-        socket.on("cancelCall", async ({ conversationId, sender }) => {
+        socket.on("cancelCall", async ({ conversationId, sender, callId: clientCallId }) => {
             const receiverData = await getUserSocket(conversationId)
             const receiverSocketId = receiverData?.socketId
 
             const senderData = await getUserSocket(sender)
             const senderSocketId = senderData?.socketId
+
+            const cancelPayload = clientCallId ? { callId: clientCallId } : {}
 
             // Remove from active calls - try both possible call IDs - Delete from Redis (O(1) operation)
             const callId1 = `${sender}-${conversationId}`
@@ -1035,6 +1076,12 @@ export const initializeSocket = async (app) => {
 
             // Also delete pending call if receiver was offline (cleanup indexed lookup) - O(1) Redis operation
             await deletePendingCall(conversationId)
+
+            // If receiver is offline/backgrounded (no socketId), store a pending cancel for delivery on reconnect.
+            // This fixes: both users were in-app → receiver backgrounds (socket disconnects) → caller cancels → receiver returns and still sees ringing UI.
+            if (!receiverSocketId && conversationId) {
+                await setPendingCancel(conversationId, { from: sender, at: Date.now() })
+            }
 
             // Update database - mark users as NOT in call (idempotent; ensures both can call again)
             User.findByIdAndUpdate(sender, { inCall: false }).catch(err => console.log('Error updating sender inCall status:', err))
@@ -1056,8 +1103,8 @@ export const initializeSocket = async (app) => {
                     console.error('❌ [cancelCall] Error details:', fcmError.message)
                 }
 
-                if (receiverSocketId) io.to(receiverSocketId).emit("CallCanceled")
-                if (senderSocketId) io.to(senderSocketId).emit("CallCanceled")
+                if (receiverSocketId) io.to(receiverSocketId).emit("CallCanceled", cancelPayload)
+                if (senderSocketId) io.to(senderSocketId).emit("CallCanceled", cancelPayload)
                 io.emit("cancleCall", { userToCall: conversationId, from: sender })
             }
             // Clear O(1) busy markers (safe even if missing)
