@@ -878,16 +878,8 @@ export const initializeSocket = async (app) => {
                 console.log(`✅ [callUser] User ${userToCall} is ONLINE, sending socket event`)
                 io.to(receiverSocketId).emit("callUser", payload)
             } else {
-                // User is offline - notify caller immediately and send push
-                if (senderSocketId) {
-                    io.to(senderSocketId).emit("callBusyError", {
-                        message: "User is offline",
-                        reason: "offline",
-                        busyUserId: userToCall,
-                        callId: clientCallId
-                    })
-                }
-                console.log(`📱 [callUser] User ${userToCall} is OFFLINE, sending push notification`)
+                // User is offline - send push so their phone rings. Do NOT tell caller "offline" – caller keeps "Calling..." and Saif's phone rings.
+                console.log(`📱 [callUser] User ${userToCall} is OFFLINE, sending push notification (phone will ring)`)
                 try {
                     console.log(`📤 [callUser] Calling sendCallNotification(${userToCall}, ${name}, ${from}, ${callType})`)
                     const result = await sendCallNotification(userToCall, name, from, callType)
