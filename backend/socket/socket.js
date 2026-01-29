@@ -2218,6 +2218,16 @@ export const initializeSocket = async (app) => {
                             io.to(otherUserData.socketId).emit("CallCanceled")
                             io.emit("cancleCall", { userToCall: otherUserId, from: disconnectedUserId })
                         }
+                        // OPTIMIZATION: Send FCM call_ended to the other user (mobile in background still gets "call ended")
+                        try {
+                            const { sendCallEndedNotificationToUser } = await import('../services/fcmNotifications.js')
+                            const fcmResult = await sendCallEndedNotificationToUser(otherUserId, disconnectedUserId)
+                            if (fcmResult.success) {
+                                console.log('✅ [disconnect] Sent call ended FCM to other user:', otherUserId)
+                            }
+                        } catch (fcmErr) {
+                            console.error('❌ [disconnect] FCM call ended to other user:', fcmErr?.message)
+                        }
                     }
                 }
             }
