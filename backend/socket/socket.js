@@ -656,32 +656,8 @@ export const initializeSocket = async (app) => {
                 console.error('❌ [socket] Failed to emit presenceUpdate (online):', e.message)
             }
             
-            // Check for pending calls when user connects (e.g., after receiving push notification)
-            // This ensures calls are re-sent automatically when user comes online
-            // Use indexed lookup (O(1)) instead of SCAN for better scalability with 1M+ users
-            try {
-                const pendingCall = await getPendingCall(userId)
-                
-                if (pendingCall && pendingCall.signal) {
-                    console.log(`📞 [socket] Found pending call for ${userId} from ${pendingCall.callerId}, re-sending signal...`)
-                    
-                    // Re-send the call signal to the newly connected user
-                    io.to(socket.id).emit("callUser", {
-                        userToCall: userId,
-                        signal: pendingCall.signal,
-                        from: pendingCall.callerId,
-                        name: pendingCall.name || 'Unknown',
-                        callType: pendingCall.callType || 'video'
-                    })
-                    console.log(`✅ [socket] Re-sent pending call signal to ${userId} from ${pendingCall.callerId}`)
-                    
-                    // Delete the pending call after re-sending (cleanup)
-                    await deletePendingCall(userId)
-                    console.log(`✅ [socket] Cleaned up pending call for ${userId}`)
-                }
-            } catch (error) {
-                console.error(`❌ [socket] Error checking for pending calls when ${userId} connected:`, error.message)
-            }
+            // Do NOT send pending call here – client may not have callUser listener attached yet (race).
+            // Client will emit requestCallSignal when ready; requestCallSignal handler sends the signal.
 
             // Deliver any pending cancel to this user (caller canceled while this user was offline/backgrounded)
             try {
