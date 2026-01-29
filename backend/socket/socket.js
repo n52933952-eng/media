@@ -1079,14 +1079,15 @@ export const initializeSocket = async (app) => {
             User.findByIdAndUpdate(sender, { inCall: false }).catch(err => console.log('Error updating sender inCall status:', err))
             User.findByIdAndUpdate(conversationId, { inCall: false }).catch(err => console.log('Error updating receiver inCall status:', err))
 
-            // Only send FCM and emit CallCanceled when we actually had an active call.
-            // Avoids duplicate FCM + duplicate CallCanceled when both sides cancel (e.g. decline + caller hang up).
-            if (hadActiveCall) {
+            // Send FCM "stop_ringtone" to receiver when: we had an active call OR receiver is offline (had pending call – phone was ringing).
+            // So when Mu cancels and Saif was offline, Saif's phone still gets "call ended" and stops ringing.
+            const shouldNotifyReceiver = hadActiveCall || !receiverSocketId
+            if (shouldNotifyReceiver && conversationId) {
                 try {
                     const { sendCallEndedNotificationToUser } = await import('../services/fcmNotifications.js')
                     const fcmResult = await sendCallEndedNotificationToUser(conversationId, sender)
                     if (fcmResult.success) {
-                        console.log('✅ [cancelCall] Sent call ended FCM notification to receiver')
+                        console.log('✅ [cancelCall] Sent call ended FCM notification to receiver (stop ringtone)')
                     } else {
                         console.log('⚠️ [cancelCall] FCM call ended notification failed:', fcmResult.error)
                     }
@@ -1094,10 +1095,15 @@ export const initializeSocket = async (app) => {
                     console.error('❌ [cancelCall] Error sending FCM call ended notification:', fcmError)
                     console.error('❌ [cancelCall] Error details:', fcmError.message)
                 }
+            }
 
+            if (hadActiveCall) {
                 if (receiverSocketId) io.to(receiverSocketId).emit("CallCanceled", cancelPayload)
                 if (senderSocketId) io.to(senderSocketId).emit("CallCanceled", cancelPayload)
                 io.emit("cancleCall", { userToCall: conversationId, from: sender })
+            } else if (senderSocketId) {
+                // Caller canceled while receiver was offline – still tell caller so their UI can close
+                io.to(senderSocketId).emit("CallCanceled", cancelPayload)
             }
             // Clear O(1) busy markers (safe even if missing)
             await Promise.all([
