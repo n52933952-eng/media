@@ -1073,13 +1073,12 @@ export const initializeSocket = async (app) => {
                 }
             }
 
+            // Always notify both sides via socket when connected, so the receiver stops ringing/incoming UI immediately.
+            // hadActiveCall can be false when receiver was offline at start (we had pendingCall only; requestCallSignal then deleted it).
+            if (receiverSocketId) io.to(receiverSocketId).emit("CallCanceled", cancelPayload)
+            if (senderSocketId) io.to(senderSocketId).emit("CallCanceled", cancelPayload)
             if (hadActiveCall) {
-                if (receiverSocketId) io.to(receiverSocketId).emit("CallCanceled", cancelPayload)
-                if (senderSocketId) io.to(senderSocketId).emit("CallCanceled", cancelPayload)
                 io.emit("cancleCall", { userToCall: conversationId, from: sender })
-            } else if (senderSocketId) {
-                // Caller canceled while receiver was offline – still tell caller so their UI can close
-                io.to(senderSocketId).emit("CallCanceled", cancelPayload)
             }
             // Clear O(1) busy markers (safe even if missing)
             await Promise.all([
