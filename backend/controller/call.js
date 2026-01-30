@@ -82,7 +82,8 @@ export const cancelCall = async (req, res) => {
             await deleteActiveCall(callId2)
         }
         
-        // Also delete pending call if receiver was offline
+        // Delete pending call: keyed by receiver (sender = B who declined had the pending call when A called)
+        await deletePendingCall(sender)
         await deletePendingCall(conversationId)
 
         // Update database - mark users as NOT in call (non-blocking, fire-and-forget)
