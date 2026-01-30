@@ -116,6 +116,7 @@ export const SocketContextProvider = ({ children }) => {
         if (!track.enabled) track.enabled = true;
       });
 
+      streamRef.current = currentStream;
       setStream(currentStream);
       console.log(`Media stream obtained - Type: ${type}, Audio tracks: ${currentStream.getAudioTracks().length}, Video tracks: ${currentStream.getVideoTracks().length}`);
     } catch (error) {
@@ -529,6 +530,7 @@ export const SocketContextProvider = ({ children }) => {
       currentStream.getAudioTracks().forEach(track => {
         if (!track.enabled) track.enabled = true;
       });
+      streamRef.current = currentStream;
       setStream(currentStream);
     }
 
@@ -622,6 +624,7 @@ export const SocketContextProvider = ({ children }) => {
       currentStream.getAudioTracks().forEach(track => {
         if (!track.enabled) track.enabled = true;
       });
+      streamRef.current = currentStream;
       setStream(currentStream);
     }
     
@@ -724,8 +727,9 @@ export const SocketContextProvider = ({ children }) => {
     cleanupPeer();
 
     // Stop all tracks from the current stream
-    if (stream) {
-      stream.getTracks().forEach(track => track.stop());
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => track.stop());
+      streamRef.current = null;
     }
     
     // Clear stream state to avoid memory leaks

@@ -1073,15 +1073,13 @@ export const initializeSocket = async (app) => {
                 }
             }
 
-            // CRITICAL: Always notify the OTHER user (conversationId) so their call ends when someone presses End. Do not gate on hadActiveCall – otherwise the other user never gets CallCanceled if Redis key was different or missing.
-            if (receiverSocketId) {
-                io.to(receiverSocketId).emit("CallCanceled", cancelPayload)
-            }
-            if (senderSocketId) {
-                io.to(senderSocketId).emit("CallCanceled", cancelPayload)
-            }
             if (hadActiveCall) {
+                if (receiverSocketId) io.to(receiverSocketId).emit("CallCanceled", cancelPayload)
+                if (senderSocketId) io.to(senderSocketId).emit("CallCanceled", cancelPayload)
                 io.emit("cancleCall", { userToCall: conversationId, from: sender })
+            } else if (senderSocketId) {
+                // Caller canceled while receiver was offline – still tell caller so their UI can close
+                io.to(senderSocketId).emit("CallCanceled", cancelPayload)
             }
             // Clear O(1) busy markers (safe even if missing)
             await Promise.all([
