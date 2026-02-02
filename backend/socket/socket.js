@@ -815,7 +815,12 @@ export const initializeSocket = async (app) => {
         }
 
         // WebRTC: Handle call user - emit to both receiver AND sender like madechess
-        socket.on("callUser", async ({ userToCall, signalData, from, name, callType = 'video', callId: clientCallId }) => {
+        socket.on("callUser", async ({ userToCall, signalData, signal: signalAlt, from, name, callType = 'video', callId: clientCallId }) => {
+            const signalPayload = signalData || signalAlt
+            if (!signalPayload) {
+                console.error('❌ [callUser] No signal/signalData in payload – rejecting')
+                return
+            }
             // Check if either user is already in a call
             const userToCallBusy = await isUserBusy(userToCall)
             const fromBusy = await isUserBusy(from)
@@ -841,7 +846,7 @@ export const initializeSocket = async (app) => {
             const senderData = await getUserSocket(from)
             const senderSocketId = senderData?.socketId
 
-            const payload = { signal: signalData, from, name, userToCall, callType }
+            const payload = { signal: signalPayload, from, name, userToCall, callType }
             if (clientCallId) payload.callId = clientCallId
 
             console.log(`📞 [callUser] Caller: ${name} (${from})`)
@@ -863,7 +868,7 @@ export const initializeSocket = async (app) => {
                     
                     await setPendingCall(userToCall, {
                         callerId: from,
-                        signal: signalData,
+                        signal: signalPayload,
                         name: name,
                         callType: callType
                     })
@@ -884,7 +889,7 @@ export const initializeSocket = async (app) => {
             await setActiveCall(callId, { 
                 user1: from, 
                 user2: userToCall,
-                signal: signalData, // Store the signal so we can re-send it
+                signal: signalPayload, // Store the signal so we can re-send it
                 name: name,
                 callType: callType
             })
