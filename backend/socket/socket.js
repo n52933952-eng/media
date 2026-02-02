@@ -1055,6 +1055,13 @@ export const initializeSocket = async (app) => {
             User.findByIdAndUpdate(sender, { inCall: false }).catch(err => console.log('Error updating sender inCall status:', err))
             User.findByIdAndUpdate(conversationId, { inCall: false }).catch(err => console.log('Error updating receiver inCall status:', err))
 
+            // CRITICAL: Clear Redis inCall BEFORE emitting CallCanceled – otherwise when receiver (Saif) gets
+            // CallCanceled and immediately calls back, callUser would see isUserBusy=true and reject the call
+            await Promise.all([
+                clearInCall(sender).catch(() => {}),
+                clearInCall(conversationId).catch(() => {}),
+            ])
+
             // Send FCM "stop_ringtone" to receiver when: we had an active call OR receiver is offline (had pending call – phone was ringing).
             // So when Mu cancels and Saif was offline, Saif's phone still gets "call ended" and stops ringing.
             const shouldNotifyReceiver = hadActiveCall || !receiverSocketId
@@ -1080,11 +1087,6 @@ export const initializeSocket = async (app) => {
             if (hadActiveCall) {
                 io.emit("cancleCall", { userToCall: conversationId, from: sender })
             }
-            // Clear O(1) busy markers (safe even if missing)
-            await Promise.all([
-                clearInCall(sender).catch(() => {}),
-                clearInCall(conversationId).catch(() => {}),
-            ])
         })
 
         // Mark messages as seen
