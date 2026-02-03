@@ -100,8 +100,12 @@ export const cancelCall = async (req, res) => {
             })
         }
 
-        console.log(`📴 [HTTP cancelCall] Canceling call - conversationId: ${conversationId}, sender: ${sender}`)
-        console.log(`📴 [HTTP cancelCall] Note: conversationId is the CALLER, sender is the RECEIVER (who declined)`)
+        console.log(`📴 [HTTP cancelCall] CALLBACK_FLOW: Canceling call`, {
+            conversationId,
+            sender,
+            note: 'conversationId=CALLER(A), sender=RECEIVER(B) who declined',
+            whenBCallsABack: 'After this, B can call A - A must NOT be busy',
+        })
 
         // Get socket IDs (same logic as socket handler)
         // conversationId = caller (who made the call)
@@ -127,10 +131,12 @@ export const cancelCall = async (req, res) => {
         await deletePendingCall(conversationId)
 
         // CRITICAL: Clear Redis inCall so isUserBusy returns false – allows recall after cancel
+        console.log(`📴 [HTTP cancelCall] CALLBACK_CLEANUP: Clearing Redis inCall for both users (sender + conversationId)`)
         await Promise.all([
-            clearInCall(sender).catch(() => {}),
-            clearInCall(conversationId).catch(() => {})
+            clearInCall(sender).catch((e) => console.error('❌ [HTTP cancelCall] clearInCall(sender) failed:', e)),
+            clearInCall(conversationId).catch((e) => console.error('❌ [HTTP cancelCall] clearInCall(conversationId) failed:', e))
         ])
+        console.log(`✅ [HTTP cancelCall] CALLBACK_CLEANUP: Redis inCall cleared - ready for B to call A back`)
 
         // Update database - mark users as NOT in call (non-blocking, fire-and-forget)
         // OPTIMIZATION: Use Promise.all for parallel updates (faster for 1M+ users)

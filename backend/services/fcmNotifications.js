@@ -256,10 +256,20 @@ export async function sendCallNotificationToUser(userId, callerName, callerId, c
     const user = await User.findById(userId);
     
     if (!user || !user.fcmToken) {
-      console.error('❌ [FCM] User not found or no FCM token:', userId);
+      console.error('❌ [FCM] CALLBACK_FCM_BLOCKED: User not found or no FCM token', {
+        userId,
+        hasUser: !!user,
+        hasFcmToken: !!user?.fcmToken,
+      });
       return { success: false, error: 'User not found or no FCM token' };
     }
 
+    console.log('📱 [FCM] CALLBACK_FCM: Sending incoming call push to user (phone will ring)', {
+      receiver: userId,
+      caller: callerId,
+      callerName,
+      callType,
+    });
     return await sendCallNotification(
       user.fcmToken,
       callerName,

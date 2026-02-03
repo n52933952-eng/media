@@ -121,6 +121,18 @@ const isInCallFast = async (userId) => {
     }
 }
 
+// Debug: Log inCall Redis values (for callback flow troubleshooting)
+const logInCallStatus = async (label, userIdA, userIdB) => {
+    if (!redisService.isRedisAvailable()) return
+    try {
+        const a = await redisService.redisGet(`${IN_CALL_PREFIX}${String(userIdA || '').trim()}`)
+        const b = await redisService.redisGet(`${IN_CALL_PREFIX}${String(userIdB || '').trim()}`)
+        console.log(`📴 [inCall] ${label}`, { userA: !!a, userB: !!b, userAVal: a, userBVal: b })
+    } catch (e) {
+        console.error('❌ [inCall] logInCallStatus failed:', e.message)
+    }
+}
+
 const getOnlineSnapshotForUserIds = async (userIds) => {
     redisService.ensureRedis()
     const client = redisService.getRedis()
@@ -822,9 +834,25 @@ export const initializeSocket = async (app) => {
                 return
             }
             // Check if either user is already in a call
+            // CALLBACK FLOW LOG: When B calls A back after cancel, we need A and B both NOT busy
+            await logInCallStatus('callUser BEFORE busy check (receiver=userToCall, caller=from)', userToCall, from)
             const userToCallBusy = await isUserBusy(userToCall)
             const fromBusy = await isUserBusy(from)
+            console.log('📞 [callUser] CALLBACK_CHECK: Busy status', {
+                receiver: userToCall,
+                receiverBusy: userToCallBusy,
+                caller: from,
+                callerBusy: fromBusy,
+                willReject: userToCallBusy || fromBusy,
+            })
             if (userToCallBusy || fromBusy) {
+                const busyUserId = userToCallBusy ? userToCall : from
+                console.log('❌ [callUser] CALLBACK_BLOCKED: Rejecting call - user is busy', {
+                    busyUserId,
+                    scenario: 'B_calls_A_after_cancel',
+                    receiver: userToCall,
+                    caller: from,
+                })
                 // Notify sender that the call cannot be made (user is busy)
                 const senderData = await getUserSocket(from)
                 const senderSocketId = senderData?.socketId
@@ -861,6 +889,12 @@ export const initializeSocket = async (app) => {
             } else {
                 // User is offline - send push so their phone rings. Do NOT tell caller "offline" – caller keeps "Calling..." and Saif's phone rings.
                 console.log(`📱 [callUser] User ${userToCall} is OFFLINE, sending push notification (phone will ring)`)
+                console.log('📱 [callUser] CALLBACK_FCM: Sending FCM to receiver (A was off-app)', {
+                    receiver: userToCall,
+                    caller: from,
+                    callerName: name,
+                    callType,
+                })
                 try {
                     console.log(`📤 [callUser] Calling sendCallNotification(${userToCall}, ${name}, ${from}, ${callType})`)
                     const result = await sendCallNotification(userToCall, name, from, callType)
@@ -1030,6 +1064,12 @@ export const initializeSocket = async (app) => {
         // 3. FCM notification is sent asynchronously
         // 4. Socket events are broadcast instantly via Redis-backed socket map
         socket.on("cancelCall", async ({ conversationId, sender, callId: clientCallId }) => {
+            console.log('📴 [cancelCall] CALLBACK_FLOW: Cancel received', {
+                conversationId,
+                sender,
+                note: 'conversationId=callee(gets call), sender=who cancelled',
+                whenBCallsA: 'conversationId=A, sender=B',
+            })
             const receiverData = await getUserSocket(conversationId)
             const receiverSocketId = receiverData?.socketId
 
@@ -1064,10 +1104,17 @@ export const initializeSocket = async (app) => {
 
             // CRITICAL: Clear Redis inCall BEFORE emitting CallCanceled – otherwise when receiver (Saif) gets
             // CallCanceled and immediately calls back, callUser would see isUserBusy=true and reject the call
+            console.log('📴 [cancelCall] CALLBACK_CLEANUP: Clearing Redis inCall for both users', {
+                sender,
+                conversationId,
+                note: 'After this, B can call A back even if A was off-app',
+            })
             await Promise.all([
-                clearInCall(sender).catch(() => {}),
-                clearInCall(conversationId).catch(() => {}),
+                clearInCall(sender).catch((e) => console.error('❌ [cancelCall] clearInCall(sender) failed:', e)),
+                clearInCall(conversationId).catch((e) => console.error('❌ [cancelCall] clearInCall(conversationId) failed:', e)),
             ])
+            await logInCallStatus('cancelCall AFTER clear (should be false for both)', sender, conversationId)
+            console.log('✅ [cancelCall] CALLBACK_CLEANUP: Redis inCall cleared for both - ready for callback')
 
             // Send FCM "stop_ringtone" to receiver when: we had an active call OR receiver is offline (had pending call – phone was ringing).
             // So when Mu cancels and Saif was offline, Saif's phone still gets "call ended" and stops ringing.
