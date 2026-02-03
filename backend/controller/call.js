@@ -2,6 +2,40 @@ import User from '../models/user.js'
 import { getIO, getUserSocket } from '../socket/socket.js'
 import * as redisService from '../services/redis.js'
 
+// STUN servers (public, no auth)
+const STUN_SERVERS = [
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun1.l.google.com:19302' },
+    { urls: 'stun:stun2.l.google.com:19302' },
+];
+
+/**
+ * GET /api/call/ice-servers
+ * Returns ICE servers (STUN + TURN) for WebRTC. TURN credentials from env for security.
+ * Set TURN_USERNAME and TURN_CREDENTIAL in .env to enable TURN relay (Metered.ca, etc.)
+ */
+export const getIceServers = async (req, res) => {
+    try {
+        const servers = [...STUN_SERVERS];
+        const username = process.env.TURN_USERNAME;
+        const credential = process.env.TURN_CREDENTIAL;
+
+        if (username && credential) {
+            servers.push(
+                { urls: 'turn:global.relay.metered.ca:80', username, credential },
+                { urls: 'turn:global.relay.metered.ca:80?transport=tcp', username, credential },
+                { urls: 'turn:global.relay.metered.ca:443', username, credential },
+                { urls: 'turns:global.relay.metered.ca:443?transport=tcp', username, credential }
+            );
+        }
+
+        return res.status(200).json({ iceServers: servers });
+    } catch (error) {
+        console.error('❌ [getIceServers] Error:', error);
+        return res.status(500).json({ error: 'Failed to get ICE servers' });
+    }
+};
+
 // Helper functions (same as in socket.js)
 const getActiveCall = async (callId) => {
     if (!redisService.isRedisAvailable()) {
