@@ -39,6 +39,15 @@ const deletePendingCall = async (receiverId) => {
     }
 }
 
+const clearInCall = async (userId) => {
+    if (!redisService.isRedisAvailable() || !userId) return
+    try {
+        await redisService.redisDel(`inCall:${String(userId).trim()}`)
+    } catch (error) {
+        console.error(`❌ [call] Error clearing inCall for ${userId}:`, error.message)
+    }
+}
+
 /**
  * HTTP endpoint to cancel a call
  * POST /api/call/cancel
@@ -76,15 +85,18 @@ export const cancelCall = async (req, res) => {
         const callId2 = `${conversationId}-${sender}`
         const call1 = await getActiveCall(callId1)
         const call2 = await getActiveCall(callId2)
-        if (call1) {
-            await deleteActiveCall(callId1)
-        } else if (call2) {
-            await deleteActiveCall(callId2)
-        }
+        if (call1) await deleteActiveCall(callId1)
+        if (call2) await deleteActiveCall(callId2)
         
         // Delete pending call: keyed by receiver (sender = B who declined had the pending call when A called)
         await deletePendingCall(sender)
         await deletePendingCall(conversationId)
+
+        // CRITICAL: Clear Redis inCall so isUserBusy returns false – allows recall after cancel
+        await Promise.all([
+            clearInCall(sender).catch(() => {}),
+            clearInCall(conversationId).catch(() => {})
+        ])
 
         // Update database - mark users as NOT in call (non-blocking, fire-and-forget)
         // OPTIMIZATION: Use Promise.all for parallel updates (faster for 1M+ users)

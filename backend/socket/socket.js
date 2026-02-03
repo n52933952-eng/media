@@ -1047,8 +1047,10 @@ export const initializeSocket = async (app) => {
             if (call2) await deleteActiveCall(callId2)
             const hadActiveCall = !!(call1 || call2)
 
-            // Also delete pending call if receiver was offline (cleanup indexed lookup) - O(1) Redis operation
-            await deletePendingCall(conversationId)
+            // Also delete pending call for BOTH users (belt-and-suspenders: ensures no stale pendingCall blocks recall)
+            // conversationId = other user, sender = who cancelled; pendingCall is keyed by receiverId
+            await deletePendingCall(conversationId).catch(() => {})
+            await deletePendingCall(sender).catch(() => {})
 
             // If receiver is offline/backgrounded (no socketId), store a pending cancel for delivery on reconnect.
             // This fixes: both users were in-app → receiver backgrounds (socket disconnects) → caller cancels → receiver returns and still sees ringing UI.
