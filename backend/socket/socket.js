@@ -1132,6 +1132,15 @@ export const initializeSocket = async (app) => {
         // 3. FCM notification is sent asynchronously
         // 4. Socket events are broadcast instantly via Redis-backed socket map
         socket.on("cancelCall", async ({ conversationId, sender, callId: clientCallId }) => {
+            const dedupeKey = `${sender}:${conversationId}`
+            const now = Date.now()
+            if (cancelProcessedKeys.has(dedupeKey)) {
+                console.log('📴 [cancelCall] Duplicate ignored (same cancel recently)', { conversationId, sender })
+                return
+            }
+            cancelProcessedKeys.add(dedupeKey)
+            setTimeout(() => cancelProcessedKeys.delete(dedupeKey), CANCEL_DEDUPE_TTL_MS)
+
             console.log('📴 [cancelCall] CALLBACK_FLOW: Cancel received', {
                 conversationId,
                 sender,
