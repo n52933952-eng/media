@@ -108,6 +108,19 @@ const clearInCall = async (userId) => {
     await redisService.redisDel(`${IN_CALL_PREFIX}${uid}`)
 }
 
+/** Returns { callId, at } or null. Used for disconnect cleanup (O(1) to find other peer). */
+const getInCall = async (userId) => {
+    redisService.ensureRedis()
+    const uid = normalizeUserId(userId)
+    if (!uid) return null
+    try {
+        return await redisService.redisGet(`${IN_CALL_PREFIX}${uid}`)
+    } catch (e) {
+        console.error('❌ [socket] getInCall failed:', e.message)
+        return null
+    }
+}
+
 const isInCallFast = async (userId) => {
     redisService.ensureRedis()
     const uid = normalizeUserId(userId)
@@ -119,6 +132,27 @@ const isInCallFast = async (userId) => {
         console.error('❌ [socket] Failed to read inCall key:', e.message)
         return false
     }
+}
+
+/** Best practice: single place for firm call cleanup (scale-ready, WhatsApp-like).
+ *  Clears Redis inCall + activeCall + pendingCall for both users. Call on every end/cancel/disconnect. */
+const clearCallStateForPair = async (userA, userB) => {
+    if (!userA || !userB) return
+    const a = normalizeUserId(userA)
+    const b = normalizeUserId(userB)
+    if (!a || !b) return
+    const callId1 = `${a}-${b}`
+    const callId2 = `${b}-${a}`
+    await Promise.all([
+        redisService.redisDel(`activeCall:${callId1}`),
+        redisService.redisDel(`activeCall:${callId2}`),
+        redisService.redisDel(`pendingCall:${a}`),
+        redisService.redisDel(`pendingCall:${b}`),
+        redisService.redisDel(`${IN_CALL_PREFIX}${a}`),
+        redisService.redisDel(`${IN_CALL_PREFIX}${b}`),
+    ].map(p => p.catch(() => {})))
+    User.findByIdAndUpdate(a, { inCall: false }).catch(() => {})
+    User.findByIdAndUpdate(b, { inCall: false }).catch(() => {})
 }
 
 // Debug: Log inCall Redis values (for callback flow troubleshooting)
@@ -1176,45 +1210,18 @@ export const initializeSocket = async (app) => {
 
             const cancelPayload = clientCallId ? { callId: clientCallId } : {}
 
-            // Remove from active calls - try both possible call IDs - Delete from Redis (O(1) operation)
+            // Firm cleanup: one place for all call state (best practice, scale-ready)
             const callId1 = `${sender}-${conversationId}`
             const callId2 = `${conversationId}-${sender}`
             const call1 = await getActiveCall(callId1)
             const call2 = await getActiveCall(callId2)
-            if (call1) await deleteActiveCall(callId1)
-            if (call2) await deleteActiveCall(callId2)
             const hadActiveCall = !!(call1 || call2)
-
-            // Also delete pending call for BOTH users (belt-and-suspenders: ensures no stale pendingCall blocks recall)
-            // conversationId = other user, sender = who cancelled; pendingCall is keyed by receiverId
-            await deletePendingCall(conversationId).catch(() => {})
-            await deletePendingCall(sender).catch(() => {})
+            await clearCallStateForPair(sender, conversationId)
 
             // If receiver is offline (no socketId), store a pending cancel ONLY when we were canceling a RING (no active call).
-            // This fixes: receiver's phone was ringing (FCM) → caller cancels → receiver returns and we tell them to stop ringing.
-            // Do NOT set pending cancel when we had an active call (hadActiveCall): if receiver disconnected right before cancel,
-            // they may reconnect for a NEW call (e.g. B calls A back); emitting CallCanceled on connect would kill the new incoming call.
             if (!receiverSocketId && conversationId && !hadActiveCall) {
                 await setPendingCancel(conversationId, { from: sender, at: Date.now() })
             }
-
-            // Update database - mark users as NOT in call (idempotent; ensures both can call again)
-            User.findByIdAndUpdate(sender, { inCall: false }).catch(err => console.log('Error updating sender inCall status:', err))
-            User.findByIdAndUpdate(conversationId, { inCall: false }).catch(err => console.log('Error updating receiver inCall status:', err))
-
-            // CRITICAL: Clear Redis inCall BEFORE emitting CallCanceled – otherwise when receiver (Saif) gets
-            // CallCanceled and immediately calls back, callUser would see isUserBusy=true and reject the call
-            console.log('📴 [cancelCall] CALLBACK_CLEANUP: Clearing Redis inCall for both users', {
-                sender,
-                conversationId,
-                note: 'After this, B can call A back even if A was off-app',
-            })
-            await Promise.all([
-                clearInCall(sender).catch((e) => console.error('❌ [cancelCall] clearInCall(sender) failed:', e)),
-                clearInCall(conversationId).catch((e) => console.error('❌ [cancelCall] clearInCall(conversationId) failed:', e)),
-            ])
-            await logInCallStatus('cancelCall AFTER clear (should be false for both)', sender, conversationId)
-            console.log('✅ [cancelCall] CALLBACK_CLEANUP: Redis inCall cleared for both - ready for callback')
 
             // Send FCM "stop_ringtone" to receiver when: we had an active call OR receiver is offline (had pending call – phone was ringing).
             // So when Mu cancels and Saif was offline, Saif's phone still gets "call ended" and stops ringing.
@@ -2346,43 +2353,30 @@ export const initializeSocket = async (app) => {
                 console.error('❌ [socket] Failed to emit presenceUpdate (offline):', e.message)
             }
 
-            // Clean up active calls for disconnected user
+            // Firm cleanup on disconnect: O(1) lookup via inCall -> callId -> other user (scale-ready)
             if (disconnectedUserId) {
-                // Clear inCall status in database for disconnected user
-                User.findByIdAndUpdate(disconnectedUserId, { inCall: false }).catch(err => console.log('Error clearing inCall status on disconnect:', err))
-                // Clear O(1) busy marker
-                await clearInCall(disconnectedUserId).catch(() => {})
-                
-                // Clean up pending call if user disconnected before answering (cleanup indexed lookup)
-                await deletePendingCall(disconnectedUserId)
-                
-                // Get all active calls from Redis
-                const allActiveCalls = await getAllActiveCalls()
-                for (const [callId, callData] of Object.entries(allActiveCalls)) {
-                    if (callData.user1 === disconnectedUserId || callData.user2 === disconnectedUserId) {
-                        await deleteActiveCall(callId)
-                        // Notify the other user
-                        const otherUserId = callData.user1 === disconnectedUserId ? callData.user2 : callData.user1
-                        const otherUserData = await getUserSocket(otherUserId)
-                        
-                        // Clear inCall status for the other user too
-                        User.findByIdAndUpdate(otherUserId, { inCall: false }).catch(err => console.log('Error clearing other user inCall status:', err))
-                        await clearInCall(otherUserId).catch(() => {})
-                        
-                        if (otherUserData) {
-                            io.to(otherUserData.socketId).emit("CallCanceled")
-                            io.emit("cancleCall", { userToCall: otherUserId, from: disconnectedUserId })
-                        }
-                        // OPTIMIZATION: Send FCM call_ended to the other user (mobile in background still gets "call ended")
-                        try {
-                            const { sendCallEndedNotificationToUser } = await import('../services/fcmNotifications.js')
-                            const fcmResult = await sendCallEndedNotificationToUser(otherUserId, disconnectedUserId)
-                            if (fcmResult.success) {
-                                console.log('✅ [disconnect] Sent call ended FCM to other user:', otherUserId)
-                            }
-                        } catch (fcmErr) {
-                            console.error('❌ [disconnect] FCM call ended to other user:', fcmErr?.message)
-                        }
+                const inCallData = await getInCall(disconnectedUserId)
+                const callId = inCallData?.callId
+                let otherUserId = null
+                if (callId) {
+                    const callData = await getActiveCall(callId)
+                    if (callData) {
+                        otherUserId = callData.user1 === disconnectedUserId ? callData.user2 : callData.user1
+                    }
+                }
+                await clearCallStateForPair(disconnectedUserId, otherUserId || '')
+                if (otherUserId) {
+                    const otherUserData = await getUserSocket(otherUserId)
+                    if (otherUserData?.socketId) {
+                        io.to(otherUserData.socketId).emit("CallCanceled")
+                        io.emit("cancleCall", { userToCall: otherUserId, from: disconnectedUserId })
+                    }
+                    try {
+                        const { sendCallEndedNotificationToUser } = await import('../services/fcmNotifications.js')
+                        const fcmResult = await sendCallEndedNotificationToUser(otherUserId, disconnectedUserId)
+                        if (fcmResult.success) console.log('✅ [disconnect] Sent call ended FCM to:', otherUserId)
+                    } catch (fcmErr) {
+                        console.error('❌ [disconnect] FCM call ended:', fcmErr?.message)
                     }
                 }
             }
