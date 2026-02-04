@@ -836,8 +836,15 @@ export const initializeSocket = async (app) => {
             // Check if either user is already in a call
             // CALLBACK FLOW LOG: When B calls A back after cancel, we need A and B both NOT busy
             await logInCallStatus('callUser BEFORE busy check (receiver=userToCall, caller=from)', userToCall, from)
-            const userToCallBusy = await isUserBusy(userToCall)
-            const fromBusy = await isUserBusy(from)
+            let userToCallBusy = await isUserBusy(userToCall)
+            let fromBusy = await isUserBusy(from)
+            // Self-heal: if receiver is offline but marked busy (stale from previous call), clear so callback works
+            const receiverDataEarly = await getUserSocket(userToCall)
+            if (userToCallBusy && !receiverDataEarly?.socketId) {
+                console.log('📞 [callUser] CALLBACK_SELFHEAL: Receiver is offline but was marked busy – clearing inCall so callback can go through')
+                await clearInCall(userToCall).catch(() => {})
+                userToCallBusy = await isUserBusy(userToCall)
+            }
             console.log('📞 [callUser] CALLBACK_CHECK: Busy status', {
                 receiver: userToCall,
                 receiverBusy: userToCallBusy,
@@ -867,8 +874,8 @@ export const initializeSocket = async (app) => {
                 return
             }
 
-            // Get socket data from Redis (source of truth)
-            const receiverData = await getUserSocket(userToCall)
+            // Get socket data from Redis (reuse lookup from above)
+            const receiverData = receiverDataEarly
             const receiverSocketId = receiverData?.socketId
 
             const senderData = await getUserSocket(from)
@@ -1092,9 +1099,11 @@ export const initializeSocket = async (app) => {
             await deletePendingCall(conversationId).catch(() => {})
             await deletePendingCall(sender).catch(() => {})
 
-            // If receiver is offline/backgrounded (no socketId), store a pending cancel for delivery on reconnect.
-            // This fixes: both users were in-app → receiver backgrounds (socket disconnects) → caller cancels → receiver returns and still sees ringing UI.
-            if (!receiverSocketId && conversationId) {
+            // If receiver is offline (no socketId), store a pending cancel ONLY when we were canceling a RING (no active call).
+            // This fixes: receiver's phone was ringing (FCM) → caller cancels → receiver returns and we tell them to stop ringing.
+            // Do NOT set pending cancel when we had an active call (hadActiveCall): if receiver disconnected right before cancel,
+            // they may reconnect for a NEW call (e.g. B calls A back); emitting CallCanceled on connect would kill the new incoming call.
+            if (!receiverSocketId && conversationId && !hadActiveCall) {
                 await setPendingCancel(conversationId, { from: sender, at: Date.now() })
             }
 
