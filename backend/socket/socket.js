@@ -1016,21 +1016,28 @@ export const initializeSocket = async (app) => {
 
         // WebRTC: Handle answer call
         socket.on("answerCall", async (data) => {
-            const callerData = await getUserSocket(data.to)
-            const callerSocketId = callerData?.socketId
-            if (callerSocketId) {
-                const payload = typeof data.signal === 'object' ? { signal: data.signal } : { signal: data.signal }
-                if (data.callId) payload.callId = data.callId
-                io.to(callerSocketId).emit("callAccepted", Object.keys(payload).length > 1 ? payload : data.signal)
-                // Call is now active - both users are busy (already marked in callUser)
-                
-                // Clean up pending call (safety measure - should already be deleted when user connected)
-                // This handles edge cases where pending call wasn't cleaned up earlier
-                const receiverId = socket.handshake.query.userId
-                if (receiverId) {
-                    await deletePendingCall(receiverId)
-                }
+            const callerId = data.to
+            if (!callerId) {
+                console.error('❌ [answerCall] Missing data.to (caller id)')
+                return
             }
+            const callerData = await getUserSocket(callerId)
+            const callerSocketId = callerData?.socketId
+            if (!callerSocketId) {
+                console.warn('⚠️ [answerCall] Caller not online:', callerId, '- cannot deliver answer')
+                return
+            }
+            const signal = data.signal
+            if (!signal || (typeof signal === 'object' && !signal.sdp)) {
+                console.error('❌ [answerCall] Missing or invalid signal (answer SDP)')
+                return
+            }
+            const payload = { signal }
+            if (data.callId) payload.callId = data.callId
+            io.to(callerSocketId).emit("callAccepted", payload)
+            console.log('✅ [answerCall] Delivered answer to caller', callerId, 'signalType:', signal.type || (signal.sdp ? 'answer' : '?'), 'sdpLength:', signal.sdp?.length ?? 0)
+            const receiverId = socket.handshake.query.userId
+            if (receiverId) await deletePendingCall(receiverId)
         })
 
 
