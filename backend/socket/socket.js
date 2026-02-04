@@ -445,6 +445,39 @@ const deletePendingCall = async (receiverId) => {
     await redisService.redisDel(`pendingCall:${receiverId}`)
 }
 
+// Queue ICE candidates when receiver is offline; deliver when they connect (requestCallSignal)
+const PENDING_ICE_PREFIX = 'pendingIce:'
+const PENDING_ICE_MAX = 40
+const PENDING_ICE_TTL = 300 // 5 min
+
+const appendPendingIce = async (receiverId, { from, candidate, callId }) => {
+    redisService.ensureRedis()
+    try {
+        const key = `${PENDING_ICE_PREFIX}${receiverId}`
+        const raw = await redisService.redisGet(key)
+        const list = raw ? (Array.isArray(raw) ? raw : [raw]) : []
+        list.push({ from, candidate, callId })
+        const trimmed = list.slice(-PENDING_ICE_MAX)
+        await redisService.redisSet(key, trimmed, PENDING_ICE_TTL)
+    } catch (e) {
+        console.error('❌ [pendingIce] append failed:', e?.message)
+    }
+}
+
+const getAndClearPendingIce = async (receiverId) => {
+    redisService.ensureRedis()
+    try {
+        const key = `${PENDING_ICE_PREFIX}${receiverId}`
+        const raw = await redisService.redisGet(key)
+        await redisService.redisDel(key)
+        if (!raw) return []
+        return Array.isArray(raw) ? raw : [raw]
+    } catch (e) {
+        console.error('❌ [pendingIce] getAndClear failed:', e?.message)
+        return []
+    }
+}
+
 // Helper functions for pending cancels (when receiver was offline/backgrounded)
 // This is critical for WhatsApp-like UX: if caller cancels while receiver socket is disconnected,
 // receiver must clear ringing UI immediately after reconnect.
@@ -976,6 +1009,16 @@ export const initializeSocket = async (app) => {
                         callType: activeCall.callType || 'video'
                     })
                     console.log(`✅ [requestCallSignal] Call signal re-sent to receiver`)
+                    // Deliver any ICE candidates that arrived while receiver was offline
+                    const queued = await getAndClearPendingIce(receiverId)
+                    if (queued.length > 0) {
+                        for (const item of queued) {
+                            const payload = { candidate: item.candidate, from: item.from }
+                            if (item.callId) payload.callId = item.callId
+                            io.to(receiverSocketId).emit("iceCandidate", payload)
+                        }
+                        console.log(`✅ [requestCallSignal] Delivered ${queued.length} queued ICE candidates to receiver`)
+                    }
                 } else if (!receiverSocketId) {
                     console.log(`⚠️ [requestCallSignal] Receiver ${receiverId} is not online`)
                 } else if (!activeCall.signal) {
@@ -1005,7 +1048,16 @@ export const initializeSocket = async (app) => {
                             callType: pendingCall.callType || 'video'
                         })
                         console.log(`✅ [requestCallSignal] Call signal re-sent from pending call`)
-                        // Clean up after sending
+                        // Deliver any ICE candidates that arrived while receiver was offline
+                        const queued = await getAndClearPendingIce(receiverId)
+                        if (queued.length > 0) {
+                            for (const item of queued) {
+                                const payload = { candidate: item.candidate, from: item.from }
+                                if (item.callId) payload.callId = item.callId
+                                io.to(receiverSocketId).emit("iceCandidate", payload)
+                            }
+                            console.log(`✅ [requestCallSignal] Delivered ${queued.length} queued ICE candidates to receiver`)
+                        }
                         await deletePendingCall(receiverId)
                     }
                 } else {
@@ -1055,6 +1107,7 @@ export const initializeSocket = async (app) => {
         })
 
         // WebRTC: Handle ICE candidate (for mobile-to-mobile calls with trickle ICE)
+        // When receiver is offline (e.g. opening app from FCM), queue candidates and deliver on requestCallSignal
         socket.on("iceCandidate", async ({ userToCall, candidate, from, callId: clientCallId }) => {
             console.log(`🧊 [iceCandidate] Forwarding ICE candidate from ${from} to ${userToCall}`)
             
@@ -1067,7 +1120,8 @@ export const initializeSocket = async (app) => {
                 io.to(receiverSocketId).emit("iceCandidate", payload)
                 console.log(`✅ [iceCandidate] ICE candidate forwarded successfully`)
             } else {
-                console.log(`⚠️ [iceCandidate] Receiver ${userToCall} is not online, cannot forward ICE candidate`)
+                await appendPendingIce(userToCall, { from, candidate, callId: clientCallId })
+                console.log(`📦 [iceCandidate] Receiver ${userToCall} offline – queued candidate (will deliver when they connect)`)
             }
         })
 
