@@ -871,12 +871,33 @@ export const initializeSocket = async (app) => {
             await logInCallStatus('callUser BEFORE busy check (receiver=userToCall, caller=from)', userToCall, from)
             let userToCallBusy = await isUserBusy(userToCall)
             let fromBusy = await isUserBusy(from)
-            // Self-heal: if receiver is offline but marked busy (stale from previous call), clear so callback works
             const receiverDataEarly = await getUserSocket(userToCall)
-            if (userToCallBusy && !receiverDataEarly?.socketId) {
+            const receiverOffline = !receiverDataEarly?.socketId
+            // Self-heal: if receiver is offline but marked busy (stale from previous call), clear so callback works
+            if (userToCallBusy && receiverOffline) {
                 console.log('📞 [callUser] CALLBACK_SELFHEAL: Receiver is offline but was marked busy – clearing inCall so callback can go through')
                 await clearInCall(userToCall).catch(() => {})
                 userToCallBusy = await isUserBusy(userToCall)
+            }
+            // Self-heal: if CALLER is marked busy and receiver is offline (e.g. caller canceled, then tries to call back), clear caller so they can call
+            if (fromBusy && receiverOffline) {
+                console.log('📞 [callUser] CALLBACK_SELFHEAL: Caller was marked busy (e.g. after cancel) – clearing caller inCall so they can call back')
+                await clearInCall(from).catch(() => {})
+                fromBusy = await isUserBusy(from)
+            }
+            // Self-heal: if either is busy but there is NO active call between these two (e.g. after cancel), clear both so the other user can call back
+            if ((userToCallBusy || fromBusy)) {
+                const callId1 = `${from}-${userToCall}`
+                const callId2 = `${userToCall}-${from}`
+                const active1 = await getActiveCall(callId1)
+                const active2 = await getActiveCall(callId2)
+                if (!active1 && !active2) {
+                    console.log('📞 [callUser] CALLBACK_SELFHEAL: No active call between this pair – clearing both inCall so callback can proceed', { from, userToCall })
+                    await clearInCall(from).catch(() => {})
+                    await clearInCall(userToCall).catch(() => {})
+                    userToCallBusy = await isUserBusy(userToCall)
+                    fromBusy = await isUserBusy(from)
+                }
             }
             console.log('📞 [callUser] CALLBACK_CHECK: Busy status', {
                 receiver: userToCall,
