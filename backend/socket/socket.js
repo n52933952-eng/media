@@ -738,14 +738,18 @@ export const initializeSocket = async (app) => {
             // Do NOT send pending call here – client may not have callUser listener attached yet (race).
             // Client will emit requestCallSignal when ready; requestCallSignal handler sends the signal.
 
-            // Deliver any pending cancel to this user (caller canceled while this user was offline/backgrounded)
+            // Deliver any pending cancel so user can clear UI and call again (caller canceled while this user was offline)
+            // Delay so client has time to attach socket listeners after reconnect – otherwise CallCanceled can be missed
             try {
                 const pendingCancel = await getPendingCancel(userId)
                 if (pendingCancel) {
-                    console.log(`📴 [socket] Found pending cancel for ${userId}, emitting CallCanceled...`, pendingCancel)
-                    io.to(socket.id).emit("CallCanceled")
+                    console.log(`📴 [socket] Found pending cancel for ${userId}, will emit CallCanceled after short delay...`, pendingCancel)
                     await deletePendingCancel(userId)
-                    console.log(`✅ [socket] Cleaned up pending cancel for ${userId}`)
+                    const sid = socket.id
+                    setTimeout(() => {
+                        io.to(sid).emit("CallCanceled")
+                        console.log(`✅ [socket] Emitted CallCanceled to ${userId} (pending cancel on connect)`)
+                    }, 500)
                 }
             } catch (error) {
                 console.error(`❌ [socket] Error checking for pending cancels when ${userId} connected:`, error.message)
@@ -919,16 +923,15 @@ export const initializeSocket = async (app) => {
                 await clearInCall(from).catch(() => {})
                 fromBusy = await isUserBusy(from)
             }
-            // Self-heal: if either is busy but there is NO active call between these two (e.g. after cancel), clear both so the other user can call back
+            // Self-heal: if either is busy but there is NO active call between these two (e.g. cancel was lost or mobile didn't emit), full cleanup so callback/recall works
             if ((userToCallBusy || fromBusy)) {
                 const callId1 = `${from}-${userToCall}`
                 const callId2 = `${userToCall}-${from}`
                 const active1 = await getActiveCall(callId1)
                 const active2 = await getActiveCall(callId2)
                 if (!active1 && !active2) {
-                    console.log('📞 [callUser] CALLBACK_SELFHEAL: No active call between this pair – clearing both inCall so callback can proceed', { from, userToCall })
-                    await clearInCall(from).catch(() => {})
-                    await clearInCall(userToCall).catch(() => {})
+                    console.log('📞 [callUser] CALLBACK_SELFHEAL: No active call between this pair – full clear (inCall + activeCall + pendingCall) so callback can proceed', { from, userToCall })
+                    await clearCallStateForPair(from, userToCall).catch(() => {})
                     userToCallBusy = await isUserBusy(userToCall)
                     fromBusy = await isUserBusy(from)
                 }
