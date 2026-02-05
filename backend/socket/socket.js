@@ -706,11 +706,12 @@ export const initializeSocket = async (app) => {
     io.on("connection", async (socket) => {
         console.log("user connected", socket.id)
         
-        const userId = socket.handshake.query.userId
-        console.log("🔌 [socket] User connecting with userId:", userId)
+        const userIdRaw = socket.handshake.query.userId
+        const userId = normalizeUserId(userIdRaw) || userIdRaw
+        console.log("🔌 [socket] User connecting with userId:", userId, userIdRaw !== userId ? `(normalized from ${userIdRaw})` : '')
         // Presence subscription support (clients can subscribe to specific userIds)
         socket.data.presenceSubscriptions = []
-        // Store socket info as object like madechess (dual-write: in-memory + Redis)
+        // Store socket info as object like madechess (dual-write: in-memory + Redis). Use normalized id so callUser lookup finds receiver.
         if (userId && userId !== "undefined") {
             const socketData = {
                 socketId: socket.id,
@@ -904,60 +905,67 @@ export const initializeSocket = async (app) => {
                 console.error('❌ [callUser] No signal/signalData in payload – rejecting')
                 return
             }
+            // Normalize IDs so we find receiver (mobile may send string/ObjectId; receiver registered with normalized id on connect)
+            const receiverId = normalizeUserId(userToCall) || userToCall
+            const callerId = normalizeUserId(from) || from
+            if (!receiverId || !callerId) {
+                console.error('❌ [callUser] Missing or invalid userToCall/from – rejecting', { userToCall, from })
+                return
+            }
             // Check if either user is already in a call
             // CALLBACK FLOW LOG: When B calls A back after cancel, we need A and B both NOT busy
-            await logInCallStatus('callUser BEFORE busy check (receiver=userToCall, caller=from)', userToCall, from)
-            let userToCallBusy = await isUserBusy(userToCall)
-            let fromBusy = await isUserBusy(from)
-            const receiverDataEarly = await getUserSocket(userToCall)
+            await logInCallStatus('callUser BEFORE busy check (receiver=userToCall, caller=from)', receiverId, callerId)
+            let userToCallBusy = await isUserBusy(receiverId)
+            let fromBusy = await isUserBusy(callerId)
+            const receiverDataEarly = await getUserSocket(receiverId)
             const receiverOffline = !receiverDataEarly?.socketId
             // Self-heal: if receiver is offline but marked busy (stale from previous call), clear so callback works
             if (userToCallBusy && receiverOffline) {
                 console.log('📞 [callUser] CALLBACK_SELFHEAL: Receiver is offline but was marked busy – clearing inCall so callback can go through')
-                await clearInCall(userToCall).catch(() => {})
-                userToCallBusy = await isUserBusy(userToCall)
+                await clearInCall(receiverId).catch(() => {})
+                userToCallBusy = await isUserBusy(receiverId)
             }
             // Self-heal: if CALLER is marked busy and receiver is offline (e.g. caller canceled, then tries to call back), clear caller so they can call
             if (fromBusy && receiverOffline) {
                 console.log('📞 [callUser] CALLBACK_SELFHEAL: Caller was marked busy (e.g. after cancel) – clearing caller inCall so they can call back')
-                await clearInCall(from).catch(() => {})
-                fromBusy = await isUserBusy(from)
+                await clearInCall(callerId).catch(() => {})
+                fromBusy = await isUserBusy(callerId)
             }
             // Self-heal: if either is busy but there is NO active call between these two (e.g. cancel was lost or mobile didn't emit), full cleanup so callback/recall works
             if ((userToCallBusy || fromBusy)) {
-                const callId1 = `${from}-${userToCall}`
-                const callId2 = `${userToCall}-${from}`
+                const callId1 = `${callerId}-${receiverId}`
+                const callId2 = `${receiverId}-${callerId}`
                 const active1 = await getActiveCall(callId1)
                 const active2 = await getActiveCall(callId2)
                 if (!active1 && !active2) {
-                    console.log('📞 [callUser] CALLBACK_SELFHEAL: No active call between this pair – full clear (inCall + activeCall + pendingCall) so callback can proceed', { from, userToCall })
-                    await clearCallStateForPair(from, userToCall).catch(() => {})
-                    userToCallBusy = await isUserBusy(userToCall)
-                    fromBusy = await isUserBusy(from)
+                    console.log('📞 [callUser] CALLBACK_SELFHEAL: No active call between this pair – full clear (inCall + activeCall + pendingCall) so callback can proceed', { from: callerId, userToCall: receiverId })
+                    await clearCallStateForPair(callerId, receiverId).catch(() => {})
+                    userToCallBusy = await isUserBusy(receiverId)
+                    fromBusy = await isUserBusy(callerId)
                 }
             }
             console.log('📞 [callUser] CALLBACK_CHECK: Busy status', {
-                receiver: userToCall,
+                receiver: receiverId,
                 receiverBusy: userToCallBusy,
-                caller: from,
+                caller: callerId,
                 callerBusy: fromBusy,
                 willReject: userToCallBusy || fromBusy,
             })
             if (userToCallBusy || fromBusy) {
-                const busyUserId = userToCallBusy ? userToCall : from
+                const busyUserId = userToCallBusy ? receiverId : callerId
                 console.log('❌ [callUser] CALLBACK_BLOCKED: Rejecting call - user is busy', {
                     busyUserId,
                     scenario: 'B_calls_A_after_cancel',
-                    receiver: userToCall,
-                    caller: from,
+                    receiver: receiverId,
+                    caller: callerId,
                 })
                 // Notify sender that the call cannot be made (user is busy)
-                const senderData = await getUserSocket(from)
+                const senderData = await getUserSocket(callerId)
                 const senderSocketId = senderData?.socketId
                 if (senderSocketId) {
                     io.to(senderSocketId).emit("callBusyError", { 
                         message: "User is currently in a call",
-                        busyUserId: userToCallBusy ? userToCall : from,
+                        busyUserId: userToCallBusy ? receiverId : callerId,
                         reason: "busy",
                         callId: clientCallId
                     })
@@ -969,42 +977,41 @@ export const initializeSocket = async (app) => {
             const receiverData = receiverDataEarly
             const receiverSocketId = receiverData?.socketId
 
-            const senderData = await getUserSocket(from)
+            const senderData = await getUserSocket(callerId)
             const senderSocketId = senderData?.socketId
 
-            const payload = { signal: signalPayload, from, name, userToCall, callType }
+            const payload = { signal: signalPayload, from: callerId, name, userToCall: receiverId, callType }
             if (clientCallId) payload.callId = clientCallId
 
-            console.log(`📞 [callUser] Caller: ${name} (${from})`)
-            console.log(`📞 [callUser] Receiver: ${userToCall}`)
+            console.log(`📞 [callUser] Caller: ${name} (${callerId})`)
+            console.log(`📞 [callUser] Receiver: ${receiverId} (receiverSocketId: ${receiverSocketId || 'none – will use FCM'})`)
             console.log(`📞 [callUser] Receiver socket data:`, receiverData)
-            console.log(`📞 [callUser] Receiver socketId:`, receiverSocketId)
 
             if (receiverSocketId) {
                 // User is online - send socket event
-                console.log(`✅ [callUser] User ${userToCall} is ONLINE, sending socket event`)
+                console.log(`✅ [callUser] User ${receiverId} is ONLINE, sending callUser to socket ${receiverSocketId}`)
                 io.to(receiverSocketId).emit("callUser", payload)
             } else {
                 // User is offline - send push so their phone rings. Do NOT tell caller "offline" – caller keeps "Calling..." and Saif's phone rings.
-                console.log(`📱 [callUser] User ${userToCall} is OFFLINE, sending push notification (phone will ring)`)
+                console.log(`📱 [callUser] User ${receiverId} is OFFLINE, sending push notification (phone will ring)`)
                 console.log('📱 [callUser] CALLBACK_FCM: Sending FCM to receiver (A was off-app)', {
-                    receiver: userToCall,
-                    caller: from,
+                    receiver: receiverId,
+                    caller: callerId,
                     callerName: name,
                     callType,
                 })
                 try {
-                    console.log(`📤 [callUser] Calling sendCallNotification(${userToCall}, ${name}, ${from}, ${callType})`)
-                    const result = await sendCallNotification(userToCall, name, from, callType)
+                    console.log(`📤 [callUser] Calling sendCallNotification(${receiverId}, ${name}, ${callerId}, ${callType})`)
+                    const result = await sendCallNotification(receiverId, name, callerId, callType)
                     console.log('✅ [callUser] Push notification result:', result)
                     
-                    await setPendingCall(userToCall, {
-                        callerId: from,
+                    await setPendingCall(receiverId, {
+                        callerId: callerId,
                         signal: signalPayload,
                         name: name,
                         callType: callType
                     })
-                    console.log(`✅ [callUser] Stored pending call for ${userToCall} (indexed for fast lookup)`)
+                    console.log(`✅ [callUser] Stored pending call for ${receiverId} (indexed for fast lookup)`)
                 } catch (error) {
                     console.error('❌ [callUser] Error sending call push notification:', error)
                     console.error('❌ [callUser] Error stack:', error.stack)
@@ -1017,25 +1024,25 @@ export const initializeSocket = async (app) => {
             }
 
             // Mark both users as busy - Store in Redis with signal data
-            const callId = `${from}-${userToCall}`
+            const callId = `${callerId}-${receiverId}`
             await setActiveCall(callId, { 
-                user1: from, 
-                user2: userToCall,
+                user1: callerId, 
+                user2: receiverId,
                 signal: signalPayload, // Store the signal so we can re-send it
                 name: name,
                 callType: callType
             })
             // O(1) busy markers (additive)
             await Promise.all([
-                setInCall(from, callId).catch(() => {}),
-                setInCall(userToCall, callId).catch(() => {}),
+                setInCall(callerId, callId).catch(() => {}),
+                setInCall(receiverId, callId).catch(() => {}),
             ])
             
             // Update database - mark users as in call (persistent across refreshes)
-            User.findByIdAndUpdate(from, { inCall: true }).catch(err => console.log('Error updating caller inCall status:', err))
-            User.findByIdAndUpdate(userToCall, { inCall: true }).catch(err => console.log('Error updating receiver inCall status:', err))
+            User.findByIdAndUpdate(callerId, { inCall: true }).catch(err => console.log('Error updating caller inCall status:', err))
+            User.findByIdAndUpdate(receiverId, { inCall: true }).catch(err => console.log('Error updating receiver inCall status:', err))
             
-            io.emit("callBusy", { userToCall, from })
+            io.emit("callBusy", { userToCall: receiverId, from: callerId })
         })
 
         // WebRTC: Handle request call signal (when user comes online after receiving push notification)
