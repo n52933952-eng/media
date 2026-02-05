@@ -524,17 +524,27 @@ export const getUserProfile = async(req,res) => {
         Follow.find({ followerId: user._id }).select('followeeId').limit(LIMIT_LIST).lean(),
       ])
 
-      const followers = followersDocs.map((d) => d.followerId?.toString?.() ?? String(d.followerId))
-      const following = followingDocs.map((d) => d.followeeId?.toString?.() ?? String(d.followeeId))
+      let followers = followersDocs.map((d) => d.followerId?.toString?.() ?? String(d.followerId))
+      let following = followingDocs.map((d) => d.followeeId?.toString?.() ?? String(d.followeeId))
 
-      // Merge onto the user object (strip mongoose internals by using toObject)
-      const userObj = user.toObject ? user.toObject() : user
+      // Fallback: if Follow collection is empty (e.g. before backfill or legacy data), use User document arrays
+      // so chess "find online" / feed / web still get following+followers and can fetch users
+      const userObj = user.toObject ? user.toObject() : { ...user }
+      const legacyFollowers = Array.isArray(userObj.followers) ? userObj.followers : []
+      const legacyFollowing = Array.isArray(userObj.following) ? userObj.following : []
+      if (followers.length === 0 && legacyFollowers.length > 0) {
+        followers = legacyFollowers.map((id) => id?.toString?.() ?? String(id)).filter(Boolean)
+      }
+      if (following.length === 0 && legacyFollowing.length > 0) {
+        following = legacyFollowing.map((id) => id?.toString?.() ?? String(id)).filter(Boolean)
+      }
+
       res.status(200).json({
         ...userObj,
         followers,
         following,
-        followersCount,
-        followingCount,
+        followersCount: followersCount > 0 ? followersCount : followers.length,
+        followingCount: followingCount > 0 ? followingCount : following.length,
         isFollowedByMe,
       })
 
@@ -827,27 +837,39 @@ export const getBusyCardUsers = async (req, res) => {
     }
 }
 
-// Get users that current user is following
+// Get users that current user is following (for messages, chess challenge list, etc.)
 export const getFollowingUsers = async (req, res) => {
     try {
         const userId = req.user._id
-        // Read-from-Follow: get followee IDs (limit to 30 for performance)
+        const limit = 500
+        let followeeIds = []
+
+        // Read-from-Follow: get followee IDs
         const followingDocs = await Follow.find({ followerId: userId })
             .select('followeeId')
             .sort({ createdAt: -1 })
-            .limit(30)
+            .limit(limit)
             .lean()
 
-        if (!followingDocs || followingDocs.length === 0) {
+        if (followingDocs && followingDocs.length > 0) {
+            followeeIds = followingDocs.map(d => d.followeeId)
+        } else {
+            // Fallback: use User.following when Follow collection is empty (legacy or before backfill)
+            const currentUser = await User.findById(userId).select('following').lean()
+            const legacyFollowing = Array.isArray(currentUser?.following) ? currentUser.following : []
+            if (legacyFollowing.length > 0) {
+                followeeIds = legacyFollowing.slice(0, limit).map(id => id?.toString?.()).filter(Boolean)
+            }
+        }
+
+        if (followeeIds.length === 0) {
             return res.status(200).json([])
         }
 
-        const followeeIds = followingDocs.map(d => d.followeeId)
-
         const followingUsers = await User.find({
             _id: { $in: followeeIds }
-        }).select('username name profilePic bio').limit(30).sort({ username: 1 })
-        
+        }).select('_id username name profilePic bio').limit(limit).sort({ username: 1 })
+
         res.status(200).json(followingUsers)
     } catch (error) {
         console.error('Error getting following users:', error)
