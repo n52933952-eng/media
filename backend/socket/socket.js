@@ -747,10 +747,9 @@ export const initializeSocket = async (app) => {
                     console.log(`📴 [socket] Found pending cancel for ${userId}, will emit CallCanceled after short delay...`, pendingCancel)
                     await deletePendingCancel(userId)
                     const sid = socket.id
-                    setTimeout(() => {
-                        io.to(sid).emit("CallCanceled")
-                        console.log(`✅ [socket] Emitted CallCanceled to ${userId} (pending cancel on connect)`)
-                    }, 500)
+                    // IMMEDIATE emit - no delay for faster cleanup
+                    io.to(sid).emit("CallCanceled")
+                    console.log(`✅ [socket] Emitted CallCanceled to ${userId} (pending cancel on connect, IMMEDIATE)`)
                 }
             } catch (error) {
                 console.error(`❌ [socket] Error checking for pending cancels when ${userId} connected:`, error.message)
