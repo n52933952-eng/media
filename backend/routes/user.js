@@ -1,13 +1,14 @@
 import express from 'express'
 
 const router = express.Router()
-import{SignUp,LoginUser,LogOut,FollowAndUnfollow,getUserProfile,UpdateUser,searchUsers,getSuggestedUsers,getBusyChessUsers,getBusyCardUsers,getFollowingUsers} from '../controller/user.js'
+import{SignUp,LoginUser,GoogleLogin,LogOut,FollowAndUnfollow,getUserProfile,UpdateUser,searchUsers,getSuggestedUsers,getBusyChessUsers,getBusyCardUsers,getFollowingUsers} from '../controller/user.js'
 import protectRoute  from '../middlware/protectRoute.js'
 import upload from '../middlware/upload.js'
 import User from '../models/user.js'
 
 router.post("/signup", SignUp)
 router.post("/login",LoginUser)
+router.post("/google-login", GoogleLogin)
 router.post("/logout",LogOut)
 router.post("/follow/:id",protectRoute,FollowAndUnfollow)
 

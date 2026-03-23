@@ -1,148 +1,38 @@
-// OneSignal Push Notification Service
-// Sends push notifications to mobile app users
-
-const ONESIGNAL_APP_ID = process.env.ONESIGNAL_APP_ID;
-const ONESIGNAL_REST_API_KEY = process.env.ONESIGNAL_REST_API_KEY;
-
-if (!ONESIGNAL_APP_ID || !ONESIGNAL_REST_API_KEY) {
-  console.error('❌ [OneSignal] Missing ONESIGNAL_APP_ID or ONESIGNAL_REST_API_KEY in environment variables!');
-}
+// Push notifications for PlaySocial — FCM (social / messages / missed call tray).
+// Incoming call ringing uses ./fcmNotifications.js directly (data-only); do not change that path here.
 
 /**
- * Send a push notification to a specific user
- * @param {string} userId - MongoDB user ID (linked to OneSignal external_user_id)
+ * Send a push notification to a specific user (FCM).
+ * @param {string} userId - MongoDB user ID
  * @param {string} title - Notification title
- * @param {string} message - Notification message
- * @param {object} data - Additional data to send with notification
+ * @param {string} message - Notification body
+ * @param {object} data - Additional data (stringified for FCM)
  * @param {object} images - Optional images: { profilePic, postImage }
  */
 async function sendNotificationToUser(userId, title, message, data = {}, images = {}) {
   try {
-    console.log('📤 [OneSignal] Preparing notification...');
-    console.log('📤 [OneSignal] User ID:', userId);
-    console.log('📤 [OneSignal] Title:', title);
-    console.log('📤 [OneSignal] Message:', message);
-    console.log('📤 [OneSignal] Data:', data);
-    console.log('📤 [OneSignal] Images:', images);
-    
-    // For call notifications, use high priority and full-screen intent
-    const isCallNotification = data.type === 'call';
-    
-    // Facebook-style rich notifications: Use profile picture as large icon, post image as big picture
-    const profilePic = images.profilePic || images.largeIcon;
-    const postImage = images.postImage || images.bigPicture;
-    
-    const notification = {
-      app_id: ONESIGNAL_APP_ID,
-      target_channel: 'push',
-      include_aliases: {
-        external_id: [userId]
-      },
-      // Facebook/WhatsApp-style notification structure
-      headings: { en: title }, // Header: User's name (bold, prominent)
-      contents: { en: message }, // Content: Action description
-      subtitle: { en: message }, // iOS: Subtitle (same as content)
-      data: data,
-      // Rich notifications (Facebook-style)
-      ...(profilePic && {
-        large_icon: profilePic, // Android: Large icon (profile picture) - shows prominently
-        ios_attachments: { id: profilePic }, // iOS: Attachment image
-      }),
-      ...(postImage && {
-        big_picture: postImage, // Android: Large image (post image) - expands when notification is opened
-      }),
-      // Notification sound and vibration (Facebook-style)
-      sound: 'default', // Default notification sound
-      // Android-specific settings
-      android_accent_color: 'FF3B82F6', // Blue accent color (like Facebook)
-      android_led_color: 'FF3B82F6', // LED color for notification
-      android_sound: 'default', // Android notification sound
-      // High priority for heads-up notifications (peek at top of screen like WhatsApp/Facebook)
-      priority: 10, // High priority so notification "peeks" at top of screen (heads-up notification)
-      // Action buttons (WhatsApp/Facebook-style) - shows buttons like "Reply", "Mark as read"
-      // Native Android intents for action buttons (like FCM)
-      buttons: [
-        ...(data.type === 'like' || data.type === 'comment' || data.type === 'mention' ? [
-          {
-            id: 'view_post',
-            text: 'View Post',
-            icon: 'ic_menu_view',
-            // Native Android intent action for native handling (like FCM)
-            action: 'com.compnay.ONESIGNAL_VIEW_POST'
-          }
-        ] : []),
-        ...(data.type === 'follow' ? [
-          {
-            id: 'view_profile',
-            text: 'View Profile',
-            icon: 'ic_menu_view',
-            // Native Android intent action for native handling (like FCM)
-            action: 'com.compnay.ONESIGNAL_VIEW_PROFILE'
-          }
-        ] : []),
-        {
-          id: 'mark_read',
-          text: 'Mark as read',
-          icon: 'ic_menu_done',
-          // Native Android intent action for native handling (like FCM)
-          action: 'com.compnay.ONESIGNAL_MARK_READ'
-        }
-      ],
-      // Override priority for call notifications (keep high priority)
-      ...(isCallNotification && {
-        priority: 10,
-      }),
-      // Android-specific settings for call notifications
-      android_channel_id: isCallNotification ? 'call_notifications' : undefined,
-      // Sound and vibration for calls
-      ...(isCallNotification && {
-        android_sound: 'default',
-        android_led_color: 'FF0000FF',
-        android_accent_color: 'FF0000FF',
-      }),
-    };
-
-    console.log('📤 [OneSignal] Sending request to OneSignal API...');
-    console.log('📤 [OneSignal] Notification payload:', JSON.stringify(notification, null, 2));
-    console.log('📤 [OneSignal] Using API Key:', ONESIGNAL_REST_API_KEY.substring(0, 20) + '...');
-
-    const response = await fetch('https://api.onesignal.com/notifications', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Key ${ONESIGNAL_REST_API_KEY}`,
-      },
-      body: JSON.stringify(notification),
-    });
-
-    console.log('📤 [OneSignal] Response status:', response.status);
-    const result = await response.json();
-    console.log('📤 [OneSignal] Response body:', JSON.stringify(result, null, 2));
-    
-    if (result.errors) {
-      console.error('❌ [OneSignal] API returned errors:', result.errors);
-      return { success: false, error: result.errors };
+    const { sendGeneralPushNotificationToUser } = await import('./fcmNotifications.js');
+    const result = await sendGeneralPushNotificationToUser(userId, title, message, data, images);
+    if (result.success) {
+      console.log('✅ [Push/FCM] Sent to user:', userId);
+    } else {
+      console.warn('⚠️ [Push/FCM] Not sent:', userId, result.error);
     }
-
-    console.log('✅ [OneSignal] Push notification sent successfully to user:', userId);
-    console.log('✅ [OneSignal] Recipients:', result.recipients);
-    return { success: true, data: result };
+    return result;
   } catch (error) {
-    console.error('❌ [OneSignal] Error sending push notification:', error);
-    console.error('❌ [OneSignal] Error stack:', error.stack);
+    console.error('❌ [Push/FCM] Error:', error);
     return { success: false, error: error.message };
   }
 }
 
 /**
  * Send notification when someone likes a post
- * Facebook-style: "John Doe liked your post"
  */
 async function sendLikeNotification(postOwnerId, likerName, postId, images = {}) {
   return await sendNotificationToUser(
     postOwnerId,
-    likerName, // Header: User's name (like Facebook)
-    'liked your post', // Content: Action description
+    likerName,
+    'liked your post',
     { type: 'like', postId },
     images
   );
@@ -150,13 +40,12 @@ async function sendLikeNotification(postOwnerId, likerName, postId, images = {})
 
 /**
  * Send notification when someone comments on a post
- * Facebook-style: "John Doe commented on your post"
  */
 async function sendCommentNotification(postOwnerId, commenterName, postId, images = {}) {
   return await sendNotificationToUser(
     postOwnerId,
-    commenterName, // Header: User's name (like Facebook)
-    'commented on your post', // Content: Action description
+    commenterName,
+    'commented on your post',
     { type: 'comment', postId },
     images
   );
@@ -164,13 +53,12 @@ async function sendCommentNotification(postOwnerId, commenterName, postId, image
 
 /**
  * Send notification when someone follows you
- * Facebook-style: "John Doe started following you"
  */
 async function sendFollowNotification(userId, followerName, followerId, images = {}) {
   return await sendNotificationToUser(
     userId,
-    followerName, // Header: User's name (like Facebook)
-    'started following you', // Content: Action description
+    followerName,
+    'started following you',
     { type: 'follow', userId: followerId },
     images
   );
@@ -178,13 +66,12 @@ async function sendFollowNotification(userId, followerName, followerId, images =
 
 /**
  * Send notification when someone mentions you
- * Facebook-style: "John Doe mentioned you in a post"
  */
 async function sendMentionNotification(userId, mentionerName, postId, images = {}) {
   return await sendNotificationToUser(
     userId,
-    mentionerName, // Header: User's name (like Facebook)
-    'mentioned you in a post', // Content: Action description
+    mentionerName,
+    'mentioned you in a post',
     { type: 'mention', postId },
     images
   );
@@ -192,22 +79,20 @@ async function sendMentionNotification(userId, mentionerName, postId, images = {
 
 /**
  * Send notification when someone sends you a message (when you're offline / not in app)
- * Facebook-style: "John Doe sent you a message"
  */
 async function sendMessageNotification(recipientUserId, senderUser, conversationId) {
-  const senderName = senderUser?.name || senderUser?.username || 'Someone'
+  const senderName = senderUser?.name || senderUser?.username || 'Someone';
   return await sendNotificationToUser(
     recipientUserId,
     senderName,
     'sent you a message',
     {
       type: 'message',
-      conversationId,
-      // include sender so mobile can open chat by otherUserId (mobile fetch is /api/message/:otherUserId)
-      senderId: senderUser?._id?.toString?.() ?? senderUser?._id,
-      senderName: senderUser?.name,
-      senderUsername: senderUser?.username,
-      senderProfilePic: senderUser?.profilePic,
+      conversationId: String(conversationId || ''),
+      senderId: senderUser?._id?.toString?.() ?? String(senderUser?._id || ''),
+      senderName: senderUser?.name || '',
+      senderUsername: senderUser?.username || '',
+      senderProfilePic: senderUser?.profilePic || '',
     },
     { profilePic: senderUser?.profilePic }
   );
@@ -221,7 +106,7 @@ async function sendChessChallengeNotification(userId, challengerName, gameId) {
     userId,
     'Chess Challenge ♟️',
     `${challengerName} challenged you to a chess game!`,
-    { type: 'chess_challenge', gameId }
+    { type: 'chess_challenge', gameId: String(gameId || '') }
   );
 }
 
@@ -233,7 +118,7 @@ async function sendChessMoveNotification(userId, opponentName, gameId) {
     userId,
     'Your Turn ♟️',
     `${opponentName} made a move. It's your turn!`,
-    { type: 'chess_move', gameId }
+    { type: 'chess_move', gameId: String(gameId || '') }
   );
 }
 
@@ -245,7 +130,7 @@ async function sendContributorAddedNotification(userId, ownerName, postId) {
     userId,
     'Collaborative Post 👥',
     `${ownerName} added you as a contributor`,
-    { type: 'contributor', postId }
+    { type: 'contributor', postId: String(postId || '') }
   );
 }
 
@@ -257,7 +142,7 @@ async function sendWeatherAlertNotification(userId, city, message) {
     userId,
     `Weather Alert 🌤️`,
     `${city}: ${message}`,
-    { type: 'weather', city }
+    { type: 'weather', city: String(city || '') }
   );
 }
 
@@ -274,41 +159,37 @@ async function sendFootballScoreNotification(userId, matchInfo) {
 }
 
 /**
- * Send notification for incoming call
- * Uses FCM ONLY for automatic ringing (WhatsApp-like behavior)
- * FCM is required for automatic ringing when app is closed
+ * Send notification for incoming call — FCM data-only (native ringing). Unchanged contract.
  */
 async function sendCallNotification(userId, callerName, callerId, callType = 'video') {
   try {
     const { sendCallNotificationToUser } = await import('./fcmNotifications.js');
     const fcmResult = await sendCallNotificationToUser(userId, callerName, callerId, callType);
-    
+
     if (fcmResult.success) {
       console.log('✅ [CallNotification] Sent via FCM (automatic ringing enabled)');
       return fcmResult;
-    } else {
-      console.error('❌ [CallNotification] FCM failed:', fcmResult.error);
-      return { success: false, error: fcmResult.error || 'FCM notification failed' };
     }
+    console.error('❌ [CallNotification] FCM failed:', fcmResult.error);
+    return { success: false, error: fcmResult.error || 'FCM notification failed' };
   } catch (error) {
     console.error('❌ [CallNotification] Error sending FCM notification:', error);
-    console.error('❌ [CallNotification] Error details:', error.message);
     return { success: false, error: error.message || 'Failed to send FCM notification' };
   }
 }
 
 /**
- * Send notification for missed call
+ * Send notification for missed call (tray notification via general FCM)
  */
 async function sendMissedCallNotification(userId, callerName, callType = 'video') {
   return await sendNotificationToUser(
     userId,
     'Missed Call 📵',
     `You missed a ${callType} call from ${callerName}`,
-    { 
-      type: 'missed_call', 
-      callType,
-      callerName 
+    {
+      type: 'missed_call',
+      callType: String(callType || 'video'),
+      callerName: String(callerName || ''),
     }
   );
 }

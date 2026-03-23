@@ -124,7 +124,7 @@ export const createNotification = async (userId, type, fromUserId, options = {})
             }
         }, 200) // Small delay to ensure socket is ready
 
-        // Send OneSignal push notification (for likes, comments, mentions, follows, etc.)
+        // Send FCM push notification (for likes, comments, mentions, follows, etc.)
         // Note: Call notifications are handled separately via FCM
         try {
             // Get the user who triggered the notification (fromUserId) with profile picture
@@ -157,26 +157,26 @@ export const createNotification = async (userId, type, fromUserId, options = {})
                 postImage: postImage || null,
             }
 
-            // Send appropriate OneSignal notification based on type
+            // Send appropriate FCM notification based on type
             switch (type) {
                 case 'like':
                     await sendLikeNotification(userId.toString(), fromUserName, postId, images)
-                    console.log(`📤 [createNotification] Sent OneSignal like notification to ${userId}`)
+                    console.log(`📤 [createNotification] Sent FCM like notification to ${userId}`)
                     break
                 
                 case 'comment':
                     await sendCommentNotification(userId.toString(), fromUserName, postId, images)
-                    console.log(`📤 [createNotification] Sent OneSignal comment notification to ${userId}`)
+                    console.log(`📤 [createNotification] Sent FCM comment notification to ${userId}`)
                     break
                 
                 case 'mention':
                     await sendMentionNotification(userId.toString(), fromUserName, postId, images)
-                    console.log(`📤 [createNotification] Sent OneSignal mention notification to ${userId}`)
+                    console.log(`📤 [createNotification] Sent FCM mention notification to ${userId}`)
                     break
                 
                 case 'follow':
                     await sendFollowNotification(userId.toString(), fromUserName, fromUserId.toString(), images)
-                    console.log(`📤 [createNotification] Sent OneSignal follow notification to ${userId}`)
+                    console.log(`📤 [createNotification] Sent FCM follow notification to ${userId}`)
                     break
                 
                 case 'collaboration':
@@ -190,15 +190,15 @@ export const createNotification = async (userId, type, fromUserId, options = {})
                         type: type,
                         postId: postId
                     }, images)
-                    console.log(`📤 [createNotification] Sent OneSignal ${type} notification to ${userId}`)
+                    console.log(`📤 [createNotification] Sent FCM ${type} notification to ${userId}`)
                     break
                 
                 default:
-                    console.log(`⚠️ [createNotification] Unknown notification type: ${type}, skipping OneSignal push`)
+                    console.log(`⚠️ [createNotification] Unknown notification type: ${type}, skipping FCM push`)
             }
         } catch (pushError) {
             // Don't fail notification creation if push fails
-            console.error(`❌ [createNotification] Error sending OneSignal push notification:`, pushError)
+            console.error(`❌ [createNotification] Error sending FCM push notification:`, pushError)
         }
 
         return notification

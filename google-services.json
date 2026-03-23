@@ -1,0 +1,39 @@
+{
+  "project_info": {
+    "project_number": "783773134798",
+    "project_id": "media-e0b78",
+    "storage_bucket": "media-e0b78.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:783773134798:android:8b8cd4ce1e57bec9a0059f",
+        "android_client_info": {
+          "package_name": "com.tweet"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "783773134798-9e2bi31ub8dhbbjebdrt5fh6u4deekd7.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDBfwGMcFV7mxY6aE-DMg3s3E-J756b8Jk"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "783773134798-9e2bi31ub8dhbbjebdrt5fh6u4deekd7.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

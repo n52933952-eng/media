@@ -1,3 +1,5 @@
+import crypto from 'crypto'
+import { OAuth2Client } from 'google-auth-library'
 import User from '../models/user.js'
 import Post from '../models/post.js'
 import Follow from '../models/follow.js'
@@ -90,9 +92,72 @@ export const LoginUser = async(req,res) => {
     }
 }
 
+export const GoogleLogin = async (req, res) => {
+  try {
+    const { idToken } = req.body
+    if (!idToken) {
+      return res.status(400).json({ error: 'idToken is required' })
+    }
+    const webClientId = process.env.GOOGLE_WEB_CLIENT_ID
+    if (!webClientId) {
+      console.error('❌ GOOGLE_WEB_CLIENT_ID is not set')
+      return res.status(500).json({ error: 'Google sign-in is not configured on the server' })
+    }
+    const oAuthClient = new OAuth2Client(webClientId)
+    const ticket = await oAuthClient.verifyIdToken({
+      idToken,
+      audience: webClientId,
+    })
+    const payload = ticket.getPayload()
+    if (!payload?.email) {
+      return res.status(400).json({ error: 'Google account has no email' })
+    }
+    const email = payload.email.toLowerCase()
+    const googleId = payload.sub
 
+    let user = await User.findOne({ $or: [{ googleId }, { email }] })
 
+    if (!user) {
+      const rawBase = (email.split('@')[0] || 'user').replace(/[^a-zA-Z0-9_]/g, '_').slice(0, 20)
+      const baseUsername = rawBase || 'user'
+      let username = baseUsername
+      let n = 0
+      while (await User.findOne({ username })) {
+        n += 1
+        username = `${baseUsername}${n}`.slice(0, 30)
+      }
+      const randomPass = crypto.randomBytes(32).toString('hex')
+      const hashPassword = bcryptjs.hashSync(randomPass, 10)
+      user = await User.create({
+        email,
+        name: payload.name || username,
+        username,
+        password: hashPassword,
+        profilePic: payload.picture || '',
+        googleId,
+      })
+    } else if (!user.googleId) {
+      user.googleId = googleId
+      await user.save()
+    }
 
+    GenerateToken(user._id, res)
+    res.status(200).json({
+      _id: user._id,
+      username: user.username,
+      name: user.name,
+      email: user.email,
+      bio: user.bio,
+      profilePic: user.profilePic,
+      country: user.country,
+      followers: user.followers,
+      following: user.following,
+    })
+  } catch (error) {
+    console.error('GoogleLogin error:', error)
+    res.status(401).json({ error: 'Google sign-in failed', details: error.message })
+  }
+}
 
 export const LogOut = async(req,res) => {
 

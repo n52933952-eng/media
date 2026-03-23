@@ -224,7 +224,7 @@ if(recipentSockedId && recipientId && io){
   }
 }
 
-// If recipient is offline (no socket), send OneSignal push notification
+// If recipient is offline (no socket), send FCM push notification
 // This mirrors web behavior: realtime via socket when online, push when offline
 if (!recipentSockedId && recipientId) {
   try {
@@ -232,7 +232,7 @@ if (!recipentSockedId && recipientId) {
     // newMessage.sender is populated with { username, profilePic, name }
     await sendMessageNotification(recipientId, newMessage.sender, conversation._id.toString())
   } catch (e) {
-    console.log('❌ Error sending OneSignal message notification:', e?.message || e)
+    console.log('❌ Error sending FCM message notification:', e?.message || e)
   }
 }
 

@@ -337,3 +337,71 @@ export async function sendCallEndedNotificationToUser(userId, senderId = null) {
     return { success: false, error: error.message };
   }
 }
+
+const PLAYSOC_GENERAL_CHANNEL = 'playsocial_general';
+
+/**
+ * FCM for social / message / activity notifications (not calls).
+ * Uses notification + data so the tray shows when backgrounded; data is used for deep links.
+ */
+export async function sendGeneralPushNotificationToUser(userId, title, body, data = {}, images = {}) {
+  if (!initializationAttempted || !isInitialized || !admin.apps.length) {
+    return { success: false, error: 'FCM not initialized' };
+  }
+
+  const uid = userId == null ? null : String(userId);
+  if (!uid) return { success: false, error: 'Invalid user id' };
+
+  try {
+    const User = (await import('../models/user.js')).default;
+    const user = await User.findById(uid).select('fcmToken');
+    if (!user?.fcmToken) {
+      return { success: false, error: 'User not found or no FCM token' };
+    }
+
+    const titleStr = String(title || 'PlaySocial').slice(0, 200);
+    const bodyStr = String(body || '').slice(0, 500);
+    const dataPayload = Object.fromEntries(
+      Object.entries({ ...data, title: titleStr, body: bodyStr }).map(([k, v]) => [k, v == null ? '' : String(v)])
+    );
+
+    const profilePic = images.profilePic || images.largeIcon;
+    const androidNotif = {
+      channelId: PLAYSOC_GENERAL_CHANNEL,
+      sound: 'default',
+      defaultSound: true,
+      defaultVibrateTimings: true,
+      ...(profilePic ? { imageUrl: profilePic } : {}),
+    };
+
+    const message = {
+      token: user.fcmToken,
+      notification: { title: titleStr, body: bodyStr },
+      data: dataPayload,
+      android: {
+        priority: 'high',
+        ttl: 60 * 60 * 1000,
+        notification: androidNotif,
+      },
+      apns: {
+        headers: { 'apns-priority': '10' },
+        payload: {
+          aps: {
+            alert: { title: titleStr, body: bodyStr },
+            sound: 'default',
+          },
+        },
+      },
+    };
+
+    const response = await admin.messaging().send(message);
+    return { success: true, messageId: response };
+  } catch (err) {
+    if (err.code === 'messaging/registration-token-not-registered' ||
+        err.code === 'messaging/invalid-registration-token') {
+      await (await import('../models/user.js')).default.findByIdAndUpdate(uid, { fcmToken: '' });
+    }
+    console.error('❌ [FCM] sendGeneralPushNotificationToUser:', err.message);
+    return { success: false, error: err.message };
+  }
+}
