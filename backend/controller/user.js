@@ -554,7 +554,10 @@ export const getUserProfile = async(req,res) => {
          user = await User.findOne({_id:trimmedQuery}).select('-password')
 
         }else{
-          user = await User.findOne({username:trimmedQuery}).select('-password')
+          // Case-insensitive username (Weather/weather, Football/football, channel lookups from mobile/web)
+          user = await User.findOne({ username: trimmedQuery })
+            .collation({ locale: 'en', strength: 2 })
+            .select('-password')
         }
 
       if(!user){
