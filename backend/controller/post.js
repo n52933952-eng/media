@@ -833,14 +833,9 @@ export const getFeedPost = async(req,res) => {
             .lean()
         const following = followingDocs.map(d => d.followeeId)
         
-        // If user follows no one, return empty feed
-        if (following.length === 0) {
-            return res.status(200).json({ 
-                posts: [],
-                hasMore: false,
-                totalCount: 0
-            })
-        }
+        // Do NOT return empty when following.length === 0 — users can still have
+        // channel posts (channelAddedBy) and may follow Football/Weather via Follow later.
+        // Previously this caused "Fetched 0 posts" after adding a channel with no other follows.
         
         // Pagination parameters
         const limit = parseInt(req.query.limit) || 10 // Default to 10 posts per page
