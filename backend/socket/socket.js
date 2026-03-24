@@ -1340,16 +1340,21 @@ export const initializeSocket = async (app) => {
 
         // Chess Challenge Events
         socket.on("chessChallenge", async ({ from, to, fromName, fromUsername, fromProfilePic }) => {
-            console.log(`♟️ Chess challenge from ${from} to ${to}`)
-            const recipientData = await getUserSocket(to)
+            const fromId = normalizeUserId(from) || from
+            const toId = normalizeUserId(to) || to
+            console.log(`♟️ Chess challenge from ${fromId} to ${toId}`)
+            const recipientData = await getUserSocket(toId)
             const recipientSocketId = recipientData?.socketId
             if (recipientSocketId) {
                 io.to(recipientSocketId).emit("chessChallenge", {
-                    from,
+                    from: fromId,
+                    to: toId,
                     fromName,
                     fromUsername,
                     fromProfilePic
                 })
+            } else {
+                console.warn(`⚠️ [chessChallenge] No socket for recipient ${toId} — challenge not delivered`)
             }
         })
 
@@ -1715,16 +1720,21 @@ export const initializeSocket = async (app) => {
 
         // Card Game Challenge Events (Same pattern as Chess)
         socket.on("cardChallenge", async ({ from, to, fromName, fromUsername, fromProfilePic }) => {
-            console.log(`🃏 Card challenge from ${from} to ${to}`)
-            const recipientData = await getUserSocket(to)
+            const fromId = normalizeUserId(from) || from
+            const toId = normalizeUserId(to) || to
+            console.log(`🃏 Card challenge from ${fromId} to ${toId}`)
+            const recipientData = await getUserSocket(toId)
             const recipientSocketId = recipientData?.socketId
             if (recipientSocketId) {
                 io.to(recipientSocketId).emit("cardChallenge", {
-                    from,
+                    from: fromId,
+                    to: toId,
                     fromName,
                     fromUsername,
                     fromProfilePic
                 })
+            } else {
+                console.warn(`⚠️ [cardChallenge] No socket for recipient ${toId} — challenge not delivered`)
             }
         })
 
