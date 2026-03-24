@@ -15,9 +15,14 @@ export const createPost = async(req,res) => {
          
       let img = ''
 
+        const textTrim = text != null ? String(text).trim() : ''
 
-        if(!postedBy || !text){
-            return res.status(400).json({error:"postedBy and text are requires"})
+        if(!postedBy){
+            return res.status(400).json({error:"postedBy is required"})
+        }
+
+        if(!textTrim && !req.file){
+            return res.status(400).json({error:"text or media is required"})
         }
 
       const user = await User.findById(postedBy)
@@ -32,7 +37,7 @@ export const createPost = async(req,res) => {
 
        const MaxLength = 500 
 
-       if(text.length > MaxLength){
+       if(textTrim.length > MaxLength){
         return res.status(500).json({error:"post text must be 500 or less"})
        }
 
@@ -62,7 +67,7 @@ export const createPost = async(req,res) => {
                img = result.secure_url
                
                try {
-                 const postData = {postedBy,text,img}
+                 const postData = {postedBy,text:textTrim,img}
                  if (isCollaborative) {
                    postData.isCollaborative = true
                    postData.contributors = contributors && Array.isArray(contributors) ? contributors : [postedBy]
@@ -104,7 +109,7 @@ export const createPost = async(req,res) => {
                const { createActivity } = await import('./activity.js')
                createActivity(postedBy, 'post', {
                    postId: newPost._id,
-                   metadata: { text: text.substring(0, 50), hasImage: !!img }
+                   metadata: { text: (textTrim || '').substring(0, 50), hasImage: !!img }
                }).catch(err => {
                    console.error('Error creating activity:', err)
                })
@@ -133,7 +138,7 @@ export const createPost = async(req,res) => {
        }
 
        // No file - create post immediately
-       const postData = {postedBy,text,img}
+       const postData = {postedBy,text:textTrim,img}
        if (isCollaborative) {
          postData.isCollaborative = true
          postData.contributors = contributors && Array.isArray(contributors) ? contributors : [postedBy]
