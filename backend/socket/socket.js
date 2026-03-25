@@ -376,6 +376,58 @@ const hasActiveChessGame = async (userId) => {
     return roomId !== null
 }
 
+// Challenger (or accepter) may not be in userSocketMap yet when the other accepts — e.g. fresh Google login
+// + slow socket connect. Queue acceptChessChallenge payload and deliver on next connection.
+const PENDING_CHESS_ACCEPT_PREFIX = 'pendingChessAccept:'
+const PENDING_CHESS_ACCEPT_TTL = 120
+
+const setPendingChessAcceptForUser = async (userId, payload) => {
+    redisService.ensureRedis()
+    const id = normalizeUserId(userId) || userId
+    if (!id) return
+    await redisService.redisSet(
+        `${PENDING_CHESS_ACCEPT_PREFIX}${id}`,
+        payload,
+        PENDING_CHESS_ACCEPT_TTL
+    )
+}
+
+/** Returns and deletes pending payload (one-shot). */
+const takePendingChessAcceptForUser = async (userId) => {
+    redisService.ensureRedis()
+    const id = normalizeUserId(userId) || userId
+    if (!id) return null
+    const key = `${PENDING_CHESS_ACCEPT_PREFIX}${id}`
+    const data = await redisService.redisGet(key)
+    if (data) await redisService.redisDel(key)
+    return data
+}
+
+const PENDING_CARD_ACCEPT_PREFIX = 'pendingCardAccept:'
+const PENDING_CARD_ACCEPT_TTL = 120
+
+const setPendingCardAcceptForUser = async (userId, payload) => {
+    redisService.ensureRedis()
+    const id = normalizeUserId(userId) || userId
+    if (!id) return
+    await redisService.redisSet(
+        `${PENDING_CARD_ACCEPT_PREFIX}${id}`,
+        payload,
+        PENDING_CARD_ACCEPT_TTL
+    )
+}
+
+/** Returns and deletes pending payload (one-shot). */
+const takePendingCardAcceptForUser = async (userId) => {
+    redisService.ensureRedis()
+    const id = normalizeUserId(userId) || userId
+    if (!id) return null
+    const key = `${PENDING_CARD_ACCEPT_PREFIX}${id}`
+    const data = await redisService.redisGet(key)
+    if (data) await redisService.redisDel(key)
+    return data
+}
+
 // Helper functions for cardGameStates - Redis only
 const setCardGameState = async (roomId, gameState) => {
     redisService.ensureRedis()
@@ -394,6 +446,40 @@ const getCardGameState = async (roomId) => {
         throw error
     }
     return null
+}
+
+/** Personalized cardGameState payload for one viewer (full hand for self, counts for opponent). */
+const buildCardGameStatePayloadForViewer = (gameState, roomId, viewerUserId) => {
+    const vid = (normalizeUserId(viewerUserId) || viewerUserId)?.toString()
+    const viewerPlayerIndex = gameState.players.findIndex((p) => {
+        const pId = (normalizeUserId(p.userId) || p.userId)?.toString()
+        return pId === vid
+    })
+    return {
+        roomId,
+        players: gameState.players.map((p, index) => {
+            if (index === viewerPlayerIndex && viewerPlayerIndex >= 0) {
+                return {
+                    userId: p.userId,
+                    hand: p.hand || [],
+                    score: p.score,
+                    books: p.books || [],
+                }
+            }
+            return {
+                userId: p.userId,
+                handCount: p.hand?.length || 0,
+                score: p.score,
+                books: p.books || [],
+            }
+        }),
+        deckCount: gameState.deck?.length || 0,
+        table: gameState.table,
+        turn: gameState.turn,
+        gameStatus: gameState.gameStatus,
+        winner: gameState.winner,
+        lastMove: gameState.lastMove,
+    }
 }
 
 const deleteCardGameState = async (roomId) => {
@@ -753,6 +839,44 @@ export const initializeSocket = async (app) => {
                 }
             } catch (error) {
                 console.error(`❌ [socket] Error checking for pending cancels when ${userId} connected:`, error.message)
+            }
+
+            // Queued chess accept (challenger/accepter connected after accept was processed)
+            try {
+                const pendingChess = await takePendingChessAcceptForUser(userId)
+                if (pendingChess?.roomId && pendingChess.yourColor && pendingChess.opponentId) {
+                    console.log(`♟️ [socket] Delivering pending acceptChessChallenge to ${userId}`, pendingChess)
+                    io.to(socket.id).emit('acceptChessChallenge', {
+                        roomId: pendingChess.roomId,
+                        yourColor: pendingChess.yourColor,
+                        opponentId: pendingChess.opponentId,
+                    })
+                    socket.join(pendingChess.roomId)
+                }
+            } catch (e) {
+                console.error(`❌ [socket] Error delivering pending chess accept for ${userId}:`, e.message)
+            }
+
+            // Queued card accept + initial cardGameState (late socket after accept)
+            try {
+                const pendingCard = await takePendingCardAcceptForUser(userId)
+                if (pendingCard?.roomId && pendingCard.opponentId != null) {
+                    console.log(`🃏 [socket] Delivering pending acceptCardChallenge to ${userId}`, pendingCard)
+                    io.to(socket.id).emit('acceptCardChallenge', {
+                        roomId: pendingCard.roomId,
+                        opponentId: pendingCard.opponentId,
+                    })
+                    socket.join(pendingCard.roomId)
+                    const gs = await getCardGameState(pendingCard.roomId)
+                    if (gs) {
+                        const cardPayload = buildCardGameStatePayloadForViewer(gs, pendingCard.roomId, userId)
+                        io.to(socket.id).emit('cardGameState', cardPayload)
+                    } else {
+                        console.warn(`🃏 [socket] Pending card accept for ${userId} but no game state in Redis for ${pendingCard.roomId}`)
+                    }
+                }
+            } catch (e) {
+                console.error(`❌ [socket] Error delivering pending card accept for ${userId}:`, e.message)
             }
         } else {
             console.warn("⚠️ [socket] User connected without valid userId:", userId)
@@ -1359,71 +1483,77 @@ export const initializeSocket = async (app) => {
         })
 
         socket.on("acceptChessChallenge", async ({ from, to, roomId }) => {
+            const fromId = normalizeUserId(from) || from
+            const toId = normalizeUserId(to) || to
             console.log(`♟️ Chess challenge accepted: ${roomId}`)
-            console.log(`♟️ Challenger (to): ${to} → WHITE`)
-            console.log(`♟️ Accepter (from): ${from} → BLACK`)
-            
-            // Determine colors (challenger is white, accepter is black)
-            const challengerData = await getUserSocket(to)
-            const challengerSocketId = challengerData?.socketId
-            const accepterData = await getUserSocket(from)
-            const accepterSocketId = accepterData?.socketId
+            console.log(`♟️ Challenger (to): ${toId} → WHITE`)
+            console.log(`♟️ Accepter (from): ${fromId} → BLACK`)
+
+            const challengerSock = await getUserSocket(toId)
+            const challengerSocketId = challengerSock?.socketId
+            const accepterSock = await getUserSocket(fromId)
+            const accepterSocketId = accepterSock?.socketId
 
             // Create chess room and join both players to Socket.IO room
             if (roomId) {
-                // Track active games for both players (Redis)
-                await setActiveChessGame(to, roomId)
-                await setActiveChessGame(from, roomId)
-                
-                // Join challenger to room
+                await setActiveChessGame(toId, roomId)
+                await setActiveChessGame(fromId, roomId)
+
                 if (challengerSocketId) {
                     const challengerSocket = io.sockets.sockets.get(challengerSocketId)
                     if (challengerSocket) {
                         challengerSocket.join(roomId)
-                        console.log(`♟️ Challenger ${to} joined room: ${roomId}`)
+                        console.log(`♟️ Challenger ${toId} joined room: ${roomId}`)
                     }
                 }
-                // Join accepter to room
                 if (accepterSocketId) {
                     const accepterSocket = io.sockets.sockets.get(accepterSocketId)
                     if (accepterSocket) {
                         accepterSocket.join(roomId)
-                        console.log(`♟️ Accepter ${from} joined room: ${roomId}`)
+                        console.log(`♟️ Accepter ${fromId} joined room: ${roomId}`)
                     }
                 }
                 console.log(`♟️ Created chess room: ${roomId} with both players`)
             }
 
             if (challengerSocketId) {
-                console.log(`♟️ Sending WHITE to challenger: ${to} (socket: ${challengerSocketId})`)
-                const challengerData = {
+                console.log(`♟️ Sending WHITE to challenger: ${toId} (socket: ${challengerSocketId})`)
+                const challengerPayload = {
                     roomId,
                     yourColor: 'white',
-                    opponentId: from
+                    opponentId: fromId,
                 }
-                console.log(`♟️ Challenger data:`, challengerData)
-                io.to(challengerSocketId).emit("acceptChessChallenge", challengerData)
+                io.to(challengerSocketId).emit('acceptChessChallenge', challengerPayload)
             } else {
-                console.log(`⚠️ Challenger ${to} not found in socket map`)
+                console.log(`⚠️ Challenger ${toId} not in socket map — queue accept for reconnect`)
+                await setPendingChessAcceptForUser(toId, {
+                    roomId,
+                    yourColor: 'white',
+                    opponentId: fromId,
+                })
             }
 
             if (accepterSocketId) {
-                console.log(`♟️ Sending BLACK to accepter: ${from} (socket: ${accepterSocketId})`)
-                const accepterData = {
+                console.log(`♟️ Sending BLACK to accepter: ${fromId} (socket: ${accepterSocketId})`)
+                const accepterPayload = {
                     roomId,
                     yourColor: 'black',
-                    opponentId: to
+                    opponentId: toId,
                 }
-                console.log(`♟️ Accepter data:`, accepterData)
-                io.to(accepterSocketId).emit("acceptChessChallenge", accepterData)
+                io.to(accepterSocketId).emit('acceptChessChallenge', accepterPayload)
             } else {
-                console.log(`⚠️ Accepter ${from} not found in socket map`)
+                console.log(`⚠️ Accepter ${fromId} not in socket map — queue accept for reconnect`)
+                await setPendingChessAcceptForUser(fromId, {
+                    roomId,
+                    yourColor: 'black',
+                    opponentId: toId,
+                })
             }
 
             // Broadcast busy status to ALL online users so they know these users are in a game
             // This allows the chess challenge modal to filter out busy users
-            io.emit("userBusyChess", { userId: from })
-            io.emit("userBusyChess", { userId: to })
+            io.emit("userBusyChess", { userId: fromId })
+            io.emit("userBusyChess", { userId: toId })
             
             // Initialize game state (starting position) in Redis
             if (roomId) {
@@ -1441,7 +1571,7 @@ export const initializeSocket = async (app) => {
             // This is important because the post creation happens immediately when game starts,
             // but followers' sockets might not be registered in userSocketMap yet
             setTimeout(() => {
-                createChessGamePost(to, from, roomId).catch(err => {
+                createChessGamePost(toId, fromId, roomId).catch(err => {
                     console.error('❌ [socket] Error creating chess game post:', err)
                 })
             }, 500) // Delay to ensure all socket connections are registered in userSocketMap
@@ -1739,197 +1869,97 @@ export const initializeSocket = async (app) => {
         })
 
         socket.on("acceptCardChallenge", async ({ from, to, roomId }) => {
+            const fromId = normalizeUserId(from) || from
+            const toId = normalizeUserId(to) || to
             console.log(`🃏 Card challenge accepted: ${roomId}`)
-            console.log(`🃏 Challenger (to): ${to}`)
-            console.log(`🃏 Accepter (from): ${from}`)
-            
-            const challengerData = await getUserSocket(to)
-            const challengerSocketId = challengerData?.socketId
-            const accepterData = await getUserSocket(from)
-            const accepterSocketId = accepterData?.socketId
+            console.log(`🃏 Challenger (to): ${toId}`)
+            console.log(`🃏 Accepter (from): ${fromId}`)
 
-            // Create card game room and join both players to Socket.IO room
+            const challengerSock = await getUserSocket(toId)
+            const challengerSocketId = challengerSock?.socketId
+            const accepterSock = await getUserSocket(fromId)
+            const accepterSocketId = accepterSock?.socketId
+
             if (roomId) {
-                // Track active games for both players (Redis)
-                await setActiveCardGame(to, roomId)
-                await setActiveCardGame(from, roomId)
-                
-                // Join challenger to room
+                await setActiveCardGame(toId, roomId)
+                await setActiveCardGame(fromId, roomId)
+
                 if (challengerSocketId) {
                     const challengerSocket = io.sockets.sockets.get(challengerSocketId)
                     if (challengerSocket) {
                         challengerSocket.join(roomId)
-                        console.log(`🃏 Challenger ${to} joined room: ${roomId}`)
+                        console.log(`🃏 Challenger ${toId} joined room: ${roomId}`)
                     }
                 }
-                // Join accepter to room
                 if (accepterSocketId) {
                     const accepterSocket = io.sockets.sockets.get(accepterSocketId)
                     if (accepterSocket) {
                         accepterSocket.join(roomId)
-                        console.log(`🃏 Accepter ${from} joined room: ${roomId}`)
+                        console.log(`🃏 Accepter ${fromId} joined room: ${roomId}`)
                     }
                 }
                 console.log(`🃏 Created card game room: ${roomId} with both players`)
             }
 
             if (challengerSocketId) {
-                console.log(`🃏 Sending data to challenger: ${to} (socket: ${challengerSocketId})`)
-                const challengerData = {
-                    roomId,
-                    opponentId: from
-                }
-                console.log(`🃏 Challenger data:`, challengerData)
-                io.to(challengerSocketId).emit("acceptCardChallenge", challengerData)
+                const payload = { roomId, opponentId: fromId }
+                console.log(`🃏 Sending acceptCardChallenge to challenger ${toId}`, payload)
+                io.to(challengerSocketId).emit('acceptCardChallenge', payload)
             } else {
-                console.log(`⚠️ Challenger ${to} not found in socket map`)
+                console.log(`⚠️ Challenger ${toId} not in socket map — queue pending card accept`)
+                await setPendingCardAcceptForUser(toId, { roomId, opponentId: fromId })
             }
 
             if (accepterSocketId) {
-                console.log(`🃏 Sending data to accepter: ${from} (socket: ${accepterSocketId})`)
-                const accepterData = {
-                    roomId,
-                    opponentId: to
-                }
-                console.log(`🃏 Accepter data:`, accepterData)
-                io.to(accepterSocketId).emit("acceptCardChallenge", accepterData)
+                const payload = { roomId, opponentId: toId }
+                console.log(`🃏 Sending acceptCardChallenge to accepter ${fromId}`, payload)
+                io.to(accepterSocketId).emit('acceptCardChallenge', payload)
             } else {
-                console.log(`⚠️ Accepter ${from} not found in socket map`)
+                console.log(`⚠️ Accepter ${fromId} not in socket map — queue pending card accept`)
+                await setPendingCardAcceptForUser(fromId, { roomId, opponentId: toId })
             }
 
-            // Initialize Go Fish game state in Redis FIRST (before emitting events)
             let gameState = null
             if (roomId) {
                 const { initializeGoFishGame } = await import('../utils/goFishGame.js')
-                gameState = initializeGoFishGame(to, from)
-                
+                gameState = initializeGoFishGame(toId, fromId)
+
                 await setCardGameState(roomId, gameState)
                 console.log(`💾 Initialized Go Fish game state for room ${roomId} in Redis`)
-                console.log(`🃏 Player 1 (${to}) score: ${gameState.players[0].score}, Player 2 (${from}) score: ${gameState.players[1].score}`)
+                console.log(
+                    `🃏 Player 1 (${toId}) score: ${gameState.players[0].score}, Player 2 (${fromId}) score: ${gameState.players[1].score}`
+                )
             }
 
-            // Broadcast busy status to ALL online users so they know these users are in a game
-            io.emit("userBusyCard", { userId: from })
-            io.emit("userBusyCard", { userId: to })
+            io.emit('userBusyCard', { userId: fromId })
+            io.emit('userBusyCard', { userId: toId })
 
-            // Emit game state to both players immediately after initialization
             if (roomId && gameState) {
                 console.log(`🃏 [acceptCardChallenge] Game state initialized:`, {
                     player1Id: gameState.players[0]?.userId,
                     player1HandLength: gameState.players[0]?.hand?.length || 0,
                     player2Id: gameState.players[1]?.userId,
                     player2HandLength: gameState.players[1]?.hand?.length || 0,
-                    challengerId: to,
-                    accepterId: from,
-                    turn: gameState.turn
+                    challengerId: toId,
+                    accepterId: fromId,
+                    turn: gameState.turn,
                 })
 
-                // Send game state to challenger
                 if (challengerSocketId) {
-                    // Challenger is player1 (index 0) in initializeGoFishGame
-                    const challengerPlayerIndex = gameState.players.findIndex((p) => {
-                        const pId = p.userId?.toString()
-                        const toId = to?.toString()
-                        return pId === toId
-                    })
-                    
-                    console.log(`🃏 [acceptCardChallenge] Challenger player index: ${challengerPlayerIndex}`, {
-                        challengerId: to,
-                        player0Id: gameState.players[0]?.userId?.toString(),
-                        player1Id: gameState.players[1]?.userId?.toString(),
-                        challengerHandLength: challengerPlayerIndex >= 0 ? gameState.players[challengerPlayerIndex]?.hand?.length : 'NOT FOUND'
-                    })
-
-                    const challengerState = {
-                        roomId,
-                        players: gameState.players.map((p, index) => {
-                            if (index === challengerPlayerIndex && challengerPlayerIndex >= 0) {
-                                return {
-                                    userId: p.userId,
-                                    hand: p.hand || [],
-                                    score: p.score,
-                                    books: p.books || []
-                                }
-                            } else {
-                                return {
-                                    userId: p.userId,
-                                    handCount: p.hand?.length || 0,
-                                    score: p.score,
-                                    books: p.books || []
-                                }
-                            }
-                        }),
-                        deckCount: gameState.deck?.length || 0,
-                        table: gameState.table,
-                        turn: gameState.turn,
-                        gameStatus: gameState.gameStatus,
-                        winner: gameState.winner,
-                        lastMove: gameState.lastMove
-                    }
-                    io.to(challengerSocketId).emit("cardGameState", challengerState)
-                    console.log(`📤 Sent initial game state to challenger ${to}`, {
-                        handLength: challengerPlayerIndex >= 0 ? gameState.players[challengerPlayerIndex]?.hand?.length : 0,
-                        playerIndex: challengerPlayerIndex,
-                        turn: gameState.turn,
-                        sentHandLength: challengerState.players[challengerPlayerIndex]?.hand?.length || 0
-                    })
+                    const challengerState = buildCardGameStatePayloadForViewer(gameState, roomId, toId)
+                    io.to(challengerSocketId).emit('cardGameState', challengerState)
+                    console.log(`📤 Sent initial game state to challenger ${toId}`)
                 }
 
-                // Send game state to accepter
                 if (accepterSocketId) {
-                    // Accepter is player2 (index 1) in initializeGoFishGame
-                    const accepterPlayerIndex = gameState.players.findIndex((p) => {
-                        const pId = p.userId?.toString()
-                        const fromId = from?.toString()
-                        return pId === fromId
-                    })
-                    
-                    console.log(`🃏 [acceptCardChallenge] Accepter player index: ${accepterPlayerIndex}`, {
-                        accepterId: from,
-                        player0Id: gameState.players[0]?.userId?.toString(),
-                        player1Id: gameState.players[1]?.userId?.toString(),
-                        accepterHandLength: accepterPlayerIndex >= 0 ? gameState.players[accepterPlayerIndex]?.hand?.length : 'NOT FOUND'
-                    })
-
-                    const accepterState = {
-                        roomId,
-                        players: gameState.players.map((p, index) => {
-                            if (index === accepterPlayerIndex && accepterPlayerIndex >= 0) {
-                                return {
-                                    userId: p.userId,
-                                    hand: p.hand || [],
-                                    score: p.score,
-                                    books: p.books || []
-                                }
-                            } else {
-                                return {
-                                    userId: p.userId,
-                                    handCount: p.hand?.length || 0,
-                                    score: p.score,
-                                    books: p.books || []
-                                }
-                            }
-                        }),
-                        deckCount: gameState.deck?.length || 0,
-                        table: gameState.table,
-                        turn: gameState.turn,
-                        gameStatus: gameState.gameStatus,
-                        winner: gameState.winner,
-                        lastMove: gameState.lastMove
-                    }
-                    io.to(accepterSocketId).emit("cardGameState", accepterState)
-                    console.log(`📤 Sent initial game state to accepter ${from}`, {
-                        handLength: accepterPlayerIndex >= 0 ? gameState.players[accepterPlayerIndex]?.hand?.length : 0,
-                        playerIndex: accepterPlayerIndex,
-                        turn: gameState.turn,
-                        sentHandLength: accepterState.players[accepterPlayerIndex]?.hand?.length || 0
-                    })
+                    const accepterState = buildCardGameStatePayloadForViewer(gameState, roomId, fromId)
+                    io.to(accepterSocketId).emit('cardGameState', accepterState)
+                    console.log(`📤 Sent initial game state to accepter ${fromId}`)
                 }
             }
-            
-            // Create card game post in feed for followers
+
             setTimeout(() => {
-                createCardGamePost(to, from, roomId).catch(err => {
+                createCardGamePost(toId, fromId, roomId).catch((err) => {
                     console.error('❌ [socket] Error creating card game post:', err)
                 })
             }, 500)
