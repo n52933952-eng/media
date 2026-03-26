@@ -12,6 +12,16 @@ export const createPost = async(req,res) => {
     try{
   
         const{postedBy,text,isCollaborative,contributors}= req.body
+        // Multipart/form-data sends contributors as a JSON string (same as web); JSON body sends an array.
+        let contributorsParsed = contributors
+        if (typeof contributors === 'string') {
+            try {
+                const parsed = JSON.parse(contributors)
+                if (Array.isArray(parsed)) contributorsParsed = parsed
+            } catch {
+                contributorsParsed = undefined
+            }
+        }
          
       let img = ''
 
@@ -70,7 +80,7 @@ export const createPost = async(req,res) => {
                  const postData = {postedBy,text:textTrim,img}
                  if (isCollaborative) {
                    postData.isCollaborative = true
-                   postData.contributors = contributors && Array.isArray(contributors) ? contributors : [postedBy]
+                   postData.contributors = contributorsParsed && Array.isArray(contributorsParsed) ? contributorsParsed : [postedBy]
                  }
                  const newPost = new Post(postData)
                  await newPost.save()
@@ -141,7 +151,7 @@ export const createPost = async(req,res) => {
        const postData = {postedBy,text:textTrim,img}
        if (isCollaborative) {
          postData.isCollaborative = true
-         postData.contributors = contributors && Array.isArray(contributors) ? contributors : [postedBy]
+         postData.contributors = contributorsParsed && Array.isArray(contributorsParsed) ? contributorsParsed : [postedBy]
        }
        const newPost = new Post(postData)
        await newPost.save()
