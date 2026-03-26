@@ -35,6 +35,34 @@ let server = null
 // - Old behavior (`getOnlineUser` full broadcast) remains for legacy clients
 // ============================================================
 const PRESENCE_ROOM_PREFIX = 'presence:'
+const PRESENCE_KEY_PREFIX = 'userPresence:'
+
+const setUserPresence = async (userId, status) => {
+    redisService.ensureRedis()
+    const uid = normalizeUserId(userId)
+    if (!uid) return
+    // Keep a TTL so stale presence can't live forever.
+    await redisService.redisSet(`${PRESENCE_KEY_PREFIX}${uid}`, String(status), 3600)
+}
+
+const getUserPresence = async (userId) => {
+    redisService.ensureRedis()
+    const uid = normalizeUserId(userId)
+    if (!uid) return null
+    try {
+        const v = await redisService.redisGet(`${PRESENCE_KEY_PREFIX}${uid}`)
+        return v ? String(v) : null
+    } catch (e) {
+        return null
+    }
+}
+
+const deleteUserPresence = async (userId) => {
+    redisService.ensureRedis()
+    const uid = normalizeUserId(userId)
+    if (!uid) return
+    await redisService.redisDel(`${PRESENCE_KEY_PREFIX}${uid}`)
+}
 const DISABLE_GLOBAL_ONLINE_BROADCAST =
     (process.env.DISABLE_GLOBAL_ONLINE_BROADCAST || '').toString().toLowerCase() === 'true'
 
@@ -177,12 +205,16 @@ const getOnlineSnapshotForUserIds = async (userIds) => {
     // We store socketData at `userSocket:<userId>` as JSON
     const keys = ids.map((id) => `userSocket:${id}`)
     const values = await client.mGet(keys)
+    const presenceKeys = ids.map((id) => `${PRESENCE_KEY_PREFIX}${id}`)
+    const presenceValues = await client.mGet(presenceKeys)
 
     // Return minimal objects that mobile already understands: { userId }
     const online = []
     for (let i = 0; i < ids.length; i++) {
         const v = values?.[i]
-        if (v) {
+        const p = (presenceValues?.[i] || '').toString().toLowerCase()
+        const isOfflineByPresence = p === 'offline'
+        if (v && !isOfflineByPresence) {
             online.push({ userId: ids[i] })
         }
     }
@@ -229,6 +261,16 @@ const getUserSocket = async (userId) => {
     
     // If not in Redis, check in-memory cache (shouldn't happen, but safe)
     return userSocketMap[userId] || null
+}
+
+const isUserEffectivelyOnline = async (userId) => {
+    const uid = normalizeUserId(userId) || userId
+    if (!uid) return false
+    const sock = await getUserSocket(uid)
+    if (!sock?.socketId) return false
+    const presence = await getUserPresence(uid)
+    if (presence && String(presence).toLowerCase() === 'offline') return false
+    return true
 }
 
 const deleteUserSocket = async (userId) => {
@@ -806,6 +848,7 @@ export const initializeSocket = async (app) => {
                 onlineAt: Date.now(),
             }
             await setUserSocket(userId, socketData)
+            await setUserPresence(userId, 'online').catch(() => {})
             // Reverse mapping for O(1) disconnect handling
             await setSocketUser(socket.id, userId)
             console.log(`✅ [socket] User ${userId} added to socket map (socket: ${socket.id})`)
@@ -913,6 +956,25 @@ export const initializeSocket = async (app) => {
                 socket.emit('presenceSnapshot', { onlineUsers: snapshot })
             } catch (e) {
                 console.error('❌ [socket] presenceSubscribe error:', e.message)
+            }
+        })
+
+        // Client-controlled presence (foreground/background) without requiring socket disconnect.
+        // Payload: { status: 'online' | 'offline' }
+        socket.on('clientPresence', async (payload = {}) => {
+            try {
+                const statusRaw = (payload?.status || '').toString().toLowerCase()
+                const status = statusRaw === 'offline' ? 'offline' : 'online'
+                const uid = normalizeUserId(userId)
+                if (!uid) return
+                await setUserPresence(uid, status)
+                io.to(`${PRESENCE_ROOM_PREFIX}${uid}`).emit('presenceUpdate', {
+                    userId: uid,
+                    online: status === 'online',
+                    onlineAt: status === 'online' ? Date.now() : undefined,
+                })
+            } catch (e) {
+                console.error('❌ [socket] clientPresence error:', e?.message || e)
             }
         })
         
@@ -1047,7 +1109,7 @@ export const initializeSocket = async (app) => {
             let userToCallBusy = await isUserBusy(receiverId)
             let fromBusy = await isUserBusy(callerId)
             const receiverDataEarly = await getUserSocket(receiverId)
-            const receiverOffline = !receiverDataEarly?.socketId
+            const receiverOffline = !(await isUserEffectivelyOnline(receiverId))
             // Self-heal: if receiver is offline but marked busy (stale from previous call), clear so callback works
             if (userToCallBusy && receiverOffline) {
                 console.log('📞 [callUser] CALLBACK_SELFHEAL: Receiver is offline but was marked busy – clearing inCall so callback can go through')
@@ -1104,7 +1166,7 @@ export const initializeSocket = async (app) => {
 
             // Get socket data from Redis (reuse lookup from above)
             const receiverData = receiverDataEarly
-            const receiverSocketId = receiverData?.socketId
+            const receiverSocketId = (await isUserEffectivelyOnline(receiverId)) ? receiverData?.socketId : null
 
             const senderData = await getUserSocket(callerId)
             const senderSocketId = senderData?.socketId
@@ -2467,6 +2529,7 @@ export const initializeSocket = async (app) => {
             disconnectedUserId = await getSocketUser(socket.id)
             if (disconnectedUserId) {
                 await deleteUserSocket(disconnectedUserId) // Delete from both in-memory and Redis
+                await deleteUserPresence(disconnectedUserId).catch(() => {})
                 await deleteSocketUser(socket.id)
             } else {
                 const allSockets = await getAllUserSockets()
@@ -2474,6 +2537,7 @@ export const initializeSocket = async (app) => {
                     if (data.socketId === socket.id) {
                         disconnectedUserId = id
                         await deleteUserSocket(id)
+                        await deleteUserPresence(id).catch(() => {})
                         break
                     }
                 }
