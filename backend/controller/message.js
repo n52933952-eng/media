@@ -1,6 +1,6 @@
 import Conversation from '../models/conversation.js'
 import Message from '../models/message.js'
-import { getRecipientSockedId, getIO } from '../socket/socket.js'
+import { getRecipientSockedId, getIO, getUserSocket } from '../socket/socket.js'
 import { v2 as cloudinary } from 'cloudinary'
 import { Readable } from 'stream'
 import mongoose from 'mongoose'
@@ -10,34 +10,45 @@ import mongoose from 'mongoose'
  * `delivered` stays false until the recipient app emits `ackMessageDelivered` (WhatsApp-style).
  */
 async function deliverOutboundMessage(newMessage, conversation, recipientId) {
-  const recipentSockedId = await getRecipientSockedId(recipientId)
+  const recipientSocketId = await getRecipientSockedId(recipientId)
   const io = getIO()
 
-  if (recipentSockedId && recipientId && io) {
+  // Important: only deliver via socket if the socket is actually still connected.
+  // Redis may still have stale socketId during disconnect/network flaps.
+  if (recipientSocketId && recipientId && io) {
+    const recipientSocket = io?.sockets?.sockets?.get?.(recipientSocketId)
+    const socketConnected = !!recipientSocket?.connected
+
+    if (socketConnected) {
     const messageWithTimestamp = {
       ...newMessage.toObject(),
       conversationUpdatedAt: conversation.updatedAt,
       delivered: false,
     }
-    io.to(recipentSockedId).emit('newMessage', messageWithTimestamp)
-    try {
-      const recipientConversations = await Conversation.find({ participants: recipientId })
-      const totalUnread = await Promise.all(
-        recipientConversations.map(async (conv) => {
-          const unreadCount = await Message.countDocuments({
-            conversationId: conv._id,
-            seen: false,
-            sender: { $ne: recipientId },
+      io.to(recipientSocketId).emit('newMessage', messageWithTimestamp)
+      try {
+        const recipientConversations = await Conversation.find({ participants: recipientId })
+        const totalUnread = await Promise.all(
+          recipientConversations.map(async (conv) => {
+            const unreadCount = await Message.countDocuments({
+              conversationId: conv._id,
+              seen: false,
+              sender: { $ne: recipientId },
+            })
+            return unreadCount || 0
           })
-          return unreadCount || 0
-        })
-      )
-      const totalUnreadCount = totalUnread.reduce((sum, count) => sum + count, 0)
-      io.to(recipentSockedId).emit('unreadCountUpdate', { totalUnread: totalUnreadCount })
-    } catch (error) {
-      console.log('Error calculating unread count:', error)
+        )
+        const totalUnreadCount = totalUnread.reduce((sum, count) => sum + count, 0)
+        io.to(recipientSocketId).emit('unreadCountUpdate', { totalUnread: totalUnreadCount })
+      } catch (error) {
+        console.log('Error calculating unread count:', error)
+      }
+      return false
     }
-  } else if (recipientId) {
+    // Socket exists but isn't connected -> fall through to FCM
+  }
+
+  if (recipientId) {
     try {
       const { sendMessageNotification } = await import('../services/pushNotifications.js')
       await sendMessageNotification(recipientId, newMessage.sender, conversation._id.toString(), newMessage._id)
@@ -47,6 +58,76 @@ async function deliverOutboundMessage(newMessage, conversation, recipientId) {
   }
 
   return false
+}
+
+// Recipient (device) confirms message reached their app.
+// This HTTP version is used when app is in background/killed (no socket available yet).
+export async function ackMessageDeliveredHttp(req, res) {
+  try {
+    const body = req?.body || {}
+    const recipientUserIdRaw = body?.recipientUserId
+    const messageIdsRaw = Array.isArray(body?.messageIds) ? body.messageIds : body?.messageId ? [body.messageId] : []
+
+    const recipientUserId = recipientUserIdRaw != null ? String(recipientUserIdRaw) : ''
+    if (!recipientUserId || !Array.isArray(messageIdsRaw) || messageIdsRaw.length === 0) {
+      return res.status(400).json({ ok: false, error: 'Missing recipientUserId/messageId' })
+    }
+
+    const uniqueIds = [...new Set(messageIdsRaw.map((id) => String(id).trim()).filter(Boolean))].slice(0, 50)
+    const objectIds = []
+    for (const id of uniqueIds) {
+      if (!mongoose.isValidObjectId(id)) continue
+      objectIds.push(new mongoose.Types.ObjectId(id))
+    }
+    if (!objectIds.length) return res.status(400).json({ ok: false, error: 'No valid messageId' })
+
+    // Only mark messages not yet delivered.
+    const msgs = await Message.find({
+      _id: { $in: objectIds },
+      delivered: { $ne: true },
+    }).lean()
+
+    const convCache = new Map()
+    for (const msg of msgs) {
+      const senderStr = msg?.sender != null ? String(msg.sender) : ''
+      const ackerId = recipientUserId
+      if (!senderStr || senderStr === ackerId) continue
+
+      const convId = msg?.conversationId != null ? String(msg.conversationId) : ''
+      if (!convId) continue
+
+      let partStrs = convCache.get(convId)
+      if (!partStrs) {
+        const conv = await Conversation.findById(convId).select('participants').lean()
+        if (!conv?.participants?.length) continue
+        partStrs = conv.participants.map((p) => String(p))
+        convCache.set(convId, partStrs)
+      }
+      if (!partStrs.includes(ackerId)) continue
+
+      await Message.updateOne({ _id: msg._id }, { $set: { delivered: true } })
+
+      // Notify sender immediately if they're connected via socket.
+      try {
+        const senderSocket = await getUserSocket(senderStr)
+        const senderSocketId = senderSocket?.socketId
+        if (senderSocketId) {
+          const io = getIO()
+          io.to(senderSocketId).emit('messageDelivered', {
+            messageId: msg._id.toString(),
+            conversationId: convId,
+          })
+        }
+      } catch {
+        // best-effort
+      }
+    }
+
+    return res.status(200).json({ ok: true })
+  } catch (e) {
+    console.warn('ackMessageDeliveredHttp error:', e?.message || e)
+    return res.status(500).json({ ok: false, error: 'server_error' })
+  }
 }
 
 export const sendMessaeg = async(req,res) => {

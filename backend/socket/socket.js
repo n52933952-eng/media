@@ -2770,7 +2770,23 @@ export const initializeSocket = async (app) => {
 export const getRecipientSockedId = async (recipientId) => {
     const id = normalizeUserId(recipientId) || recipientId
     const userData = await getUserSocket(id)
-    return userData ? userData.socketId : null
+    const socketId = userData ? userData.socketId : null
+    if (!socketId) return null
+
+    // Respect clientPresence (foreground/background) for routing decisions.
+    const effectivelyOnline = await isUserEffectivelyOnline(id)
+    if (!effectivelyOnline) return null
+
+    // Guard against stale Redis socket IDs (e.g., network loss before disconnect cleanup).
+    const isLocalLive = !!io?.sockets?.sockets?.get?.(socketId)
+    if (isLocalLive) return socketId
+    try {
+        const remotes = await io.in(socketId).fetchSockets()
+        if (Array.isArray(remotes) && remotes.length > 0) return socketId
+    } catch (_) {
+        // ignore and fall back to null
+    }
+    return null
 }
 
 // Export getUserSocket for use in HTTP endpoints

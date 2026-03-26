@@ -1,6 +1,6 @@
 import express from 'express'
 
-import{sendMessaeg,getMessage,mycon,deletconversation,toggleReaction,deleteMessage,getTotalUnreadCount} from '../controller/message.js'
+import{sendMessaeg,getMessage,mycon,deletconversation,toggleReaction,deleteMessage,getTotalUnreadCount,ackMessageDeliveredHttp} from '../controller/message.js'
 
 import protectRoute from '../middlware/protectRoute.js'
 import upload from '../middlware/upload.js'
@@ -12,6 +12,7 @@ const router = express.Router()
 router.post("/",protectRoute,upload.single('file'),sendMessaeg)
 
 // Put more specific routes before parameterized routes to avoid conflicts
+router.post("/ack-delivered", ackMessageDeliveredHttp)
 router.get("/conversations",protectRoute,mycon)
 
 // Get total unread count - specific route before parameterized routes
