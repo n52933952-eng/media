@@ -1530,36 +1530,21 @@ export const initializeSocket = async (app) => {
                 yourColor: 'black',
                 opponentId: toId,
             }
-            // Redis can still list a socketId briefly after the client disconnected (e.g. app background →
-            // client disconnect before server deletes map). io.to(deadId).emit drops silently — queue pending.
-            const challengerLive = challengerSocketId && io.sockets.sockets.get(challengerSocketId)
-            const accepterLive = accepterSocketId && io.sockets.sockets.get(accepterSocketId)
-
-            if (challengerLive) {
-                console.log(`♟️ Sending WHITE to challenger: ${toId} (socket: ${challengerSocketId})`)
+            // IMPORTANT: Don't check "local" socket existence via io.sockets.sockets.get(socketId).
+            // With Redis adapter / multiple server instances, io.to(socketId).emit will still route correctly,
+            // but io.sockets.sockets.get() only sees sockets on the current node.
+            // So we only queue when socketId is missing from userSocketMap.
+            if (challengerSocketId) {
                 io.to(challengerSocketId).emit('acceptChessChallenge', challengerPayload)
             } else {
-                if (challengerSocketId) {
-                    console.warn(`⚠️ Challenger ${toId} has stale socket ${challengerSocketId} — clear map if still that id, queue accept`)
-                    const map = await getUserSocket(toId)
-                    if (map?.socketId === challengerSocketId) await deleteUserSocket(toId)
-                } else {
-                    console.log(`⚠️ Challenger ${toId} not in socket map — queue accept for reconnect`)
-                }
+                console.log(`⚠️ Challenger ${toId} not in socket map — queue accept for reconnect`)
                 await setPendingChessAcceptForUser(toId, challengerPayload)
             }
 
-            if (accepterLive) {
-                console.log(`♟️ Sending BLACK to accepter: ${fromId} (socket: ${accepterSocketId})`)
+            if (accepterSocketId) {
                 io.to(accepterSocketId).emit('acceptChessChallenge', accepterPayload)
             } else {
-                if (accepterSocketId) {
-                    console.warn(`⚠️ Accepter ${fromId} has stale socket ${accepterSocketId} — clear map if still that id, queue accept`)
-                    const map = await getUserSocket(fromId)
-                    if (map?.socketId === accepterSocketId) await deleteUserSocket(fromId)
-                } else {
-                    console.log(`⚠️ Accepter ${fromId} not in socket map — queue accept for reconnect`)
-                }
+                console.log(`⚠️ Accepter ${fromId} not in socket map — queue accept for reconnect`)
                 await setPendingChessAcceptForUser(fromId, accepterPayload)
             }
 
@@ -1914,36 +1899,21 @@ export const initializeSocket = async (app) => {
                 console.log(`🃏 Created card game room: ${roomId} with both players`)
             }
 
-            const challengerCardLive = challengerSocketId && io.sockets.sockets.get(challengerSocketId)
-            const accepterCardLive = accepterSocketId && io.sockets.sockets.get(accepterSocketId)
-
-            if (challengerCardLive) {
+            // Same reasoning as chess: don't use io.sockets.sockets.get() to decide whether to emit.
+            // Only queue when the socketId is missing from userSocketMap.
+            if (challengerSocketId) {
                 const payload = { roomId, opponentId: fromId }
-                console.log(`🃏 Sending acceptCardChallenge to challenger ${toId}`, payload)
                 io.to(challengerSocketId).emit('acceptCardChallenge', payload)
             } else {
-                if (challengerSocketId) {
-                    console.warn(`🃏 Challenger ${toId} stale socket ${challengerSocketId} — clear map if still that id, queue pending`)
-                    const map = await getUserSocket(toId)
-                    if (map?.socketId === challengerSocketId) await deleteUserSocket(toId)
-                } else {
-                    console.log(`⚠️ Challenger ${toId} not in socket map — queue pending card accept`)
-                }
+                console.log(`⚠️ Challenger ${toId} not in socket map — queue pending card accept for reconnect`)
                 await setPendingCardAcceptForUser(toId, { roomId, opponentId: fromId })
             }
 
-            if (accepterCardLive) {
+            if (accepterSocketId) {
                 const payload = { roomId, opponentId: toId }
-                console.log(`🃏 Sending acceptCardChallenge to accepter ${fromId}`, payload)
                 io.to(accepterSocketId).emit('acceptCardChallenge', payload)
             } else {
-                if (accepterSocketId) {
-                    console.warn(`🃏 Accepter ${fromId} stale socket ${accepterSocketId} — clear map if still that id, queue pending`)
-                    const map = await getUserSocket(fromId)
-                    if (map?.socketId === accepterSocketId) await deleteUserSocket(fromId)
-                } else {
-                    console.log(`⚠️ Accepter ${fromId} not in socket map — queue pending card accept`)
-                }
+                console.log(`⚠️ Accepter ${fromId} not in socket map — queue pending card accept for reconnect`)
                 await setPendingCardAcceptForUser(fromId, { roomId, opponentId: toId })
             }
 
@@ -1973,13 +1943,13 @@ export const initializeSocket = async (app) => {
                     turn: gameState.turn,
                 })
 
-                if (challengerCardLive) {
+                if (challengerSocketId) {
                     const challengerState = buildCardGameStatePayloadForViewer(gameState, roomId, toId)
                     io.to(challengerSocketId).emit('cardGameState', challengerState)
                     console.log(`📤 Sent initial game state to challenger ${toId}`)
                 }
 
-                if (accepterCardLive) {
+                if (accepterSocketId) {
                     const accepterState = buildCardGameStatePayloadForViewer(gameState, roomId, fromId)
                     io.to(accepterSocketId).emit('cardGameState', accepterState)
                     console.log(`📤 Sent initial game state to accepter ${fromId}`)
