@@ -162,8 +162,7 @@ export const GoogleLogin = async (req, res) => {
 export const LogOut = async(req,res) => {
 
     try{
-    // Clear FCM token so the logged-out account won't keep receiving
-    // push notifications on this same device after the user switches accounts.
+    // Clear FCM token for the logged-out account (protectRoute ensures req.user is available).
     if (req.user?._id) {
       await User.findByIdAndUpdate(req.user._id, { fcmToken: null });
     }

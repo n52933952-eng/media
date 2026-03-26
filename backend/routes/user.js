@@ -9,7 +9,7 @@ import User from '../models/user.js'
 router.post("/signup", SignUp)
 router.post("/login",LoginUser)
 router.post("/google-login", GoogleLogin)
-router.post("/logout",LogOut)
+router.post("/logout",protectRoute,LogOut)
 router.post("/follow/:id",protectRoute,FollowAndUnfollow)
 
 // IMPORTANT: More specific routes should come before less specific ones
