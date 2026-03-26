@@ -1,6 +1,7 @@
 
 import { Server } from 'socket.io'
 import http from 'http'
+import mongoose from 'mongoose'
 import Message from '../models/message.js'
 import Conversation from '../models/conversation.js'
 import User from '../models/user.js'
@@ -1445,6 +1446,67 @@ export const initializeSocket = async (app) => {
                 }
             } catch (error) {
                 console.log("Error marking messages as seen:", error)
+            }
+        })
+
+        // Recipient confirms message reached their app (WhatsApp-style double gray tick).
+        // Payload: { messageId } or { messageIds: string[] }
+        socket.on('ackMessageDelivered', async (payload = {}) => {
+            try {
+                const ackerRaw = socket.handshake.query.userId
+                const ackerId = normalizeUserId(ackerRaw) || (ackerRaw && String(ackerRaw))
+                if (!ackerId || ackerId === 'undefined') return
+
+                const rawList = Array.isArray(payload.messageIds)
+                    ? payload.messageIds
+                    : payload.messageId
+                      ? [payload.messageId]
+                      : []
+                const uniqueIds = [...new Set(rawList.map((id) => String(id).trim()).filter(Boolean))].slice(0, 50)
+                if (!uniqueIds.length) return
+
+                const objectIds = []
+                for (const id of uniqueIds) {
+                    if (!mongoose.isValidObjectId(id)) continue
+                    objectIds.push(new mongoose.Types.ObjectId(id))
+                }
+                if (!objectIds.length) return
+
+                const msgs = await Message.find({
+                    _id: { $in: objectIds },
+                    delivered: { $ne: true },
+                }).lean()
+
+                const convCache = new Map()
+                for (const msg of msgs) {
+                    const senderStr = normalizeUserId(msg.sender) || msg.sender?.toString?.()
+                    if (!senderStr || senderStr === ackerId) continue
+
+                    const convId = msg.conversationId?.toString?.()
+                    if (!convId) continue
+
+                    let partStrs = convCache.get(convId)
+                    if (!partStrs) {
+                        const conv = await Conversation.findById(convId).select('participants').lean()
+                        if (!conv?.participants?.length) continue
+                        partStrs = conv.participants.map((p) => p.toString())
+                        convCache.set(convId, partStrs)
+                    }
+                    if (!partStrs.includes(ackerId)) continue
+
+                    await Message.updateOne({ _id: msg._id }, { $set: { delivered: true } })
+
+                    const senderData = await getUserSocket(senderStr)
+                    const senderSocketId = senderData?.socketId
+                    if (senderSocketId) {
+                        io.to(senderSocketId).emit('messageDelivered', {
+                            messageId: msg._id.toString(),
+                            conversationId: convId,
+                        })
+                    }
+                }
+            } catch (e) {
+                console.warn('ackMessageDelivered error:', e?.message || e)
             }
         })
 

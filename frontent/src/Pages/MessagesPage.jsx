@@ -443,6 +443,25 @@ const MessagesPage = () => {
       container.scrollTop = 0
     }
 
+    const emitDeliveryAcksForList = (arr) => {
+      if (!socket?.emit || !user?._id || !arr?.length) return
+      const uid = typeof user._id === 'string' ? user._id : user._id.toString()
+      const ids = arr
+        .filter((m) => {
+          const sid =
+            m.sender?._id != null
+              ? typeof m.sender._id === 'string'
+                ? m.sender._id
+                : m.sender._id.toString()
+              : m.sender
+                ? String(m.sender)
+                : ''
+          return sid && sid !== uid && m.delivered === false && m._id
+        })
+        .map((m) => String(m._id))
+      if (ids.length) socket.emit('ackMessageDelivered', { messageIds: ids.slice(0, 50) })
+    }
+
     const fetchMessages = async (loadMore = false, beforeId = null) => {
       if (!selectedConversation) return
 
@@ -490,6 +509,7 @@ const MessagesPage = () => {
               }
               return combined
             })
+            emitDeliveryAcksForList(data.messages || [])
             // Don't update lastMessageCountRef here - pagination shouldn't trigger unread count
             return // Exit early, don't trigger unread detection
           } else {
@@ -510,10 +530,11 @@ const MessagesPage = () => {
             
             // Set messages
             setMessages(messagesToSet)
-            
+            emitDeliveryAcksForList(messagesToSet)
+
             // Mark that we should scroll to bottom after messages render (initial load only)
             shouldScrollToBottomRef.current = true
-            
+
             // Mark messages as seen when opening conversation
             const otherUser = selectedConversation.participants[0]
             if (otherUser?._id && socket) {
@@ -545,7 +566,7 @@ const MessagesPage = () => {
       currentConversationIdRef.current = null
       currentParticipantIdRef.current = null
     }
-  }, [selectedConversation?._id, selectedConversation?.participants[0]?._id, showToast])
+  }, [selectedConversation?._id, selectedConversation?.participants[0]?._id, showToast, socket, user?._id])
 
   // Scroll to bottom when messages are initially loaded (not pagination)
   useEffect(() => {
@@ -900,7 +921,11 @@ const MessagesPage = () => {
         console.log('⚠️ Ignoring own message in socket listener (already handled by handleMessageSent)')
         return // Don't process own messages via socket
       }
-      
+
+      if (message._id && socket?.emit) {
+        socket.emit('ackMessageDelivered', { messageId: String(message._id) })
+      }
+
       console.log('✅ Processing message from other user in handleNewMessage')
       console.log('⏰ Message timestamp info:', {
         messageCreatedAt: message.createdAt,
@@ -1127,6 +1152,21 @@ const MessagesPage = () => {
       socket.off("messagesSeen", handleMessagesSeen)
     }
   }, [socket, selectedConversation?._id])
+
+  useEffect(() => {
+    if (!socket || !user?._id) return
+
+    const handleMessageDelivered = (data) => {
+      const mid = data?.messageId?.toString()
+      if (!mid) return
+      setMessages((prev) =>
+        prev.map((m) => (m._id?.toString() === mid ? { ...m, delivered: true } : m))
+      )
+    }
+
+    socket.on('messageDelivered', handleMessageDelivered)
+    return () => socket.off('messageDelivered', handleMessageDelivered)
+  }, [socket, user?._id])
 
   // Listen for call started - update inCall status when users become busy
   useEffect(() => {

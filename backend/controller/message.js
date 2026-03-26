@@ -6,21 +6,18 @@ import { Readable } from 'stream'
 import mongoose from 'mongoose'
 
 /**
- * Fan-out to recipient: socket if connected, else FCM. Sets `delivered` on success.
- * WhatsApp-style: one tick until this succeeds; two gray after; blue uses `seen`.
+ * Fan-out to recipient: socket if connected, else FCM.
+ * `delivered` stays false until the recipient app emits `ackMessageDelivered` (WhatsApp-style).
  */
-async function deliverOutboundMessage(newMessage, conversation, recipientId, senderId) {
+async function deliverOutboundMessage(newMessage, conversation, recipientId) {
   const recipentSockedId = await getRecipientSockedId(recipientId)
   const io = getIO()
-  let delivered = false
 
   if (recipentSockedId && recipientId && io) {
-    await Message.findByIdAndUpdate(newMessage._id, { delivered: true })
-    delivered = true
     const messageWithTimestamp = {
       ...newMessage.toObject(),
       conversationUpdatedAt: conversation.updatedAt,
-      delivered: true,
+      delivered: false,
     }
     io.to(recipentSockedId).emit('newMessage', messageWithTimestamp)
     try {
@@ -43,31 +40,13 @@ async function deliverOutboundMessage(newMessage, conversation, recipientId, sen
   } else if (recipientId) {
     try {
       const { sendMessageNotification } = await import('../services/pushNotifications.js')
-      const result = await sendMessageNotification(
-        recipientId,
-        newMessage.sender,
-        conversation._id.toString()
-      )
-      if (result?.success) {
-        await Message.findByIdAndUpdate(newMessage._id, { delivered: true })
-        delivered = true
-      }
+      await sendMessageNotification(recipientId, newMessage.sender, conversation._id.toString())
     } catch (e) {
       console.log('❌ Error sending FCM message notification:', e?.message || e)
     }
   }
 
-  if (delivered && io) {
-    const senderSocketId = await getRecipientSockedId(senderId)
-    if (senderSocketId) {
-      io.to(senderSocketId).emit('messageDelivered', {
-        messageId: newMessage._id.toString(),
-        conversationId: conversation._id.toString(),
-      })
-    }
-  }
-
-  return delivered
+  return false
 }
 
 export const sendMessaeg = async(req,res) => {
@@ -150,12 +129,7 @@ export const sendMessaeg = async(req,res) => {
                   })
                 }
                   
-                const delivered = await deliverOutboundMessage(
-                  newMessage,
-                  conversation,
-                  recipientId,
-                  senderId
-                )
+                const delivered = await deliverOutboundMessage(newMessage, conversation, recipientId)
 
                 if (!res.headersSent) {
                   const responseData = {
@@ -233,7 +207,7 @@ if (newMessage.replyTo) {
   })
 }
   
-const delivered = await deliverOutboundMessage(newMessage, conversation, recipientId, senderId)
+const delivered = await deliverOutboundMessage(newMessage, conversation, recipientId)
 
 const responseData = {
   ...newMessage.toObject(),
