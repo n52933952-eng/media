@@ -1530,22 +1530,21 @@ export const initializeSocket = async (app) => {
                 yourColor: 'black',
                 opponentId: toId,
             }
+            // IMPORTANT: Always queue pending accept for both users.
+            // A brief disconnect / listener timing issue can cause the live emit to be missed.
+            // The next socket connect will deliver this one-shot payload.
+            if (toId) await setPendingChessAcceptForUser(toId, challengerPayload)
+            if (fromId) await setPendingChessAcceptForUser(fromId, accepterPayload)
+
             // IMPORTANT: Don't check "local" socket existence via io.sockets.sockets.get(socketId).
             // With Redis adapter / multiple server instances, io.to(socketId).emit will still route correctly,
             // but io.sockets.sockets.get() only sees sockets on the current node.
-            // So we only queue when socketId is missing from userSocketMap.
             if (challengerSocketId) {
                 io.to(challengerSocketId).emit('acceptChessChallenge', challengerPayload)
-            } else {
-                console.log(`⚠️ Challenger ${toId} not in socket map — queue accept for reconnect`)
-                await setPendingChessAcceptForUser(toId, challengerPayload)
             }
 
             if (accepterSocketId) {
                 io.to(accepterSocketId).emit('acceptChessChallenge', accepterPayload)
-            } else {
-                console.log(`⚠️ Accepter ${fromId} not in socket map — queue accept for reconnect`)
-                await setPendingChessAcceptForUser(fromId, accepterPayload)
             }
 
             // Broadcast busy status to ALL online users so they know these users are in a game
@@ -1901,20 +1900,22 @@ export const initializeSocket = async (app) => {
 
             // Same reasoning as chess: don't use io.sockets.sockets.get() to decide whether to emit.
             // Only queue when the socketId is missing from userSocketMap.
+            // Make it robust by always writing pending payload for both users.
+            // If the live emit is missed (disconnect/reconnect timing), the next socket connect will deliver.
+            if (toId) await setPendingCardAcceptForUser(toId, { roomId, opponentId: fromId })
+            if (fromId) await setPendingCardAcceptForUser(fromId, { roomId, opponentId: toId })
             if (challengerSocketId) {
                 const payload = { roomId, opponentId: fromId }
                 io.to(challengerSocketId).emit('acceptCardChallenge', payload)
             } else {
-                console.log(`⚠️ Challenger ${toId} not in socket map — queue pending card accept for reconnect`)
-                await setPendingCardAcceptForUser(toId, { roomId, opponentId: fromId })
+                console.log(`⚠️ Challenger ${toId} not in socket map — live accept emit skipped (pending already written)`)
             }
 
             if (accepterSocketId) {
                 const payload = { roomId, opponentId: toId }
                 io.to(accepterSocketId).emit('acceptCardChallenge', payload)
             } else {
-                console.log(`⚠️ Accepter ${fromId} not in socket map — queue pending card accept for reconnect`)
-                await setPendingCardAcceptForUser(fromId, { roomId, opponentId: toId })
+                console.log(`⚠️ Accepter ${fromId} not in socket map — live accept emit skipped (pending already written)`)
             }
 
             let gameState = null
