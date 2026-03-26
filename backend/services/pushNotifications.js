@@ -80,7 +80,7 @@ async function sendMentionNotification(userId, mentionerName, postId, images = {
 /**
  * Send notification when someone sends you a message (when you're offline / not in app)
  */
-async function sendMessageNotification(recipientUserId, senderUser, conversationId) {
+async function sendMessageNotification(recipientUserId, senderUser, conversationId, messageId) {
   const senderName = senderUser?.name || senderUser?.username || 'Someone';
   return await sendNotificationToUser(
     recipientUserId,
@@ -89,6 +89,7 @@ async function sendMessageNotification(recipientUserId, senderUser, conversation
     {
       type: 'message',
       conversationId: String(conversationId || ''),
+      messageId: messageId != null ? String(messageId) : '',
       senderId: senderUser?._id?.toString?.() ?? String(senderUser?._id || ''),
       senderName: senderUser?.name || '',
       senderUsername: senderUser?.username || '',

@@ -40,7 +40,7 @@ async function deliverOutboundMessage(newMessage, conversation, recipientId) {
   } else if (recipientId) {
     try {
       const { sendMessageNotification } = await import('../services/pushNotifications.js')
-      await sendMessageNotification(recipientId, newMessage.sender, conversation._id.toString())
+      await sendMessageNotification(recipientId, newMessage.sender, conversation._id.toString(), newMessage._id)
     } catch (e) {
       console.log('❌ Error sending FCM message notification:', e?.message || e)
     }
