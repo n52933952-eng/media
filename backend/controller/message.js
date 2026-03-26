@@ -5,6 +5,70 @@ import { v2 as cloudinary } from 'cloudinary'
 import { Readable } from 'stream'
 import mongoose from 'mongoose'
 
+/**
+ * Fan-out to recipient: socket if connected, else FCM. Sets `delivered` on success.
+ * WhatsApp-style: one tick until this succeeds; two gray after; blue uses `seen`.
+ */
+async function deliverOutboundMessage(newMessage, conversation, recipientId, senderId) {
+  const recipentSockedId = await getRecipientSockedId(recipientId)
+  const io = getIO()
+  let delivered = false
+
+  if (recipentSockedId && recipientId && io) {
+    await Message.findByIdAndUpdate(newMessage._id, { delivered: true })
+    delivered = true
+    const messageWithTimestamp = {
+      ...newMessage.toObject(),
+      conversationUpdatedAt: conversation.updatedAt,
+      delivered: true,
+    }
+    io.to(recipentSockedId).emit('newMessage', messageWithTimestamp)
+    try {
+      const recipientConversations = await Conversation.find({ participants: recipientId })
+      const totalUnread = await Promise.all(
+        recipientConversations.map(async (conv) => {
+          const unreadCount = await Message.countDocuments({
+            conversationId: conv._id,
+            seen: false,
+            sender: { $ne: recipientId },
+          })
+          return unreadCount || 0
+        })
+      )
+      const totalUnreadCount = totalUnread.reduce((sum, count) => sum + count, 0)
+      io.to(recipentSockedId).emit('unreadCountUpdate', { totalUnread: totalUnreadCount })
+    } catch (error) {
+      console.log('Error calculating unread count:', error)
+    }
+  } else if (recipientId) {
+    try {
+      const { sendMessageNotification } = await import('../services/pushNotifications.js')
+      const result = await sendMessageNotification(
+        recipientId,
+        newMessage.sender,
+        conversation._id.toString()
+      )
+      if (result?.success) {
+        await Message.findByIdAndUpdate(newMessage._id, { delivered: true })
+        delivered = true
+      }
+    } catch (e) {
+      console.log('❌ Error sending FCM message notification:', e?.message || e)
+    }
+  }
+
+  if (delivered && io) {
+    const senderSocketId = await getRecipientSockedId(senderId)
+    if (senderSocketId) {
+      io.to(senderSocketId).emit('messageDelivered', {
+        messageId: newMessage._id.toString(),
+        conversationId: conversation._id.toString(),
+      })
+    }
+  }
+
+  return delivered
+}
 
 export const sendMessaeg = async(req,res) => {
 
@@ -86,42 +150,18 @@ export const sendMessaeg = async(req,res) => {
                   })
                 }
                   
-                const recipentSockedId = await getRecipientSockedId(recipientId)
-                const io = getIO()
-
-                if(recipentSockedId && recipientId && io){
-                  // Add conversation updatedAt to message for accurate sorting
-                  const messageWithTimestamp = {
-                    ...newMessage.toObject(),
-                    conversationUpdatedAt: conversation.updatedAt
-                  }
-                  io.to(recipentSockedId).emit("newMessage", messageWithTimestamp)
-                  
-                  // Calculate and emit unread count update for recipient
-                  try {
-                    const recipientConversations = await Conversation.find({ participants: recipientId })
-                    const totalUnread = await Promise.all(
-                      recipientConversations.map(async (conv) => {
-                        const unreadCount = await Message.countDocuments({
-                          conversationId: conv._id,
-                          seen: false,
-                          sender: { $ne: recipientId }
-                        })
-                        return unreadCount || 0
-                      })
-                    )
-                    const totalUnreadCount = totalUnread.reduce((sum, count) => sum + count, 0)
-                    io.to(recipentSockedId).emit("unreadCountUpdate", { totalUnread: totalUnreadCount })
-                  } catch (error) {
-                    console.log('Error calculating unread count:', error)
-                  }
-                }
+                const delivered = await deliverOutboundMessage(
+                  newMessage,
+                  conversation,
+                  recipientId,
+                  senderId
+                )
 
                 if (!res.headersSent) {
-                  // Send message with conversation timestamp to sender for accurate sorting
                   const responseData = {
                     ...newMessage.toObject(),
-                    conversationUpdatedAt: conversation.updatedAt
+                    conversationUpdatedAt: conversation.updatedAt,
+                    delivered,
                   }
                   console.log('📤 Sending message to sender with timestamp:', conversation.updatedAt)
                   res.status(201).json(responseData)
@@ -193,54 +233,12 @@ if (newMessage.replyTo) {
   })
 }
   
-const recipentSockedId = await getRecipientSockedId(recipientId)
-const io = getIO() // Get io instance
+const delivered = await deliverOutboundMessage(newMessage, conversation, recipientId, senderId)
 
-if(recipentSockedId && recipientId && io){
-  // Add conversation updatedAt to message for accurate sorting
-  const messageWithTimestamp = {
-    ...newMessage.toObject(),
-    conversationUpdatedAt: conversation.updatedAt
-  }
-  io.to(recipentSockedId).emit("newMessage", messageWithTimestamp)
-  
-  // Calculate and emit unread count update for recipient
-  try {
-    const recipientConversations = await Conversation.find({ participants: recipientId })
-    const totalUnread = await Promise.all(
-      recipientConversations.map(async (conv) => {
-        const unreadCount = await Message.countDocuments({
-          conversationId: conv._id,
-          seen: false,
-          sender: { $ne: recipientId }
-        })
-        return unreadCount || 0
-      })
-    )
-    const totalUnreadCount = totalUnread.reduce((sum, count) => sum + count, 0)
-    io.to(recipentSockedId).emit("unreadCountUpdate", { totalUnread: totalUnreadCount })
-  } catch (error) {
-    console.log('Error calculating unread count:', error)
-  }
-}
-
-// If recipient is offline (no socket), send FCM push notification
-// This mirrors web behavior: realtime via socket when online, push when offline
-if (!recipentSockedId && recipientId) {
-  try {
-    const { sendMessageNotification } = await import('../services/pushNotifications.js')
-    // newMessage.sender is populated with { username, profilePic, name }
-    await sendMessageNotification(recipientId, newMessage.sender, conversation._id.toString())
-  } catch (e) {
-    console.log('❌ Error sending FCM message notification:', e?.message || e)
-  }
-}
-
-
-// Send message with conversation timestamp to sender for accurate sorting
 const responseData = {
   ...newMessage.toObject(),
-  conversationUpdatedAt: conversation.updatedAt
+  conversationUpdatedAt: conversation.updatedAt,
+  delivered,
 }
 console.log('📤 Sending message to sender with timestamp:', conversation.updatedAt)
 res.status(201).json(responseData)

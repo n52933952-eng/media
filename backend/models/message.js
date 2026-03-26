@@ -19,6 +19,12 @@ const MessageSchema = new mongoose.Schema({
         default:false
     },
 
+    /** True when recipient got the message in-app (socket) or FCM accepted the message push (device may show notification). */
+    delivered:{
+        type:Boolean,
+        default:false
+    },
+
     img:{
         type:String,
         default:""
