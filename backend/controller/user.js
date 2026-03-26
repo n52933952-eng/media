@@ -162,6 +162,11 @@ export const GoogleLogin = async (req, res) => {
 export const LogOut = async(req,res) => {
 
     try{
+    // Clear FCM token so the logged-out account won't keep receiving
+    // push notifications on this same device after the user switches accounts.
+    if (req.user?._id) {
+      await User.findByIdAndUpdate(req.user._id, { fcmToken: null });
+    }
 
    res.cookie("jwt","",{maxAge:1})
    res.status(200).json({message:"user logOut"})
