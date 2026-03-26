@@ -548,7 +548,8 @@ const CANCEL_DEDUPE_TTL_MS = 6000
 // This is more scalable than SCAN for 1M+ users
 const setPendingCall = async (receiverId, callData) => {
     redisService.ensureRedis()
-    await redisService.redisSet(`pendingCall:${receiverId}`, callData, 3600) // 1 hour TTL
+    // Short TTL: ringing window. Prevent stale calls after long offline.
+    await redisService.redisSet(`pendingCall:${receiverId}`, callData, 75) // 75 seconds TTL
 }
 
 const getPendingCall = async (receiverId) => {
@@ -1120,24 +1121,28 @@ export const initializeSocket = async (app) => {
                 console.log(`✅ [callUser] User ${receiverId} is ONLINE, sending callUser to socket ${receiverSocketId}`)
                 io.to(receiverSocketId).emit("callUser", payload)
             } else {
-                // User is offline - send push so their phone rings. Do NOT tell caller "offline" – caller keeps "Calling..." and Saif's phone rings.
+                // User is offline - send push so their phone rings (WhatsApp-like).
+                // Stale-call protection is handled via cancelCall (stop ringtone push + pendingCancel) and requestCallSignal checks.
                 console.log(`📱 [callUser] User ${receiverId} is OFFLINE, sending push notification (phone will ring)`)
                 console.log('📱 [callUser] CALLBACK_FCM: Sending FCM to receiver (A was off-app)', {
                     receiver: receiverId,
                     caller: callerId,
                     callerName: name,
                     callType,
+                    callId: clientCallId,
                 })
                 try {
-                    console.log(`📤 [callUser] Calling sendCallNotification(${receiverId}, ${name}, ${callerId}, ${callType})`)
-                    const result = await sendCallNotification(receiverId, name, callerId, callType)
+                    console.log(`📤 [callUser] Calling sendCallNotification(${receiverId}, ${name}, ${callerId}, ${callType}, ${clientCallId || 'auto'})`)
+                    const result = await sendCallNotification(receiverId, name, callerId, callType, clientCallId || null)
                     console.log('✅ [callUser] Push notification result:', result)
                     
                     await setPendingCall(receiverId, {
                         callerId: callerId,
                         signal: signalPayload,
                         name: name,
-                        callType: callType
+                        callType: callType,
+                        callId: clientCallId || null,
+                        at: Date.now(),
                     })
                     console.log(`✅ [callUser] Stored pending call for ${receiverId} (indexed for fast lookup)`)
                 } catch (error) {
@@ -1174,8 +1179,27 @@ export const initializeSocket = async (app) => {
         })
 
         // WebRTC: Handle request call signal (when user comes online after receiving push notification)
-        socket.on("requestCallSignal", async ({ callerId, receiverId }) => {
+        socket.on("requestCallSignal", async ({ callerId, receiverId, callId: clientCallId }) => {
             console.log(`📞 [requestCallSignal] Requesting call signal for ${receiverId} from ${callerId}`)
+            // If receiver had a pending cancel while offline/backgrounded, do NOT resurrect the call.
+            // Also ensure callId matches when provided (prevents mixing new call with old cancel).
+            const pendingCancel = await getPendingCancel(receiverId)
+            if (pendingCancel) {
+                const cancelAgeMs = Date.now() - (Number(pendingCancel.at) || 0)
+                const cancelCallId = pendingCancel.callId || null
+                const callIdMatches = !clientCallId || !cancelCallId || String(clientCallId) === String(cancelCallId)
+                if (cancelAgeMs < 180000 && callIdMatches) {
+                    console.log('🧯 [requestCallSignal] Pending cancel exists — suppressing call signal resend', {
+                        receiverId,
+                        callerId,
+                        cancelAgeMs,
+                        cancelCallId,
+                        clientCallId,
+                    })
+                    await deletePendingCancel(receiverId)
+                    return
+                }
+            }
             
             // Check if there's an active call between these users
             const callId1 = `${callerId}-${receiverId}`
@@ -1227,7 +1251,9 @@ export const initializeSocket = async (app) => {
                 // Fallback: Check pending calls (indexed lookup) in case active call wasn't found
                 // This handles edge cases where pending call exists but active call wasn't stored
                 const pendingCall = await getPendingCall(receiverId)
-                if (pendingCall && pendingCall.callerId === callerId && pendingCall.signal) {
+                const pendingCallId = pendingCall?.callId || null
+                const callIdOk = !clientCallId || !pendingCallId || String(clientCallId) === String(pendingCallId)
+                if (pendingCall && pendingCall.callerId === callerId && pendingCall.signal && callIdOk) {
                     console.log(`✅ [requestCallSignal] Found pending call, re-sending signal`)
                     const receiverData = await getUserSocket(receiverId)
                     const receiverSocketId = receiverData?.socketId
@@ -1357,8 +1383,11 @@ export const initializeSocket = async (app) => {
             await clearCallStateForPair(sender, conversationId)
 
             // If receiver is offline (no socketId), store a pending cancel ONLY when we were canceling a RING (no active call).
+            // Include callId so requestCallSignal can suppress only the matching call.
             if (!receiverSocketId && conversationId && !hadActiveCall) {
-                await setPendingCancel(conversationId, { from: sender, at: Date.now() })
+                const pending = { from: sender, at: Date.now() }
+                if (clientCallId) pending.callId = clientCallId
+                await setPendingCancel(conversationId, pending)
             }
 
             // Send FCM "stop_ringtone" to receiver when: we had an active call OR receiver is offline (had pending call – phone was ringing).
