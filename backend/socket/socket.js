@@ -1088,9 +1088,10 @@ export const initializeSocket = async (app) => {
                 }
                 socket.data.presenceSubscriptions = requested
 
-                // Send a snapshot so UI can paint immediately
+                // Snapshot: who is online among subscribed ids + full id list so clients set explicit offline
+                // (avoids "partner looks online" from global list while socket still open during app background).
                 const snapshot = await getOnlineSnapshotForUserIds(requested)
-                socket.emit('presenceSnapshot', { onlineUsers: snapshot })
+                socket.emit('presenceSnapshot', { onlineUsers: snapshot, subscribedUserIds: requested })
             } catch (e) {
                 console.error('❌ [socket] presenceSubscribe error:', e.message)
             }
