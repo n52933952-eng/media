@@ -405,3 +405,59 @@ export async function sendGeneralPushNotificationToUser(userId, title, body, dat
     return { success: false, error: err.message };
   }
 }
+
+/**
+ * Message push without top-level `notification` so Android delivers as a data message.
+ * `onMessageReceived` runs in background/killed (WhatsApp-style delivery ack from native).
+ * iOS still gets a visible alert via `apns` payload.
+ */
+export async function sendMessagePushDataOnly(userId, title, body, data = {}, _images = {}) {
+  if (!initializationAttempted || !isInitialized || !admin.apps.length) {
+    return { success: false, error: 'FCM not initialized' };
+  }
+
+  const uid = userId == null ? null : String(userId);
+  if (!uid) return { success: false, error: 'Invalid user id' };
+
+  try {
+    const User = (await import('../models/user.js')).default;
+    const user = await User.findById(uid).select('fcmToken');
+    if (!user?.fcmToken) {
+      return { success: false, error: 'User not found or no FCM token' };
+    }
+
+    const titleStr = String(title || 'PlaySocial').slice(0, 200);
+    const bodyStr = String(body || '').slice(0, 500);
+    const dataPayload = Object.fromEntries(
+      Object.entries({ ...data, title: titleStr, body: bodyStr }).map(([k, v]) => [k, v == null ? '' : String(v)])
+    );
+
+    const message = {
+      token: user.fcmToken,
+      data: dataPayload,
+      android: {
+        priority: 'high',
+        ttl: 60 * 60 * 1000,
+      },
+      apns: {
+        headers: { 'apns-priority': '10' },
+        payload: {
+          aps: {
+            alert: { title: titleStr, body: bodyStr },
+            sound: 'default',
+          },
+        },
+      },
+    };
+
+    const response = await admin.messaging().send(message);
+    return { success: true, messageId: response };
+  } catch (err) {
+    if (err.code === 'messaging/registration-token-not-registered' ||
+        err.code === 'messaging/invalid-registration-token') {
+      await (await import('../models/user.js')).default.findByIdAndUpdate(uid, { fcmToken: '' });
+    }
+    console.error('❌ [FCM] sendMessagePushDataOnly:', err.message);
+    return { success: false, error: err.message };
+  }
+}

@@ -82,21 +82,33 @@ async function sendMentionNotification(userId, mentionerName, postId, images = {
  */
 async function sendMessageNotification(recipientUserId, senderUser, conversationId, messageId) {
   const senderName = senderUser?.name || senderUser?.username || 'Someone';
-  return await sendNotificationToUser(
-    recipientUserId,
-    senderName,
-    'sent you a message',
-    {
-      type: 'message',
-      conversationId: String(conversationId || ''),
-      messageId: messageId != null ? String(messageId) : '',
-      senderId: senderUser?._id?.toString?.() ?? String(senderUser?._id || ''),
-      senderName: senderUser?.name || '',
-      senderUsername: senderUser?.username || '',
-      senderProfilePic: senderUser?.profilePic || '',
-    },
-    { profilePic: senderUser?.profilePic }
-  );
+  try {
+    const { sendMessagePushDataOnly } = await import('./fcmNotifications.js');
+    const result = await sendMessagePushDataOnly(
+      recipientUserId,
+      senderName,
+      'sent you a message',
+      {
+        type: 'message',
+        conversationId: String(conversationId || ''),
+        messageId: messageId != null ? String(messageId) : '',
+        senderId: senderUser?._id?.toString?.() ?? String(senderUser?._id || ''),
+        senderName: senderUser?.name || '',
+        senderUsername: senderUser?.username || '',
+        senderProfilePic: senderUser?.profilePic || '',
+      },
+      { profilePic: senderUser?.profilePic }
+    );
+    if (result.success) {
+      console.log('✅ [Push/FCM] Message data-only push sent to user:', recipientUserId);
+    } else {
+      console.warn('⚠️ [Push/FCM] Message push not sent:', recipientUserId, result.error);
+    }
+    return result;
+  } catch (error) {
+    console.error('❌ [Push/FCM] sendMessageNotification:', error);
+    return { success: false, error: error.message };
+  }
 }
 
 /**
