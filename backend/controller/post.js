@@ -300,10 +300,14 @@ export const updatePost = async(req,res) => {
         // Check if user is owner
         const isOwner = postOwnerId === userId.toString()
         
-        // Check if user is a contributor (for collaborative posts)
-        const isContributor = post.isCollaborative && 
-            post.contributors && 
-            post.contributors.some(c => (c._id || c).toString() === userId.toString())
+        // Check if user is a contributor (for collaborative posts) — works populated or raw ObjectIds
+        const isContributor =
+            post.isCollaborative &&
+            Array.isArray(post.contributors) &&
+            post.contributors.some((c) => {
+                const cid = c && c._id != null ? c._id.toString() : String(c)
+                return cid === userId.toString()
+            })
         
         if(!isOwner && !isContributor){
             return res.status(403).json({error:"You can only edit your own posts or collaborative posts you contribute to"})
