@@ -370,8 +370,9 @@ export const updatePost = async(req,res) => {
                         img = result.secure_url
                         
                         // Update post
-                        post.text = text || post.text
+                        post.text = text !== undefined && text !== null ? text : post.text
                         post.img = img
+                        post.editedAt = new Date()
                         await post.save()
                         
                         // Populate for response
@@ -490,7 +491,8 @@ export const updatePost = async(req,res) => {
         }
         
         // No file upload - just update text
-        post.text = text || post.text
+        post.text = text !== undefined && text !== null ? text : post.text
+        post.editedAt = new Date()
         await post.save()
         
         // Populate for response

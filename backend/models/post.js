@@ -17,6 +17,12 @@ const PostSchema = mongoose.Schema({
         maxLength:500
     },
 
+    /** Set when the author/contributor saves an edit (for “Edited” in clients). */
+    editedAt: {
+        type: Date,
+        default: null,
+    },
+
     img:{
         type:String
     },
