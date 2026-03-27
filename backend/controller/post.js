@@ -22,6 +22,8 @@ export const createPost = async(req,res) => {
                 contributorsParsed = undefined
             }
         }
+        // Multipart sends strings; only treat explicit true / "true" as collaborative (string "false" is truthy in JS)
+        const wantCollaborative = isCollaborative === true || isCollaborative === 'true'
          
       let img = ''
 
@@ -78,7 +80,7 @@ export const createPost = async(req,res) => {
                
                try {
                  const postData = {postedBy,text:textTrim,img}
-                 if (isCollaborative) {
+                 if (wantCollaborative) {
                    postData.isCollaborative = true
                    postData.contributors = contributorsParsed && Array.isArray(contributorsParsed) ? contributorsParsed : [postedBy]
                  }
@@ -149,7 +151,7 @@ export const createPost = async(req,res) => {
 
        // No file - create post immediately
        const postData = {postedBy,text:textTrim,img}
-       if (isCollaborative) {
+       if (wantCollaborative) {
          postData.isCollaborative = true
          postData.contributors = contributorsParsed && Array.isArray(contributorsParsed) ? contributorsParsed : [postedBy]
        }
@@ -954,11 +956,21 @@ export const getFeedPost = async(req,res) => {
                 seenPostIds.add(postId)
             }
         }
+
+        // Never show the viewer's own authored posts in the home feed (profile is for that).
+        // Still show posts where someone else is author and the viewer is only a contributor.
+        const viewerIdStr = userId.toString()
+        const feedNormalPosts = uniqueNormalPosts.filter((post) => {
+            const pb = post.postedBy
+            if (!pb) return false
+            const aid = pb._id != null ? pb._id.toString() : String(pb)
+            return aid !== viewerIdStr
+        })
         
         // For first page (skip=0): Football + Channels + 12 normal posts (all sorted together)
         if (skip === 0) {
             // Get top 12 normal posts
-            const topNormalPosts = uniqueNormalPosts.slice(0, 12)
+            const topNormalPosts = feedNormalPosts.slice(0, 12)
             
             // Combine: Football + Channels + 12 normal posts
             const combinedPosts = []
@@ -977,12 +989,12 @@ export const getFeedPost = async(req,res) => {
             })
             
             // Calculate hasMore: true if there are more than 12 normal posts
-            const hasMore = uniqueNormalPosts.length > 12
+            const hasMore = feedNormalPosts.length > 12
             
             return res.status(200).json({ 
                 posts: combinedPosts,
                 hasMore,
-                totalCount: uniqueNormalPosts.length
+                totalCount: feedNormalPosts.length
             })
         }
         
@@ -990,9 +1002,9 @@ export const getFeedPost = async(req,res) => {
         // Skip the first 12 normal posts (already shown on page 1)
         const startIndex = skip
         const endIndex = startIndex + limit
-        const paginatedPosts = uniqueNormalPosts.slice(startIndex, endIndex)
-        const hasMore = endIndex < uniqueNormalPosts.length
-        const totalCount = uniqueNormalPosts.length
+        const paginatedPosts = feedNormalPosts.slice(startIndex, endIndex)
+        const hasMore = endIndex < feedNormalPosts.length
+        const totalCount = feedNormalPosts.length
         
         console.log(`📄 [getFeedPost] Page ${Math.floor(skip / limit) + 1}: Returning ${paginatedPosts.length} posts (skip: ${skip}, limit: ${limit}, hasMore: ${hasMore}, totalCount: ${totalCount})`)
         

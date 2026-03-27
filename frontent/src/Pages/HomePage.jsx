@@ -254,6 +254,13 @@ const HomePage = () => {
           console.log('⚠️ [HomePage] New post has no author, skipping:', newPost._id)
           return prev
         }
+
+        const myId = user?._id?.toString?.()
+        const isGamePost = !!(newPost?.chessGameData || newPost?.cardGameData)
+        if (myId && newPostAuthorId === myId && !isGamePost) {
+          console.log('⚠️ [HomePage] Ignoring own post for feed (matches API):', newPost._id)
+          return prev
+        }
         
         // Filter out posts from the same author
         const postsFromOtherAuthors = prev.filter(p => {
