@@ -957,14 +957,22 @@ export const getFeedPost = async(req,res) => {
             }
         }
 
-        // Never show the viewer's own authored posts in the home feed (profile is for that).
-        // Still show posts where someone else is author and the viewer is only a contributor.
+        // Own authored posts: hide from home feed unless collaborative with at least one *other* contributor.
+        // (Solo posts → profile only; add someone → show in your feed too.)
         const viewerIdStr = userId.toString()
+        const hasAnotherContributor = (post, authorIdStr) => {
+            if (!post.isCollaborative || !Array.isArray(post.contributors)) return false
+            return post.contributors.some((c) => {
+                const cid = c && c._id != null ? c._id.toString() : String(c)
+                return cid && cid !== authorIdStr
+            })
+        }
         const feedNormalPosts = uniqueNormalPosts.filter((post) => {
             const pb = post.postedBy
             if (!pb) return false
             const aid = pb._id != null ? pb._id.toString() : String(pb)
-            return aid !== viewerIdStr
+            if (aid !== viewerIdStr) return true
+            return hasAnotherContributor(post, viewerIdStr)
         })
         
         // For first page (skip=0): Football + Channels + 12 normal posts (all sorted together)

@@ -257,7 +257,15 @@ const HomePage = () => {
 
         const myId = user?._id?.toString?.()
         const isGamePost = !!(newPost?.chessGameData || newPost?.cardGameData)
-        if (myId && newPostAuthorId === myId && !isGamePost) {
+        const contributors = newPost?.contributors
+        const hasOtherContributor =
+          !!newPost?.isCollaborative &&
+          Array.isArray(contributors) &&
+          contributors.some((c) => {
+            const cid = (c?._id != null ? c._id : c)?.toString?.() ?? String(c)
+            return cid && cid !== myId
+          })
+        if (myId && newPostAuthorId === myId && !isGamePost && !hasOtherContributor) {
           console.log('⚠️ [HomePage] Ignoring own post for feed (matches API):', newPost._id)
           return prev
         }
