@@ -1,5 +1,5 @@
 import User from '../models/user.js'
-import { getIO, getUserSocket } from '../socket/socket.js'
+import { getIO, getRecipientSockedId } from '../socket/socket.js'
 import * as redisService from '../services/redis.js'
 
 // STUN servers (public, no auth)
@@ -107,15 +107,12 @@ export const cancelCall = async (req, res) => {
             whenBCallsABack: 'After this, B can call A - A must NOT be busy',
         })
 
-        // Get socket IDs (same logic as socket handler)
+        // Live Socket.IO ids only (Redis may list a socketId while presence is "offline" or row is stale)
         // conversationId = caller (who made the call)
         // sender = receiver (who declined the call)
-        const callerData = await getUserSocket(conversationId)
-        const callerSocketId = callerData?.socketId
+        const callerSocketId = await getRecipientSockedId(conversationId)
+        const receiverSocketId = await getRecipientSockedId(sender)
 
-        const receiverData = await getUserSocket(sender)
-        const receiverSocketId = receiverData?.socketId
-        
         console.log(`📴 [HTTP cancelCall] Socket IDs - Caller: ${callerSocketId || 'NOT CONNECTED'}, Receiver: ${receiverSocketId || 'NOT CONNECTED'}`)
 
         // Remove from active calls - try both possible call IDs

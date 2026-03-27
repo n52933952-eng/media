@@ -296,6 +296,28 @@ const isUserEffectivelyOnline = async (userId) => {
     return true
 }
 
+/**
+ * Redis userSocket entry is still connected on this Socket.IO server (or cluster via fetchSockets).
+ * Does NOT use clientPresence — mobile may set presence "offline" while the socket stays open during
+ * delayed disconnect after background (UserContext), which must not force FCM / "offline" for calls.
+ */
+const resolveLiveSocketIdForUser = async (userId) => {
+    const uid = normalizeUserId(userId) || userId
+    if (!uid || !io) return null
+    const userData = await getUserSocket(uid)
+    const socketId = userData?.socketId
+    if (!socketId) return null
+    const isLocalLive = !!io.sockets?.sockets?.get?.(socketId)
+    if (isLocalLive) return socketId
+    try {
+        const remotes = await io.in(socketId).fetchSockets()
+        if (Array.isArray(remotes) && remotes.length > 0) return socketId
+    } catch (_) {
+        /* ignore */
+    }
+    return null
+}
+
 const deleteUserSocket = async (userId) => {
     redisService.ensureRedis() // Redis is required
     
@@ -1183,7 +1205,7 @@ export const initializeSocket = async (app) => {
             let userToCallBusy = await isUserBusy(receiverId)
             let fromBusy = await isUserBusy(callerId)
             const receiverDataEarly = await getUserSocket(receiverId)
-            const receiverOffline = !(await isUserEffectivelyOnline(receiverId))
+            const receiverOffline = !(await resolveLiveSocketIdForUser(receiverId))
             // Self-heal: if receiver is offline but marked busy (stale from previous call), clear so callback works
             if (userToCallBusy && receiverOffline) {
                 console.log('📞 [callUser] CALLBACK_SELFHEAL: Receiver is offline but was marked busy – clearing inCall so callback can go through')
@@ -1240,7 +1262,7 @@ export const initializeSocket = async (app) => {
 
             // Get socket data from Redis (reuse lookup from above)
             const receiverData = receiverDataEarly
-            const receiverSocketId = (await isUserEffectivelyOnline(receiverId)) ? receiverData?.socketId : null
+            const receiverSocketId = await resolveLiveSocketIdForUser(receiverId)
 
             const senderData = await getUserSocket(callerId)
             const senderSocketId = senderData?.socketId
@@ -2852,25 +2874,7 @@ export const initializeSocket = async (app) => {
 }
 
 export const getRecipientSockedId = async (recipientId) => {
-    const id = normalizeUserId(recipientId) || recipientId
-    const userData = await getUserSocket(id)
-    const socketId = userData ? userData.socketId : null
-    if (!socketId) return null
-
-    // Respect clientPresence (foreground/background) for routing decisions.
-    const effectivelyOnline = await isUserEffectivelyOnline(id)
-    if (!effectivelyOnline) return null
-
-    // Guard against stale Redis socket IDs (e.g., network loss before disconnect cleanup).
-    const isLocalLive = !!io?.sockets?.sockets?.get?.(socketId)
-    if (isLocalLive) return socketId
-    try {
-        const remotes = await io.in(socketId).fetchSockets()
-        if (Array.isArray(remotes) && remotes.length > 0) return socketId
-    } catch (_) {
-        // ignore and fall back to null
-    }
-    return null
+    return resolveLiveSocketIdForUser(recipientId)
 }
 
 // Export getUserSocket for use in HTTP endpoints
