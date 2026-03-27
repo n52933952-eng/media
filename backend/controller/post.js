@@ -1642,6 +1642,11 @@ export const deleteCardGamePost = async (roomId) => {
                     // Emit post deleted to post author, other player, and all followers
                     const io = getIO()
                     if (io) {
+                        try {
+                            io.emit('postDeleted', { postId: deletedPostId })
+                        } catch (emitErr) {
+                            console.warn('⚠️ [deleteCardGamePost] Global postDeleted emit failed:', emitErr?.message)
+                        }
                         const { getAllUserSockets } = await import('../socket/socket.js')
                         const userSocketMap = await getAllUserSockets()
                         const recipients = new Set() // Use Set to avoid duplicates
@@ -1743,6 +1748,7 @@ export const deleteChessGamePost = async (roomId) => {
                           .lean()
                         
                         // Delete the post
+                        const deletedPostId = post._id.toString()
                         await Post.findByIdAndDelete(post._id)
                         deletedCount++
                         console.log(`🗑️ Deleted chess game post: ${post._id} for roomId: ${roomId}`)
@@ -1750,6 +1756,12 @@ export const deleteChessGamePost = async (roomId) => {
                         // Emit post deleted to post author, other player, and all followers
                         const io = getIO()
                         if (io) {
+                            // Broadcast so every connected client drops the post (fixes stale "Live" on Feed)
+                            try {
+                                io.emit('postDeleted', { postId: deletedPostId })
+                            } catch (emitErr) {
+                                console.warn('⚠️ [deleteChessGamePost] Global postDeleted emit failed:', emitErr?.message)
+                            }
                             const userSocketMap = await getAllUserSockets()
                             const recipients = new Set() // Use Set to avoid duplicates
                             

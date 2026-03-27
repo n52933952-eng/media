@@ -491,6 +491,28 @@ const takePendingChessAcceptForUser = async (userId) => {
     return data
 }
 
+const deletePendingChessAcceptForUser = async (userId) => {
+    redisService.ensureRedis()
+    const id = normalizeUserId(userId) || userId
+    if (!id) return
+    await redisService.redisDel(`${PENDING_CHESS_ACCEPT_PREFIX}${id}`)
+}
+
+/** Pending accept must match an active game + Redis state, or it is stale (game ended / canceled). */
+const isPendingChessAcceptStillValid = async (userId, payload) => {
+    if (!payload?.roomId) return false
+    const uid = normalizeUserId(userId) || userId
+    if (!uid) return false
+    try {
+        const activeRoom = await getActiveChessGame(uid)
+        if (!activeRoom || String(activeRoom) !== String(payload.roomId)) return false
+        const state = await getChessGameState(payload.roomId)
+        return !!state
+    } catch (_) {
+        return false
+    }
+}
+
 const PENDING_CARD_ACCEPT_PREFIX = 'pendingCardAccept:'
 const PENDING_CARD_ACCEPT_TTL = 120
 
@@ -514,6 +536,27 @@ const takePendingCardAcceptForUser = async (userId) => {
     const data = await redisService.redisGet(key)
     if (data) await redisService.redisDel(key)
     return data
+}
+
+const deletePendingCardAcceptForUser = async (userId) => {
+    redisService.ensureRedis()
+    const id = normalizeUserId(userId) || userId
+    if (!id) return
+    await redisService.redisDel(`${PENDING_CARD_ACCEPT_PREFIX}${id}`)
+}
+
+const isPendingCardAcceptStillValid = async (userId, payload) => {
+    if (!payload?.roomId) return false
+    const uid = normalizeUserId(userId) || userId
+    if (!uid) return false
+    try {
+        const activeRoom = await getActiveCardGame(uid)
+        if (!activeRoom || String(activeRoom) !== String(payload.roomId)) return false
+        const state = await getCardGameState(payload.roomId)
+        return !!state
+    } catch (_) {
+        return false
+    }
 }
 
 // Helper functions for cardGameStates - Redis only
@@ -968,13 +1011,18 @@ export const initializeSocket = async (app) => {
                 try {
                     const pendingChess = await takePendingChessAcceptForUser(connectUserId)
                     if (pendingChess?.roomId && pendingChess.yourColor && pendingChess.opponentId) {
-                        console.log(`♟️ [socket] Delivering pending acceptChessChallenge to ${connectUserId}`, pendingChess)
-                        io.to(connectSid).emit('acceptChessChallenge', {
-                            roomId: pendingChess.roomId,
-                            yourColor: pendingChess.yourColor,
-                            opponentId: pendingChess.opponentId,
-                        })
-                        sock.join(pendingChess.roomId)
+                        const stillValid = await isPendingChessAcceptStillValid(connectUserId, pendingChess)
+                        if (!stillValid) {
+                            console.log(`♟️ [socket] Skipping stale pending chess accept for ${connectUserId} (room ${pendingChess.roomId})`)
+                        } else {
+                            console.log(`♟️ [socket] Delivering pending acceptChessChallenge to ${connectUserId}`, pendingChess)
+                            io.to(connectSid).emit('acceptChessChallenge', {
+                                roomId: pendingChess.roomId,
+                                yourColor: pendingChess.yourColor,
+                                opponentId: pendingChess.opponentId,
+                            })
+                            sock.join(pendingChess.roomId)
+                        }
                     }
                 } catch (e) {
                     console.error(`❌ [socket] Error delivering pending chess accept for ${connectUserId}:`, e.message)
@@ -982,18 +1030,23 @@ export const initializeSocket = async (app) => {
                 try {
                     const pendingCard = await takePendingCardAcceptForUser(connectUserId)
                     if (pendingCard?.roomId && pendingCard.opponentId != null) {
-                        console.log(`🃏 [socket] Delivering pending acceptCardChallenge to ${connectUserId}`, pendingCard)
-                        io.to(connectSid).emit('acceptCardChallenge', {
-                            roomId: pendingCard.roomId,
-                            opponentId: pendingCard.opponentId,
-                        })
-                        sock.join(pendingCard.roomId)
-                        const gs = await getCardGameState(pendingCard.roomId)
-                        if (gs) {
-                            const cardPayload = buildCardGameStatePayloadForViewer(gs, pendingCard.roomId, connectUserId)
-                            io.to(connectSid).emit('cardGameState', cardPayload)
+                        const stillValid = await isPendingCardAcceptStillValid(connectUserId, pendingCard)
+                        if (!stillValid) {
+                            console.log(`🃏 [socket] Skipping stale pending card accept for ${connectUserId} (room ${pendingCard.roomId})`)
                         } else {
-                            console.warn(`🃏 [socket] Pending card accept for ${connectUserId} but no game state in Redis for ${pendingCard.roomId}`)
+                            console.log(`🃏 [socket] Delivering pending acceptCardChallenge to ${connectUserId}`, pendingCard)
+                            io.to(connectSid).emit('acceptCardChallenge', {
+                                roomId: pendingCard.roomId,
+                                opponentId: pendingCard.opponentId,
+                            })
+                            sock.join(pendingCard.roomId)
+                            const gs = await getCardGameState(pendingCard.roomId)
+                            if (gs) {
+                                const cardPayload = buildCardGameStatePayloadForViewer(gs, pendingCard.roomId, connectUserId)
+                                io.to(connectSid).emit('cardGameState', cardPayload)
+                            } else {
+                                console.warn(`🃏 [socket] Pending card accept for ${connectUserId} but no game state in Redis for ${pendingCard.roomId}`)
+                            }
                         }
                     }
                 } catch (e) {
@@ -1834,11 +1887,15 @@ export const initializeSocket = async (app) => {
         })
 
         socket.on("declineChessChallenge", async ({ from, to }) => {
-            console.log(`♟️ Chess challenge declined by ${from}`)
-            const challengerData = await getUserSocket(to)
+            const fromId = normalizeUserId(from) || from
+            const toId = normalizeUserId(to) || to
+            console.log(`♟️ Chess challenge declined by ${fromId}`)
+            await deletePendingChessAcceptForUser(fromId).catch(() => {})
+            await deletePendingChessAcceptForUser(toId).catch(() => {})
+            const challengerData = await getUserSocket(toId)
             const challengerSocketId = challengerData?.socketId
             if (challengerSocketId) {
-                io.to(challengerSocketId).emit("chessDeclined", { from })
+                io.to(challengerSocketId).emit("chessDeclined", { from: fromId })
             }
         })
 
@@ -2006,7 +2063,7 @@ export const initializeSocket = async (app) => {
                 const room = io.sockets.adapter.rooms.get(roomId)
                 if (room && room.size > 0) {
                     console.log(`👁️ Notifying ${room.size} spectators that game ended (resign)`)
-                    io.to(roomId).emit("chessGameEnded", { reason: 'resigned' })
+                    io.to(roomId).emit("chessGameEnded", { roomId, reason: 'resigned' })
                 }
             }
             
@@ -2018,6 +2075,8 @@ export const initializeSocket = async (app) => {
                 // Remove from active games tracking (Redis)
                 await deleteActiveChessGame(userId)
                 await deleteActiveChessGame(to)
+                await deletePendingChessAcceptForUser(userId).catch(() => {})
+                await deletePendingChessAcceptForUser(to).catch(() => {})
                 // Clean up game state (Redis)
                 await deleteChessGameState(roomId)
                 console.log(`🗑️ Cleaned up game state for room ${roomId}`)
@@ -2075,7 +2134,7 @@ export const initializeSocket = async (app) => {
                 if (room && room.size > 0) {
                     const endReason = reason || 'player_left'
                     console.log(`👁️ Notifying ${room.size} spectators that game ended (${endReason})`)
-                    io.to(roomId).emit("chessGameEnded", { reason: endReason })
+                    io.to(roomId).emit("chessGameEnded", { roomId, reason: endReason })
                 }
             }
             
@@ -2087,6 +2146,8 @@ export const initializeSocket = async (app) => {
                 // Remove from active games tracking (Redis)
                 await deleteActiveChessGame(player1)
                 await deleteActiveChessGame(player2)
+                await deletePendingChessAcceptForUser(player1).catch(() => {})
+                await deletePendingChessAcceptForUser(player2).catch(() => {})
                 // Clean up game state (Redis)
                 await deleteChessGameState(roomId)
                 console.log(`🗑️ Cleaned up game state for room ${roomId}`)
@@ -2224,11 +2285,15 @@ export const initializeSocket = async (app) => {
         })
 
         socket.on("declineCardChallenge", async ({ from, to }) => {
-            console.log(`🃏 Card challenge declined by ${from}`)
-            const challengerData = await getUserSocket(to)
+            const fromId = normalizeUserId(from) || from
+            const toId = normalizeUserId(to) || to
+            console.log(`🃏 Card challenge declined by ${fromId}`)
+            await deletePendingCardAcceptForUser(fromId).catch(() => {})
+            await deletePendingCardAcceptForUser(toId).catch(() => {})
+            const challengerData = await getUserSocket(toId)
             const challengerSocketId = challengerData?.socketId
             if (challengerSocketId) {
-                io.to(challengerSocketId).emit("cardDeclined", { from })
+                io.to(challengerSocketId).emit("cardDeclined", { from: fromId })
             }
         })
 
@@ -2402,6 +2467,8 @@ export const initializeSocket = async (app) => {
                                 // Clean up Redis
                                 await deleteActiveCardGame(currentState.players[0].userId)
                                 await deleteActiveCardGame(currentState.players[1].userId)
+                                await deletePendingCardAcceptForUser(currentState.players[0].userId).catch(() => {})
+                                await deletePendingCardAcceptForUser(currentState.players[1].userId).catch(() => {})
                                 await deleteCardGameState(roomId)
                                 
                                 // Make users available
@@ -2486,6 +2553,8 @@ export const initializeSocket = async (app) => {
                 if (opponentId) {
                     await deleteActiveCardGame(opponentId)
                 }
+                await deletePendingCardAcceptForUser(userId).catch(() => {})
+                if (opponentId) await deletePendingCardAcceptForUser(opponentId).catch(() => {})
                 // Clean up game state (Redis)
                 await deleteCardGameState(roomId)
                 console.log(`🗑️ Cleaned up card game state for room ${roomId}`)
@@ -2545,6 +2614,8 @@ export const initializeSocket = async (app) => {
                 // Remove from active games tracking (Redis)
                 await deleteActiveCardGame(player1)
                 await deleteActiveCardGame(player2)
+                await deletePendingCardAcceptForUser(player1).catch(() => {})
+                await deletePendingCardAcceptForUser(player2).catch(() => {})
                 // Clean up game state (Redis)
                 await deleteCardGameState(roomId)
                 console.log(`🗑️ Cleaned up card game state for room ${roomId}`)
@@ -2736,7 +2807,7 @@ export const initializeSocket = async (app) => {
                         const room = io.sockets.adapter.rooms.get(gameRoomId)
                         if (room && room.size > 0) {
                             console.log(`👁️ Notifying ${room.size} spectators that game ended (player disconnected)`)
-                            io.to(gameRoomId).emit("chessGameEnded", { reason: 'player_disconnected' })
+                            io.to(gameRoomId).emit("chessGameEnded", { roomId: gameRoomId, reason: 'player_disconnected' })
                         }
                     }
                     
@@ -2750,6 +2821,8 @@ export const initializeSocket = async (app) => {
                     if (otherPlayerId) {
                         await deleteActiveChessGame(otherPlayerId)
                     }
+                    await deletePendingChessAcceptForUser(disconnectedUserId).catch(() => {})
+                    if (otherPlayerId) await deletePendingChessAcceptForUser(otherPlayerId).catch(() => {})
                     
                     // Clean up game state (Redis)
                     await deleteChessGameState(gameRoomId)
@@ -2816,6 +2889,8 @@ export const initializeSocket = async (app) => {
                     if (otherPlayerId) {
                         await deleteActiveCardGame(otherPlayerId)
                     }
+                    await deletePendingCardAcceptForUser(disconnectedUserId).catch(() => {})
+                    if (otherPlayerId) await deletePendingCardAcceptForUser(otherPlayerId).catch(() => {})
                     
                     // Clean up game state (Redis)
                     await deleteCardGameState(gameRoomId)
