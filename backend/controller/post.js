@@ -6,6 +6,28 @@ import { v2 as cloudinary } from 'cloudinary'
 import { Readable } from 'stream'
 import { getIO, getAllUserSockets } from '../socket/socket.js'
 
+/** Notify everyone listed as contributor except the poster when a collaborative post is created. */
+async function notifyContributorsOnCollaborativeCreate(newPost, posterId) {
+    if (!newPost?.isCollaborative || !Array.isArray(newPost.contributors)) return
+    const posterStr = String(posterId)
+    const others = newPost.contributors.filter((c) => {
+        const cid = (c._id || c).toString()
+        return cid && cid !== posterStr
+    })
+    if (others.length === 0) return
+    const { createNotification } = await import('./notification.js')
+    for (const c of others) {
+        const cid = (c._id || c).toString()
+        try {
+            await createNotification(cid, 'collaboration', posterStr, {
+                postId: newPost._id.toString(),
+                postText: (newPost.text || '').substring(0, 50) || 'a collaborative post'
+            })
+        } catch (e) {
+            console.error('❌ [notifyContributorsOnCollaborativeCreate]', cid, e)
+        }
+    }
+}
 
 export const createPost = async(req,res) => {
 
@@ -90,6 +112,8 @@ export const createPost = async(req,res) => {
                  // Populate postedBy for socket emission
                  await newPost.populate("postedBy", "username profilePic name")
                  
+                 await notifyContributorsOnCollaborativeCreate(newPost, postedBy)
+
                  // OPTIMIZED: Emit new post only to online followers (not all users)
                  const io = getIO()
                  if (io) {
@@ -161,6 +185,8 @@ export const createPost = async(req,res) => {
        // Populate postedBy for socket emission
        await newPost.populate("postedBy", "username profilePic name")
        
+       await notifyContributorsOnCollaborativeCreate(newPost, postedBy)
+
        // OPTIMIZED: Emit new post only to online followers (not all users)
        const io = getIO()
        if (io) {

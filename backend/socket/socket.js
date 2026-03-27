@@ -2791,6 +2791,8 @@ export const getRecipientSockedId = async (recipientId) => {
 
 // Export getUserSocket for use in HTTP endpoints
 export { getUserSocket }
+/** True when user has an active socket and is not marked presence-offline (in-app / foreground). */
+export { isUserEffectivelyOnline }
 
 // Export getters for io and server
 export const getIO = () => io

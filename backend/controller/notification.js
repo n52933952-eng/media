@@ -1,7 +1,7 @@
 import Notification from '../models/notification.js'
 import User from '../models/user.js'
 import Post from '../models/post.js'
-import { getIO, getUserSocketMap } from '../socket/socket.js'
+import { getIO, getRecipientSockedId } from '../socket/socket.js'
 import { 
     sendLikeNotification, 
     sendCommentNotification, 
@@ -9,6 +9,54 @@ import {
     sendFollowNotification,
     sendNotificationToUser
 } from '../services/pushNotifications.js'
+
+function buildNotificationSocketPayload(notification, options = {}) {
+    let notificationObj
+    if (notification.toObject) {
+        notificationObj = notification.toObject()
+    } else if (typeof notification.toJSON === 'function') {
+        notificationObj = notification.toJSON()
+    } else {
+        notificationObj = JSON.parse(JSON.stringify(notification))
+    }
+
+    if (notificationObj.from && typeof notificationObj.from === 'object') {
+        notificationObj.from = {
+            _id: notificationObj.from._id?.toString() || notificationObj.from._id,
+            username: notificationObj.from.username,
+            name: notificationObj.from.name,
+            profilePic: notificationObj.from.profilePic
+        }
+    }
+
+    if (notificationObj.post && typeof notificationObj.post === 'object') {
+        notificationObj.post = {
+            _id: notificationObj.post._id?.toString() || notificationObj.post._id,
+            text: notificationObj.post.text,
+            img: notificationObj.post.img,
+            postedBy: notificationObj.post.postedBy ? {
+                username: notificationObj.post.postedBy.username || notificationObj.post.postedBy
+            } : null
+        }
+    }
+
+    if (notification.metadata) {
+        notificationObj.metadata = notification.metadata
+    } else if (options.postText || options.postId) {
+        notificationObj.metadata = {
+            postText: options.postText || null,
+            postId: options.postId?.toString() || notificationObj.post?._id?.toString() || null
+        }
+    }
+
+    if (!notificationObj.post && options.postId) {
+        notificationObj.post = {
+            _id: options.postId.toString()
+        }
+    }
+
+    return notificationObj
+}
 
 // Create a notification
 export const createNotification = async (userId, type, fromUserId, options = {}) => {
@@ -55,77 +103,28 @@ export const createNotification = async (userId, type, fromUserId, options = {})
             }
         }
         
-        // Emit real-time notification to user if online
-        // Use setTimeout to ensure socket is fully ready
-        setTimeout(() => {
-            const io = getIO()
-            if (io) {
-                const userSocketMap = getUserSocketMap()
-                const userSocketData = userSocketMap[userId.toString()]
-                
-                if (userSocketData) {
-                    // Convert Mongoose document to plain object for socket emission
-                    let notificationObj
-                    if (notification.toObject) {
-                        notificationObj = notification.toObject()
-                    } else if (typeof notification.toJSON === 'function') {
-                        notificationObj = notification.toJSON()
-                    } else {
-                        notificationObj = JSON.parse(JSON.stringify(notification))
-                    }
-                    
-                    // Ensure all nested objects are properly serialized
-                    if (notificationObj.from && typeof notificationObj.from === 'object') {
-                        notificationObj.from = {
-                            _id: notificationObj.from._id?.toString() || notificationObj.from._id,
-                            username: notificationObj.from.username,
-                            name: notificationObj.from.name,
-                            profilePic: notificationObj.from.profilePic
-                        }
-                    }
-                    
-                    if (notificationObj.post && typeof notificationObj.post === 'object') {
-                        notificationObj.post = {
-                            _id: notificationObj.post._id?.toString() || notificationObj.post._id,
-                            text: notificationObj.post.text,
-                            img: notificationObj.post.img,
-                            postedBy: notificationObj.post.postedBy ? {
-                                username: notificationObj.post.postedBy.username || notificationObj.post.postedBy
-                            } : null
-                        }
-                    }
-                    
-                    // Include metadata in socket emission (for collaboration/post_edit notifications)
-                    if (notification.metadata) {
-                        notificationObj.metadata = notification.metadata
-                    } else if (options.postText || options.postId) {
-                        // Ensure metadata is included even if not saved properly
-                        notificationObj.metadata = {
-                            postText: options.postText || null,
-                            postId: options.postId?.toString() || notificationObj.post?._id?.toString() || null
-                        }
-                    }
-                    
-                    // Ensure post is included for navigation (even if populate failed)
-                    if (!notificationObj.post && options.postId) {
-                        notificationObj.post = {
-                            _id: options.postId.toString()
-                        }
-                    }
-                    
-                    io.to(userSocketData.socketId).emit('newNotification', notificationObj)
-                    console.log(`📬 [createNotification] Sent notification to user ${userId} (socket: ${userSocketData.socketId}), type: ${type}`)
-                } else {
-                    console.log(`⚠️ [createNotification] User ${userId} is not online (not in socket map)`)
-                    console.log(`🔍 [createNotification] Available users in socket map:`, Object.keys(userSocketMap))
-                }
+        const notificationObj = buildNotificationSocketPayload(notification, options)
+        const io = getIO()
+        // In-app: only when there is a live, valid socket (same helper as messages)
+        let deliveredInApp = false
+        try {
+            const socketId = await getRecipientSockedId(userId)
+            if (io && socketId) {
+                io.to(socketId).emit('newNotification', notificationObj)
+                deliveredInApp = true
+                console.log(`📬 [createNotification] In-app notification → user ${userId}, type: ${type}, socket: ${socketId}`)
             } else {
-                console.log(`⚠️ [createNotification] Socket.IO not initialized`)
+                console.log(`⚠️ [createNotification] No live socket for user ${userId} (type: ${type}) — will send push if applicable`)
             }
-        }, 200) // Small delay to ensure socket is ready
+        } catch (emitErr) {
+            console.error(`❌ [createNotification] Socket emit failed for ${userId}:`, emitErr?.message)
+        }
 
-        // Send FCM push notification (for likes, comments, mentions, follows, etc.)
-        // Note: Call notifications are handled separately via FCM
+        // Push (FCM): only when not delivered in-app — avoids duplicate banner while user is in the app
+        if (deliveredInApp) {
+            return notification
+        }
+
         try {
             // Get the user who triggered the notification (fromUserId) with profile picture
             const fromUser = await User.findById(fromUserId).select('username name profilePic')
@@ -139,7 +138,7 @@ export const createNotification = async (userId, type, fromUserId, options = {})
             
             // Get post image if it's a post-related notification
             let postImage = null
-            if (postId && (type === 'like' || type === 'comment' || type === 'mention')) {
+            if (postId && (type === 'like' || type === 'comment' || type === 'mention' || type === 'collaboration' || type === 'post_edit')) {
                 try {
                     const Post = (await import('../models/post.js')).default
                     const post = await Post.findById(postId).select('img')
