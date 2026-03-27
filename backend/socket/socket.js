@@ -165,6 +165,34 @@ const isInCallFast = async (userId) => {
     }
 }
 
+// Brief socket drops during incoming ring / WebRTC setup should not wipe call state (same idea as chess disconnect grace).
+const CALL_DISCONNECT_GRACE_MS = 10000
+const callDisconnectGraceTimers = new Map()
+
+const clearCallDisconnectGraceTimer = (userId) => {
+    const uid = normalizeUserId(userId)
+    if (!uid) return
+    const t = callDisconnectGraceTimers.get(uid)
+    if (t) {
+        clearTimeout(t)
+        callDisconnectGraceTimers.delete(uid)
+    }
+}
+
+/** callId format `${callerId}-${receiverId}`; Mongo ObjectIds contain no '-'. */
+const getPeerUserIdFromCompositeCallId = (callId, uid) => {
+    if (!callId || !uid) return null
+    const u = normalizeUserId(uid)
+    if (!u) return null
+    const hyphen = callId.indexOf('-')
+    if (hyphen <= 0 || hyphen >= callId.length - 1) return null
+    const id1 = callId.slice(0, hyphen)
+    const id2 = callId.slice(hyphen + 1)
+    if (id1 === u) return id2
+    if (id2 === u) return id1
+    return null
+}
+
 /** Best practice: single place for firm call cleanup (scale-ready, WhatsApp-like).
  *  Clears Redis inCall + activeCall + pendingCall for both users. Call on every end/cancel/disconnect. */
 const clearCallStateForPair = async (userA, userB) => {
@@ -186,6 +214,8 @@ const clearCallStateForPair = async (userA, userB) => {
     ].map(p => p.catch(() => {})))
     User.findByIdAndUpdate(a, { inCall: false }).catch(() => {})
     User.findByIdAndUpdate(b, { inCall: false }).catch(() => {})
+    clearCallDisconnectGraceTimer(a)
+    clearCallDisconnectGraceTimer(b)
 }
 
 // Debug: Log inCall Redis values (for callback flow troubleshooting)
@@ -2734,31 +2764,59 @@ export const initializeSocket = async (app) => {
                 console.error('❌ [socket] Failed to emit presenceUpdate (offline):', e.message)
             }
 
-            // Firm cleanup on disconnect: O(1) lookup via inCall -> callId -> other user (scale-ready)
+            // Call teardown on disconnect: wait for reconnect (ringing / WebRTC churn) before clearing Redis + FCM.
             if (disconnectedUserId) {
                 const inCallData = await getInCall(disconnectedUserId)
                 const callId = inCallData?.callId
-                let otherUserId = null
                 if (callId) {
-                    const callData = await getActiveCall(callId)
-                    if (callData) {
-                        otherUserId = callData.user1 === disconnectedUserId ? callData.user2 : callData.user1
-                    }
-                }
-                await clearCallStateForPair(disconnectedUserId, otherUserId || '')
-                if (otherUserId) {
-                    const otherUserData = await getUserSocket(otherUserId)
-                    if (otherUserData?.socketId) {
-                        io.to(otherUserData.socketId).emit("CallCanceled")
-                        io.emit("cancleCall", { userToCall: otherUserId, from: disconnectedUserId })
-                    }
-                    try {
-                        const { sendCallEndedNotificationToUser } = await import('../services/fcmNotifications.js')
-                        const fcmResult = await sendCallEndedNotificationToUser(otherUserId, disconnectedUserId)
-                        if (fcmResult.success) console.log('✅ [disconnect] Sent call ended FCM to:', otherUserId)
-                    } catch (fcmErr) {
-                        console.error('❌ [disconnect] FCM call ended:', fcmErr?.message)
-                    }
+                    const uid = normalizeUserId(disconnectedUserId)
+                    const prevTimer = callDisconnectGraceTimers.get(uid)
+                    if (prevTimer) clearTimeout(prevTimer)
+
+                    callDisconnectGraceTimers.set(
+                        uid,
+                        setTimeout(async () => {
+                            callDisconnectGraceTimers.delete(uid)
+                            try {
+                                const stillIn = await getInCall(uid)
+                                if (!stillIn?.callId || stillIn.callId !== callId) return
+
+                                const sock = await getUserSocket(uid)
+                                if (sock?.socketId) {
+                                    console.log(`✅ [disconnect-call] User ${uid} reconnected within grace — skipping call teardown`)
+                                    return
+                                }
+
+                                let otherUserId = null
+                                const callData = await getActiveCall(callId)
+                                if (callData) {
+                                    const u1 = normalizeUserId(callData.user1)
+                                    const u2 = normalizeUserId(callData.user2)
+                                    if (u1 === uid) otherUserId = u2
+                                    else if (u2 === uid) otherUserId = u1
+                                }
+                                if (!otherUserId) otherUserId = getPeerUserIdFromCompositeCallId(callId, uid)
+
+                                await clearCallStateForPair(uid, otherUserId || '')
+                                if (otherUserId) {
+                                    const otherUserData = await getUserSocket(otherUserId)
+                                    if (otherUserData?.socketId) {
+                                        io.to(otherUserData.socketId).emit('CallCanceled')
+                                        io.emit('cancleCall', { userToCall: otherUserId, from: uid })
+                                    }
+                                    try {
+                                        const { sendCallEndedNotificationToUser } = await import('../services/fcmNotifications.js')
+                                        const fcmResult = await sendCallEndedNotificationToUser(otherUserId, uid)
+                                        if (fcmResult.success) console.log('✅ [disconnect-call] Sent call ended FCM to:', otherUserId)
+                                    } catch (fcmErr) {
+                                        console.error('❌ [disconnect-call] FCM call ended:', fcmErr?.message)
+                                    }
+                                }
+                            } catch (e) {
+                                console.error('❌ [disconnect-call] grace handler failed:', e?.message)
+                            }
+                        }, CALL_DISCONNECT_GRACE_MS)
+                    )
                 }
             }
 
