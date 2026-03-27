@@ -4,7 +4,7 @@ import Post from '../models/post.js'
 import Follow from '../models/follow.js'
 import { v2 as cloudinary } from 'cloudinary'
 import { Readable } from 'stream'
-import { getIO, getAllUserSockets } from '../socket/socket.js'
+import { getIO, getUserSocket } from '../socket/socket.js'
 
 /** Notify everyone listed as contributor except the poster when a collaborative post is created. */
 async function notifyContributorsOnCollaborativeCreate(newPost, posterId) {
@@ -1328,10 +1328,10 @@ export const createChessGamePost = async (player1Id, player2Id, roomId) => {
         const io = getIO()
         console.log('🔍 [createChessGamePost] Checking IO instance:', !!io)
         
+        const p1Str = player1Id?.toString?.() ?? String(player1Id)
+        const p2Str = player2Id?.toString?.() ?? String(player2Id)
+
         if (io) {
-            const userSocketMap = await getAllUserSockets()
-            console.log('🔍 [createChessGamePost] User socket map size:', Object.keys(userSocketMap).length)
-            
             // Emit each post only to followers of that post's author
             for (const post of posts) {
                 // Get the author ID - handle both ObjectId and populated object
@@ -1362,47 +1362,58 @@ export const createChessGamePost = async (player1Id, player2Id, roomId) => {
                     console.log(`ℹ️ [createChessGamePost] Post author ${postAuthorId} has no followers`)
                     continue
                 }
-                
-                // Find online followers of this post's author
-                const onlineFollowers = []
-                console.log(`🔍 [createChessGamePost] Checking ${followerDocs.length} followers of ${postAuthorId}`)
-                console.log(`🔍 [createChessGamePost] Available user IDs in socket map:`, Object.keys(userSocketMap))
-                console.log(`🔍 [createChessGamePost] Socket map entries:`, Object.entries(userSocketMap).map(([id, data]) => ({ userId: id, socketId: data.socketId })))
-                
-                followerDocs.forEach(d => {
-                    // Use same simple approach as postDeleted (which works)
+
+                // Per-user Redis lookup (avoids stale bulk SCAN + always include both co-players)
+                const targetSocketIds = new Set()
+                console.log(`🔍 [createChessGamePost] Checking ${followerDocs.length} followers of ${postAuthorId} (getUserSocket each)`)
+
+                for (const d of followerDocs) {
                     const followerIdStr = d.followerId?.toString?.() ?? String(d.followerId)
-                    if (userSocketMap[followerIdStr]) {
-                        onlineFollowers.push(userSocketMap[followerIdStr].socketId)
-                        console.log(`✅ [createChessGamePost] Found online follower of ${postAuthorId}: ${followerIdStr} (socket: ${userSocketMap[followerIdStr].socketId})`)
-                    } else {
-                        console.log(`⚠️ [createChessGamePost] Follower ${followerIdStr} is not online (not in socket map)`)
+                    try {
+                        const sock = await getUserSocket(followerIdStr)
+                        if (sock?.socketId) {
+                            targetSocketIds.add(sock.socketId)
+                            console.log(`✅ [createChessGamePost] Online follower of ${postAuthorId}: ${followerIdStr} (${sock.socketId})`)
+                        } else {
+                            console.log(`⚠️ [createChessGamePost] Follower ${followerIdStr} has no socket (offline / reconnect)`)
+                        }
+                    } catch (e) {
+                        console.warn(`⚠️ [createChessGamePost] getUserSocket failed for follower ${followerIdStr}:`, e?.message)
                     }
-                })
-                
-                if (onlineFollowers.length > 0) {
-                    // Convert Mongoose document to plain object for socket emission
+                }
+
+                for (const pid of [p1Str, p2Str]) {
+                    if (!pid || pid === 'undefined') continue
+                    try {
+                        const sock = await getUserSocket(pid)
+                        if (sock?.socketId) targetSocketIds.add(sock.socketId)
+                    } catch (_) {
+                        /* ignore */
+                    }
+                }
+
+                if (targetSocketIds.size > 0) {
                     const postObject = post.toObject ? post.toObject() : post
-                    console.log(`📤 [createChessGamePost] Emitting newPost to ${onlineFollowers.length} followers of ${postAuthorId} for post: ${post._id}`)
+                    console.log(`📤 [createChessGamePost] Emitting newPost to ${targetSocketIds.size} socket(s) for author ${postAuthorId}, post: ${post._id}`)
                     console.log(`📤 [createChessGamePost] Post data:`, {
                         _id: postObject._id,
                         postedBy: postObject.postedBy,
                         text: postObject.text,
-                        hasChessGameData: !!postObject.chessGameData
+                        hasChessGameData: !!postObject.chessGameData,
                     })
-                    console.log(`📤 [createChessGamePost] Socket IDs to emit to:`, onlineFollowers)
-                    
-                    // Use same pattern as postDeleted (which works for User N)
-                    // Emit to each socket individually to ensure delivery
-                    onlineFollowers.forEach(socketId => {
-                        io.to(socketId).emit("newPost", postObject)
+                    for (const socketId of targetSocketIds) {
+                        io.to(socketId).emit('newPost', postObject)
                         console.log(`✅ [createChessGamePost] Emitted newPost to socket: ${socketId}`)
-                    })
-                    console.log(`✅ [createChessGamePost] Emitted newPost event to ${onlineFollowers.length} sockets for post: ${post._id}`)
+                    }
+                    console.log(`✅ [createChessGamePost] Done post ${post._id}`)
                 } else {
-                    console.log(`ℹ️ [createChessGamePost] No online followers for post author ${postAuthorId}`)
-                    console.log(`🔍 [createChessGamePost] All followers of ${postAuthorId}:`, followerDocs.map(d => d.followerId?.toString?.() ?? String(d.followerId)))
-                    console.log(`🔍 [createChessGamePost] Online user IDs in socket map:`, Object.keys(userSocketMap))
+                    console.log(`ℹ️ [createChessGamePost] No sockets for post author ${postAuthorId} (followers + players offline?)`)
+                    console.log(`🔍 [createChessGamePost] All followers:`, followerDocs.map(d => d.followerId?.toString?.() ?? String(d.followerId)))
+                    if (roomId && typeof roomId === 'string' && roomId.startsWith('chess_')) {
+                        const postObject = post.toObject ? post.toObject() : post
+                        io.to(roomId).emit('newPost', postObject)
+                        console.log(`📤 [createChessGamePost] Fallback: newPost only to room ${roomId}`)
+                    }
                 }
             }
         } else {
@@ -1474,46 +1485,62 @@ export const createCardGamePost = async (player1Id, player2Id, roomId) => {
         }
         
         console.log('✅ [createCardGamePost] Created card game posts:', posts.map(p => p._id))
-        
-        // Emit newPost to online followers (same pattern as chess)
+
+        const cardP1 = player1Id?.toString?.() ?? String(player1Id)
+        const cardP2 = player2Id?.toString?.() ?? String(player2Id)
+
+        // Emit newPost to online followers + both players (per-user socket lookup, same as chess)
         const io = getIO()
         if (io) {
-            const { getAllUserSockets } = await import('../socket/socket.js')
-            const userSocketMap = await getAllUserSockets()
-            
             for (const post of posts) {
                 const postAuthorId = post.postedBy?._id?.toString() || post.postedBy?.toString()
                 if (!postAuthorId) {
                     console.error(`❌ [createCardGamePost] Post ${post._id} has invalid postedBy field:`, post.postedBy)
                     continue
                 }
-                
+
                 try {
                     const followerDocs = await Follow.find({ followeeId: postAuthorId })
                         .select('followerId')
                         .limit(10000)
                         .lean()
-                    
+
                     if (followerDocs.length === 0) {
                         console.log(`ℹ️ [createCardGamePost] Post author ${postAuthorId} has no followers`)
                         continue
                     }
-                    
-                    const onlineFollowers = []
-                    followerDocs.forEach(d => {
+
+                    const targetSocketIds = new Set()
+                    for (const d of followerDocs) {
                         const followerIdStr = d.followerId?.toString?.() ?? String(d.followerId)
-                        if (userSocketMap[followerIdStr]) {
-                            onlineFollowers.push(userSocketMap[followerIdStr].socketId)
+                        try {
+                            const sock = await getUserSocket(followerIdStr)
+                            if (sock?.socketId) targetSocketIds.add(sock.socketId)
+                        } catch (_) {
+                            /* ignore */
                         }
-                    })
-                    
-                    if (onlineFollowers.length > 0) {
-                        const postObject = post.toObject()
-                        postObject.cardGameData = post.cardGameData
-                        
-                        onlineFollowers.forEach(socketId => {
-                            io.to(socketId).emit("newPost", { postId: post._id, post: postObject })
-                        })
+                    }
+                    for (const pid of [cardP1, cardP2]) {
+                        if (!pid || pid === 'undefined') continue
+                        try {
+                            const sock = await getUserSocket(pid)
+                            if (sock?.socketId) targetSocketIds.add(sock.socketId)
+                        } catch (_) {
+                            /* ignore */
+                        }
+                    }
+
+                    const postObject = post.toObject()
+                    postObject.cardGameData = post.cardGameData
+                    const wrapped = { postId: post._id, post: postObject }
+
+                    if (targetSocketIds.size > 0) {
+                        for (const socketId of targetSocketIds) {
+                            io.to(socketId).emit('newPost', wrapped)
+                        }
+                    } else if (roomId && typeof roomId === 'string' && roomId.startsWith('card_')) {
+                        io.to(roomId).emit('newPost', wrapped)
+                        console.log(`📤 [createCardGamePost] Fallback newPost to room ${roomId}`)
                     }
                 } catch (err) {
                     console.error(`❌ [createCardGamePost] Error emitting post ${post._id}:`, err)

@@ -36,6 +36,8 @@ let server = null
 // ============================================================
 const PRESENCE_ROOM_PREFIX = 'presence:'
 const PRESENCE_KEY_PREFIX = 'userPresence:'
+/** Queued WebRTC answer SDP when caller socket drops before callee answers (Wi‑Fi / reconnect race). */
+const PENDING_ANSWER_PREFIX = 'pendingAnswer:'
 
 const setUserPresence = async (userId, status) => {
     redisService.ensureRedis()
@@ -177,6 +179,8 @@ const clearCallStateForPair = async (userA, userB) => {
         redisService.redisDel(`activeCall:${callId2}`),
         redisService.redisDel(`pendingCall:${a}`),
         redisService.redisDel(`pendingCall:${b}`),
+        redisService.redisDel(`${PENDING_ANSWER_PREFIX}${a}`),
+        redisService.redisDel(`${PENDING_ANSWER_PREFIX}${b}`),
         redisService.redisDel(`${IN_CALL_PREFIX}${a}`),
         redisService.redisDel(`${IN_CALL_PREFIX}${b}`),
     ].map(p => p.catch(() => {})))
@@ -219,6 +223,25 @@ const getOnlineSnapshotForUserIds = async (userIds) => {
         }
     }
     return online
+}
+
+/**
+ * userIds that should appear in "online" lists: exclude Redis clientPresence `offline`
+ * (socket may still exist briefly after app backgrounds — see UserContext delayed disconnect).
+ */
+const filterOutPresenceOfflineUserIds = async (userIds) => {
+    const ids = uniqueUserIds(userIds)
+    if (ids.length === 0) return new Set()
+    redisService.ensureRedis()
+    const client = redisService.getRedis()
+    const presenceKeys = ids.map((id) => `${PRESENCE_KEY_PREFIX}${id}`)
+    const presenceValues = await client.mGet(presenceKeys)
+    const keep = new Set()
+    for (let i = 0; i < ids.length; i++) {
+        const p = (presenceValues?.[i] || '').toString().toLowerCase()
+        if (p !== 'offline') keep.add(ids[i])
+    }
+    return keep
 }
 
 // Helper functions for userSocketMap - Redis only (required for 1M+ users)
@@ -642,6 +665,34 @@ const getAndClearPendingIce = async (receiverId) => {
     }
 }
 
+const PENDING_ANSWER_TTL = 120
+
+const setPendingAnswer = async (callerId, payload) => {
+    redisService.ensureRedis()
+    const uid = normalizeUserId(callerId)
+    if (!uid) return
+    try {
+        await redisService.redisSet(`${PENDING_ANSWER_PREFIX}${uid}`, payload, PENDING_ANSWER_TTL)
+    } catch (e) {
+        console.error('❌ [pendingAnswer] set failed:', e?.message)
+    }
+}
+
+const getAndClearPendingAnswer = async (callerId) => {
+    redisService.ensureRedis()
+    const uid = normalizeUserId(callerId)
+    if (!uid) return null
+    const key = `${PENDING_ANSWER_PREFIX}${uid}`
+    try {
+        const raw = await redisService.redisGet(key)
+        await redisService.redisDel(key)
+        return raw || null
+    } catch (e) {
+        console.error('❌ [pendingAnswer] getAndClear failed:', e?.message)
+        return null
+    }
+}
+
 // Helper functions for pending cancels (when receiver was offline/backgrounded)
 // This is critical for WhatsApp-like UX: if caller cancels while receiver socket is disconnected,
 // receiver must clear ringing UI immediately after reconnect.
@@ -926,6 +977,17 @@ export const initializeSocket = async (app) => {
                 } catch (e) {
                     console.error(`❌ [socket] Error delivering pending card accept for ${connectUserId}:`, e.message)
                 }
+                try {
+                    const pendingAns = await getAndClearPendingAnswer(connectUserId)
+                    if (pendingAns?.signal && (pendingAns.signal.sdp || pendingAns.signal.type)) {
+                        const out = { signal: pendingAns.signal }
+                        if (pendingAns.callId) out.callId = pendingAns.callId
+                        io.to(connectSid).emit('callAccepted', out)
+                        console.log(`✅ [socket] Delivered queued WebRTC answer to caller ${connectUserId} (reconnect after callee answered)`)
+                    }
+                } catch (e) {
+                    console.error(`❌ [socket] Error delivering pending answer for ${connectUserId}:`, e.message)
+                }
             }, 450)
         } else {
             console.warn("⚠️ [socket] User connected without valid userId:", userId)
@@ -1018,11 +1080,15 @@ export const initializeSocket = async (app) => {
                         if (callData.user2) busyUserIds.add(callData.user2);
                     }
                     
-                    const fallbackArray = Object.entries(userSocketMap).map(([id, data]) => ({
-                        userId: id,
-                        onlineAt: data.onlineAt,
-                        inCall: busyUserIds.has(id), // Fast Set lookup
-                    }));
+                    const memEntries = Object.entries(userSocketMap)
+                    const keepPresence = await filterOutPresenceOfflineUserIds(memEntries.map(([id]) => id))
+                    const fallbackArray = memEntries
+                        .filter(([id]) => keepPresence.has(id))
+                        .map(([id, data]) => ({
+                            userId: id,
+                            onlineAt: data.onlineAt,
+                            inCall: busyUserIds.has(id), // Fast Set lookup
+                        }))
                     if (fallbackArray.length > 0) {
                         io.emit("getOnlineUser", fallbackArray)
                         isEmittingOnlineUsers = false
@@ -1040,12 +1106,16 @@ export const initializeSocket = async (app) => {
                     if (callData.user2) busyUserIds.add(callData.user2);
                 }
                 
-                // Map online users and check busy status from Set (O(1) lookup, no database queries)
-                const onlineArray = Object.entries(allSockets).map(([id, data]) => ({
-                    userId: id,
-                    onlineAt: data.onlineAt,
-                    inCall: busyUserIds.has(id), // Fast Set lookup, no database query
-                }));
+                // Map online users; respect clientPresence offline (socket may still exist during delayed disconnect)
+                const sockEntries = Object.entries(allSockets)
+                const keepPresenceMain = await filterOutPresenceOfflineUserIds(sockEntries.map(([id]) => id))
+                const onlineArray = sockEntries
+                    .filter(([id]) => keepPresenceMain.has(id))
+                    .map(([id, data]) => ({
+                        userId: id,
+                        onlineAt: data.onlineAt,
+                        inCall: busyUserIds.has(id), // Fast Set lookup, no database query
+                    }))
                 if (onlineArray.length > 0) {
                     io.emit("getOnlineUser", onlineArray)
                 }
@@ -1061,11 +1131,15 @@ export const initializeSocket = async (app) => {
                         if (callData.user2) busyUserIds.add(callData.user2);
                     }
                     
-                    const fallbackArray = Object.entries(userSocketMap).map(([id, data]) => ({
-                        userId: id,
-                        onlineAt: data.onlineAt,
-                        inCall: busyUserIds.has(id), // Fast Set lookup
-                    }));
+                    const memEntries2 = Object.entries(userSocketMap)
+                    const keepPresenceFb = await filterOutPresenceOfflineUserIds(memEntries2.map(([id]) => id))
+                    const fallbackArray = memEntries2
+                        .filter(([id]) => keepPresenceFb.has(id))
+                        .map(([id, data]) => ({
+                            userId: id,
+                            onlineAt: data.onlineAt,
+                            inCall: busyUserIds.has(id), // Fast Set lookup
+                        }))
                     console.log(`⚠️ [socket] Emitting from in-memory fallback with ${fallbackArray.length} users`)
                     io.emit("getOnlineUser", fallbackArray)
                 } catch (fallbackError) {
@@ -1349,15 +1423,10 @@ export const initializeSocket = async (app) => {
 
         // WebRTC: Handle answer call
         socket.on("answerCall", async (data) => {
-            const callerId = data.to
+            const callerId = normalizeUserId(data.to) || data.to
+            const receiverId = normalizeUserId(socket.handshake.query.userId) || socket.handshake.query.userId
             if (!callerId) {
                 console.error('❌ [answerCall] Missing data.to (caller id)')
-                return
-            }
-            const callerData = await getUserSocket(callerId)
-            const callerSocketId = callerData?.socketId
-            if (!callerSocketId) {
-                console.warn('⚠️ [answerCall] Caller not online:', callerId, '- cannot deliver answer')
                 return
             }
             const signal = data.signal
@@ -1367,9 +1436,22 @@ export const initializeSocket = async (app) => {
             }
             const payload = { signal }
             if (data.callId) payload.callId = data.callId
+
+            const callerData = await getUserSocket(callerId)
+            const callerSocketId = callerData?.socketId
+            if (!callerSocketId) {
+                await setPendingAnswer(callerId, {
+                    signal,
+                    callId: data.callId || null,
+                    from: receiverId || null,
+                    at: Date.now(),
+                })
+                console.log('📦 [answerCall] Caller offline – queued answer for', callerId, '(deliver on reconnect, same as ICE)')
+                if (receiverId) await deletePendingCall(receiverId)
+                return
+            }
             io.to(callerSocketId).emit("callAccepted", payload)
             console.log('✅ [answerCall] Delivered answer to caller', callerId, 'signalType:', signal.type || (signal.sdp ? 'answer' : '?'), 'sdpLength:', signal.sdp?.length ?? 0)
-            const receiverId = socket.handshake.query.userId
             if (receiverId) await deletePendingCall(receiverId)
         })
 
@@ -1726,7 +1808,7 @@ export const initializeSocket = async (app) => {
                 createChessGamePost(toId, fromId, roomId).catch(err => {
                     console.error('❌ [socket] Error creating chess game post:', err)
                 })
-            }, 500) // Delay to ensure all socket connections are registered in userSocketMap
+            }, 900) // Delay so challenger socket often re-registers after accept (mobile/Wi‑Fi churn)
         })
 
         socket.on("declineChessChallenge", async ({ from, to }) => {
