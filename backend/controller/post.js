@@ -871,16 +871,22 @@ export const getFeedPost = async(req,res) => {
         const postsPerUser = 3
         const followedUserIds = following.filter(id => id.toString() !== userId.toString())
         
-        // Get 3 most recent posts from each followed user
+        // Get 3 most recent posts per followed user: their own posts + collaborative posts they contribute to
+        // (so if C follows B but not A, C still sees A's post when B is a contributor)
         const postsPromises = followedUserIds.map(async (followedUserId) => {
-            const userPosts = await Post.find({ postedBy: followedUserId })
+            const userPosts = await Post.find({
+                $or: [
+                    { postedBy: followedUserId },
+                    { isCollaborative: true, contributors: followedUserId }
+                ]
+            })
                 .populate("postedBy", "-password")
                 .populate("contributors", "username profilePic name")
-                .sort({ createdAt: -1 })
+                .sort({ updatedAt: -1, createdAt: -1 })
                 .limit(postsPerUser)
             return userPosts
         })
-        
+
         // Get channel posts that this user added
         const channelPostsPromise = Post.find({ 
             channelAddedBy: userId.toString() 
@@ -903,11 +909,22 @@ export const getFeedPost = async(req,res) => {
                 .limit(1)
         }
         
+        // Collaborative posts where the current user is a contributor (even if they don't follow the author)
+        const contributorPostsPromise = Post.find({
+            isCollaborative: true,
+            contributors: userId
+        })
+            .populate("postedBy", "-password")
+            .populate("contributors", "username profilePic name")
+            .sort({ updatedAt: -1, createdAt: -1 })
+            .limit(40)
+
         // Wait for all posts to be fetched
-        const [allPostsArrays, channelPosts, footballPosts] = await Promise.all([
+        const [allPostsArrays, channelPosts, footballPosts, contributorPosts] = await Promise.all([
             Promise.all(postsPromises),
             channelPostsPromise,
-            footballPostsPromise
+            footballPostsPromise,
+            contributorPostsPromise
         ])
         
         // SIMPLE APPROACH: 
@@ -918,12 +935,12 @@ export const getFeedPost = async(req,res) => {
         // 5. Subsequent pages: Only normal posts
         
         // Separate normal posts from Football and channels
-        let allNormalPosts = allPostsArrays.flat()
+        let allNormalPosts = [...allPostsArrays.flat(), ...contributorPosts]
         
-        // Sort normal posts by createdAt (newest first)
+        // Sort normal posts by last activity (edits / contributor adds bump updatedAt)
         allNormalPosts.sort((a, b) => {
-            const dateA = new Date(a.createdAt).getTime()
-            const dateB = new Date(b.createdAt).getTime()
+            const dateA = new Date(a.updatedAt || a.createdAt).getTime()
+            const dateB = new Date(b.updatedAt || b.createdAt).getTime()
             return dateB - dateA // Newest first
         })
         
@@ -1746,8 +1763,9 @@ export const addContributorToPost = async (req, res) => {
             return res.status(400).json({ message: "User is already a contributor" })
         }
 
-        // Add contributor
+        // Add contributor (bump updatedAt so feeds / sorting show fresh activity for followers)
         post.contributors.push(contributorId)
+        post.updatedAt = new Date()
         await post.save()
 
         await post.populate("contributors", "username profilePic name")
