@@ -1153,6 +1153,27 @@ const MessagesPage = () => {
     }
   }, [socket, selectedConversation?._id])
 
+  // Reader (you opened chat / marked incoming) — clear list unread only. Do not use `messagesSeen`
+  // for this; that event is reserved for the *sender* read-receipts on their bubbles.
+  useEffect(() => {
+    if (!socket) return
+
+    const handleConversationMarkedRead = ({ conversationId }) => {
+      if (!conversationId) return
+      setConversations((prev) =>
+        prev.map((conv) => {
+          if (conv._id && conv._id.toString() === conversationId.toString()) {
+            return { ...conv, unreadCount: 0 }
+          }
+          return conv
+        })
+      )
+    }
+
+    socket.on("conversationMarkedRead", handleConversationMarkedRead)
+    return () => socket.off("conversationMarkedRead", handleConversationMarkedRead)
+  }, [socket])
+
   useEffect(() => {
     if (!socket || !user?._id) return
 

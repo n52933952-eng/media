@@ -1508,12 +1508,14 @@ export const initializeSocket = async (app) => {
                     io.to(senderSocketId).emit("messagesSeen", { conversationId })
                 }
                 
-                // Also emit to the current user who marked messages as seen (to update their count)
+                // Notify the reader (not the sender) so they can clear local unread — do NOT use `messagesSeen`
+                // here: that event is for the *sender* to update read receipts on their outgoing messages.
+                // Sending `messagesSeen` to the reader made clients flip their own bubbles to ✓✓ incorrectly.
                 if (currentUserId && currentUserId !== userId) {
                     const currentUserData = await getUserSocket(currentUserId)
                     const currentUserSocketId = currentUserData?.socketId
                     if (currentUserSocketId) {
-                        io.to(currentUserSocketId).emit("messagesSeen", { conversationId })
+                        io.to(currentUserSocketId).emit("conversationMarkedRead", { conversationId })
                         
                         // Update unread count for the user who marked messages as seen
                         try {
