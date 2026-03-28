@@ -1285,6 +1285,16 @@ export const initializeSocket = async (app) => {
             return false
         }
 
+        /** Block game invites while in a call or already in chess/card (server-side; app also filters). */
+        const isBlockedForGameChallenge = async (userId) => {
+            const uid = normalizeUserId(userId) || userId
+            if (!uid) return true
+            if (await isUserBusy(uid)) return true
+            if (await getActiveChessGame(uid)) return true
+            if (await getActiveCardGame(uid)) return true
+            return false
+        }
+
         // WebRTC: Handle call user - emit to both receiver AND sender like madechess
         socket.on("callUser", async ({ userToCall, signalData, signal: signalAlt, from, name, callType = 'video', callId: clientCallId }) => {
             const signalPayload = signalData || signalAlt
@@ -1834,6 +1844,14 @@ export const initializeSocket = async (app) => {
             const fromId = normalizeUserId(from) || from
             const toId = normalizeUserId(to) || to
             console.log(`♟️ Chess challenge from ${fromId} to ${toId}`)
+            if (await isBlockedForGameChallenge(fromId) || await isBlockedForGameChallenge(toId)) {
+                const senderSock = await getUserSocket(fromId)
+                if (senderSock?.socketId) {
+                    io.to(senderSock.socketId).emit('gameChallengeBlocked', { game: 'chess', to: toId })
+                }
+                console.warn(`♟️ [chessChallenge] Blocked (call or active game)`, { fromId, toId })
+                return
+            }
             const recipientData = await getUserSocket(toId)
             const recipientSocketId = recipientData?.socketId
             if (recipientSocketId) {
@@ -2221,6 +2239,14 @@ export const initializeSocket = async (app) => {
             const fromId = normalizeUserId(from) || from
             const toId = normalizeUserId(to) || to
             console.log(`🃏 Card challenge from ${fromId} to ${toId}`)
+            if (await isBlockedForGameChallenge(fromId) || await isBlockedForGameChallenge(toId)) {
+                const senderSock = await getUserSocket(fromId)
+                if (senderSock?.socketId) {
+                    io.to(senderSock.socketId).emit('gameChallengeBlocked', { game: 'card', to: toId })
+                }
+                console.warn(`🃏 [cardChallenge] Blocked (call or active game)`, { fromId, toId })
+                return
+            }
             const recipientData = await getUserSocket(toId)
             const recipientSocketId = recipientData?.socketId
             if (recipientSocketId) {
