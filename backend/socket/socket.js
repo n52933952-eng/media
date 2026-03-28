@@ -242,13 +242,13 @@ const getOnlineSnapshotForUserIds = async (userIds) => {
     const presenceKeys = ids.map((id) => `${PRESENCE_KEY_PREFIX}${id}`)
     const presenceValues = await client.mGet(presenceKeys)
 
-    // Return minimal objects that mobile already understands: { userId }
+    // Require explicit clientPresence `online` AND a socket row — "missing" presence is NOT online.
+    // Otherwise presenceSubscribe refresh resurrects people from stale userSocket alone.
     const online = []
     for (let i = 0; i < ids.length; i++) {
         const v = values?.[i]
         const p = (presenceValues?.[i] || '').toString().toLowerCase()
-        const isOfflineByPresence = p === 'offline'
-        if (v && !isOfflineByPresence) {
+        if (v && p === 'online') {
             online.push({ userId: ids[i] })
         }
     }
@@ -256,10 +256,10 @@ const getOnlineSnapshotForUserIds = async (userIds) => {
 }
 
 /**
- * userIds that should appear in "online" lists: exclude Redis clientPresence `offline`
- * (socket may still exist briefly after app backgrounds — see UserContext delayed disconnect).
+ * userIds that may appear in global "online" broadcast: only explicit Redis `clientPresence` === `online`.
+ * Stale sockets without a fresh `online` flag cannot show up after list refresh.
  */
-const filterOutPresenceOfflineUserIds = async (userIds) => {
+const filterToExplicitOnlinePresenceUserIds = async (userIds) => {
     const ids = uniqueUserIds(userIds)
     if (ids.length === 0) return new Set()
     redisService.ensureRedis()
@@ -269,7 +269,7 @@ const filterOutPresenceOfflineUserIds = async (userIds) => {
     const keep = new Set()
     for (let i = 0; i < ids.length; i++) {
         const p = (presenceValues?.[i] || '').toString().toLowerCase()
-        if (p !== 'offline') keep.add(ids[i])
+        if (p === 'online') keep.add(ids[i])
     }
     return keep
 }
@@ -322,8 +322,7 @@ const isUserEffectivelyOnline = async (userId) => {
     const sock = await getUserSocket(uid)
     if (!sock?.socketId) return false
     const presence = await getUserPresence(uid)
-    if (presence && String(presence).toLowerCase() === 'offline') return false
-    return true
+    return presence != null && String(presence).toLowerCase() === 'online'
 }
 
 /**
@@ -1193,7 +1192,7 @@ export const initializeSocket = async (app) => {
                     }
                     
                     const memEntries = Object.entries(userSocketMap)
-                    const keepPresence = await filterOutPresenceOfflineUserIds(memEntries.map(([id]) => id))
+                    const keepPresence = await filterToExplicitOnlinePresenceUserIds(memEntries.map(([id]) => id))
                     const fallbackArray = memEntries
                         .filter(([id]) => keepPresence.has(id))
                         .map(([id, data]) => ({
@@ -1220,7 +1219,7 @@ export const initializeSocket = async (app) => {
                 
                 // Map online users; respect clientPresence offline (socket may still exist during delayed disconnect)
                 const sockEntries = Object.entries(allSockets)
-                const keepPresenceMain = await filterOutPresenceOfflineUserIds(sockEntries.map(([id]) => id))
+                const keepPresenceMain = await filterToExplicitOnlinePresenceUserIds(sockEntries.map(([id]) => id))
                 const onlineArray = sockEntries
                     .filter(([id]) => keepPresenceMain.has(id))
                     .map(([id, data]) => ({
@@ -1244,7 +1243,7 @@ export const initializeSocket = async (app) => {
                     }
                     
                     const memEntries2 = Object.entries(userSocketMap)
-                    const keepPresenceFb = await filterOutPresenceOfflineUserIds(memEntries2.map(([id]) => id))
+                    const keepPresenceFb = await filterToExplicitOnlinePresenceUserIds(memEntries2.map(([id]) => id))
                     const fallbackArray = memEntries2
                         .filter(([id]) => keepPresenceFb.has(id))
                         .map(([id, data]) => ({
@@ -1354,10 +1353,10 @@ export const initializeSocket = async (app) => {
             const receiverData = receiverDataEarly
             const liveReceiverSocketId = await resolveLiveSocketIdForUser(receiverId)
             const rcvPresence = await getUserPresence(receiverId)
-            const clientMarkedOffline =
-                !!rcvPresence && String(rcvPresence).toLowerCase() === 'offline'
-            // Presence offline while socket still exists (UserContext: immediate offline + delayed disconnect) must match UI: ring via FCM, not only in-app socket.
-            const receiverSocketId = clientMarkedOffline ? null : liveReceiverSocketId
+            const pr = rcvPresence != null ? String(rcvPresence).toLowerCase() : ''
+            const receiverExplicitOnline = pr === 'online'
+            // In-app ring only when client explicitly reported foreground `online`; missing/offline => FCM (matches snapshot after refresh).
+            const receiverSocketId = receiverExplicitOnline ? liveReceiverSocketId : null
 
             const senderData = await getUserSocket(callerId)
             const senderSocketId = senderData?.socketId
@@ -1367,12 +1366,12 @@ export const initializeSocket = async (app) => {
 
             console.log(`📞 [callUser] Caller: ${name} (${callerId})`)
             console.log(
-                `📞 [callUser] Receiver: ${receiverId} (liveSocket: ${liveReceiverSocketId || 'none'}, presenceOffline: ${clientMarkedOffline}, deliverSocket: ${!!receiverSocketId})`
+                `📞 [callUser] Receiver: ${receiverId} (liveSocket: ${liveReceiverSocketId || 'none'}, presence: ${pr || 'none'}, deliverSocket: ${!!receiverSocketId})`
             )
             console.log(`📞 [callUser] Receiver socket data:`, receiverData)
 
-            if (clientMarkedOffline && liveReceiverSocketId) {
-                console.log(`📱 [callUser] Receiver marked offline (e.g. app background) — FCM ring even though socket still connected`)
+            if (!receiverExplicitOnline && liveReceiverSocketId) {
+                console.log(`📱 [callUser] Receiver not explicit online — FCM ring even if socket still connected`)
             }
 
             if (receiverSocketId) {
@@ -3024,7 +3023,7 @@ export const getRecipientSockedId = async (recipientId) => {
 
 // Export getUserSocket for use in HTTP endpoints
 export { getUserSocket }
-/** True when user has an active socket and is not marked presence-offline (in-app / foreground). */
+/** True when user has an active socket and Redis clientPresence is explicitly `online`. */
 export { isUserEffectivelyOnline }
 
 // Export getters for io and server
