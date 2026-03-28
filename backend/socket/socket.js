@@ -328,8 +328,8 @@ const isUserEffectivelyOnline = async (userId) => {
 
 /**
  * Redis userSocket entry is still connected on this Socket.IO server (or cluster via fetchSockets).
- * Does NOT use clientPresence — mobile may set presence "offline" while the socket stays open during
- * delayed disconnect after background (UserContext), which must not force FCM / "offline" for calls.
+ * Does NOT use clientPresence — see `callUser`, which combines this with `getUserPresence` so
+ * backgrounded users (presence offline, socket still open briefly) get FCM + pendingCall like truly offline.
  */
 const resolveLiveSocketIdForUser = async (userId) => {
     const uid = normalizeUserId(userId) || userId
@@ -999,6 +999,12 @@ export const initializeSocket = async (app) => {
             await setSocketUser(socket.id, userId)
             console.log(`✅ [socket] User ${userId} added to socket map (socket: ${socket.id})`)
 
+            // Reconnect cancels delayed call teardown scheduled on disconnect (avoids false "call ended" FCM).
+            try {
+                const normConn = normalizeUserId(userId)
+                if (normConn) clearCallDisconnectGraceTimer(normConn)
+            } catch (_) {}
+
             // Emit targeted presence update for this userId (for subscribed clients)
             try {
                 const normalized = normalizeUserId(userId)
@@ -1346,7 +1352,12 @@ export const initializeSocket = async (app) => {
 
             // Get socket data from Redis (reuse lookup from above)
             const receiverData = receiverDataEarly
-            const receiverSocketId = await resolveLiveSocketIdForUser(receiverId)
+            const liveReceiverSocketId = await resolveLiveSocketIdForUser(receiverId)
+            const rcvPresence = await getUserPresence(receiverId)
+            const clientMarkedOffline =
+                !!rcvPresence && String(rcvPresence).toLowerCase() === 'offline'
+            // Presence offline while socket still exists (UserContext: immediate offline + delayed disconnect) must match UI: ring via FCM, not only in-app socket.
+            const receiverSocketId = clientMarkedOffline ? null : liveReceiverSocketId
 
             const senderData = await getUserSocket(callerId)
             const senderSocketId = senderData?.socketId
@@ -1355,18 +1366,21 @@ export const initializeSocket = async (app) => {
             if (clientCallId) payload.callId = clientCallId
 
             console.log(`📞 [callUser] Caller: ${name} (${callerId})`)
-            console.log(`📞 [callUser] Receiver: ${receiverId} (receiverSocketId: ${receiverSocketId || 'none – will use FCM'})`)
+            console.log(
+                `📞 [callUser] Receiver: ${receiverId} (liveSocket: ${liveReceiverSocketId || 'none'}, presenceOffline: ${clientMarkedOffline}, deliverSocket: ${!!receiverSocketId})`
+            )
             console.log(`📞 [callUser] Receiver socket data:`, receiverData)
 
+            if (clientMarkedOffline && liveReceiverSocketId) {
+                console.log(`📱 [callUser] Receiver marked offline (e.g. app background) — FCM ring even though socket still connected`)
+            }
+
             if (receiverSocketId) {
-                // User is online - send socket event
-                console.log(`✅ [callUser] User ${receiverId} is ONLINE, sending callUser to socket ${receiverSocketId}`)
+                console.log(`✅ [callUser] User ${receiverId} reachable in-app, sending callUser to socket ${receiverSocketId}`)
                 io.to(receiverSocketId).emit("callUser", payload)
             } else {
-                // User is offline - send push so their phone rings (WhatsApp-like).
-                // Stale-call protection is handled via cancelCall (stop ringtone push + pendingCancel) and requestCallSignal checks.
-                console.log(`📱 [callUser] User ${receiverId} is OFFLINE, sending push notification (phone will ring)`)
-                console.log('📱 [callUser] CALLBACK_FCM: Sending FCM to receiver (A was off-app)', {
+                console.log(`📱 [callUser] User ${receiverId} needs push ring (no live in-app delivery path)`)
+                console.log('📱 [callUser] CALLBACK_FCM: Sending FCM to receiver', {
                     receiver: receiverId,
                     caller: callerId,
                     callerName: name,
@@ -1377,7 +1391,7 @@ export const initializeSocket = async (app) => {
                     console.log(`📤 [callUser] Calling sendCallNotification(${receiverId}, ${name}, ${callerId}, ${callType}, ${clientCallId || 'auto'})`)
                     const result = await sendCallNotification(receiverId, name, callerId, callType, clientCallId || null)
                     console.log('✅ [callUser] Push notification result:', result)
-                    
+
                     await setPendingCall(receiverId, {
                         callerId: callerId,
                         signal: signalPayload,
@@ -1390,33 +1404,30 @@ export const initializeSocket = async (app) => {
                 } catch (error) {
                     console.error('❌ [callUser] Error sending call push notification:', error)
                     console.error('❌ [callUser] Error stack:', error.stack)
+                    return
                 }
-                return
             }
 
             if (senderSocketId) {
                 io.to(senderSocketId).emit("callUser", payload)
             }
 
-            // Mark both users as busy - Store in Redis with signal data
             const callId = `${callerId}-${receiverId}`
-            await setActiveCall(callId, { 
-                user1: callerId, 
+            await setActiveCall(callId, {
+                user1: callerId,
                 user2: receiverId,
-                signal: signalPayload, // Store the signal so we can re-send it
+                signal: signalPayload,
                 name: name,
                 callType: callType
             })
-            // O(1) busy markers (additive)
             await Promise.all([
                 setInCall(callerId, callId).catch(() => {}),
                 setInCall(receiverId, callId).catch(() => {}),
             ])
-            
-            // Update database - mark users as in call (persistent across refreshes)
+
             User.findByIdAndUpdate(callerId, { inCall: true }).catch(err => console.log('Error updating caller inCall status:', err))
             User.findByIdAndUpdate(receiverId, { inCall: true }).catch(err => console.log('Error updating receiver inCall status:', err))
-            
+
             io.emit("callBusy", { userToCall: receiverId, from: callerId })
         })
 
