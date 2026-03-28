@@ -2,7 +2,7 @@ import { Match, League } from '../models/football.js'
 import User from '../models/user.js'
 import Post from '../models/post.js'
 import Follow from '../models/follow.js'
-import { getIO, getUserSocketMap } from '../socket/socket.js'
+import { getIO, getUserSocketMap, getAllUserSockets } from '../socket/socket.js'
 
 // football-data.org API configuration
 // API token from www.football-data.org

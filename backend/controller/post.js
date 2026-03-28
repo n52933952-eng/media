@@ -4,7 +4,7 @@ import Post from '../models/post.js'
 import Follow from '../models/follow.js'
 import { v2 as cloudinary } from 'cloudinary'
 import { Readable } from 'stream'
-import { getIO, getUserSocket } from '../socket/socket.js'
+import { getIO, getUserSocket, getAllUserSockets } from '../socket/socket.js'
 
 /** Notify everyone listed as contributor except the poster when a collaborative post is created. */
 async function notifyContributorsOnCollaborativeCreate(newPost, posterId) {
@@ -1647,7 +1647,6 @@ export const deleteCardGamePost = async (roomId) => {
                         } catch (emitErr) {
                             console.warn('⚠️ [deleteCardGamePost] Global postDeleted emit failed:', emitErr?.message)
                         }
-                        const { getAllUserSockets } = await import('../socket/socket.js')
                         const userSocketMap = await getAllUserSockets()
                         const recipients = new Set() // Use Set to avoid duplicates
                         
