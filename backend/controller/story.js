@@ -2,6 +2,45 @@ import { v2 as cloudinary } from 'cloudinary'
 import { Readable } from 'stream'
 import Story from '../models/story.js'
 import User from '../models/user.js'
+import Follow from '../models/follow.js'
+import { getIO, getAllUserSockets } from '../socket/socket.js'
+
+/** Tell followers + author (socket) to refetch `/api/story/feed-strip` so rings / red vs gray stay in sync. */
+async function emitStoryStripChanged(authorUserId) {
+  try {
+    const io = getIO()
+    if (!io) return
+    const aid = authorUserId?.toString?.() ?? String(authorUserId)
+    const followerDocs = await Follow.find({ followeeId: aid }).select('followerId').limit(10000).lean()
+    const socketMap = await getAllUserSockets()
+    const targets = new Set([aid])
+    for (const d of followerDocs || []) {
+      const fid = d.followerId?.toString?.() ?? String(d.followerId)
+      if (fid) targets.add(fid)
+    }
+    for (const fid of targets) {
+      const sock = socketMap[fid]
+      const sid = sock?.socketId
+      if (sid) io.to(sid).emit('storyStripChanged', { authorUserId: aid })
+    }
+  } catch (e) {
+    console.error('❌ [story] emitStoryStripChanged:', e?.message || e)
+  }
+}
+
+/** After someone opens a story, only they need a fresh strip (hasUnviewed → false for that author). */
+async function emitStoryStripChangedForViewer(viewerUserId) {
+  try {
+    const io = getIO()
+    if (!io) return
+    const vid = viewerUserId?.toString?.() ?? String(viewerUserId)
+    const socketMap = await getAllUserSockets()
+    const sid = socketMap[vid]?.socketId
+    if (sid) io.to(sid).emit('storyStripChanged', { viewerRefresh: true })
+  } catch (e) {
+    console.error('❌ [story] emitStoryStripChangedForViewer:', e?.message || e)
+  }
+}
 
 const STORY_MAX_VIDEO_SEC = 20
 const STORY_TTL_MS = 24 * 60 * 60 * 1000
@@ -84,6 +123,7 @@ export const createStory = async (req, res) => {
       existing.viewers = []
       await existing.save()
       await existing.populate('user', 'username profilePic name')
+      void emitStoryStripChanged(userId)
       return res.status(200).json({ story: existing, appended: true })
     }
 
@@ -102,6 +142,7 @@ export const createStory = async (req, res) => {
     await story.save()
     await story.populate('user', 'username profilePic name')
 
+    void emitStoryStripChanged(userId)
     return res.status(201).json({ story, appended: false })
   } catch (e) {
     console.error('❌ [createStory]', e)
@@ -127,6 +168,7 @@ export const deleteMyStory = async (req, res) => {
       }
     }
     await Story.deleteOne({ _id: active._id })
+    void emitStoryStripChanged(userId)
     return res.json({ ok: true })
   } catch (e) {
     console.error('❌ [deleteMyStory]', e)
@@ -244,6 +286,8 @@ export const getStoryByUser = async (req, res) => {
             (v) => (v.user?._id?.toString?.() || v.user?.toString?.() || v.user) !== req.user._id.toString()
           )
         : undefined
+
+    void emitStoryStripChangedForViewer(req.user._id)
 
     return res.json({
       story: fresh,
