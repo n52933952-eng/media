@@ -1,49 +1,55 @@
 import Conversation from '../models/conversation.js'
 import Message from '../models/message.js'
-import { getRecipientSockedId, getIO, getUserSocket } from '../socket/socket.js'
+import { getRecipientSockedId, getIO, getUserSocket, isUserEffectivelyOnline } from '../socket/socket.js'
 import { v2 as cloudinary } from 'cloudinary'
 import { Readable } from 'stream'
 import mongoose from 'mongoose'
 
 /**
- * Fan-out to recipient: socket if connected, else FCM.
+ * Fan-out to recipient: socket only if connected **and** presence is not `offline` (foreground).
+ * If the app is backgrounded it emits `clientPresence: offline` while the WebSocket can stay open
+ * for a while on some devices — without this check we'd skip FCM and the user gets no push.
  * `delivered` stays false until the recipient app emits `ackMessageDelivered` (WhatsApp-style).
  */
 async function deliverOutboundMessage(newMessage, conversation, recipientId) {
   const recipientSocketId = await getRecipientSockedId(recipientId)
   const io = getIO()
 
-  // Important: only deliver via socket if the socket is actually still connected.
+  // Important: only deliver via socket if connected AND client is effectively in-app (same idea as calls).
   // Redis may still have stale socketId during disconnect/network flaps.
   if (recipientSocketId && recipientId && io) {
     const recipientSocket = io?.sockets?.sockets?.get?.(recipientSocketId)
     const socketConnected = !!recipientSocket?.connected
 
     if (socketConnected) {
-    const messageWithTimestamp = {
-      ...newMessage.toObject(),
-      conversationUpdatedAt: conversation.updatedAt,
-      delivered: false,
-    }
-      io.to(recipientSocketId).emit('newMessage', messageWithTimestamp)
-      try {
-        const recipientConversations = await Conversation.find({ participants: recipientId })
-        const totalUnread = await Promise.all(
-          recipientConversations.map(async (conv) => {
-            const unreadCount = await Message.countDocuments({
-              conversationId: conv._id,
-              seen: false,
-              sender: { $ne: recipientId },
+      const effectivelyOnline = await isUserEffectivelyOnline(recipientId)
+      if (effectivelyOnline) {
+        const messageWithTimestamp = {
+          ...newMessage.toObject(),
+          conversationUpdatedAt: conversation.updatedAt,
+          delivered: false,
+        }
+        io.to(recipientSocketId).emit('newMessage', messageWithTimestamp)
+        try {
+          const recipientConversations = await Conversation.find({ participants: recipientId })
+          const totalUnread = await Promise.all(
+            recipientConversations.map(async (conv) => {
+              const unreadCount = await Message.countDocuments({
+                conversationId: conv._id,
+                seen: false,
+                sender: { $ne: recipientId },
+              })
+              return unreadCount || 0
             })
-            return unreadCount || 0
-          })
-        )
-        const totalUnreadCount = totalUnread.reduce((sum, count) => sum + count, 0)
-        io.to(recipientSocketId).emit('unreadCountUpdate', { totalUnread: totalUnreadCount })
-      } catch (error) {
-        console.log('Error calculating unread count:', error)
+          )
+          const totalUnreadCount = totalUnread.reduce((sum, count) => sum + count, 0)
+          io.to(recipientSocketId).emit('unreadCountUpdate', { totalUnread: totalUnreadCount })
+        } catch (error) {
+          console.log('Error calculating unread count:', error)
+        }
+        return false
       }
-      return false
+      // Socket still open in background but presence is offline — fall through to FCM
     }
     // Socket exists but isn't connected -> fall through to FCM
   }
