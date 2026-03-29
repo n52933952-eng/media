@@ -5,6 +5,8 @@ import User from '../models/user.js'
 
 const STORY_MAX_VIDEO_SEC = 20
 const STORY_TTL_MS = 24 * 60 * 60 * 1000
+/** Max slides in one active story (across multiple “Share” sessions until 24h expiry) */
+const STORY_MAX_TOTAL_SLIDES = 50
 
 function uploadBufferToCloudinary(buffer, mimetype) {
   const isVideo = mimetype.startsWith('video/')
@@ -34,6 +36,18 @@ export const createStory = async (req, res) => {
     }
 
     const userId = req.user._id.toString()
+
+    const existing = await Story.findOne({
+      user: userId,
+      expiresAt: { $gt: new Date() },
+    })
+    const currentLen = existing?.slides?.length ?? 0
+    if (currentLen + files.length > STORY_MAX_TOTAL_SLIDES) {
+      return res.status(400).json({
+        error: `Your story can have at most ${STORY_MAX_TOTAL_SLIDES} items before it expires (24h).`,
+      })
+    }
+
     const slides = []
 
     for (const file of files) {
@@ -64,6 +78,15 @@ export const createStory = async (req, res) => {
       }
     }
 
+    if (existing) {
+      existing.slides = [...(existing.slides || []), ...slides]
+      // New segments should show as unviewed for followers (story-level view flag).
+      existing.viewers = []
+      await existing.save()
+      await existing.populate('user', 'username profilePic name')
+      return res.status(200).json({ story: existing, appended: true })
+    }
+
     await Story.deleteMany({
       user: userId,
       expiresAt: { $gt: new Date() },
@@ -79,7 +102,7 @@ export const createStory = async (req, res) => {
     await story.save()
     await story.populate('user', 'username profilePic name')
 
-    return res.status(201).json({ story })
+    return res.status(201).json({ story, appended: false })
   } catch (e) {
     console.error('❌ [createStory]', e)
     return res.status(500).json({ error: e.message || 'Failed to create story' })
