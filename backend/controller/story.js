@@ -129,11 +129,11 @@ export const getStoryStatus = async (req, res) => {
     const viewed = (story.viewers || []).some(
       (v) => (v.user?.toString?.() || v.user) === req.user._id.toString()
     )
-    const isSelf = userId === req.user._id.toString()
     return res.json({
       active: true,
       storyId: story._id,
-      hasUnviewed: !isSelf ? !viewed : false,
+      // Same as Instagram: poster sees “new” ring until they open their own story; then gray.
+      hasUnviewed: !viewed,
       slideCount: (story.slides || []).length,
     })
   } catch (e) {
@@ -172,7 +172,7 @@ export const getFeedStrip = async (req, res) => {
         storyId: s._id,
         user: s.user,
         slideCount: (s.slides || []).length,
-        hasUnviewed: uid !== req.user._id.toString() ? !viewed : false,
+        hasUnviewed: !viewed,
         expiresAt: s.expiresAt,
       })
     }
@@ -199,26 +199,33 @@ export const getStoryByUser = async (req, res) => {
 
     const isOwner = userId === req.user._id.toString()
 
-    if (!isOwner) {
-      await Story.updateOne(
-        { _id: story._id },
-        { $pull: { viewers: { user: req.user._id } } }
-      )
-      await Story.updateOne(
-        { _id: story._id },
-        { $push: { viewers: { user: req.user._id, viewedAt: new Date() } } }
-      )
-    }
+    // Record view for opener too (including owner) so poster’s ring turns gray after they watch — Instagram-style.
+    await Story.updateOne(
+      { _id: story._id },
+      { $pull: { viewers: { user: req.user._id } } }
+    )
+    await Story.updateOne(
+      { _id: story._id },
+      { $push: { viewers: { user: req.user._id, viewedAt: new Date() } } }
+    )
 
     const fresh = await Story.findById(story._id)
       .populate('user', 'username profilePic name')
       .populate('viewers.user', 'username profilePic name')
       .lean()
 
+    const allViewers = fresh?.viewers || []
+    const viewersForOwner =
+      isOwner
+        ? allViewers.filter(
+            (v) => (v.user?._id?.toString?.() || v.user?.toString?.() || v.user) !== req.user._id.toString()
+          )
+        : undefined
+
     return res.json({
       story: fresh,
       isOwner,
-      viewers: isOwner ? fresh?.viewers || [] : undefined,
+      viewers: isOwner ? viewersForOwner : undefined,
     })
   } catch (e) {
     console.error('❌ [getStoryByUser]', e)
@@ -235,7 +242,10 @@ export const getStoryViewers = async (req, res) => {
     if (story.user.toString() !== req.user._id.toString()) {
       return res.status(403).json({ error: 'Forbidden' })
     }
-    return res.json({ viewers: story.viewers || [] })
+    const list = (story.viewers || []).filter(
+      (v) => (v.user?._id?.toString?.() || v.user?.toString?.() || v.user) !== req.user._id.toString()
+    )
+    return res.json({ viewers: list })
   } catch (e) {
     console.error('❌ [getStoryViewers]', e)
     return res.status(500).json({ error: e.message || 'Failed to load viewers' })
