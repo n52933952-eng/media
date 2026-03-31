@@ -4,6 +4,7 @@ import upload from '../middlware/upload.js'
 import {
   createStory,
   deleteMyStory,
+  deleteMyStorySlide,
   getFeedStrip,
   getStoryByUser,
   getStoryViewers,
@@ -14,6 +15,7 @@ const router = express.Router()
 
 router.post('/create', protectRoute, upload.array('files', 20), createStory)
 router.delete('/mine', protectRoute, deleteMyStory)
+router.delete('/mine/slide', protectRoute, deleteMyStorySlide)
 router.get('/feed-strip', protectRoute, getFeedStrip)
 router.get('/status/:userId', protectRoute, getStoryStatus)
 router.get('/user/:userId', protectRoute, getStoryByUser)

@@ -76,6 +76,23 @@ export const createStory = async (req, res) => {
 
     const userId = req.user._id.toString()
 
+    // Optional overlay text. Supports either:
+    // - text: single string applied to all uploaded slides
+    // - texts: JSON array (same length as files) for per-slide captions
+    const textAll = (req.body?.text || '').toString().slice(0, 300)
+    let texts = null
+    try {
+      const raw = req.body?.texts
+      if (raw) {
+        const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw
+        if (Array.isArray(parsed)) {
+          texts = parsed.map((x) => (x == null ? '' : String(x))).map((s) => s.slice(0, 300))
+        }
+      }
+    } catch (_) {
+      texts = null
+    }
+
     const existing = await Story.findOne({
       user: userId,
       expiresAt: { $gt: new Date() },
@@ -89,9 +106,11 @@ export const createStory = async (req, res) => {
 
     const slides = []
 
-    for (const file of files) {
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i]
       const isVideo = file.mimetype.startsWith('video/')
       const result = await uploadBufferToCloudinary(file.buffer, file.mimetype)
+      const slideText = (texts && typeof texts[i] === 'string' ? texts[i] : textAll) || ''
 
       if (isVideo) {
         const dur = typeof result.duration === 'number' ? result.duration : parseFloat(result.duration) || 0
@@ -105,6 +124,7 @@ export const createStory = async (req, res) => {
           type: 'video',
           url: result.secure_url,
           publicId: result.public_id || '',
+          text: slideText,
           durationSec: Math.min(dur || STORY_MAX_VIDEO_SEC, STORY_MAX_VIDEO_SEC),
         })
       } else {
@@ -112,6 +132,7 @@ export const createStory = async (req, res) => {
           type: 'image',
           url: result.secure_url,
           publicId: result.public_id || '',
+          text: slideText,
           durationSec: 5,
         })
       }
@@ -172,6 +193,86 @@ export const deleteMyStory = async (req, res) => {
     return res.json({ ok: true })
   } catch (e) {
     console.error('❌ [deleteMyStory]', e)
+    return res.status(500).json({ error: e.message || 'Failed to delete story' })
+  }
+}
+
+/** DELETE — remove ONE slide from current user's active story.
+ *  Query: ?index=<number>&publicId=<string>&url=<string>
+ *  We accept index for UI simplicity, and verify by publicId/url to prevent "auto-advance" deleting the wrong slide.
+ *  If it was the last slide, the whole story is deleted.
+ */
+export const deleteMyStorySlide = async (req, res) => {
+  try {
+    const userId = req.user._id
+    const active = await Story.findOne({ user: userId, expiresAt: { $gt: new Date() } })
+    if (!active) {
+      return res.status(404).json({ error: 'No active story' })
+    }
+
+    const rawIndex = req.query.index
+    const index = Number.parseInt(String(rawIndex), 10)
+    if (!Number.isFinite(index) || index < 0) {
+      return res.status(400).json({ error: 'Invalid index' })
+    }
+
+    const expectedPublicId = (req.query.publicId || '').toString().trim()
+    const expectedUrl = (req.query.url || '').toString().trim()
+
+    const slides = Array.isArray(active.slides) ? active.slides : []
+    if (index >= slides.length) {
+      return res.status(400).json({ error: 'Index out of range' })
+    }
+
+    const atIndex = slides[index]
+    let deleteIdx = index
+
+    // Verify target slide matches what client saw to avoid deleting the wrong slide if it advanced.
+    const matchesExpected =
+      (!!expectedPublicId && atIndex?.publicId && String(atIndex.publicId) === expectedPublicId) ||
+      (!!expectedUrl && atIndex?.url && String(atIndex.url) === expectedUrl)
+
+    if (!matchesExpected && (expectedPublicId || expectedUrl)) {
+      const found = slides.findIndex((s) => {
+        if (!s) return false
+        if (expectedPublicId && s.publicId && String(s.publicId) === expectedPublicId) return true
+        if (expectedUrl && s.url && String(s.url) === expectedUrl) return true
+        return false
+      })
+      if (found >= 0) {
+        deleteIdx = found
+      } else {
+        return res.status(409).json({ error: 'Story changed. Please try again.' })
+      }
+    }
+
+    const target = slides[deleteIdx]
+    if (target?.publicId) {
+      try {
+        await cloudinary.uploader.destroy(String(target.publicId), {
+          resource_type: target.type === 'video' ? 'video' : 'image',
+        })
+      } catch (_) {}
+    }
+
+    active.slides.splice(deleteIdx, 1)
+
+    if (!active.slides.length) {
+      await Story.deleteOne({ _id: active._id })
+      void emitStoryStripChanged(userId)
+      return res.json({ ok: true, deletedAll: true })
+    }
+
+    await active.save()
+    const fresh = await Story.findById(active._id)
+      .populate('user', 'username profilePic name')
+      .populate('viewers.user', 'username profilePic name')
+      .lean()
+
+    void emitStoryStripChanged(userId)
+    return res.json({ ok: true, deletedAll: false, story: fresh })
+  } catch (e) {
+    console.error('❌ [deleteMyStorySlide]', e)
     return res.status(500).json({ error: e.message || 'Failed to delete story' })
   }
 }

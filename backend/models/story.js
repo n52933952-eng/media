@@ -5,6 +5,8 @@ const StorySlideSchema = new mongoose.Schema(
     type: { type: String, enum: ['image', 'video'], required: true },
     url: { type: String, required: true },
     publicId: { type: String, default: '' },
+    /** Optional overlay text shown in viewer */
+    text: { type: String, default: '' },
     /** Video length in seconds (images use display duration client-side, default 5s) */
     durationSec: { type: Number, default: 5 },
   },
