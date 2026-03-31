@@ -257,6 +257,13 @@ export const createLiveStreamPost = async (req, res) => {
         if (existingPost) {
             console.log(`ℹ️ ${channelConfig.name} live stream post already exists for user`)
             
+            // Treat re-adding as "fresh" for this viewer:
+            // this post is per-user (channelAddedBy), so bumping updatedAt is safe and makes it sort near the top.
+            try {
+                existingPost.updatedAt = new Date()
+                await existingPost.save()
+            } catch (_) {}
+
             // Still emit to current user's socket
             await existingPost.populate("postedBy", "username profilePic name")
             
