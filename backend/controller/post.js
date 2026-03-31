@@ -896,6 +896,21 @@ export const getFeedPost = async(req,res) => {
         const followsFootball = footballAccount && following.some(followId => {
             return followId.toString() === footballAccount._id.toString()
         })
+        // If user follows Football, capture *follow time* so Football post can sort as "just added"
+        // without mutating the Football post document for all users.
+        let footballFollowedAtMs = 0
+        if (followsFootball && footballAccount) {
+            try {
+                const footballFollowDoc = await Follow.findOne({ followerId: userId, followeeId: footballAccount._id })
+                    .select('createdAt')
+                    .lean()
+                if (footballFollowDoc?.createdAt) {
+                    footballFollowedAtMs = new Date(footballFollowDoc.createdAt).getTime()
+                }
+            } catch (_) {
+                footballFollowedAtMs = 0
+            }
+        }
         
         // Strategy: Always include Football and channel posts in first page, sorted with normal posts
         // For first page (skip=0): Get normal posts + always include Football + channels
@@ -1015,7 +1030,14 @@ export const getFeedPost = async(req,res) => {
             // Combine: Football + Channels + 12 normal posts
             const combinedPosts = []
             if (footballPosts.length > 0) {
-                combinedPosts.push(footballPosts[0])
+                const fp = footballPosts[0]
+                // Attach ephemeral sort key used only for this response
+                try {
+                    if (footballFollowedAtMs) {
+                        fp.__viewerSortBoostMs = footballFollowedAtMs
+                    }
+                } catch (_) {}
+                combinedPosts.push(fp)
             }
             combinedPosts.push(...channelPosts)
             combinedPosts.push(...topNormalPosts)
@@ -1023,8 +1045,10 @@ export const getFeedPost = async(req,res) => {
             // Sort ALL together by updatedAt (or createdAt if no updatedAt) - this makes the feed dynamic!
             // Football post will move to top when scores update (updatedAt changes)
             combinedPosts.sort((a, b) => {
-                const dateA = new Date(a.updatedAt || a.createdAt).getTime()
-                const dateB = new Date(b.updatedAt || b.createdAt).getTime()
+                const boostA = a && typeof a.__viewerSortBoostMs === 'number' ? a.__viewerSortBoostMs : 0
+                const boostB = b && typeof b.__viewerSortBoostMs === 'number' ? b.__viewerSortBoostMs : 0
+                const dateA = Math.max(new Date(a.updatedAt || a.createdAt).getTime(), boostA)
+                const dateB = Math.max(new Date(b.updatedAt || b.createdAt).getTime(), boostB)
                 return dateB - dateA // Newest first
             })
             
