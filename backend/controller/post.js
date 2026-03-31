@@ -911,6 +911,25 @@ export const getFeedPost = async(req,res) => {
                 footballFollowedAtMs = 0
             }
         }
+
+        // Get Weather account and check if user follows it
+        const weatherAccount = await User.findOne({ username: 'Weather' }).select('_id')
+        const followsWeather = weatherAccount && following.some(followId => {
+            return followId.toString() === weatherAccount._id.toString()
+        })
+        let weatherFollowedAtMs = 0
+        if (followsWeather && weatherAccount) {
+            try {
+                const weatherFollowDoc = await Follow.findOne({ followerId: userId, followeeId: weatherAccount._id })
+                    .select('createdAt')
+                    .lean()
+                if (weatherFollowDoc?.createdAt) {
+                    weatherFollowedAtMs = new Date(weatherFollowDoc.createdAt).getTime()
+                }
+            } catch (_) {
+                weatherFollowedAtMs = 0
+            }
+        }
         
         // Strategy: Always include Football and channel posts in first page, sorted with normal posts
         // For first page (skip=0): Get normal posts + always include Football + channels
@@ -957,6 +976,19 @@ export const getFeedPost = async(req,res) => {
                 .sort({ createdAt: -1 })
                 .limit(1)
         }
+
+        // Get Weather post if user follows Weather (latest 1)
+        let weatherPostsPromise = Promise.resolve([])
+        if (followsWeather && weatherAccount) {
+            weatherPostsPromise = Post.find({
+                postedBy: weatherAccount._id,
+                weatherData: { $exists: true, $ne: null },
+            })
+                .populate("postedBy", "-password")
+                .populate("contributors", "username profilePic name")
+                .sort({ updatedAt: -1, createdAt: -1 })
+                .limit(1)
+        }
         
         // Collaborative posts where the current user is a contributor (even if they don't follow the author)
         const contributorPostsPromise = Post.find({
@@ -969,10 +1001,11 @@ export const getFeedPost = async(req,res) => {
             .limit(40)
 
         // Wait for all posts to be fetched
-        const [allPostsArrays, channelPosts, footballPosts, contributorPosts] = await Promise.all([
+        const [allPostsArrays, channelPosts, footballPosts, weatherPosts, contributorPosts] = await Promise.all([
             Promise.all(postsPromises),
             channelPostsPromise,
             footballPostsPromise,
+            weatherPostsPromise,
             contributorPostsPromise
         ])
         
@@ -1038,6 +1071,15 @@ export const getFeedPost = async(req,res) => {
                     }
                 } catch (_) {}
                 combinedPosts.push(fp)
+            }
+            if (weatherPosts.length > 0) {
+                const wp = weatherPosts[0]
+                try {
+                    if (weatherFollowedAtMs) {
+                        wp.__viewerSortBoostMs = weatherFollowedAtMs
+                    }
+                } catch (_) {}
+                combinedPosts.push(wp)
             }
             combinedPosts.push(...channelPosts)
             combinedPosts.push(...topNormalPosts)
