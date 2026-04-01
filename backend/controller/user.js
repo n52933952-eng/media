@@ -412,20 +412,13 @@ export const DeleteMyAccount = async (req, res) => {
     const userId = req.user?._id
     if (!userId) return res.status(401).json({ error: 'Unauthorized' })
 
-    const { confirm, password } = req.body || {}
+    const { confirm } = req.body || {}
     if (String(confirm || '').trim().toUpperCase() !== 'DELETE') {
       return res.status(400).json({ error: 'Confirmation required' })
     }
 
-    const user = await User.findById(userId).select('+password googleId profilePic').lean()
+    const user = await User.findById(userId).select('googleId profilePic').lean()
     if (!user) return res.status(404).json({ error: 'User not found' })
-
-    // If this is a password account (not Google-only), require password for safety.
-    const hasGoogle = !!user.googleId
-    if (!hasGoogle) {
-      const passOk = await bcryptjs.compareSync(String(password || ''), String(user.password || ''))
-      if (!passOk) return res.status(400).json({ error: 'Invalid password' })
-    }
 
     // 1) Cloudinary cleanup (best-effort; never block deletion)
     if (user.profilePic) {
