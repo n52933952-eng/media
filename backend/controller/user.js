@@ -411,6 +411,7 @@ export const DeleteMyAccount = async (req, res) => {
   try {
     const userId = req.user?._id
     if (!userId) return res.status(401).json({ error: 'Unauthorized' })
+    const userIdStr = userId.toString()
 
     const { confirm } = req.body || {}
     if (String(confirm || '').trim().toUpperCase() !== 'DELETE') {
@@ -457,12 +458,17 @@ export const DeleteMyAccount = async (req, res) => {
     // Remove user from other users' follower/following arrays (legacy arrays)
     await User.updateMany({ followers: userId }, { $pull: { followers: userId } })
     await User.updateMany({ following: userId }, { $pull: { following: userId } })
+    // Also handle legacy string storage (some docs store ids as strings)
+    await User.updateMany({ followers: userIdStr }, { $pull: { followers: userIdStr } })
+    await User.updateMany({ following: userIdStr }, { $pull: { following: userIdStr } })
 
     // Follow collection
     await Follow.deleteMany({ $or: [{ followerId: userId }, { followeeId: userId }] })
 
     // Collaborative: remove user from contributors on other posts
     await Post.updateMany({ contributors: userId }, { $pull: { contributors: userId } })
+    // Also handle legacy string contributor ids (defensive)
+    await Post.updateMany({ contributors: userIdStr }, { $pull: { contributors: userIdStr } })
     // Remove likes and embedded replies by this user to avoid broken profile lookups
     await Post.updateMany({ likes: userId }, { $pull: { likes: userId } })
     await Post.updateMany({ 'replies.userId': userId }, { $pull: { replies: { userId } } })
