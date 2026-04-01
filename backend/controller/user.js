@@ -3,6 +3,12 @@ import { OAuth2Client } from 'google-auth-library'
 import User from '../models/user.js'
 import Post from '../models/post.js'
 import Follow from '../models/follow.js'
+import Conversation from '../models/conversation.js'
+import Message from '../models/message.js'
+import Story from '../models/story.js'
+import Activity from '../models/activity.js'
+import Notification from '../models/notification.js'
+import ChessBusy from '../models/chessBusy.js'
 import bcryptjs from 'bcryptjs' 
 import GenerateToken from '../utils/GenerateToken.js'
 import mongoose from 'mongoose'
@@ -10,6 +16,47 @@ import { v2 as cloudinary } from 'cloudinary'
 import { Readable } from 'stream'
 import { LIVE_CHANNELS } from '../config/channels.js'
 import * as redisService from '../services/redis.js'
+
+function extractCloudinaryPublicId(url) {
+  try {
+    if (!url || typeof url !== 'string') return ''
+    if (!url.includes('cloudinary')) return ''
+    const urlParts = url.split('/')
+    const uploadIndex = urlParts.findIndex((part) => part === 'upload')
+    if (uploadIndex === -1) return ''
+    let publicIdParts = urlParts.slice(uploadIndex + 1)
+    if (publicIdParts.length > 0 && /^v\\d+$/.test(publicIdParts[0])) {
+      publicIdParts = publicIdParts.slice(1)
+    }
+    let publicId = publicIdParts.join('/')
+    publicId = publicId.replace(/\\.(jpg|jpeg|png|gif|webp|bmp|mp4|webm|ogg|mov)$/i, '')
+    return publicId || ''
+  } catch {
+    return ''
+  }
+}
+
+async function safeCloudinaryDestroyByUrl(url) {
+  const publicId = extractCloudinaryPublicId(url)
+  if (!publicId) return
+  const isVideo =
+    (typeof url === 'string' && url.includes('/video/upload/')) ||
+    /\\.(mp4|webm|ogg|mov)$/i.test(String(url || ''))
+  try {
+    await cloudinary.uploader.destroy(publicId, { resource_type: isVideo ? 'video' : 'image' })
+  } catch (e) {
+    console.error('⚠️ Cloudinary destroy failed:', e?.message || e)
+  }
+}
+
+async function safeCloudinaryDestroyPublicId(publicId, resourceType = 'image') {
+  try {
+    if (!publicId) return
+    await cloudinary.uploader.destroy(String(publicId), { resource_type: resourceType })
+  } catch (e) {
+    console.error('⚠️ Cloudinary destroy failed:', e?.message || e)
+  }
+}
 
 
 
@@ -354,6 +401,114 @@ export const FollowAndUnfollow = async(req,res) => {
         console.log(error)
         res.status(500).json(error)
     }
+}
+
+/**
+ * Permanently delete the logged-in account and all related data.
+ * Body: { confirm: "DELETE", password?: string }
+ */
+export const DeleteMyAccount = async (req, res) => {
+  try {
+    const userId = req.user?._id
+    if (!userId) return res.status(401).json({ error: 'Unauthorized' })
+
+    const { confirm, password } = req.body || {}
+    if (String(confirm || '').trim().toUpperCase() !== 'DELETE') {
+      return res.status(400).json({ error: 'Confirmation required' })
+    }
+
+    const user = await User.findById(userId).select('+password googleId profilePic').lean()
+    if (!user) return res.status(404).json({ error: 'User not found' })
+
+    // If this is a password account (not Google-only), require password for safety.
+    const hasGoogle = !!user.googleId
+    if (!hasGoogle) {
+      const passOk = await bcryptjs.compareSync(String(password || ''), String(user.password || ''))
+      if (!passOk) return res.status(400).json({ error: 'Invalid password' })
+    }
+
+    // 1) Cloudinary cleanup (best-effort; never block deletion)
+    if (user.profilePic) {
+      await safeCloudinaryDestroyByUrl(String(user.profilePic))
+    }
+
+    const myPosts = await Post.find({ postedBy: userId }).select('_id img').lean()
+    for (const p of myPosts) {
+      if (p?.img) await safeCloudinaryDestroyByUrl(String(p.img))
+    }
+
+    const myStories = await Story.find({ user: userId }).select('_id slides').lean()
+    for (const st of myStories) {
+      const slides = Array.isArray(st?.slides) ? st.slides : []
+      for (const s of slides) {
+        if (s?.publicId) {
+          await safeCloudinaryDestroyPublicId(String(s.publicId), s?.type === 'video' ? 'video' : 'image')
+        } else if (s?.url) {
+          await safeCloudinaryDestroyByUrl(String(s.url))
+        }
+      }
+    }
+
+    const convs = await Conversation.find({ participants: userId }).select('_id').lean()
+    const convIds = convs.map((c) => c?._id).filter(Boolean)
+    if (convIds.length) {
+      const msgsWithMedia = await Message.find({ conversationId: { $in: convIds }, img: { $ne: '' } })
+        .select('_id img')
+        .lean()
+      for (const m of msgsWithMedia) {
+        if (m?.img) await safeCloudinaryDestroyByUrl(String(m.img))
+      }
+    }
+
+    // 2) Data cleanup
+    // Remove user from other users' follower/following arrays (legacy arrays)
+    await User.updateMany({ followers: userId }, { $pull: { followers: userId } })
+    await User.updateMany({ following: userId }, { $pull: { following: userId } })
+
+    // Follow collection
+    await Follow.deleteMany({ $or: [{ followerId: userId }, { followeeId: userId }] })
+
+    // Collaborative: remove user from contributors on other posts
+    await Post.updateMany({ contributors: userId }, { $pull: { contributors: userId } })
+    // Remove likes and embedded replies by this user to avoid broken profile lookups
+    await Post.updateMany({ likes: userId }, { $pull: { likes: userId } })
+    await Post.updateMany({ 'replies.userId': userId }, { $pull: { replies: { userId } } })
+
+    // Delete authored posts
+    await Post.deleteMany({ postedBy: userId })
+
+    // Stories: remove viewer entries on others + delete own stories
+    await Story.updateMany({ 'viewers.user': userId }, { $pull: { viewers: { user: userId } } })
+    await Story.deleteMany({ user: userId })
+
+    // Messages & conversations where user participated (deletes for both users)
+    if (convIds.length) {
+      await Message.deleteMany({ conversationId: { $in: convIds } })
+      await Conversation.deleteMany({ _id: { $in: convIds } })
+    }
+
+    // Notifications & activities
+    await Notification.deleteMany({ $or: [{ user: userId }, { from: userId }] })
+    await Activity.deleteMany({ $or: [{ userId: userId }, { targetUser: userId }] })
+
+    // Chess busy state
+    await ChessBusy.deleteMany({ $or: [{ userId: userId }, { opponentId: userId }] })
+
+    // Redis best-effort cleanup (if any)
+    try {
+      await redisService.clearUserState?.(String(userId))
+    } catch {}
+
+    // Finally delete user
+    await User.deleteOne({ _id: userId })
+
+    // Clear session cookie
+    res.cookie('jwt', '', { maxAge: 1 })
+    return res.status(200).json({ success: true })
+  } catch (error) {
+    console.error('Error deleting account:', error)
+    return res.status(500).json({ error: 'Failed to delete account' })
+  }
 }
 
 

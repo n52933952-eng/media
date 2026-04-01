@@ -1,7 +1,7 @@
 import express from 'express'
 
 const router = express.Router()
-import{SignUp,LoginUser,GoogleLogin,LogOut,FollowAndUnfollow,getUserProfile,UpdateUser,searchUsers,getSuggestedUsers,getBusyChessUsers,getBusyCardUsers,getFollowingUsers} from '../controller/user.js'
+import{SignUp,LoginUser,GoogleLogin,LogOut,FollowAndUnfollow,getUserProfile,UpdateUser,searchUsers,getSuggestedUsers,getBusyChessUsers,getBusyCardUsers,getFollowingUsers,DeleteMyAccount} from '../controller/user.js'
 import protectRoute  from '../middlware/protectRoute.js'
 import upload from '../middlware/upload.js'
 import User from '../models/user.js'
@@ -34,5 +34,8 @@ router.post("/save-fcm-token",protectRoute,async (req,res) => {
     res.status(500).json({ error: 'Failed to save FCM token' })
   }
 })
+
+// Permanently delete the logged-in account (dangerous)
+router.delete("/delete", protectRoute, DeleteMyAccount)
 
 export default router
