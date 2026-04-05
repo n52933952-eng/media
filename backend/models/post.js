@@ -126,7 +126,13 @@ const PostSchema = mongoose.Schema({
                     type: String,
                     default: null
                 }
-            }
+            },
+
+            /** Football feed: tie top-level comment (and thread) to a specific live match card (fixture/_id key from client). */
+            footballMatchId: {
+                type: String,
+                default: null,
+            },
         }
     ]
 

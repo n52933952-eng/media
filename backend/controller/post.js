@@ -782,7 +782,7 @@ export const ReplyPost = async(req,res) => {
 
     try{
   
-        const{text}= req.body
+        const { text, footballMatchId: footballMatchIdRaw } = req.body
         const username = req.user.username
         const userId = req.user._id 
         const id = req.params.id 
@@ -793,13 +793,19 @@ export const ReplyPost = async(req,res) => {
         if(!post){
             return res.status(400).json({message:"no post"})
         }
+
+        let footballMatchId = null
+        if (footballMatchIdRaw != null && String(footballMatchIdRaw).trim() !== '') {
+            footballMatchId = String(footballMatchIdRaw).trim().slice(0, 128)
+        }
      
         const reply = {
             text,
             username,
             userId,
             userProfilePic,
-            likes: []  // Initialize likes array
+            likes: [],  // Initialize likes array
+            ...(footballMatchId ? { footballMatchId } : {}),
         }
 
         post.replies.push(reply)
@@ -1231,14 +1237,27 @@ export const ReplyToComment = async(req, res) => {
         // NEW: Extract mentioned user - if replying to a comment, mention that person
         // This stores who was mentioned (like @username on Facebook)
         let mentionedUser = null
+        /** Inherit match scope from the root of the thread (for Football per-match comments). */
+        let inheritedFootballMatchId = null
         if (parentReplyId) {
             // Find the parent comment/reply that's being replied to
-            const parentReply = post.replies.id(parentReplyId)
-            if (parentReply) {
+            let threadReply = post.replies.id(parentReplyId)
+            if (threadReply) {
                 // The person being replied to is automatically mentioned
                 mentionedUser = {
-                    userId: parentReply.userId,
-                    username: parentReply.username
+                    userId: threadReply.userId,
+                    username: threadReply.username
+                }
+                let root = threadReply
+                let guard = 0
+                while (root && root.parentReplyId && guard < 50) {
+                    const pr = post.replies.id(root.parentReplyId)
+                    if (!pr) break
+                    root = pr
+                    guard++
+                }
+                if (root?.footballMatchId) {
+                    inheritedFootballMatchId = String(root.footballMatchId).slice(0, 128)
                 }
             }
         }
@@ -1251,7 +1270,8 @@ export const ReplyToComment = async(req, res) => {
             userProfilePic,
             parentReplyId: parentReplyId || null,  // If parentReplyId exists, it's a nested reply
             mentionedUser: mentionedUser,  // NEW: Save who was mentioned (@username)
-            likes: []  // Initialize likes array
+            likes: [],  // Initialize likes array
+            ...(inheritedFootballMatchId ? { footballMatchId: inheritedFootballMatchId } : {}),
         }
 
         post.replies.push(reply)
