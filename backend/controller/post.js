@@ -725,11 +725,63 @@ export const LikePost = async(req,res) => {
 
      const{id} = req.params 
      const userId = req.user._id 
+     const rawMid = req.body?.footballMatchId
+     const mid =
+         rawMid != null && String(rawMid).trim() !== ''
+             ? String(rawMid).trim().slice(0, 128)
+             : null
   
      const post = await Post.findById(id)
      
      if(!post){
         return res.status(400).json({message:"no post found"})
+     }
+
+     /** Per–match-card like (Football live list): does not toggle post.likes. */
+     if (mid) {
+         if (!Array.isArray(post.footballMatchLikes)) post.footballMatchLikes = []
+         let entry = post.footballMatchLikes.find((e) => String(e.footballMatchId) === mid)
+         if (!entry) {
+             post.footballMatchLikes.push({ footballMatchId: mid, likes: [] })
+             entry = post.footballMatchLikes[post.footballMatchLikes.length - 1]
+         }
+         const likesArr = Array.isArray(entry.likes) ? entry.likes : []
+         const uidStr = userId.toString()
+         const idx = likesArr.findIndex((l) => (l && l.toString ? l.toString() : String(l)) === uidStr)
+         let isLikedAfter = false
+         if (idx >= 0) {
+             entry.likes.splice(idx, 1)
+             isLikedAfter = false
+         } else {
+             entry.likes.push(userId)
+             isLikedAfter = true
+             if (post.postedBy.toString() !== uidStr) {
+                 const { createNotification } = await import('./notification.js')
+                 createNotification(post.postedBy, 'like', userId, {
+                     postId: post._id,
+                     footballMatchId: mid,
+                 }).catch((err) => {
+                     console.error('Error creating match-like notification:', err)
+                 })
+             }
+             const { createActivity } = await import('./activity.js')
+             createActivity(userId, 'like', {
+                 postId: post._id,
+                 targetUser: post.postedBy,
+                 metadata: { postText: (post.text || '').substring(0, 50) || '', footballMatchId: mid },
+             }).catch((err) => {
+                 console.error('Error creating activity:', err)
+             })
+         }
+         await post.save()
+         const likesCount = Array.isArray(entry.likes) ? entry.likes.length : 0
+         return res.status(200).json({
+             scope: 'footballMatch',
+             footballMatchId: mid,
+             isLiked: isLikedAfter,
+             likesCount,
+             footballMatchLikes: post.footballMatchLikes,
+         })
      }
     
      const isUserLikedPost = post.likes.includes(userId)

@@ -78,6 +78,18 @@ const PostSchema = mongoose.Schema({
 
     },
 
+    /** Football feed: like counts per live match card (key matches client footballMatchId). */
+    footballMatchLikes: [
+        {
+            footballMatchId: { type: String, required: true },
+            likes: {
+                type: [mongoose.Schema.Types.ObjectId],
+                ref: 'User',
+                default: [],
+            },
+        },
+    ],
+
 
     replies:[
         {
