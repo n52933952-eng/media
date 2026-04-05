@@ -1631,8 +1631,11 @@ export const forceCheckFeedPostMatches = async () => {
                 // Emit socket event
                 const io = getIO()
                 if (io) {
-                    const freshFootballAccount = await User.findById(footballAccount._id).select('followers')
-                    const followerIds = freshFootballAccount?.followers?.map(f => f.toString()) || []
+                    const followerDocs = await Follow.find({ followeeId: footballAccount._id })
+                        .select('followerId')
+                        .limit(5000)
+                        .lean()
+                    const followerIds = followerDocs.map((d) => d.followerId?.toString?.() ?? String(d.followerId))
                     const socketMap = await getAllUserSockets()
                     let onlineCount = 0
                     

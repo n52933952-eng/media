@@ -726,16 +726,28 @@ export const getUserProfile = async(req,res) => {
         return res.status(404).json({error:"User not found"})
       }
 
-      // Read-from-Follow (scalable) with backwards-compatible payload:
-      // - keep `followers`/`following` arrays for current app (but cap them)
-      // - add counts + `isFollowedByMe` for correctness when arrays are capped
-      const LIMIT_LIST = 5000
+      // Read-from-Follow (scalable): accurate counts + isFollowedByMe.
+      // Do NOT attach large followers/following id lists here (mobile/web use /following & /followers paginated APIs).
       const viewerId = req.user?._id
 
-      const [followersCount, followingCount] = await Promise.all([
+      const userObj = user.toObject ? user.toObject() : { ...user }
+      const legacyFollowers = Array.isArray(userObj.followers) ? userObj.followers : []
+      const legacyFollowing = Array.isArray(userObj.following) ? userObj.following : []
+
+      const [followersCountDb, followingCountDb] = await Promise.all([
         Follow.countDocuments({ followeeId: user._id }),
         Follow.countDocuments({ followerId: user._id }),
       ])
+
+      let followersCount = followersCountDb
+      let followingCount = followingCountDb
+      // Legacy-only accounts: Follow rows empty but User arrays still have ids
+      if (followersCount === 0 && legacyFollowers.length > 0) {
+        followersCount = legacyFollowers.length
+      }
+      if (followingCount === 0 && legacyFollowing.length > 0) {
+        followingCount = legacyFollowing.length
+      }
 
       let isFollowedByMe = false
       if (viewerId) {
@@ -743,34 +755,20 @@ export const getUserProfile = async(req,res) => {
           .select('_id')
           .lean()
         isFollowedByMe = !!exists
+        if (!isFollowedByMe && legacyFollowers.length > 0) {
+          const vid = viewerId.toString()
+          isFollowedByMe = legacyFollowers.some((id) => (id?.toString?.() ?? String(id)) === vid)
+        }
       }
 
-      const [followersDocs, followingDocs] = await Promise.all([
-        Follow.find({ followeeId: user._id }).select('followerId').limit(LIMIT_LIST).lean(),
-        Follow.find({ followerId: user._id }).select('followeeId').limit(LIMIT_LIST).lean(),
-      ])
-
-      let followers = followersDocs.map((d) => d.followerId?.toString?.() ?? String(d.followerId))
-      let following = followingDocs.map((d) => d.followeeId?.toString?.() ?? String(d.followeeId))
-
-      // Fallback: if Follow collection is empty (e.g. before backfill or legacy data), use User document arrays
-      // so chess "find online" / feed / web still get following+followers and can fetch users
-      const userObj = user.toObject ? user.toObject() : { ...user }
-      const legacyFollowers = Array.isArray(userObj.followers) ? userObj.followers : []
-      const legacyFollowing = Array.isArray(userObj.following) ? userObj.following : []
-      if (followers.length === 0 && legacyFollowers.length > 0) {
-        followers = legacyFollowers.map((id) => id?.toString?.() ?? String(id)).filter(Boolean)
-      }
-      if (following.length === 0 && legacyFollowing.length > 0) {
-        following = legacyFollowing.map((id) => id?.toString?.() ?? String(id)).filter(Boolean)
-      }
+      const { followers: _omitFollowers, following: _omitFollowing, ...userWithoutFollowLists } = userObj
 
       res.status(200).json({
-        ...userObj,
-        followers,
-        following,
-        followersCount: followersCount > 0 ? followersCount : followers.length,
-        followingCount: followingCount > 0 ? followingCount : following.length,
+        ...userWithoutFollowLists,
+        followers: [],
+        following: [],
+        followersCount,
+        followingCount,
         isFollowedByMe,
       })
 
@@ -1064,39 +1062,96 @@ export const getBusyCardUsers = async (req, res) => {
 }
 
 // Get users that current user is following (for messages, chess challenge list, etc.)
+// Without `limit`/`skip` query: returns a plain array (max 500) — backward compatible.
+// With `limit` or `skip`: returns { users, hasMore, nextSkip } for pagination.
 export const getFollowingUsers = async (req, res) => {
     try {
         const userId = req.user._id
-        const limit = 500
-        let followeeIds = []
+        const wantsPaginate = req.query.limit !== undefined || req.query.skip !== undefined
 
-        // Read-from-Follow: get followee IDs
-        const followingDocs = await Follow.find({ followerId: userId })
+        if (!wantsPaginate) {
+            const limit = 500
+            let followeeIds = []
+
+            const followingDocs = await Follow.find({ followerId: userId })
+                .select('followeeId')
+                .sort({ createdAt: -1 })
+                .limit(limit)
+                .lean()
+
+            if (followingDocs && followingDocs.length > 0) {
+                followeeIds = followingDocs.map(d => d.followeeId)
+            } else {
+                const currentUser = await User.findById(userId).select('following').lean()
+                const legacyFollowing = Array.isArray(currentUser?.following) ? currentUser.following : []
+                if (legacyFollowing.length > 0) {
+                    followeeIds = legacyFollowing.slice(0, limit).map(id => id?.toString?.()).filter(Boolean)
+                }
+            }
+
+            if (followeeIds.length === 0) {
+                return res.status(200).json([])
+            }
+
+            const followingUsers = await User.find({
+                _id: { $in: followeeIds }
+            }).select('_id username name profilePic bio').limit(limit).sort({ username: 1 })
+
+            return res.status(200).json(followingUsers)
+        }
+
+        const pageSize = Math.min(Math.max(parseInt(String(req.query.limit), 10) || 12, 1), 100)
+        const skip = Math.max(parseInt(String(req.query.skip), 10) || 0, 0)
+
+        let followingDocs = await Follow.find({ followerId: userId })
             .select('followeeId')
             .sort({ createdAt: -1 })
-            .limit(limit)
+            .skip(skip)
+            .limit(pageSize + 1)
             .lean()
 
-        if (followingDocs && followingDocs.length > 0) {
-            followeeIds = followingDocs.map(d => d.followeeId)
-        } else {
-            // Fallback: use User.following when Follow collection is empty (legacy or before backfill)
+        let useLegacy = false
+        if (!followingDocs.length) {
+            const c = await Follow.countDocuments({ followerId: userId })
+            if (c === 0) useLegacy = true
+        }
+
+        let followeeIds = []
+        let hasMore = false
+
+        if (useLegacy) {
             const currentUser = await User.findById(userId).select('following').lean()
             const legacyFollowing = Array.isArray(currentUser?.following) ? currentUser.following : []
-            if (legacyFollowing.length > 0) {
-                followeeIds = legacyFollowing.slice(0, limit).map(id => id?.toString?.()).filter(Boolean)
-            }
+            const window = legacyFollowing.slice(skip, skip + pageSize + 1).map(id => id?.toString?.()).filter(Boolean)
+            hasMore = window.length > pageSize
+            followeeIds = hasMore ? window.slice(0, pageSize) : window
+        } else {
+            hasMore = followingDocs.length > pageSize
+            const sliceDocs = hasMore ? followingDocs.slice(0, pageSize) : followingDocs
+            followeeIds = sliceDocs.map(d => d.followeeId).filter(Boolean)
         }
 
         if (followeeIds.length === 0) {
-            return res.status(200).json([])
+            return res.status(200).json({ users: [], hasMore: false, nextSkip: skip })
         }
 
         const followingUsers = await User.find({
             _id: { $in: followeeIds }
-        }).select('_id username name profilePic bio').limit(limit).sort({ username: 1 })
+        })
+            .select('_id username name profilePic bio')
+            .lean()
 
-        res.status(200).json(followingUsers)
+        const orderMap = new Map(followeeIds.map((id, i) => [id.toString(), i]))
+        followingUsers.sort(
+            (a, b) =>
+                (orderMap.get(a._id.toString()) ?? 0) - (orderMap.get(b._id.toString()) ?? 0)
+        )
+
+        return res.status(200).json({
+            users: followingUsers,
+            hasMore,
+            nextSkip: skip + followeeIds.length,
+        })
     } catch (error) {
         console.error('Error getting following users:', error)
         res.status(500).json({ error: error.message || "Failed to get following users" })
@@ -1104,40 +1159,98 @@ export const getFollowingUsers = async (req, res) => {
 }
 
 // Users who follow the logged-in user (for Followers list in app)
+// Same pagination contract as getFollowingUsers.
 export const getFollowersUsers = async (req, res) => {
     try {
         const userId = req.user._id
-        const limit = 500
-        let followerIds = []
+        const wantsPaginate = req.query.limit !== undefined || req.query.skip !== undefined
 
-        const followerDocs = await Follow.find({ followeeId: userId })
+        if (!wantsPaginate) {
+            const limit = 500
+            let followerIds = []
+
+            const followerDocs = await Follow.find({ followeeId: userId })
+                .select('followerId')
+                .sort({ createdAt: -1 })
+                .limit(limit)
+                .lean()
+
+            if (followerDocs && followerDocs.length > 0) {
+                followerIds = followerDocs.map((d) => d.followerId)
+            } else {
+                const me = await User.findById(userId).select('followers').lean()
+                const legacy = Array.isArray(me?.followers) ? me.followers : []
+                if (legacy.length > 0) {
+                    followerIds = legacy.slice(0, limit).map((id) => id?.toString?.()).filter(Boolean)
+                }
+            }
+
+            if (followerIds.length === 0) {
+                return res.status(200).json([])
+            }
+
+            const followerUsers = await User.find({
+                _id: { $in: followerIds },
+            })
+                .select('_id username name profilePic bio')
+                .limit(limit)
+                .sort({ username: 1 })
+
+            return res.status(200).json(followerUsers)
+        }
+
+        const pageSize = Math.min(Math.max(parseInt(String(req.query.limit), 10) || 12, 1), 100)
+        const skip = Math.max(parseInt(String(req.query.skip), 10) || 0, 0)
+
+        let followerDocs = await Follow.find({ followeeId: userId })
             .select('followerId')
             .sort({ createdAt: -1 })
-            .limit(limit)
+            .skip(skip)
+            .limit(pageSize + 1)
             .lean()
 
-        if (followerDocs && followerDocs.length > 0) {
-            followerIds = followerDocs.map((d) => d.followerId)
-        } else {
+        let useLegacy = false
+        if (!followerDocs.length) {
+            const c = await Follow.countDocuments({ followeeId: userId })
+            if (c === 0) useLegacy = true
+        }
+
+        let followerIds = []
+        let hasMore = false
+
+        if (useLegacy) {
             const me = await User.findById(userId).select('followers').lean()
             const legacy = Array.isArray(me?.followers) ? me.followers : []
-            if (legacy.length > 0) {
-                followerIds = legacy.slice(0, limit).map((id) => id?.toString?.()).filter(Boolean)
-            }
+            const window = legacy.slice(skip, skip + pageSize + 1).map((id) => id?.toString?.()).filter(Boolean)
+            hasMore = window.length > pageSize
+            followerIds = hasMore ? window.slice(0, pageSize) : window
+        } else {
+            hasMore = followerDocs.length > pageSize
+            const sliceDocs = hasMore ? followerDocs.slice(0, pageSize) : followerDocs
+            followerIds = sliceDocs.map((d) => d.followerId).filter(Boolean)
         }
 
         if (followerIds.length === 0) {
-            return res.status(200).json([])
+            return res.status(200).json({ users: [], hasMore: false, nextSkip: skip })
         }
 
         const followerUsers = await User.find({
             _id: { $in: followerIds },
         })
             .select('_id username name profilePic bio')
-            .limit(limit)
-            .sort({ username: 1 })
+            .lean()
 
-        res.status(200).json(followerUsers)
+        const orderMap = new Map(followerIds.map((id, i) => [id.toString(), i]))
+        followerUsers.sort(
+            (a, b) =>
+                (orderMap.get(a._id.toString()) ?? 0) - (orderMap.get(b._id.toString()) ?? 0)
+        )
+
+        return res.status(200).json({
+            users: followerUsers,
+            hasMore,
+            nextSkip: skip + followerIds.length,
+        })
     } catch (error) {
         console.error('Error getting followers users:', error)
         res.status(500).json({ error: error.message || 'Failed to get followers users' })
