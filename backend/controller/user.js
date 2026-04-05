@@ -1103,6 +1103,82 @@ export const getFollowingUsers = async (req, res) => {
     }
 }
 
+// Users who follow the logged-in user (for Followers list in app)
+export const getFollowersUsers = async (req, res) => {
+    try {
+        const userId = req.user._id
+        const limit = 500
+        let followerIds = []
+
+        const followerDocs = await Follow.find({ followeeId: userId })
+            .select('followerId')
+            .sort({ createdAt: -1 })
+            .limit(limit)
+            .lean()
+
+        if (followerDocs && followerDocs.length > 0) {
+            followerIds = followerDocs.map((d) => d.followerId)
+        } else {
+            const me = await User.findById(userId).select('followers').lean()
+            const legacy = Array.isArray(me?.followers) ? me.followers : []
+            if (legacy.length > 0) {
+                followerIds = legacy.slice(0, limit).map((id) => id?.toString?.()).filter(Boolean)
+            }
+        }
+
+        if (followerIds.length === 0) {
+            return res.status(200).json([])
+        }
+
+        const followerUsers = await User.find({
+            _id: { $in: followerIds },
+        })
+            .select('_id username name profilePic bio')
+            .limit(limit)
+            .sort({ username: 1 })
+
+        res.status(200).json(followerUsers)
+    } catch (error) {
+        console.error('Error getting followers users:', error)
+        res.status(500).json({ error: error.message || 'Failed to get followers users' })
+    }
+}
+
+/**
+ * Remove someone from your followers (they stop following you).
+ * Deletes Follow { followerId: :id, followeeId: me } and syncs legacy User arrays.
+ */
+export const removeFollower = async (req, res) => {
+    try {
+        const meId = req.user._id
+        const { id } = req.params
+        if (!id || id === meId.toString()) {
+            return res.status(400).json({ error: 'Invalid user' })
+        }
+
+        const followerUser = await User.findById(id).select('_id').lean()
+        if (!followerUser) {
+            return res.status(404).json({ error: 'User not found' })
+        }
+
+        const deleted = await Follow.deleteOne({ followerId: id, followeeId: meId })
+        await User.findByIdAndUpdate(meId, { $pull: { followers: id } })
+        await User.findByIdAndUpdate(id, { $pull: { following: meId } })
+
+        if (deleted.deletedCount === 0) {
+            // Legacy-only follow: still try to clean arrays
+            await User.findByIdAndUpdate(meId, { $pull: { followers: id } })
+            await User.findByIdAndUpdate(id, { $pull: { following: meId } })
+        }
+
+        const current = await User.findById(meId).select('-password')
+        return res.status(200).json({ success: true, current })
+    } catch (error) {
+        console.error('Error removing follower:', error)
+        return res.status(500).json({ error: error.message || 'Failed to remove follower' })
+    }
+}
+
 
 
 

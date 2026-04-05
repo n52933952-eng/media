@@ -1,7 +1,7 @@
 import express from 'express'
 
 const router = express.Router()
-import{SignUp,LoginUser,GoogleLogin,LogOut,FollowAndUnfollow,getUserProfile,UpdateUser,searchUsers,getSuggestedUsers,getBusyChessUsers,getBusyCardUsers,getFollowingUsers,DeleteMyAccount} from '../controller/user.js'
+import{SignUp,LoginUser,GoogleLogin,LogOut,FollowAndUnfollow,getUserProfile,UpdateUser,searchUsers,getSuggestedUsers,getBusyChessUsers,getBusyCardUsers,getFollowingUsers,getFollowersUsers,removeFollower,DeleteMyAccount} from '../controller/user.js'
 import protectRoute  from '../middlware/protectRoute.js'
 import upload from '../middlware/upload.js'
 import User from '../models/user.js'
@@ -20,6 +20,8 @@ router.put("/update/:id",protectRoute,upload.single('file'),UpdateUser)
 router.get("/search",protectRoute,searchUsers)  // GET /api/user/search?search=john
 router.get("/suggested",protectRoute,getSuggestedUsers)  // GET /api/user/suggested
 router.get("/following",protectRoute,getFollowingUsers)  // GET /api/user/following
+router.get("/followers",protectRoute,getFollowersUsers)  // GET /api/user/followers
+router.delete("/follower/:id",protectRoute,removeFollower)  // DELETE /api/user/follower/:userId — remove from your followers
 router.get("/busyChessUsers",protectRoute,getBusyChessUsers)  // GET /api/user/busyChessUsers
 router.get("/busyCardUsers",protectRoute,getBusyCardUsers)  // GET /api/user/busyCardUsers
 router.post("/save-fcm-token",protectRoute,async (req,res) => {
