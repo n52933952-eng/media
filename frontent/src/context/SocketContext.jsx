@@ -163,6 +163,58 @@ export const SocketContextProvider = ({ children }) => {
 
     newSocket?.on('getOnlineUser', (users) => setOnlineUser(users));
 
+    // Targeted presence snapshot — response to presenceSubscribe (one component or SocketContext can trigger it)
+    // Merges snapshot online users into the global onlineUser list
+    newSocket?.on('presenceSnapshot', ({ onlineUsers: snapshotUsers, subscribedUserIds }) => {
+      if (!Array.isArray(snapshotUsers)) return
+      const snapshotOnlineIds = new Set(
+        snapshotUsers.map(u => (typeof u === 'object' ? u.userId?.toString() : u?.toString())).filter(Boolean)
+      )
+      const allSubscribedIds = new Set(
+        (Array.isArray(subscribedUserIds) ? subscribedUserIds : []).map(id => id?.toString()).filter(Boolean)
+      )
+      setOnlineUser(prev => {
+        const arr = Array.isArray(prev) ? prev : []
+        // Remove subscribed users who are now offline; keep everyone else untouched
+        const kept = arr.filter(u => {
+          const uid = typeof u === 'object' ? u.userId?.toString() : u?.toString()
+          if (!uid || !allSubscribedIds.has(uid)) return true // not in subscribed set — keep as-is
+          return snapshotOnlineIds.has(uid) // only keep if snapshot says online
+        })
+        // Add newly online users from snapshot that aren't already in the list
+        const keptIds = new Set(kept.map(u => (typeof u === 'object' ? u.userId?.toString() : u?.toString())))
+        const toAdd = snapshotUsers
+          .map(u => {
+            const uid = typeof u === 'object' ? u.userId?.toString() : u?.toString()
+            return uid ? { userId: uid, onlineAt: typeof u === 'object' ? (u.onlineAt || Date.now()) : Date.now() } : null
+          })
+          .filter(u => u && !keptIds.has(u.userId))
+        return [...kept, ...toAdd]
+      })
+    });
+
+    // Targeted presence updates (from presenceSubscribe — more reliable than global broadcast)
+    newSocket?.on('presenceUpdate', ({ userId, online }) => {
+      if (!userId) return
+      setOnlineUser(prev => {
+        const arr = Array.isArray(prev) ? prev : []
+        if (online) {
+          // Add if not already in list
+          const exists = arr.some(u => {
+            const uid = typeof u === 'object' ? u.userId?.toString() : u?.toString()
+            return uid === userId?.toString()
+          })
+          return exists ? arr : [...arr, { userId: userId.toString(), onlineAt: Date.now() }]
+        } else {
+          // Remove from list
+          return arr.filter(u => {
+            const uid = typeof u === 'object' ? u.userId?.toString() : u?.toString()
+            return uid !== userId?.toString()
+          })
+        }
+      })
+    });
+
     // Listen for unread count updates
     newSocket?.on('unreadCountUpdate', ({ totalUnread }) => {
       setTotalUnreadCount(totalUnread || 0);

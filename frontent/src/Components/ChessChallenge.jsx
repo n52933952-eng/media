@@ -115,16 +115,42 @@ const ChessChallenge = () => {
                 console.warn('⚠️ [ChessChallenge] Error fetching connections:', err)
             }
             
+            // Use presenceSubscribe to get accurate real-time presence
+            // (works even when global getOnlineUser broadcast is disabled for scale)
+            let presenceOnlineSet = new Set()
+            if (socket && allUsers.length > 0) {
+                const connectionIds = allUsers.map(u => u._id?.toString()).filter(Boolean)
+                try {
+                    const snapshot = await new Promise((resolve) => {
+                        const timer = setTimeout(() => resolve(null), 2000) // 2s timeout
+                        socket.once('presenceSnapshot', (data) => {
+                            clearTimeout(timer)
+                            resolve(data)
+                        })
+                        socket.emit('presenceSubscribe', { userIds: connectionIds })
+                    })
+                    if (snapshot?.onlineUsers) {
+                        snapshot.onlineUsers.forEach(u => {
+                            const id = typeof u === 'object' ? u.userId?.toString() : u?.toString()
+                            if (id) presenceOnlineSet.add(id)
+                        })
+                        if (import.meta.env.DEV) {
+                            console.log(`♟️ [ChessChallenge] presenceSnapshot: ${presenceOnlineSet.size} online of ${connectionIds.length}`)
+                        }
+                    }
+                } catch (_) {}
+            }
+
+            // Also build a Set from the legacy global onlineUsers list as a fallback
+            const globalOnlineSet = new Set(
+                (Array.isArray(onlineUsers) ? onlineUsers : []).map(o => {
+                    if (typeof o === 'object' && o !== null) return o.userId?.toString()
+                    return o?.toString()
+                }).filter(Boolean)
+            )
+
             // Filter to only online users who are not busy
             const onlineAvailableUsers = allUsers.filter(u => {
-                // Safety check for onlineUsers
-                if (!onlineUsers || !Array.isArray(onlineUsers)) {
-                    if (import.meta.env.DEV) {
-                        console.warn('⚠️ [ChessChallenge] onlineUsers is not an array:', onlineUsers)
-                    }
-                    return false
-                }
-                
                 // Convert both to strings for comparison
                 const userIdStr = u._id?.toString()
                 const currentUserIdStr = user._id?.toString()
@@ -133,17 +159,10 @@ const ChessChallenge = () => {
                     return false
                 }
                 
-                // Check if user is online - onlineUsers is array of {userId, onlineAt}
-                const isOnline = onlineUsers.some(online => {
-                    // Handle both object format {userId: "...", onlineAt: "..."} and direct string format
-                    let onlineUserId = null
-                    if (typeof online === 'object' && online !== null) {
-                        onlineUserId = online.userId?.toString() || online.toString()
-                    } else {
-                        onlineUserId = online?.toString()
-                    }
-                    return onlineUserId === userIdStr
-                })
+                // Check via presenceSubscribe snapshot first, fall back to global list
+                const isOnline = presenceOnlineSet.size > 0
+                    ? presenceOnlineSet.has(userIdStr)
+                    : globalOnlineSet.has(userIdStr)
                 
                 const isNotSelf = userIdStr !== currentUserIdStr
                 const isNotBusy = !busyUsers.some(busyId => {

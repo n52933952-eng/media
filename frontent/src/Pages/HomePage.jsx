@@ -26,7 +26,9 @@ const HomePage = () => {
   const observerTarget = useRef(null) // For infinite scroll
   const isLoadingRef = useRef(false) // Prevent duplicate requests
   const hasLoadedRef = useRef(false) // Track if initial load happened
-  const followPostCountRef = useRef(0) // Track current post count for pagination
+  const followPostCountRef = useRef(0) // Total posts in UI (socket / follow inserts)
+  /** Matches backend `getFeedPost`: `skip` indexes `feedNormalPosts` only (excludes pinned Football/Weather/channels on page 1). */
+  const normalFeedOffsetRef = useRef(0)
 
 
 
@@ -130,10 +132,11 @@ const HomePage = () => {
     }
     
     try{
-      // Calculate skip: for loadMore, use ref value (always up-to-date)
-      const skip = loadMore ? followPostCountRef.current : 0
+      // Backend: skip=0 returns pinned + up to 12 normal; skip>0 slices feedNormalPosts only.
+      // Do NOT use total UI post count as skip (would skip normal rows when pinned exist).
+      const skip = loadMore ? normalFeedOffsetRef.current : 0
       
-      console.log(`📥 [getFeedPost] Fetching posts: loadMore=${loadMore}, skip=${skip}, currentCount=${followPostCountRef.current}`)
+      console.log(`📥 [getFeedPost] Fetching posts: loadMore=${loadMore}, skip=${skip}, normalOffset=${normalFeedOffsetRef.current}`)
       
       const res = await fetch(`${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/post/feed/feedpost?limit=10&skip=${skip}`,{
         credentials:"include",
@@ -148,22 +151,26 @@ const HomePage = () => {
 
       if(res.ok){
         if (loadMore) {
-          // When loading more, check for duplicates
+          const batch = Array.isArray(data.posts) ? data.posts : []
+          // Advance normal-feed cursor by what the server returned (page 2+ is normal-only)
+          if (batch.length > 0) {
+            normalFeedOffsetRef.current += batch.length
+          }
           setFollowPost(prev => {
             const existingIds = new Set(prev.map(p => p._id?.toString()))
-            const newPosts = (data.posts || []).filter(p => !existingIds.has(p._id?.toString()))
+            const newPosts = batch.filter(p => !existingIds.has(p._id?.toString()))
             
-            console.log(`📥 [getFeedPost] LoadMore: received ${data.posts?.length || 0} posts, ${newPosts.length} new posts, current feed has ${prev.length} posts`)
+            console.log(`📥 [getFeedPost] LoadMore: received ${batch.length} posts, ${newPosts.length} new posts, current feed has ${prev.length} posts`)
             
-            // If no new posts, set hasMore to false to stop infinite loading
+            // All duplicates (e.g. already inserted via socket): keep paging if server says hasMore
             if (newPosts.length === 0) {
-              console.log('⚠️ [getFeedPost] No new posts, stopping pagination')
-              setHasMore(false)
+              if (batch.length === 0) {
+                setHasMore(false)
+              }
               return prev
             }
             
             const updated = [...prev, ...newPosts]
-            // Update ref with new count
             followPostCountRef.current = updated.length
             return updated
           })
@@ -175,12 +182,15 @@ const HomePage = () => {
           )
           console.log(`📥 [getFeedPost] Initial load: received ${posts.length} posts, ${uniquePosts.length} unique posts`)
           setFollowPost(uniquePosts)
-          // Update ref with initial count
           followPostCountRef.current = uniquePosts.length
+          // Page 1 includes up to 12 normal posts from feedNormalPosts; totalCount is full normal list length
+          const totalNormal = Number(data.totalCount)
+          const safeTotal = Number.isFinite(totalNormal) ? totalNormal : 0
+          normalFeedOffsetRef.current = Math.min(12, safeTotal)
         }
         
         const hasMoreValue = data.hasMore !== undefined ? data.hasMore : false
-        console.log(`📥 [getFeedPost] Setting hasMore to: ${hasMoreValue}, totalCount: ${data.totalCount || 'N/A'}`)
+        console.log(`📥 [getFeedPost] Setting hasMore to: ${hasMoreValue}, totalCount: ${data.totalCount || 'N/A'}, normalOffset: ${normalFeedOffsetRef.current}`)
         setHasMore(hasMoreValue)
       }
 

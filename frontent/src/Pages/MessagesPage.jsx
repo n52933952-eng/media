@@ -326,6 +326,14 @@ const MessagesPage = () => {
     fetchFollowedUsers()
   }, [user?._id])
 
+  // Subscribe to targeted presence for followed users so Online Friends is accurate
+  // even when the global getOnlineUser broadcast is disabled in production
+  useEffect(() => {
+    if (!socket || followedUsers.length === 0) return
+    const userIds = followedUsers.map(u => u._id?.toString()).filter(Boolean)
+    socket.emit('presenceSubscribe', { userIds })
+  }, [socket, followedUsers])
+
   // Update followed users list when conversations change (add users you're chatting with)
   useEffect(() => {
     if (!conversations || conversations.length === 0) return
