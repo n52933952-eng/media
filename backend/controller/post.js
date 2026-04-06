@@ -993,25 +993,30 @@ export const getFeedPost = async(req,res) => {
         // For first page (skip=0): Get normal posts + always include Football + channels
         // For subsequent pages: Get normal posts only (Football and channels already shown on page 1)
         
-        // OPTIMIZED: Fetch only the last 3 posts from each followed user
-        const postsPerUser = 3
+        // SCALABLE: Single $in query replaces N per-user queries
         const followedUserIds = following.filter(id => id.toString() !== userId.toString())
-        
-        // Get 3 most recent posts per followed user: their own posts + collaborative posts they contribute to
-        // (so if C follows B but not A, C still sees A's post when B is a contributor)
-        const postsPromises = followedUserIds.map(async (followedUserId) => {
-            const userPosts = await Post.find({
+
+        // Exclude system accounts (Football/Weather) from the normal feed query — fetched separately below
+        const systemAccountIds = [
+            footballAccount?._id?.toString(),
+            weatherAccount?._id?.toString()
+        ].filter(Boolean)
+        const normalFollowedIds = followedUserIds.filter(id => !systemAccountIds.includes(id.toString()))
+
+        // ONE query instead of N queries (one per followed user)
+        let normalPostsPromise = Promise.resolve([])
+        if (normalFollowedIds.length > 0) {
+            normalPostsPromise = Post.find({
                 $or: [
-                    { postedBy: followedUserId },
-                    { isCollaborative: true, contributors: followedUserId }
+                    { postedBy: { $in: normalFollowedIds } },
+                    { isCollaborative: true, contributors: { $in: normalFollowedIds } }
                 ]
             })
                 .populate("postedBy", "-password")
                 .populate("contributors", "username profilePic name")
                 .sort({ updatedAt: -1, createdAt: -1 })
-                .limit(postsPerUser)
-            return userPosts
-        })
+                .limit(200)
+        }
 
         // Get channel posts that this user added
         const channelPostsPromise = Post.find({ 
@@ -1059,8 +1064,8 @@ export const getFeedPost = async(req,res) => {
             .limit(40)
 
         // Wait for all posts to be fetched
-        const [allPostsArrays, channelPosts, footballPosts, weatherPosts, contributorPosts] = await Promise.all([
-            Promise.all(postsPromises),
+        const [normalPosts, channelPosts, footballPosts, weatherPosts, contributorPosts] = await Promise.all([
+            normalPostsPromise,
             channelPostsPromise,
             footballPostsPromise,
             weatherPostsPromise,
@@ -1075,7 +1080,7 @@ export const getFeedPost = async(req,res) => {
         // 5. Subsequent pages: Only normal posts
         
         // Separate normal posts from Football and channels
-        let allNormalPosts = [...allPostsArrays.flat(), ...contributorPosts]
+        let allNormalPosts = [...normalPosts, ...contributorPosts]
         
         // Sort normal posts by last activity (edits / contributor adds bump updatedAt)
         allNormalPosts.sort((a, b) => {
