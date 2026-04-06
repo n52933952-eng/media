@@ -1003,7 +1003,7 @@ export const getFeedPost = async(req,res) => {
         ].filter(Boolean)
         const normalFollowedIds = followedUserIds.filter(id => !systemAccountIds.includes(id.toString()))
 
-        // ONE query instead of N queries (one per followed user)
+        // ONE query instead of N queries, then cap to 3 posts per user in JS
         let normalPostsPromise = Promise.resolve([])
         if (normalFollowedIds.length > 0) {
             normalPostsPromise = Post.find({
@@ -1015,7 +1015,8 @@ export const getFeedPost = async(req,res) => {
                 .populate("postedBy", "-password")
                 .populate("contributors", "username profilePic name")
                 .sort({ updatedAt: -1, createdAt: -1 })
-                .limit(200)
+                .limit(normalFollowedIds.length * 3 + 50) // safety cap: 3 per user + buffer
+                .lean()
         }
 
         // Get channel posts that this user added
@@ -1079,17 +1080,27 @@ export const getFeedPost = async(req,res) => {
         // 4. First page: Football + Channels + 12 normal posts (all sorted together)
         // 5. Subsequent pages: Only normal posts
         
-        // Separate normal posts from Football and channels
-        let allNormalPosts = [...normalPosts, ...contributorPosts]
+        // Cap to 3 newest posts per user (in JS, after single DB query)
+        const perUserMap = new Map()
+        for (const post of normalPosts) {
+            const pb = post.postedBy
+            const uid = pb && pb._id != null ? pb._id.toString() : String(pb)
+            if (!perUserMap.has(uid)) perUserMap.set(uid, [])
+            if (perUserMap.get(uid).length < 3) perUserMap.get(uid).push(post)
+        }
+        const cappedNormalPosts = [...perUserMap.values()].flat()
+
+        // Merge capped normal posts + collaborative contributor posts, remove duplicates
+        let allNormalPosts = [...cappedNormalPosts, ...contributorPosts]
         
-        // Sort normal posts by last activity (edits / contributor adds bump updatedAt)
+        // Sort by last activity
         allNormalPosts.sort((a, b) => {
             const dateA = new Date(a.updatedAt || a.createdAt).getTime()
             const dateB = new Date(b.updatedAt || b.createdAt).getTime()
-            return dateB - dateA // Newest first
+            return dateB - dateA
         })
         
-        // Remove duplicates from normal posts
+        // Remove duplicates
         const uniqueNormalPosts = []
         const seenPostIds = new Set()
         for (const post of allNormalPosts) {
@@ -1100,8 +1111,7 @@ export const getFeedPost = async(req,res) => {
             }
         }
 
-        // Own authored posts: hide from home feed unless collaborative with at least one *other* contributor.
-        // (Solo posts → profile only; add someone → show in your feed too.)
+        // Hide own solo posts from feed (show only if collaborative with another contributor)
         const viewerIdStr = userId.toString()
         const hasAnotherContributor = (post, authorIdStr) => {
             if (!post.isCollaborative || !Array.isArray(post.contributors)) return false
@@ -1117,47 +1127,35 @@ export const getFeedPost = async(req,res) => {
             if (aid !== viewerIdStr) return true
             return hasAnotherContributor(post, viewerIdStr)
         })
-        
-        // For first page (skip=0): Football + Channels + 12 normal posts (all sorted together)
+
+        // Build pinned posts (Football + Weather + Channels) — always sent on every page
+        // Mobile deduplication handles not showing them twice
+        const pinnedPosts = []
+        if (footballPosts.length > 0) {
+            const fp = footballPosts[0]
+            try { if (footballFollowedAtMs) fp.__viewerSortBoostMs = footballFollowedAtMs } catch (_) {}
+            pinnedPosts.push(fp)
+        }
+        if (weatherPosts.length > 0) {
+            const wp = weatherPosts[0]
+            try { if (weatherFollowedAtMs) wp.__viewerSortBoostMs = weatherFollowedAtMs } catch (_) {}
+            pinnedPosts.push(wp)
+        }
+        pinnedPosts.push(...channelPosts)
+
+        // Page 1: pinned + first 12 normal posts
         if (skip === 0) {
-            // Get top 12 normal posts
             const topNormalPosts = feedNormalPosts.slice(0, 12)
+            const combinedPosts = [...pinnedPosts, ...topNormalPosts]
             
-            // Combine: Football + Channels + 12 normal posts
-            const combinedPosts = []
-            if (footballPosts.length > 0) {
-                const fp = footballPosts[0]
-                // Attach ephemeral sort key used only for this response
-                try {
-                    if (footballFollowedAtMs) {
-                        fp.__viewerSortBoostMs = footballFollowedAtMs
-                    }
-                } catch (_) {}
-                combinedPosts.push(fp)
-            }
-            if (weatherPosts.length > 0) {
-                const wp = weatherPosts[0]
-                try {
-                    if (weatherFollowedAtMs) {
-                        wp.__viewerSortBoostMs = weatherFollowedAtMs
-                    }
-                } catch (_) {}
-                combinedPosts.push(wp)
-            }
-            combinedPosts.push(...channelPosts)
-            combinedPosts.push(...topNormalPosts)
-            
-            // Sort ALL together by updatedAt (or createdAt if no updatedAt) - this makes the feed dynamic!
-            // Football post will move to top when scores update (updatedAt changes)
             combinedPosts.sort((a, b) => {
                 const boostA = a && typeof a.__viewerSortBoostMs === 'number' ? a.__viewerSortBoostMs : 0
                 const boostB = b && typeof b.__viewerSortBoostMs === 'number' ? b.__viewerSortBoostMs : 0
                 const dateA = Math.max(new Date(a.updatedAt || a.createdAt).getTime(), boostA)
                 const dateB = Math.max(new Date(b.updatedAt || b.createdAt).getTime(), boostB)
-                return dateB - dateA // Newest first
+                return dateB - dateA
             })
             
-            // Calculate hasMore: true if there are more than 12 normal posts
             const hasMore = feedNormalPosts.length > 12
             
             return res.status(200).json({ 
@@ -1167,18 +1165,17 @@ export const getFeedPost = async(req,res) => {
             })
         }
         
-        // For subsequent pages: Only return normal posts (no Football or channels)
-        // Skip the first 12 normal posts (already shown on page 1)
+        // Subsequent pages: normal posts only (Football/Weather/Channels already on page 1, stay in place)
         const startIndex = skip
         const endIndex = startIndex + limit
-        const paginatedPosts = feedNormalPosts.slice(startIndex, endIndex)
+        const paginatedNormal = feedNormalPosts.slice(startIndex, endIndex)
         const hasMore = endIndex < feedNormalPosts.length
         const totalCount = feedNormalPosts.length
         
-        console.log(`📄 [getFeedPost] Page ${Math.floor(skip / limit) + 1}: Returning ${paginatedPosts.length} posts (skip: ${skip}, limit: ${limit}, hasMore: ${hasMore}, totalCount: ${totalCount})`)
+        console.log(`📄 [getFeedPost] Page ${Math.floor(skip / limit) + 1}: Returning ${paginatedNormal.length} posts (skip: ${skip}, hasMore: ${hasMore})`)
         
         return res.status(200).json({ 
-            posts: paginatedPosts,
+            posts: paginatedNormal,
             hasMore,
             totalCount
         })
