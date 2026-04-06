@@ -303,50 +303,21 @@ const MessagesPage = () => {
     return () => clearTimeout(timer)
   }, [callAccepted, callEnded, stream, remoteStream, myVideo, userVideo, selectedConversation])
 
-  // Fetch followed users for search
+  // Fetch followed users for search — uses /api/user/following (Follow collection)
   useEffect(() => {
     const fetchFollowedUsers = async () => {
       if (!user?._id) return
       
       try {
-        // Get current user's following list
-        const userRes = await fetch(`${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/user/getUserPro/${user._id}`, {
+        const baseUrl = import.meta.env.PROD ? window.location.origin : "http://localhost:5000"
+        const res = await fetch(`${baseUrl}/api/user/following`, {
           credentials: 'include',
         })
-        const userData = await userRes.json()
-        if (userRes.ok && userData.following && userData.following.length > 0) {
-          // Fetch user details for each followed user
-          const usersPromises = userData.following.map(async (userId) => {
-            try {
-              // Check if userId is a valid string/ObjectId
-              if (!userId || typeof userId !== 'string') {
-                return null
-              }
-              
-              const userRes = await fetch(`${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/user/getUserPro/${userId}`, {
-                credentials: 'include',
-              })
-              
-              if (!userRes.ok) {
-                // Silently skip invalid user IDs (400 errors) - don't log to console
-                return null
-              }
-              
-              const data = await userRes.json()
-              // Check if response has error
-              if (data.error || !data._id) {
-                return null
-              }
-              
-              return data
-            } catch (error) {
-              console.log(`Error fetching user ${userId}:`, error)
-              return null
-            }
-          })
-          const users = await Promise.all(usersPromises)
-          setFollowedUsers(users.filter(u => u !== null && u !== undefined && !u.error && u._id))
-        }
+        if (!res.ok) return
+        const data = await res.json()
+        // Endpoint returns a plain array when called without pagination params
+        const list = Array.isArray(data) ? data : (Array.isArray(data.users) ? data.users : [])
+        setFollowedUsers(list.filter(u => u && u._id))
       } catch (error) {
         console.log('Error fetching followed users:', error)
       }

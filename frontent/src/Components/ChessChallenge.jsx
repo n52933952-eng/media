@@ -73,70 +73,46 @@ const ChessChallenge = () => {
                 console.warn('⚠️ [ChessChallenge] Failed to fetch busy users:', err)
             }
             
-            // Fetch fresh profile (following/followers) from API
-            let freshUserData = user
+            // Fetch following + followers using the Follow-collection-backed endpoints
+            let allUsers = []
             try {
-                const userRes = await fetch(`${baseUrl}/api/user/getUserPro/${user._id}`, {
-                    credentials: 'include'
+                const [followingRes, followersRes] = await Promise.all([
+                    fetch(`${baseUrl}/api/user/following`, { credentials: 'include' }),
+                    fetch(`${baseUrl}/api/user/followers`, { credentials: 'include' }),
+                ])
+
+                const toList = async (res) => {
+                    if (!res.ok) return []
+                    const data = await res.json()
+                    return Array.isArray(data) ? data : (Array.isArray(data.users) ? data.users : [])
+                }
+
+                const [followingList, followersList] = await Promise.all([toList(followingRes), toList(followersRes)])
+
+                if (import.meta.env.DEV) {
+                    console.log(`♟️ [ChessChallenge] following: ${followingList.length}, followers: ${followersList.length}`)
+                }
+
+                // Merge and deduplicate (by _id string)
+                const seen = new Set()
+                const merged = [...followingList, ...followersList].filter(u => {
+                    if (!u?._id) return false
+                    const id = u._id.toString()
+                    if (seen.has(id)) return false
+                    seen.add(id)
+                    return id !== user._id?.toString()
                 })
-                if (userRes.ok) {
-                    freshUserData = await userRes.json()
-                    if (import.meta.env.DEV) {
-                        console.log('♟️ [ChessChallenge] Fetched fresh user data:', {
-                            following: freshUserData.following?.length || 0,
-                            followers: freshUserData.followers?.length || 0
-                        })
-                    }
+
+                if (merged.length > 0) {
+                    setHasConnections(true)
+                    allUsers = merged
+                }
+
+                if (import.meta.env.DEV) {
+                    console.log(`♟️ [ChessChallenge] Total unique connections: ${allUsers.length}`)
                 }
             } catch (err) {
-                console.warn('⚠️ [ChessChallenge] Error fetching fresh user data:', err)
-            }
-            
-            // Build connection IDs (handle both string IDs and objects with _id)
-            const allConnectionIds = [
-                ...(freshUserData.following || []),
-                ...(freshUserData.followers || [])
-            ].map(toIdStr).filter(Boolean)
-            const uniqueIds = [...new Set(allConnectionIds)]
-            
-            let allUsers = []
-            if (uniqueIds.length > 0) {
-                setHasConnections(true)
-                if (import.meta.env.DEV) {
-                    console.log(`♟️ [ChessChallenge] Fetching ${uniqueIds.length} users for online check`)
-                }
-                const userPromises = uniqueIds.map(async (userId) => {
-                    try {
-                        const res = await fetch(`${baseUrl}/api/user/getUserPro/${userId}`, {
-                            credentials: 'include'
-                        })
-                        if (res.ok) {
-                            const userData = await res.json()
-                            if (userData && userData._id) return userData
-                        }
-                    } catch (err) {
-                        if (import.meta.env.DEV) console.warn(`⚠️ [ChessChallenge] Error fetching user ${userId}:`, err.message)
-                    }
-                    return null
-                })
-                allUsers = (await Promise.all(userPromises)).filter(u => u !== null && u._id)
-            } else {
-                // Fallback: try /api/user/following (returns full user objects)
-                try {
-                    const followingRes = await fetch(`${baseUrl}/api/user/following`, { credentials: 'include' })
-                    if (followingRes.ok) {
-                        const followingList = await followingRes.json()
-                        if (Array.isArray(followingList) && followingList.length > 0) {
-                            setHasConnections(true)
-                            allUsers = followingList.filter(u => u && u._id && u._id.toString() !== user._id?.toString())
-                            if (import.meta.env.DEV) {
-                                console.log('♟️ [ChessChallenge] Used /api/user/following fallback:', allUsers.length, 'users')
-                            }
-                        }
-                    }
-                } catch (err) {
-                    console.warn('⚠️ [ChessChallenge] Fallback /api/user/following failed:', err)
-                }
+                console.warn('⚠️ [ChessChallenge] Error fetching connections:', err)
             }
             
             // Filter to only online users who are not busy

@@ -16,7 +16,15 @@ const UserHeader = ({users, activeTab, setActiveTab, onUserFollowed}) => {
      
      const currentUser = user
       
-     const[following,setFollowing]=useState(users?.followers?.includes(currentUser?._id))
+     // isFollowedByMe comes from getUserPro (scalable Follow collection check)
+     // Fall back to legacy followers array if isFollowedByMe is not present
+     const[following,setFollowing]=useState(
+       users?.isFollowedByMe ?? users?.followers?.includes(currentUser?._id) ?? false
+     )
+     // Optimistic followers count — prefer followersCount (from Follow collection)
+     const[localFollowersCount,setLocalFollowersCount]=useState(
+       users?.followersCount ?? users?.followers?.length ?? 0
+     )
      
        
  
@@ -26,6 +34,12 @@ const UserHeader = ({users, activeTab, setActiveTab, onUserFollowed}) => {
   
   const showToast=useShowToast()
   
+  // Sync follow state and counts when viewing a different user profile
+  useEffect(() => {
+    setFollowing(users?.isFollowedByMe ?? users?.followers?.includes(currentUser?._id) ?? false)
+    setLocalFollowersCount(users?.followersCount ?? users?.followers?.length ?? 0)
+  }, [users?._id])
+
   // Update instagramUrl when users prop changes
   useEffect(() => {
     setInstagramUrl(users?.instagram || "")
@@ -144,10 +158,10 @@ const UserHeader = ({users, activeTab, setActiveTab, onUserFollowed}) => {
         
          if(following){
            showToast("Success",`unfollowed ${users.name}`,"success")
-           users.followers.pop()
+           setLocalFollowersCount(prev => Math.max(0, prev - 1))
          }else{
           showToast("Success",`you Followed ${users.name}`,"success")
-          users.followers.push(currentUser._id)
+          setLocalFollowersCount(prev => prev + 1)
           
           // Call onUserFollowed callback to fetch user's posts and add to feed
           if (onUserFollowed && users._id) {
@@ -227,7 +241,7 @@ const UserHeader = ({users, activeTab, setActiveTab, onUserFollowed}) => {
     <Flex w="full" justifyContent="space-between" >
    
     <Flex alignItems="center" gap={2}>
-        <Text color="gray.light">{users?.followers?.length} followers</Text>
+        <Text color="gray.light">{localFollowersCount} followers</Text>
         <Box w={"1"} h="1" bg="gray.light" borderRadius="full"></Box>
         {users?.instagram ? (
           <Text 

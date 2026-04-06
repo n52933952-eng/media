@@ -72,9 +72,10 @@ const toast =useToast()
       return;
     }
 
-    // Success
-    setUser(data);
-    localStorage.setItem("userInfo", JSON.stringify(data));
+    // Success — normalize _id (backend signup returns 'id', not '_id')
+    const userData = { ...data, _id: data._id || data.id }
+    setUser(userData);
+    localStorage.setItem("userInfo", JSON.stringify(userData));
 
     toast({
       title: "Signup successful",
