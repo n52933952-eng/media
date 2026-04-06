@@ -22,6 +22,7 @@ import { ViewIcon, ViewOffIcon,useToast } from "@chakra-ui/icons";
 import{Link} from 'react-router-dom'
 import{useNavigate} from 'react-router-dom'
 import{UserContext} from '../context/UserContext'
+import API_BASE_URL from '../config/api'
 
 
 
@@ -47,35 +48,95 @@ const[inputs,setInputs]=useState({name:"",username:"",email:"",password:"",count
 const toast =useToast()
 
 	const handleSignup = async () => {
+  const name = String(inputs.name || '').trim()
+  const username = String(inputs.username || '').trim()
+  const email = String(inputs.email || '').trim().toLowerCase()
+  const password = String(inputs.password || '')
+  const country = String(inputs.country || '').trim()
+
+  if (!name || !username || !email || !password) {
+    toast({
+      title: "Error",
+      description: "Please fill in name, username, email, and password.",
+      status: "error",
+      duration: 4000,
+      isClosable: true,
+    })
+    return
+  }
+  if (password.length < 6) {
+    toast({
+      title: "Error",
+      description: "Password must be at least 6 characters.",
+      status: "error",
+      duration: 4000,
+      isClosable: true,
+    })
+    return
+  }
+  if (!country) {
+    toast({
+      title: "Error",
+      description: "Please select your country.",
+      status: "error",
+      duration: 4000,
+      isClosable: true,
+    })
+    return
+  }
+
+  const baseUrl = API_BASE_URL || (import.meta.env.PROD ? window.location.origin : 'http://localhost:5000')
+
   try {
-    console.log('📝 Signing up with data:', { ...inputs, password: '***' })
-    const res = await fetch(`${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/user/signup`, {
+    console.log('📝 Signing up with data:', { name, username, email, country, password: '***' })
+    const res = await fetch(`${baseUrl}/api/user/signup`, {
       method: "POST",
       credentials: "include",
       headers: {
         "Content-Type": "application/json",
       },
-      body: JSON.stringify(inputs),
+      body: JSON.stringify({ name, username, email, password, country }),
     });
 
-    const data = await res.json();
+    let data = {}
+    const text = await res.text()
+    try {
+      data = text ? JSON.parse(text) : {}
+    } catch {
+      data = { error: text || `Server error (${res.status})` }
+    }
 
-    // Check backend error
+    const serverError =
+      typeof data?.error === 'string'
+        ? data.error
+        : data?.error?.message || data?.message || (typeof data === 'string' ? data : null)
+
     if (!res.ok) {
       toast({
-        title: "Error",
-        description: data.error ,
+        title: "Registration failed",
+        description: serverError || `Request failed (${res.status})`,
         status: "error",
-        duration: 3000,
+        duration: 5000,
         isClosable: true,
-      });
-      return;
+      })
+      return
     }
 
     // Success — normalize _id (backend signup returns 'id', not '_id')
     const userData = { ...data, _id: data._id || data.id }
-    setUser(userData);
-    localStorage.setItem("userInfo", JSON.stringify(userData));
+    if (!userData._id) {
+      toast({
+        title: "Error",
+        description: "Invalid response from server. Please try logging in.",
+        status: "error",
+        duration: 5000,
+        isClosable: true,
+      })
+      return
+    }
+
+    setUser(userData)
+    localStorage.setItem("userInfo", JSON.stringify(userData))
 
     toast({
       title: "Signup successful",
@@ -83,11 +144,18 @@ const toast =useToast()
       status: "success",
       duration: 3000,
       isClosable: true,
-    });
+    })
 
-    navigate("/home");
+    navigate("/home")
   } catch (error) {
-    console.log(error);
+    console.error(error)
+    toast({
+      title: "Network error",
+      description: error?.message || "Could not reach the server. Check your connection and API URL (VITE_API_URL).",
+      status: "error",
+      duration: 5000,
+      isClosable: true,
+    })
   }
 };
 
@@ -246,7 +314,7 @@ return (
 								لديك حساب?{" "}
 								
 								
-								<Link color={"blue.400"} to={"/login"}  >
+								<Link color={"blue.400"} to={"/"}>
 									الدخول
 								</Link>
 							

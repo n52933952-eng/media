@@ -22,6 +22,7 @@ import{Link} from 'react-router-dom'
 import useShowToast from '../hooks/useShowToast.js'
 
 import{UserContext} from '../context/UserContext'
+import API_BASE_URL from '../config/api'
 
 
 
@@ -44,29 +45,41 @@ export default function Login() {
  const handleLogin =async() => {
    
     try{
-
-     const res = await fetch(`${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/user/login`, {
+     const baseUrl = API_BASE_URL || (import.meta.env.PROD ? window.location.origin : 'http://localhost:5000')
+     const res = await fetch(`${baseUrl}/api/user/login`, {
       method:"POST",
        credentials: "include",
       headers:{
        "Content-Type": "application/json"
         },
         
-        body:JSON.stringify(inputs) 
+        body:JSON.stringify({
+          username: String(inputs.username || '').trim(),
+          password: inputs.password,
+        }) 
       
      })
    
-     const data = await res.json()
+     const text = await res.text()
+     let data = {}
+     try {
+       data = text ? JSON.parse(text) : {}
+     } catch {
+       showToast("Error", text || `Server error (${res.status})`, "error")
+       return
+     }
 
      if(data.error){
       showToast("Error",data.error,"error")
       return
      }
       
-     localStorage.setItem("userInfo",JSON.stringify(data))
-     setUser(data)
+     // Keep _id stable (defensive if API ever returns `id`)
+     const userData = { ...data, _id: data._id || data.id }
+     localStorage.setItem("userInfo",JSON.stringify(userData))
+     setUser(userData)
     }catch(error){
-      showToast(error)
+      showToast("Error", error?.message || String(error), "error")
     }
   
   }
