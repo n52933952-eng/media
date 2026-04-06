@@ -1066,14 +1066,22 @@ export const getBusyCardUsers = async (req, res) => {
 // With `limit` or `skip`: returns { users, hasMore, nextSkip } for pagination.
 export const getFollowingUsers = async (req, res) => {
     try {
-        const userId = req.user._id
+        let subjectId = req.user._id
+        const qUid = req.query.userId
+        if (qUid && mongoose.Types.ObjectId.isValid(String(qUid))) {
+            subjectId = new mongoose.Types.ObjectId(String(qUid))
+            const exists = await User.findById(subjectId).select('_id').lean()
+            if (!exists) {
+                return res.status(404).json({ error: 'User not found' })
+            }
+        }
         const wantsPaginate = req.query.limit !== undefined || req.query.skip !== undefined
 
         if (!wantsPaginate) {
             const limit = 500
             let followeeIds = []
 
-            const followingDocs = await Follow.find({ followerId: userId })
+            const followingDocs = await Follow.find({ followerId: subjectId })
                 .select('followeeId')
                 .sort({ createdAt: -1 })
                 .limit(limit)
@@ -1082,7 +1090,7 @@ export const getFollowingUsers = async (req, res) => {
             if (followingDocs && followingDocs.length > 0) {
                 followeeIds = followingDocs.map(d => d.followeeId)
             } else {
-                const currentUser = await User.findById(userId).select('following').lean()
+                const currentUser = await User.findById(subjectId).select('following').lean()
                 const legacyFollowing = Array.isArray(currentUser?.following) ? currentUser.following : []
                 if (legacyFollowing.length > 0) {
                     followeeIds = legacyFollowing.slice(0, limit).map(id => id?.toString?.()).filter(Boolean)
@@ -1103,7 +1111,7 @@ export const getFollowingUsers = async (req, res) => {
         const pageSize = Math.min(Math.max(parseInt(String(req.query.limit), 10) || 12, 1), 100)
         const skip = Math.max(parseInt(String(req.query.skip), 10) || 0, 0)
 
-        let followingDocs = await Follow.find({ followerId: userId })
+        let followingDocs = await Follow.find({ followerId: subjectId })
             .select('followeeId')
             .sort({ createdAt: -1 })
             .skip(skip)
@@ -1112,7 +1120,7 @@ export const getFollowingUsers = async (req, res) => {
 
         let useLegacy = false
         if (!followingDocs.length) {
-            const c = await Follow.countDocuments({ followerId: userId })
+            const c = await Follow.countDocuments({ followerId: subjectId })
             if (c === 0) useLegacy = true
         }
 
@@ -1120,7 +1128,7 @@ export const getFollowingUsers = async (req, res) => {
         let hasMore = false
 
         if (useLegacy) {
-            const currentUser = await User.findById(userId).select('following').lean()
+            const currentUser = await User.findById(subjectId).select('following').lean()
             const legacyFollowing = Array.isArray(currentUser?.following) ? currentUser.following : []
             const window = legacyFollowing.slice(skip, skip + pageSize + 1).map(id => id?.toString?.()).filter(Boolean)
             hasMore = window.length > pageSize
@@ -1162,14 +1170,22 @@ export const getFollowingUsers = async (req, res) => {
 // Same pagination contract as getFollowingUsers.
 export const getFollowersUsers = async (req, res) => {
     try {
-        const userId = req.user._id
+        let subjectId = req.user._id
+        const qUid = req.query.userId
+        if (qUid && mongoose.Types.ObjectId.isValid(String(qUid))) {
+            subjectId = new mongoose.Types.ObjectId(String(qUid))
+            const exists = await User.findById(subjectId).select('_id').lean()
+            if (!exists) {
+                return res.status(404).json({ error: 'User not found' })
+            }
+        }
         const wantsPaginate = req.query.limit !== undefined || req.query.skip !== undefined
 
         if (!wantsPaginate) {
             const limit = 500
             let followerIds = []
 
-            const followerDocs = await Follow.find({ followeeId: userId })
+            const followerDocs = await Follow.find({ followeeId: subjectId })
                 .select('followerId')
                 .sort({ createdAt: -1 })
                 .limit(limit)
@@ -1178,7 +1194,7 @@ export const getFollowersUsers = async (req, res) => {
             if (followerDocs && followerDocs.length > 0) {
                 followerIds = followerDocs.map((d) => d.followerId)
             } else {
-                const me = await User.findById(userId).select('followers').lean()
+                const me = await User.findById(subjectId).select('followers').lean()
                 const legacy = Array.isArray(me?.followers) ? me.followers : []
                 if (legacy.length > 0) {
                     followerIds = legacy.slice(0, limit).map((id) => id?.toString?.()).filter(Boolean)
@@ -1202,7 +1218,7 @@ export const getFollowersUsers = async (req, res) => {
         const pageSize = Math.min(Math.max(parseInt(String(req.query.limit), 10) || 12, 1), 100)
         const skip = Math.max(parseInt(String(req.query.skip), 10) || 0, 0)
 
-        let followerDocs = await Follow.find({ followeeId: userId })
+        let followerDocs = await Follow.find({ followeeId: subjectId })
             .select('followerId')
             .sort({ createdAt: -1 })
             .skip(skip)
@@ -1211,7 +1227,7 @@ export const getFollowersUsers = async (req, res) => {
 
         let useLegacy = false
         if (!followerDocs.length) {
-            const c = await Follow.countDocuments({ followeeId: userId })
+            const c = await Follow.countDocuments({ followeeId: subjectId })
             if (c === 0) useLegacy = true
         }
 
@@ -1219,7 +1235,7 @@ export const getFollowersUsers = async (req, res) => {
         let hasMore = false
 
         if (useLegacy) {
-            const me = await User.findById(userId).select('followers').lean()
+            const me = await User.findById(subjectId).select('followers').lean()
             const legacy = Array.isArray(me?.followers) ? me.followers : []
             const window = legacy.slice(skip, skip + pageSize + 1).map((id) => id?.toString?.()).filter(Boolean)
             hasMore = window.length > pageSize
