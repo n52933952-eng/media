@@ -51,6 +51,14 @@ app.use((req, res, next) => {
 });
 
 app.use(cookieParser())
+
+// Allow Google Sign-In popup to communicate back to the page.
+// Render sets COOP: same-origin by default which breaks the credential callback.
+app.use((req, res, next) => {
+  res.setHeader('Cross-Origin-Opener-Policy', 'same-origin-allow-popups')
+  next()
+})
+
 // CORS - allow both localhost (dev) and your Render frontend URL (prod)
 app.use(cors({
     origin: process.env.FRONTEND_URL || "http://localhost:5173",
