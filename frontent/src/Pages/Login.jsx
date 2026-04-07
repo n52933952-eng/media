@@ -25,6 +25,7 @@ import useShowToast from '../hooks/useShowToast.js'
 import{UserContext} from '../context/UserContext'
 import API_BASE_URL from '../config/api'
 import { GoogleLogin } from '@react-oauth/google'
+import { FcGoogle } from 'react-icons/fc'
 
 
 
@@ -196,18 +197,44 @@ export default function Login() {
               الدخول
             </Button>
             <Divider borderColor={dividerColor} />
-            <Box w="full" display="flex" justifyContent="center" opacity={googleLoading ? 0.7 : 1} pointerEvents={googleLoading ? 'none' : 'auto'}>
-              <GoogleLogin
-                onSuccess={handleGoogleCredential}
-                onError={() => showToast('Error', 'Google sign-in failed', 'error')}
-                text="continue_with"
-                shape="rectangular"
-                size="large"
-                width="100%"
-                locale="en"
-                theme="filled_black"
-                auto_select={false}
-              />
+            {/* Styled button visible to user; transparent Google button sits on top to handle the credential flow */}
+            <Box position="relative" w="full" h="48px" opacity={googleLoading ? 0.7 : 1}>
+              {/* Visible styled button — pointer events disabled so clicks pass through */}
+              <Button
+                w="full"
+                h="full"
+                bg={primaryBtnBg}
+                color="white"
+                _hover={{ bg: primaryBtnHoverBg }}
+                leftIcon={<FcGoogle size={22} />}
+                isLoading={googleLoading}
+                loadingText="Google"
+                pointerEvents="none"
+                fontSize="lg"
+                fontWeight="semibold"
+                borderRadius="md"
+              >
+                Continue with Google
+              </Button>
+              {/* Invisible Google credential button layered on top */}
+              <Box
+                position="absolute"
+                top={0}
+                left={0}
+                w="full"
+                h="full"
+                opacity={0}
+                overflow="hidden"
+                pointerEvents={googleLoading ? 'none' : 'auto'}
+              >
+                <GoogleLogin
+                  onSuccess={handleGoogleCredential}
+                  onError={() => showToast('Error', 'Google sign-in failed', 'error')}
+                  size="large"
+                  width="400"
+                  auto_select={false}
+                />
+              </Box>
             </Box>
           </Stack>
           <Text align="center" fontSize="sm" pt={1}>
