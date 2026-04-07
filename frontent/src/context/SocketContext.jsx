@@ -599,8 +599,9 @@ export const SocketContextProvider = ({ children }) => {
     cleanupPeer();
     setCallAccepted(false);
     setCallEnded(false);
-    setCallType(type);
-    setCall({ isCalling: false, userToCall: userIdToStr(id), recipientName: recipientName, callType: type });
+    let effectiveType = type;
+    setCallType(effectiveType);
+    setCall({ isCalling: false, userToCall: userIdToStr(id), recipientName: recipientName, callType: effectiveType });
     try {
 
     // Get appropriate media stream based on call type
@@ -618,9 +619,30 @@ export const SocketContextProvider = ({ children }) => {
       // Get new stream with correct type
       const constraints = {
         audio: true,
-        video: type === 'video' ? true : false
+        video: effectiveType === 'video' ? true : false
       };
-      currentStream = await navigator.mediaDevices.getUserMedia(constraints);
+      try {
+        currentStream = await navigator.mediaDevices.getUserMedia(constraints);
+      } catch (mediaErr) {
+        // Web safety: if camera capture fails, still allow audio call instead of hard failing.
+        if (effectiveType === 'video') {
+          console.warn('⚠️ [callUser] Video media failed, retrying audio-only:', mediaErr?.name, mediaErr?.message);
+          currentStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+          effectiveType = 'audio';
+          setCallType('audio');
+          setCall((prev) => ({ ...prev, callType: 'audio' }));
+          toast({
+            title: "Camera unavailable",
+            description: "Started as audio call because camera failed.",
+            status: "warning",
+            duration: 4000,
+            isClosable: true,
+            position: "top",
+          });
+        } else {
+          throw mediaErr;
+        }
+      }
       // Unmute audio tracks explicitly
       currentStream.getAudioTracks().forEach(track => {
         if (!track.enabled) track.enabled = true;
@@ -642,7 +664,7 @@ export const SocketContextProvider = ({ children }) => {
         signalData: data,
         from: userIdToStr(user?._id || me),
         name: user.username,
-        callType: type,
+        callType: effectiveType,
       });
     });
 
@@ -685,7 +707,7 @@ export const SocketContextProvider = ({ children }) => {
 
     connectionRef.current = peer;
     } catch (err) {
-      console.error('❌ [callUser] Failed to create/send offer:', err);
+      console.error('❌ [callUser] Failed to create/send offer:', err?.name, err?.message, err);
       if (ringtoneAudio.current) {
         ringtoneAudio.current.pause();
         ringtoneAudio.current.currentTime = 0;
@@ -697,7 +719,7 @@ export const SocketContextProvider = ({ children }) => {
       setCall({});
       toast({
         title: "Call couldn't start",
-        description: "Microphone/Camera permission blocked or media failed. Please allow access and try again.",
+        description: `Media error: ${err?.name || 'UnknownError'}${err?.message ? ` - ${err.message}` : ''}`,
         status: "error",
         duration: 5000,
         isClosable: true,
