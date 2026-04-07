@@ -19,9 +19,9 @@ import {
     Avatar,
     useColorModeValue,
     useToast,
-    SimpleGrid,
     Wrap,
     WrapItem,
+    Image,
 } from '@chakra-ui/react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { UserContext } from '../context/UserContext'
@@ -30,58 +30,60 @@ import { PostContext } from '../context/PostContext'
 import API_BASE_URL from '../config/api'
 
 // ─── Rank helpers ──────────────────────────────────────────────────────────────
-const RANK_NAMES = {
-    1: 'Ace', 2: '2', 3: '3', 4: '4', 5: '5', 6: '6', 7: '7',
-    8: '8', 9: '9', 10: '10', 11: 'J', 12: 'Q', 13: 'K',
-}
 const RANK_LABELS = {
     1: 'Ace', 2: '2', 3: '3', 4: '4', 5: '5', 6: '6', 7: '7',
     8: '8', 9: '9', 10: '10', 11: 'Jack', 12: 'Queen', 13: 'King',
 }
-const SUIT_SYMBOLS = { hearts: '♥', diamonds: '♦', clubs: '♣', spades: '♠' }
-const isRed = (suit) => suit === 'hearts' || suit === 'diamonds'
 
-// ─── Inline playing card ───────────────────────────────────────────────────────
-const PlayingCard = ({ suit, value, onClick, highlighted, disabled, small }) => {
-    const bg = useColorModeValue('white', '#1e1e2e')
-    const color = isRed(suit) ? '#e53e3e' : useColorModeValue('#1a202c', '#e2e8f0')
-    const borderCol = highlighted
-        ? '#9333ea'
-        : useColorModeValue('gray.300', 'gray.600')
+// Maps server rank (1-13) to image filename prefix
+const RANK_FILE = {
+    1: 'ace', 2: '2', 3: '3', 4: '4', 5: '5', 6: '6', 7: '7',
+    8: '8', 9: '9', 10: '10', 11: 'jack', 12: 'queen', 13: 'king',
+}
 
-    const size = small ? { w: '52px', h: '72px', fontSize: 'xs', symbolSize: 'md' }
-                       : { w: '64px', h: '90px', fontSize: 'sm', symbolSize: 'xl' }
+// Build the image path for a card (served from /public/cards/)
+const cardImagePath = (suit, value) =>
+    `/cards/${RANK_FILE[value]}_of_${suit}.png`
+
+// ─── Real playing card using PNG images ────────────────────────────────────────
+const PlayingCard = ({ suit, value, onClick, highlighted, disabled }) => {
+    const imgSrc = cardImagePath(suit, value)
 
     return (
         <Box
             as={onClick ? 'button' : 'div'}
             onClick={!disabled ? onClick : undefined}
-            w={size.w}
-            h={size.h}
-            bg={bg}
-            border="2px solid"
-            borderColor={borderCol}
-            borderRadius="md"
-            display="flex"
-            flexDirection="column"
-            justifyContent="space-between"
-            p="3px"
+            w={{ base: '72px', md: '84px' }}
+            h={{ base: '100px', md: '118px' }}
+            borderRadius="8px"
+            overflow="hidden"
+            border="3px solid"
+            borderColor={highlighted ? '#9333ea' : 'transparent'}
             cursor={onClick && !disabled ? 'pointer' : 'default'}
-            opacity={disabled ? 0.45 : 1}
-            boxShadow={highlighted ? '0 0 0 2px #9333ea, 0 2px 8px rgba(147,51,234,0.4)' : 'sm'}
+            opacity={disabled ? 0.4 : 1}
+            boxShadow={highlighted
+                ? '0 0 0 2px #9333ea, 0 4px 14px rgba(147,51,234,0.5)'
+                : '0 2px 6px rgba(0,0,0,0.35)'}
             transition="all 0.15s"
-            _hover={onClick && !disabled ? { transform: 'translateY(-4px)', boxShadow: highlighted ? '0 0 0 2px #9333ea, 0 6px 16px rgba(147,51,234,0.5)' : 'md' } : {}}
+            _hover={onClick && !disabled
+                ? { transform: 'translateY(-6px)', boxShadow: '0 0 0 2px #9333ea, 0 10px 24px rgba(147,51,234,0.55)' }
+                : {}}
             userSelect="none"
+            flexShrink={0}
+            display="block"
+            p={0}
+            bg="transparent"
         >
-            <Text fontSize={size.fontSize} fontWeight="bold" color={color} lineHeight={1}>
-                {RANK_NAMES[value]}
-            </Text>
-            <Text fontSize={size.symbolSize} color={color} textAlign="center" lineHeight={1}>
-                {SUIT_SYMBOLS[suit]}
-            </Text>
-            <Text fontSize={size.fontSize} fontWeight="bold" color={color} textAlign="right" lineHeight={1} transform="rotate(180deg)">
-                {RANK_NAMES[value]}
-            </Text>
+            <Image
+                src={imgSrc}
+                alt={`${RANK_LABELS[value]} of ${suit}`}
+                w="100%"
+                h="100%"
+                objectFit="fill"
+                borderRadius="5px"
+                draggable={false}
+                pointerEvents="none"
+            />
         </Box>
     )
 }
@@ -377,22 +379,21 @@ const CardGamePage = () => {
                     {myHand.length === 0 ? (
                         <Text color={mutedCol} fontSize="sm" fontStyle="italic">No cards in hand</Text>
                     ) : (
-                        <Wrap spacing={2}>
+                        <Flex flexWrap="wrap" gap={3} justify="flex-start">
                             {myHand.map((card, i) => {
                                 const clickable = isMyTurn && !gameOver && availableRanks.includes(card.value)
                                 return (
-                                    <WrapItem key={i}>
-                                        <PlayingCard
-                                            suit={card.suit}
-                                            value={card.value}
-                                            highlighted={clickable}
-                                            disabled={!clickable}
-                                            onClick={clickable ? () => handleAsk(card.value) : undefined}
-                                        />
-                                    </WrapItem>
+                                    <PlayingCard
+                                        key={i}
+                                        suit={card.suit}
+                                        value={card.value}
+                                        highlighted={clickable}
+                                        disabled={!clickable}
+                                        onClick={clickable ? () => handleAsk(card.value) : undefined}
+                                    />
                                 )
                             })}
-                        </Wrap>
+                        </Flex>
                     )}
 
                     <Box mt={3} minH="28px" display="flex" alignItems="center">
