@@ -12,6 +12,7 @@ import {
 	Heading,
 	Text,
 	useColorModeValue,
+	Divider,
 	
 } from "@chakra-ui/react";
 import { useState,useContext } from "react";
@@ -23,6 +24,8 @@ import useShowToast from '../hooks/useShowToast.js'
 
 import{UserContext} from '../context/UserContext'
 import API_BASE_URL from '../config/api'
+import { GoogleLogin } from '@react-oauth/google'
+import { GOOGLE_WEB_CLIENT_ID } from '../config/googleWebClient'
 
 
 
@@ -40,6 +43,8 @@ export default function Login() {
   const[inputs,setInputs]=useState({username:"",password:""})
 
  const{setUser}=useContext(UserContext)
+
+ const [googleLoading, setGoogleLoading] = useState(false)
 
     
  const handleLogin =async() => {
@@ -82,6 +87,43 @@ export default function Login() {
       showToast("Error", error?.message || String(error), "error")
     }
   
+  }
+
+  const handleGoogleSuccess = async (credentialResponse) => {
+    const idToken = credentialResponse?.credential
+    if (!idToken) {
+      showToast('Error', 'No Google token received', 'error')
+      return
+    }
+    setGoogleLoading(true)
+    try {
+      const baseUrl = API_BASE_URL || (import.meta.env.PROD ? window.location.origin : 'http://localhost:5000')
+      const res = await fetch(`${baseUrl}/api/user/google-login`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ idToken }),
+      })
+      const text = await res.text()
+      let data = {}
+      try {
+        data = text ? JSON.parse(text) : {}
+      } catch {
+        showToast('Error', text || `Server error (${res.status})`, 'error')
+        return
+      }
+      if (data.error) {
+        showToast('Error', data.error, 'error')
+        return
+      }
+      const userData = { ...data, _id: data._id || data.id }
+      localStorage.setItem('userInfo', JSON.stringify(userData))
+      setUser(userData)
+    } catch (error) {
+      showToast('Error', error?.message || String(error), 'error')
+    } finally {
+      setGoogleLoading(false)
+    }
   }
 
 
@@ -144,10 +186,27 @@ export default function Login() {
                 bg: useColorModeValue("gray.700", "gray.800"),
               }}
              onClick={handleLogin}
+             isDisabled={googleLoading}
             >
               الدخول
             </Button>
           </Stack>
+          {GOOGLE_WEB_CLIENT_ID && (
+            <>
+              <Divider />
+              <Box display="flex" justifyContent="center" w="full" opacity={googleLoading ? 0.6 : 1} pointerEvents={googleLoading ? 'none' : 'auto'}>
+                <GoogleLogin
+                  onSuccess={handleGoogleSuccess}
+                  onError={() => showToast('Error', 'Google sign-in failed', 'error')}
+                  text="continue_with"
+                  shape="rectangular"
+                  size="large"
+                  width="100%"
+                  locale="en"
+                />
+              </Box>
+            </>
+          )}
           <Stack pt={6}>
             <Text align={"center"}>
               ليس لديك حساب?{" "}

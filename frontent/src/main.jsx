@@ -11,6 +11,8 @@ import{BrowserRouter} from 'react-router-dom'
 import{UserContextProvider} from './context/UserContext'
 import{PostContextProvider} from './context/PostContext'
 import{SocketContextProvider} from './context/SocketContext'
+import { GoogleOAuthProvider } from '@react-oauth/google'
+import { GOOGLE_WEB_CLIENT_ID } from './config/googleWebClient'
 
 
 
@@ -45,8 +47,8 @@ const theme = extendTheme({ config, styles, colors });
 
 
 
-createRoot(document.getElementById('root')).render(
-    <UserContextProvider>
+const appShell = (
+  <UserContextProvider>
 	<PostContextProvider>
     <SocketContextProvider>
    <BrowserRouter>
@@ -61,5 +63,12 @@ createRoot(document.getElementById('root')).render(
   </SocketContextProvider>
   </PostContextProvider>
   </UserContextProvider>
+)
 
+createRoot(document.getElementById('root')).render(
+  GOOGLE_WEB_CLIENT_ID ? (
+    <GoogleOAuthProvider clientId={GOOGLE_WEB_CLIENT_ID}>{appShell}</GoogleOAuthProvider>
+  ) : (
+    appShell
+  )
 )
