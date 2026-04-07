@@ -41,6 +41,7 @@ export const SocketContextProvider = ({ children }) => {
   const connectionRef = useRef();
   const peerRef = useRef();
   const streamRef = useRef(null);
+  const iceServersRef = useRef(null);
   const ringtoneAudio = useRef(new Audio(ringTone)); // Audio for incoming call ringtone
   const messageSoundAudio = useRef(new Audio(messageSound)); // Audio for new unread message notification
   const chessToneAudio = useRef(new Audio(chessTone)); // Audio for chess challenge notification
@@ -157,6 +158,24 @@ export const SocketContextProvider = ({ children }) => {
     const newSocket = io(socketUrl, {
       query: { userId: userIdToStr(user._id), clientType: 'web' },
     });
+
+    // WebRTC connectivity: use backend ICE servers (STUN/TURN) with safe fallback.
+    const fetchIceServers = async () => {
+      try {
+        const res = await fetch(`${socketUrl}/api/call/ice-servers`, {
+          credentials: 'include',
+        })
+        if (!res.ok) return
+        const data = await res.json()
+        if (Array.isArray(data?.iceServers) && data.iceServers.length > 0) {
+          iceServersRef.current = data.iceServers
+          console.log(`✅ [webrtc] Loaded ICE servers: ${data.iceServers.length}`)
+        }
+      } catch (e) {
+        console.warn('⚠️ [webrtc] Failed to load ICE servers, using browser defaults:', e?.message || e)
+      }
+    }
+    fetchIceServers()
 
     // Re-assert "online" so Redis presence matches an active web session. Mobile may have set
     // clientPresence offline while backgrounded — same userId would block in-app callUser delivery.
@@ -653,7 +672,11 @@ export const SocketContextProvider = ({ children }) => {
     }
 
     // Create peer connection (web-to-web uses bundled ICE candidates)
-    const peer = new Peer({ initiator: true, trickle: false, stream: currentStream });
+    const callerPeerOptions = { initiator: true, trickle: false, stream: currentStream };
+    if (Array.isArray(iceServersRef.current) && iceServersRef.current.length > 0) {
+      callerPeerOptions.config = { iceServers: iceServersRef.current };
+    }
+    const peer = new Peer(callerPeerOptions);
     peerRef.current = peer;
 
     peer.on('signal', (data) => {
@@ -786,7 +809,11 @@ export const SocketContextProvider = ({ children }) => {
     }
     
     // Create peer connection (web-to-web uses bundled ICE candidates)
-    const peer = new Peer({ initiator: false, trickle: false, stream: currentStream });
+    const answerPeerOptions = { initiator: false, trickle: false, stream: currentStream };
+    if (Array.isArray(iceServersRef.current) && iceServersRef.current.length > 0) {
+      answerPeerOptions.config = { iceServers: iceServersRef.current };
+    }
+    const peer = new Peer(answerPeerOptions);
     peerRef.current = peer;
 
     peer.on('signal', (data) => {
