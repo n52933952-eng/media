@@ -599,9 +599,8 @@ export const SocketContextProvider = ({ children }) => {
     cleanupPeer();
     setCallAccepted(false);
     setCallEnded(false);
-    setIsCalling(true); // Start ringing state when calling
     setCallType(type);
-    setCall({ isCalling: true, userToCall: userIdToStr(id), recipientName: recipientName, callType: type });
+    setCall({ isCalling: false, userToCall: userIdToStr(id), recipientName: recipientName, callType: type });
 
     // Get appropriate media stream based on call type
     // Check if we need a new stream (different type than current)
@@ -634,6 +633,9 @@ export const SocketContextProvider = ({ children }) => {
     peerRef.current = peer;
 
     peer.on('signal', (data) => {
+      // Ringing state starts only once we have a real offer to send.
+      setIsCalling(true);
+      setCall((prev) => ({ ...prev, isCalling: true }));
       socket.emit('callUser', {
         userToCall: userIdToStr(id),
         signalData: data,
@@ -681,6 +683,26 @@ export const SocketContextProvider = ({ children }) => {
 
 
     connectionRef.current = peer;
+    } catch (err) {
+      console.error('❌ [callUser] Failed to create/send offer:', err);
+      if (ringtoneAudio.current) {
+        ringtoneAudio.current.pause();
+        ringtoneAudio.current.currentTime = 0;
+      }
+      cleanupPeer();
+      setIsCalling(false);
+      setCallAccepted(false);
+      setCallEnded(true);
+      setCall({});
+      toast({
+        title: "Call couldn't start",
+        description: "Microphone/Camera permission blocked or media failed. Please allow access and try again.",
+        status: "error",
+        duration: 5000,
+        isClosable: true,
+        position: "top",
+      });
+    }
   };
 
   // Answer an incoming call
