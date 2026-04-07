@@ -601,6 +601,7 @@ export const SocketContextProvider = ({ children }) => {
     setCallEnded(false);
     setCallType(type);
     setCall({ isCalling: false, userToCall: userIdToStr(id), recipientName: recipientName, callType: type });
+    try {
 
     // Get appropriate media stream based on call type
     // Check if we need a new stream (different type than current)
