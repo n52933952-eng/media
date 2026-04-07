@@ -723,6 +723,32 @@ export const SocketContextProvider = ({ children }) => {
     const peer = new Peer(callerPeerOptions);
     peerRef.current = peer;
 
+    peer.on('error', (err) => {
+      console.error('❌ [WebRTC caller] Peer error:', err?.code, err?.message, err);
+      toast({ title: 'Call error', description: `${err?.code || err?.message || 'WebRTC error'}`, status: 'error', duration: 5000, isClosable: true, position: 'top' });
+    });
+
+    // Monitor underlying ICE state for diagnostics
+    if (peer._pc) {
+      peer._pc.oniceconnectionstatechange = () => {
+        const s = peer._pc.iceConnectionState;
+        console.log(`🧊 [WebRTC caller] ICE state: ${s}`);
+        if (s === 'failed') {
+          console.error('❌ [WebRTC caller] ICE failed — no reachable candidate pair. TURN may be needed.');
+        }
+      };
+      peer._pc.onicegatheringstatechange = () => {
+        console.log(`🧊 [WebRTC caller] ICE gathering: ${peer._pc.iceGatheringState}`);
+      };
+      const origOnIce = peer._pc.onicecandidate;
+      peer._pc.onicecandidate = (e) => {
+        if (e.candidate) {
+          console.log(`🧊 [WebRTC caller] Candidate: type=${e.candidate.type} proto=${e.candidate.protocol} addr=${e.candidate.address}`);
+        }
+        if (origOnIce) origOnIce.call(peer._pc, e);
+      };
+    }
+
     peer.on('signal', (data) => {
       const fromId = userIdToStr(user?._id || me)
       const toId = userIdToStr(id)
@@ -871,6 +897,32 @@ export const SocketContextProvider = ({ children }) => {
     }
     const peer = new Peer(answerPeerOptions);
 
+    peer.on('error', (err) => {
+      console.error('❌ [WebRTC answerer] Peer error:', err?.code, err?.message, err);
+      toast({ title: 'Call error', description: `${err?.code || err?.message || 'WebRTC error'}`, status: 'error', duration: 5000, isClosable: true, position: 'top' });
+    });
+
+    // Monitor underlying ICE state for diagnostics
+    if (peer._pc) {
+      peer._pc.oniceconnectionstatechange = () => {
+        const s = peer._pc.iceConnectionState;
+        console.log(`🧊 [WebRTC answerer] ICE state: ${s}`);
+        if (s === 'failed') {
+          console.error('❌ [WebRTC answerer] ICE failed — no reachable candidate pair. TURN may be needed.');
+        }
+      };
+      peer._pc.onicegatheringstatechange = () => {
+        console.log(`🧊 [WebRTC answerer] ICE gathering: ${peer._pc.iceGatheringState}`);
+      };
+      const origOnIce = peer._pc.onicecandidate;
+      peer._pc.onicecandidate = (e) => {
+        if (e.candidate) {
+          console.log(`🧊 [WebRTC answerer] Candidate: type=${e.candidate.type} proto=${e.candidate.protocol} addr=${e.candidate.address}`);
+        }
+        if (origOnIce) origOnIce.call(peer._pc, e);
+      };
+    }
+
     peer.on('signal', (data) => {
       const fromId = userIdToStr(me || user?._id)
       const toId = userIdToStr(call.from)
@@ -913,10 +965,12 @@ export const SocketContextProvider = ({ children }) => {
     });
 
     if (call.signal) {
+      console.log('📡 [WebRTC answerer] Signaling offer from caller, SDP type:', call.signal?.type, 'sdp length:', call.signal?.sdp?.length);
       try {
         peer.signal(call.signal);
       } catch (err) {
-        console.warn('Error signaling answerCall:', err.message);
+        console.error('❌ [WebRTC answerer] peer.signal(offer) threw:', err?.name, err?.message);
+        toast({ title: 'SDP error', description: `Could not process caller's offer: ${err?.message}`, status: 'error', duration: 6000, isClosable: true, position: 'top' });
       }
     }
 
