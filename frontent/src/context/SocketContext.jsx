@@ -40,6 +40,7 @@ export const SocketContextProvider = ({ children }) => {
   const userVideo = useRef();
   const connectionRef = useRef();
   const peerRef = useRef();
+  const streamRef = useRef(null);
   const ringtoneAudio = useRef(new Audio(ringTone)); // Audio for incoming call ringtone
   const messageSoundAudio = useRef(new Audio(messageSound)); // Audio for new unread message notification
   const chessToneAudio = useRef(new Audio(chessTone)); // Audio for chess challenge notification
