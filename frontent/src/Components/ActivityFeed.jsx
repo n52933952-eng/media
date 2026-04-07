@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useContext, useMemo, useCallback } from 'react'
+import React, { useState, useEffect, useContext, useMemo, useRef } from 'react'
 import { Box, Flex, Text, Avatar, VStack, HStack, Spinner, useColorModeValue, Divider, IconButton } from '@chakra-ui/react'
 import { useNavigate } from 'react-router-dom'
 import { SocketContext } from '../context/SocketContext'
@@ -34,29 +34,56 @@ const ActivityFeed = () => {
         return [...list].map(followIdToString).filter(Boolean).sort().join(',')
     }, [user?.following])
 
-    const fetchActivities = useCallback(async () => {
-        try {
-            const base = API_BASE_URL || (import.meta.env.PROD ? window.location.origin : 'http://localhost:5000')
-            const res = await fetch(`${base}/api/activity`, { credentials: 'include' })
-            const data = await res.json()
-            if (res.ok && data.activities) {
-                const sixHoursAgo = new Date(Date.now() - 6 * 60 * 60 * 1000)
-                const recentActivities = data.activities
-                    .filter((activity) => new Date(activity.createdAt) >= sixHoursAgo)
-                    .slice(0, 15)
-                setActivities(recentActivities)
-            }
-        } catch (error) {
-            console.error('Error fetching activities:', error)
-        } finally {
-            setLoading(false)
-        }
-    }, [])
+    /** One GET /api/activity when `followingFingerprint` string changes — not on every render (stable string deps). */
+    const fetchAbortRef = useRef(null)
+    /** After first successful load for this login, follow/unfollow refetches run silently (no full-card spinner). */
+    const activityFetchStartedRef = useRef(false)
 
     useEffect(() => {
-        setLoading(true)
-        fetchActivities()
-    }, [fetchActivities, followingFingerprint])
+        if (!user?._id) {
+            fetchAbortRef.current?.abort()
+            fetchAbortRef.current = null
+            activityFetchStartedRef.current = false
+            setActivities([])
+            setLoading(false)
+            return
+        }
+
+        const base = API_BASE_URL || (import.meta.env.PROD ? window.location.origin : 'http://localhost:5000')
+        fetchAbortRef.current?.abort()
+        const ac = new AbortController()
+        fetchAbortRef.current = ac
+
+        const silent = activityFetchStartedRef.current
+        if (!silent) setLoading(true)
+
+        ;(async () => {
+            try {
+                const res = await fetch(`${base}/api/activity`, {
+                    credentials: 'include',
+                    signal: ac.signal,
+                })
+                const data = await res.json()
+                if (!ac.signal.aborted && res.ok && data.activities) {
+                    const sixHoursAgo = new Date(Date.now() - 6 * 60 * 60 * 1000)
+                    const recentActivities = data.activities
+                        .filter((activity) => new Date(activity.createdAt) >= sixHoursAgo)
+                        .slice(0, 15)
+                    setActivities(recentActivities)
+                }
+            } catch (error) {
+                if (error?.name === 'AbortError') return
+                console.error('Error fetching activities:', error)
+            } finally {
+                if (!ac.signal.aborted) {
+                    activityFetchStartedRef.current = true
+                    setLoading(false)
+                }
+            }
+        })()
+
+        return () => ac.abort()
+    }, [user?._id, followingFingerprint])
 
     // Listen for new activities
     useEffect(() => {
