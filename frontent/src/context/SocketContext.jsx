@@ -35,6 +35,7 @@ export const SocketContextProvider = ({ children }) => {
   const [totalUnreadCount, setTotalUnreadCount] = useState(0); // Global unread message count
   const [notificationCount, setNotificationCount] = useState(0); // Global unread notification count
   const [chessChallenge, setChessChallenge] = useState(null); // Track incoming chess challenge
+  const [cardChallenge, setCardChallenge] = useState(null);   // Track incoming card (Go Fish) challenge
 
   const myVideo = useRef();
   const userVideo = useRef();
@@ -725,6 +726,8 @@ export const SocketContextProvider = ({ children }) => {
 
     peer.on('error', (err) => {
       console.error('❌ [WebRTC caller] Peer error:', err?.code, err?.message, err);
+      // ERR_DATA_CHANNEL on close is expected cleanup noise — don't surface it to the user
+      if (err?.code === 'ERR_DATA_CHANNEL') return;
       toast({ title: 'Call error', description: `${err?.code || err?.message || 'WebRTC error'}`, status: 'error', duration: 5000, isClosable: true, position: 'top' });
     });
 
@@ -898,6 +901,8 @@ export const SocketContextProvider = ({ children }) => {
 
     peer.on('error', (err) => {
       console.error('❌ [WebRTC answerer] Peer error:', err?.code, err?.message, err);
+      // ERR_DATA_CHANNEL on close is expected cleanup noise — don't surface it to the user
+      if (err?.code === 'ERR_DATA_CHANNEL') return;
       toast({ title: 'Call error', description: `${err?.code || err?.message || 'WebRTC error'}`, status: 'error', duration: 5000, isClosable: true, position: 'top' });
     });
 
@@ -1175,6 +1180,63 @@ export const SocketContextProvider = ({ children }) => {
     }
   };
 
+  // ── Card (Go Fish) challenge handlers ─────────────────────────────────────────
+  useEffect(() => {
+    if (!socket) return;
+
+    const handleCardChallenge = (data) => {
+      setCardChallenge({
+        from: data.from,
+        fromName: data.fromName,
+        fromUsername: data.fromUsername,
+        fromProfilePic: data.fromProfilePic,
+        isReceivingChallenge: true,
+      });
+    };
+
+    const handleCardDeclined = () => {
+      setCardChallenge(null);
+    };
+
+    socket.on('cardChallenge', handleCardChallenge);
+    socket.on('cardDeclined', handleCardDeclined);
+
+    return () => {
+      socket.off('cardChallenge', handleCardChallenge);
+      socket.off('cardDeclined', handleCardDeclined);
+    };
+  }, [socket]);
+
+  const acceptCardChallenge = () => {
+    if (!socket || !cardChallenge) return;
+
+    const roomId = `card_${cardChallenge.from}_${user._id}_${Date.now()}`;
+    const acceptData = { from: user._id, to: cardChallenge.from, roomId };
+
+    localStorage.setItem('cardRoomId', roomId);
+    socket.emit('acceptCardChallenge', acceptData);
+    setCardChallenge(null);
+  };
+
+  const declineCardChallenge = () => {
+    if (!socket || !cardChallenge) return;
+    socket.emit('declineCardChallenge', { from: user._id, to: cardChallenge.from });
+    setCardChallenge(null);
+  };
+
+  const endCardGameOnNavigate = () => {
+    const roomId = localStorage.getItem('cardRoomId');
+    if (roomId && socket) {
+      const match = roomId.match(/^card_(.+?)_(.+?)_(\d+)$/);
+      if (match) {
+        socket.emit('cardGameEnd', { roomId, player1: match[1], player2: match[2] });
+      } else {
+        socket.emit('cardGameEnd', { roomId });
+      }
+      localStorage.removeItem('cardRoomId');
+    }
+  };
+
   // Function to update which conversation is currently open (for notification sound control)
   const setSelectedConversationId = (userId) => {
     console.log('🔊 Setting selectedConversationId:', userId || 'none')
@@ -1209,6 +1271,10 @@ export const SocketContextProvider = ({ children }) => {
         acceptChessChallenge, // Function to accept chess challenge
         declineChessChallenge, // Function to decline chess challenge
         endChessGameOnNavigate, // Function to end chess game when navigating away
+        cardChallenge, // Export card (Go Fish) challenge state
+        acceptCardChallenge, // Function to accept card challenge
+        declineCardChallenge, // Function to decline card challenge
+        endCardGameOnNavigate, // Function to end card game when navigating away
       }}
     >
       {children}

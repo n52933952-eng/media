@@ -19,8 +19,10 @@ import WeatherPage from './Pages/WeatherPage'
 import NewsPage from './Pages/NewsPage'
 import NotificationsPage from './Pages/NotificationsPage'
 import ChessGamePage from './Pages/ChessGamePage'
+import CardGamePage from './Pages/CardGamePage'
 import CallNotification from './Components/CallNotification'
 import ChessChallengeNotification from './Components/ChessChallengeNotification'
+import CardChallengeNotification from './Components/CardChallengeNotification'
 
 const AppContent = () => {
   const location = useLocation()
@@ -31,7 +33,7 @@ const AppContent = () => {
   // Check if current path is a user page (e.g., /username, but not /username/post/123 or other routes)
   const pathParts = location.pathname.split('/').filter(Boolean)
   const isUserPage = pathParts.length === 1 && 
-                     !['sign', 'update', 'football', 'weather', 'news', 'notifications', 'chess', 'home', 'messages'].includes(pathParts[0])
+                     !['sign', 'update', 'football', 'weather', 'news', 'notifications', 'chess', 'card', 'home', 'messages'].includes(pathParts[0])
   // Check if it's the current user's own page
   const isOwnUserPage = isUserPage && user && pathParts[0] === user.username
 
@@ -42,6 +44,9 @@ const AppContent = () => {
       
       {/* Global Chess Challenge Notification - shows on all pages */}
       {user && <ChessChallengeNotification />}
+      
+      {/* Global Card (Go Fish) Challenge Notification - shows on all pages */}
+      {user && <CardChallengeNotification />}
       
       {/* Header always centered at 620px - same as other pages */}
       <Container maxW="620px" px={{ base: 4, md: 6 }} position="relative" zIndex={10}>
@@ -90,6 +95,7 @@ const AppContent = () => {
                 <Route path="/news" element={<NewsPage/>} />
                 <Route path="/notifications" element={user ? <NotificationsPage /> : <Navigate to="/" />} />
                 <Route path="/chess/:opponentId" element={user ? <ChessGamePage /> : <Navigate to="/" />} />
+                <Route path="/card/:opponentId" element={user ? <CardGamePage /> : <Navigate to="/" />} />
                 <Route path="/:username/post/:id" element={<PostPage/>}/>
               </Routes>
               {user && isOwnUserPage && <CreatePost/>}
