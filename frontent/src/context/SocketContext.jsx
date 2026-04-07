@@ -598,6 +598,23 @@ export const SocketContextProvider = ({ children }) => {
     };
   }, [socket, me, user?._id, isCalling]);
 
+  // Trickle ICE relay for web calls (backend already supports this event).
+  useEffect(() => {
+    if (!socket) return;
+    const handleIceCandidate = ({ candidate }) => {
+      if (!candidate || !peerRef.current) return;
+      try {
+        peerRef.current.signal(candidate);
+      } catch (err) {
+        console.warn('Error applying remote ICE candidate:', err?.message || err);
+      }
+    };
+    socket.on('iceCandidate', handleIceCandidate);
+    return () => {
+      socket.off('iceCandidate', handleIceCandidate);
+    };
+  }, [socket]);
+
   // Clean up peer connections and video streams
   const cleanupPeer = () => {
     if (connectionRef.current) {
@@ -672,7 +689,7 @@ export const SocketContextProvider = ({ children }) => {
     }
 
     // Create peer connection (web-to-web uses bundled ICE candidates)
-    const callerPeerOptions = { initiator: true, trickle: false, stream: currentStream };
+    const callerPeerOptions = { initiator: true, trickle: true, stream: currentStream };
     if (Array.isArray(iceServersRef.current) && iceServersRef.current.length > 0) {
       callerPeerOptions.config = { iceServers: iceServersRef.current };
     }
@@ -680,16 +697,25 @@ export const SocketContextProvider = ({ children }) => {
     peerRef.current = peer;
 
     peer.on('signal', (data) => {
-      // Ringing state starts only once we have a real offer to send.
-      setIsCalling(true);
-      setCall((prev) => ({ ...prev, isCalling: true }));
-      socket.emit('callUser', {
-        userToCall: userIdToStr(id),
-        signalData: data,
-        from: userIdToStr(user?._id || me),
-        name: user.username,
-        callType: effectiveType,
-      });
+      const fromId = userIdToStr(user?._id || me)
+      const toId = userIdToStr(id)
+      // Offer SDP -> start ringing and send call invite
+      if (data?.type === 'offer') {
+        setIsCalling(true);
+        setCall((prev) => ({ ...prev, isCalling: true }));
+        socket.emit('callUser', {
+          userToCall: toId,
+          signalData: data,
+          from: fromId,
+          name: user.username,
+          callType: effectiveType,
+        });
+        return
+      }
+      // Trickle ICE candidate -> send via dedicated socket event
+      if (data?.candidate) {
+        socket.emit('iceCandidate', { userToCall: toId, candidate: data, from: fromId });
+      }
     });
 
     peer.on('stream', (currentStream) => {
@@ -718,9 +744,10 @@ export const SocketContextProvider = ({ children }) => {
       }
     });
 
-    socket.once('callAccepted', (signal) => {
+    socket.once('callAccepted', (payload) => {
       try {
-        peer.signal(signal);
+        const answerSignal = payload?.signal || payload;
+        peer.signal(answerSignal);
         setCallAccepted(true);
         setIsCalling(false); // Stop ringing when call is accepted
       } catch (err) {
@@ -809,7 +836,7 @@ export const SocketContextProvider = ({ children }) => {
     }
     
     // Create peer connection (web-to-web uses bundled ICE candidates)
-    const answerPeerOptions = { initiator: false, trickle: false, stream: currentStream };
+    const answerPeerOptions = { initiator: false, trickle: true, stream: currentStream };
     if (Array.isArray(iceServersRef.current) && iceServersRef.current.length > 0) {
       answerPeerOptions.config = { iceServers: iceServersRef.current };
     }
@@ -817,7 +844,15 @@ export const SocketContextProvider = ({ children }) => {
     peerRef.current = peer;
 
     peer.on('signal', (data) => {
-      socket.emit('answerCall', { signal: data, to: userIdToStr(call.from) });
+      const fromId = userIdToStr(me || user?._id)
+      const toId = userIdToStr(call.from)
+      if (data?.type === 'answer') {
+        socket.emit('answerCall', { signal: data, to: toId });
+        return
+      }
+      if (data?.candidate) {
+        socket.emit('iceCandidate', { userToCall: toId, candidate: data, from: fromId });
+      }
     });
 
     // Handle ICE restart offer from mobile app (when connection fails)
