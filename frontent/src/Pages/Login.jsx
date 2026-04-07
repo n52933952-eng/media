@@ -24,7 +24,8 @@ import useShowToast from '../hooks/useShowToast.js'
 
 import{UserContext} from '../context/UserContext'
 import API_BASE_URL from '../config/api'
-import { GoogleLogin } from '@react-oauth/google'
+import { useGoogleLogin } from '@react-oauth/google'
+import { FcGoogle } from 'react-icons/fc'
 
 
 
@@ -32,6 +33,9 @@ export default function Login() {
 	
 
  const showToast = useShowToast()
+ const primaryBtnBg = useColorModeValue('gray.600', 'gray.700')
+ const primaryBtnHoverBg = useColorModeValue('gray.700', 'gray.800')
+ const dividerColor = useColorModeValue('gray.200', 'whiteAlpha.200')
 
 
   
@@ -88,42 +92,55 @@ export default function Login() {
   
   }
 
-  const handleGoogleSuccess = async (credentialResponse) => {
-    const idToken = credentialResponse?.credential
-    if (!idToken) {
-      showToast('Error', 'No Google token received', 'error')
-      return
-    }
-    setGoogleLoading(true)
-    try {
-      const baseUrl = API_BASE_URL || (import.meta.env.PROD ? window.location.origin : 'http://localhost:5000')
-      const res = await fetch(`${baseUrl}/api/user/google-login`, {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ idToken }),
-      })
-      const text = await res.text()
-      let data = {}
+  /** Plain “Continue with Google” + account picker (not “Continue as name” on the button). */
+  const startGoogleLogin = useGoogleLogin({
+    flow: 'implicit',
+    prompt: 'select_account',
+    onSuccess: async (tokenResponse) => {
+      const idToken = tokenResponse?.id_token
+      if (!idToken) {
+        showToast('Error', 'No Google ID token received. Try again.', 'error')
+        return
+      }
+      setGoogleLoading(true)
       try {
-        data = text ? JSON.parse(text) : {}
-      } catch {
-        showToast('Error', text || `Server error (${res.status})`, 'error')
-        return
+        const baseUrl = API_BASE_URL || (import.meta.env.PROD ? window.location.origin : 'http://localhost:5000')
+        const res = await fetch(`${baseUrl}/api/user/google-login`, {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ idToken }),
+        })
+        const text = await res.text()
+        let data = {}
+        try {
+          data = text ? JSON.parse(text) : {}
+        } catch {
+          showToast('Error', text || `Server error (${res.status})`, 'error')
+          return
+        }
+        if (data.error) {
+          showToast('Error', data.error, 'error')
+          return
+        }
+        const userData = { ...data, _id: data._id || data.id }
+        localStorage.setItem('userInfo', JSON.stringify(userData))
+        setUser(userData)
+      } catch (error) {
+        showToast('Error', error?.message || String(error), 'error')
+      } finally {
+        setGoogleLoading(false)
       }
-      if (data.error) {
-        showToast('Error', data.error, 'error')
-        return
-      }
-      const userData = { ...data, _id: data._id || data.id }
-      localStorage.setItem('userInfo', JSON.stringify(userData))
-      setUser(userData)
-    } catch (error) {
-      showToast('Error', error?.message || String(error), 'error')
-    } finally {
-      setGoogleLoading(false)
-    }
-  }
+    },
+    onError: (err) => {
+      const msg = err?.error_description || err?.error
+      if (msg) showToast('Error', String(msg), 'error')
+    },
+    onNonOAuthError: (e) => {
+      if (e?.type === 'popup_closed') return
+      showToast('Error', 'Google sign-in was cancelled or failed.', 'error')
+    },
+  })
 
 
 
@@ -131,18 +148,23 @@ export default function Login() {
 	
 	return (
 		
-    <Flex  align={"center"} justify={"center"} >
-    <Stack spacing={8} mx={"auto"} maxW={"lg"} py={2} px={6}>
-      <Stack align={"center"}>
-        <Heading fontSize={"4xl"} textAlign={"center"}>
+    <Flex align="center" justify="center" minH="100dvh" py={{ base: 3, md: 4 }} px={4}>
+    <Stack spacing={3} mx="auto" maxW="lg" w="full">
+      <Stack align="center" spacing={1}>
+        <Heading fontSize={{ base: '2xl', md: '3xl' }} textAlign="center" lineHeight="shorter">
           الدخول
         </Heading>
                   
       </Stack>
-      <Box rounded={"lg"} bg={useColorModeValue("white", "gray.dark")} boxShadow={"lg"} p={8}
-               w={{base:"full",sm:"400px"}}
-              >
-        <Stack spacing={4}>
+      <Box
+        rounded="lg"
+        bg={useColorModeValue('white', 'gray.dark')}
+        boxShadow="lg"
+        p={{ base: 5, sm: 6 }}
+        w={{ base: 'full', sm: '400px' }}
+        mx="auto"
+      >
+        <Stack spacing={3}>
           
                   <FormControl  isRequired>
                 <FormLabel>اسم المستخدم</FormLabel>
@@ -173,60 +195,51 @@ export default function Login() {
               </InputRightElement>
             </InputGroup>
           </FormControl>
-          <Stack spacing={10} pt={2}>
-            
-            
+          <Stack spacing={3} pt={1}>
             <Button
-              loadingText='Submitting'
-              size='lg'
-              bg={useColorModeValue("gray.600", "gray.700")}
-              color={"white"}
-              _hover={{
-                bg: useColorModeValue("gray.700", "gray.800"),
-              }}
-             onClick={handleLogin}
-             isDisabled={googleLoading}
+              loadingText="Submitting"
+              size="lg"
+              w="full"
+              bg={primaryBtnBg}
+              color="white"
+              _hover={{ bg: primaryBtnHoverBg }}
+              onClick={handleLogin}
+              isDisabled={googleLoading}
             >
               الدخول
             </Button>
-          </Stack>
-          <>
-            <Divider />
-            <Box
-              display="flex"
-              justifyContent="center"
+            <Divider borderColor={dividerColor} />
+            <Button
               w="full"
-              minH="44px"
-              opacity={googleLoading ? 0.6 : 1}
-              pointerEvents={googleLoading ? 'none' : 'auto'}
+              size="lg"
+              bg={primaryBtnBg}
+              color="white"
+              _hover={{ bg: primaryBtnHoverBg }}
+              leftIcon={<FcGoogle size={22} />}
+              onClick={() => startGoogleLogin()}
+              isLoading={googleLoading}
+              isDisabled={googleLoading}
+              loadingText="Google"
             >
-              <GoogleLogin
-                onSuccess={handleGoogleSuccess}
-                onError={() => showToast('Error', 'Google sign-in failed', 'error')}
-                text="continue_with"
-                shape="rectangular"
-                size="large"
-                width="100%"
-                locale="en"
-              />
-            </Box>
-          </>
-          <Stack pt={6}>
-            <Text align={"center"}>
-              ليس لديك حساب?{" "}
-              
-                              <Link color={"blue.400"} to={"/sign"}>
-                التسجيل
-              </Link>
-            
-                          </Text>
+              Continue with Google
+            </Button>
           </Stack>
+          <Text align="center" fontSize="sm" pt={1}>
+            ليس لديك حساب?{' '}
+            <Link color="blue.400" to="/sign">
+              التسجيل
+            </Link>
+          </Text>
         </Stack>
       </Box>
-     <Box >
-     <Text align="center" fontWeight="bold">برمجه وتطوير المهندس مهند</Text>
-     <Text align="center">j4116507@gmail.com</Text>
-     </Box>
+      <Box pt={1}>
+        <Text align="center" fontWeight="bold" fontSize="sm">
+          برمجه وتطوير المهندس مهند
+        </Text>
+        <Text align="center" fontSize="xs" color="gray.500">
+          j4116507@gmail.com
+        </Text>
+      </Box>
     
     </Stack>
   
