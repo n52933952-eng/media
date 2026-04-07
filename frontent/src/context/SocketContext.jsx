@@ -728,25 +728,19 @@ export const SocketContextProvider = ({ children }) => {
       toast({ title: 'Call error', description: `${err?.code || err?.message || 'WebRTC error'}`, status: 'error', duration: 5000, isClosable: true, position: 'top' });
     });
 
-    // Monitor underlying ICE state for diagnostics
+    // Monitor underlying ICE state for diagnostics (addEventListener = no conflict with simple-peer)
     if (peer._pc) {
-      peer._pc.oniceconnectionstatechange = () => {
+      peer._pc.addEventListener('iceconnectionstatechange', () => {
         const s = peer._pc.iceConnectionState;
         console.log(`🧊 [WebRTC caller] ICE state: ${s}`);
-        if (s === 'failed') {
-          console.error('❌ [WebRTC caller] ICE failed — no reachable candidate pair. TURN may be needed.');
-        }
-      };
-      peer._pc.onicegatheringstatechange = () => {
+        if (s === 'failed') console.error('❌ [WebRTC caller] ICE failed — no reachable candidate pair. TURN may be needed.');
+      });
+      peer._pc.addEventListener('icegatheringstatechange', () => {
         console.log(`🧊 [WebRTC caller] ICE gathering: ${peer._pc.iceGatheringState}`);
-      };
-      const origOnIce = peer._pc.onicecandidate;
-      peer._pc.onicecandidate = (e) => {
-        if (e.candidate) {
-          console.log(`🧊 [WebRTC caller] Candidate: type=${e.candidate.type} proto=${e.candidate.protocol} addr=${e.candidate.address}`);
-        }
-        if (origOnIce) origOnIce.call(peer._pc, e);
-      };
+      });
+      peer._pc.addEventListener('icecandidate', (e) => {
+        if (e.candidate) console.log(`🧊 [WebRTC caller] Candidate: type=${e.candidate.type} proto=${e.candidate.protocol} addr=${e.candidate.address}`);
+      });
     }
 
     peer.on('signal', (data) => {
@@ -835,7 +829,12 @@ export const SocketContextProvider = ({ children }) => {
   // Answer an incoming call
   const answerCall = async () => {
     const partnerId = userIdToStr(call.from)
-    cleanupPeer();
+    // Rescue ICE candidates that arrived BEFORE the user tapped Answer (mobile sends them immediately
+    // after its offer). cleanupPeer() wipes pendingRemoteIceRef, so save & filter first.
+    const rescuedIce = pendingRemoteIceRef.current.filter(() => true); // copy
+    cleanupPeer(); // resets pendingRemoteIceRef to []
+    // Restore the rescued candidates (already normalised for simple-peer) for the correct partner
+    pendingRemoteIceRef.current = rescuedIce;
     if (partnerId) callPartnerIdRef.current = partnerId
     setCallAccepted(true);
     setCallEnded(false);
@@ -902,25 +901,19 @@ export const SocketContextProvider = ({ children }) => {
       toast({ title: 'Call error', description: `${err?.code || err?.message || 'WebRTC error'}`, status: 'error', duration: 5000, isClosable: true, position: 'top' });
     });
 
-    // Monitor underlying ICE state for diagnostics
+    // Monitor underlying ICE state for diagnostics (addEventListener = no conflict with simple-peer)
     if (peer._pc) {
-      peer._pc.oniceconnectionstatechange = () => {
+      peer._pc.addEventListener('iceconnectionstatechange', () => {
         const s = peer._pc.iceConnectionState;
         console.log(`🧊 [WebRTC answerer] ICE state: ${s}`);
-        if (s === 'failed') {
-          console.error('❌ [WebRTC answerer] ICE failed — no reachable candidate pair. TURN may be needed.');
-        }
-      };
-      peer._pc.onicegatheringstatechange = () => {
+        if (s === 'failed') console.error('❌ [WebRTC answerer] ICE failed — no reachable candidate pair. TURN may be needed.');
+      });
+      peer._pc.addEventListener('icegatheringstatechange', () => {
         console.log(`🧊 [WebRTC answerer] ICE gathering: ${peer._pc.iceGatheringState}`);
-      };
-      const origOnIce = peer._pc.onicecandidate;
-      peer._pc.onicecandidate = (e) => {
-        if (e.candidate) {
-          console.log(`🧊 [WebRTC answerer] Candidate: type=${e.candidate.type} proto=${e.candidate.protocol} addr=${e.candidate.address}`);
-        }
-        if (origOnIce) origOnIce.call(peer._pc, e);
-      };
+      });
+      peer._pc.addEventListener('icecandidate', (e) => {
+        if (e.candidate) console.log(`🧊 [WebRTC answerer] Candidate: type=${e.candidate.type} proto=${e.candidate.protocol} addr=${e.candidate.address}`);
+      });
     }
 
     peer.on('signal', (data) => {
