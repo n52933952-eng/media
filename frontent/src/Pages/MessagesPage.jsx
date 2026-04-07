@@ -40,6 +40,18 @@ import { MdDelete } from 'react-icons/md'
 import EmojiPicker from 'emoji-picker-react'
 import { compressVideo, needsCompression } from '../utils/videoCompress'
 
+/** Match socket `userId` strings to API user `_id` (string or ObjectId) — strict === fails and hides online friends. */
+const idStr = (id) => {
+  if (id == null || id === '') return ''
+  if (typeof id === 'string') return id.trim()
+  if (typeof id === 'object' && typeof id.toString === 'function') return String(id.toString()).trim()
+  return String(id).trim()
+}
+
+const isUserInOnlineList = (onlineList, userId) =>
+  Array.isArray(onlineList) &&
+  onlineList.some((ou) => idStr(ou.userId || ou._id) === idStr(userId))
+
 const MessagesPage = () => {
   const { user } = useContext(UserContext)
   const socketContext = useContext(SocketContext)
@@ -2123,7 +2135,7 @@ const MessagesPage = () => {
                       name={u.name || u.username || 'User'}
                       bg={useColorModeValue('blue.500', 'blue.600')}
                     />
-                    {onlineUser?.some(ou => (ou.userId || ou._id) === u._id) && (
+                    {isUserInOnlineList(onlineUser, u._id) && (
                       <Box
                         position="absolute"
                         bottom={0}
@@ -2213,7 +2225,7 @@ const MessagesPage = () => {
                           name={otherUser?.name || otherUser?.username || 'User'}
                           bg={useColorModeValue('blue.500', 'blue.600')}
                         />
-                        {onlineUser?.some(u => (u.userId || u._id) === otherUser?._id) && (
+                        {isUserInOnlineList(onlineUser, otherUser?._id) && (
                           <Box
                             position="absolute"
                             bottom={0}
@@ -2374,7 +2386,7 @@ const MessagesPage = () => {
                 >
                   {selectedConversation.participants[0]?.name || selectedConversation.participants[0]?.username || 'Unknown User'}
                 </Text>
-                {onlineUser?.some(u => (u.userId || u._id) === selectedConversation.participants[0]?._id) && (
+                {isUserInOnlineList(onlineUser, selectedConversation.participants[0]?._id) && (
                   <>
                     <Text fontSize={{ base: "2xs", md: "xs" }} color="gray.500">
                       •
@@ -3591,11 +3603,13 @@ const MessagesPage = () => {
         
         <VStack align="stretch" spacing={0} p={2}>
           {followedUsers
-            .filter(user => onlineUser?.some(ou => (ou.userId || ou._id) === user._id))
+            .filter((user) => isUserInOnlineList(onlineUser, user._id))
             .sort((a, b) => {
               // Get onlineAt timestamps for both users
-              const aOnline = onlineUser?.find(ou => (ou.userId || ou._id) === a._id)?.onlineAt || 0
-              const bOnline = onlineUser?.find(ou => (ou.userId || ou._id) === b._id)?.onlineAt || 0
+              const aOnline =
+                onlineUser?.find((ou) => idStr(ou.userId || ou._id) === idStr(a._id))?.onlineAt || 0
+              const bOnline =
+                onlineUser?.find((ou) => idStr(ou.userId || ou._id) === idStr(b._id))?.onlineAt || 0
               // Sort by most recent first (highest timestamp first)
               return bOnline - aOnline
             })
@@ -3640,7 +3654,7 @@ const MessagesPage = () => {
                 </Box>
               </Flex>
             ))}
-          {followedUsers.filter(user => onlineUser?.some(ou => (ou.userId || ou._id) === user._id)).length === 0 && (
+          {followedUsers.filter((user) => isUserInOnlineList(onlineUser, user._id)).length === 0 && (
             <Text px={4} py={8} color="gray.500" fontSize="sm" textAlign="center">
               No friends online
             </Text>
