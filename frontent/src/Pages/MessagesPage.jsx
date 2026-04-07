@@ -3436,15 +3436,19 @@ const MessagesPage = () => {
                   <MenuItem
                     icon={<FaVideo />}
                     onClick={() => {
-                      const recipientId = selectedConversation?.participants[0]?._id
+                      const currentUserId = idStr(user?._id)
+                      const recipient = selectedConversation?.participants?.find(
+                        (p) => idStr(p?._id) !== currentUserId
+                      ) || selectedConversation?.participants?.[0]
+                      const recipientId = recipient?._id
                       if (recipientId && callUser) {
                         // Check if user is busy before calling - check both socket AND database
-                        if (busyUsers?.has(recipientId) || selectedConversation?.participants[0]?.inCall || busyUsers?.has(user?._id) || user?.inCall) {
+                        if (busyUsers?.has(idStr(recipientId)) || recipient?.inCall || busyUsers?.has(idStr(user?._id)) || user?.inCall) {
                           showToast('Error', 'User is currently in a call', 'error')
                           return
                         }
                         // Get recipient name from conversation
-                        const recipientName = selectedConversation?.participants[0]?.name || selectedConversation?.participants[0]?.username
+                        const recipientName = recipient?.name || recipient?.username
                         callUser(recipientId, recipientName, 'video')
                       }
                     }}
@@ -3472,15 +3476,19 @@ const MessagesPage = () => {
                   <MenuItem
                     icon={<FaPhone />}
                     onClick={() => {
-                      const recipientId = selectedConversation?.participants[0]?._id
+                      const currentUserId = idStr(user?._id)
+                      const recipient = selectedConversation?.participants?.find(
+                        (p) => idStr(p?._id) !== currentUserId
+                      ) || selectedConversation?.participants?.[0]
+                      const recipientId = recipient?._id
                       if (recipientId && callUser) {
                         // Check if user is busy before calling - check both socket AND database
-                        if (busyUsers?.has(recipientId) || selectedConversation?.participants[0]?.inCall || busyUsers?.has(user?._id) || user?.inCall) {
+                        if (busyUsers?.has(idStr(recipientId)) || recipient?.inCall || busyUsers?.has(idStr(user?._id)) || user?.inCall) {
                           showToast('Error', 'User is currently in a call', 'error')
                           return
                         }
                         // Get recipient name from conversation
-                        const recipientName = selectedConversation?.participants[0]?.name || selectedConversation?.participants[0]?.username
+                        const recipientName = recipient?.name || recipient?.username
                         callUser(recipientId, recipientName, 'audio')
                       }
                     }}

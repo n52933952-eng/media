@@ -511,7 +511,7 @@ export const SocketContextProvider = ({ children }) => {
     if (!socket) return;
 
     const handleCallcomming = ({ from, name: callerName, signal, userToCall, callType: incomingCallType = 'video' }) => {
-      const currentUserId = userIdToStr(me || user?._id)
+      const currentUserId = userIdToStr(user?._id || me)
       const fromId = userIdToStr(from)
       const targetId = userIdToStr(userToCall)
 
@@ -637,7 +637,7 @@ export const SocketContextProvider = ({ children }) => {
       socket.emit('callUser', {
         userToCall: userIdToStr(id),
         signalData: data,
-        from: userIdToStr(me),
+        from: userIdToStr(user?._id || me),
         name: user.username,
         callType: type,
       });
