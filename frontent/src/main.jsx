@@ -66,9 +66,5 @@ const appShell = (
 )
 
 createRoot(document.getElementById('root')).render(
-  GOOGLE_WEB_CLIENT_ID ? (
-    <GoogleOAuthProvider clientId={GOOGLE_WEB_CLIENT_ID}>{appShell}</GoogleOAuthProvider>
-  ) : (
-    appShell
-  )
+  <GoogleOAuthProvider clientId={GOOGLE_WEB_CLIENT_ID}>{appShell}</GoogleOAuthProvider>
 )

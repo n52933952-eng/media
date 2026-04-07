@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "nodemon backend/index.js",
     "start": "node backend/index.js",
-    "build": "npm install && npm install --prefix frontent && npm run build --prefix frontent"
+    "build": "npm install && npm install --prefix frontent --include=dev && npm run build --prefix frontent"
   },
   "keywords": [],
   "author": "",

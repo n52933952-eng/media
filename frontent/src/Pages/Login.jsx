@@ -25,7 +25,6 @@ import useShowToast from '../hooks/useShowToast.js'
 import{UserContext} from '../context/UserContext'
 import API_BASE_URL from '../config/api'
 import { GoogleLogin } from '@react-oauth/google'
-import { GOOGLE_WEB_CLIENT_ID } from '../config/googleWebClient'
 
 
 
@@ -191,22 +190,27 @@ export default function Login() {
               الدخول
             </Button>
           </Stack>
-          {GOOGLE_WEB_CLIENT_ID && (
-            <>
-              <Divider />
-              <Box display="flex" justifyContent="center" w="full" opacity={googleLoading ? 0.6 : 1} pointerEvents={googleLoading ? 'none' : 'auto'}>
-                <GoogleLogin
-                  onSuccess={handleGoogleSuccess}
-                  onError={() => showToast('Error', 'Google sign-in failed', 'error')}
-                  text="continue_with"
-                  shape="rectangular"
-                  size="large"
-                  width="100%"
-                  locale="en"
-                />
-              </Box>
-            </>
-          )}
+          <>
+            <Divider />
+            <Box
+              display="flex"
+              justifyContent="center"
+              w="full"
+              minH="44px"
+              opacity={googleLoading ? 0.6 : 1}
+              pointerEvents={googleLoading ? 'none' : 'auto'}
+            >
+              <GoogleLogin
+                onSuccess={handleGoogleSuccess}
+                onError={() => showToast('Error', 'Google sign-in failed', 'error')}
+                text="continue_with"
+                shape="rectangular"
+                size="large"
+                width="100%"
+                locale="en"
+              />
+            </Box>
+          </>
           <Stack pt={6}>
             <Text align={"center"}>
               ليس لديك حساب?{" "}
