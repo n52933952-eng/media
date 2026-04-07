@@ -1,10 +1,18 @@
-import React, { useState, useEffect, useContext } from 'react'
+import React, { useState, useEffect, useContext, useMemo, useCallback } from 'react'
 import { Box, Flex, Text, Avatar, VStack, HStack, Spinner, useColorModeValue, Divider, IconButton } from '@chakra-ui/react'
 import { useNavigate } from 'react-router-dom'
 import { SocketContext } from '../context/SocketContext'
 import { UserContext } from '../context/UserContext'
 import { formatDistanceToNow } from 'date-fns'
 import { CloseIcon } from '@chakra-ui/icons'
+import API_BASE_URL from '../config/api'
+
+/** Normalize a following entry (ObjectId, string, or { _id }) to string id */
+function followIdToString(f) {
+    if (f == null) return ''
+    if (typeof f === 'object' && f._id != null) return String(f._id)
+    return String(f)
+}
 
 const ActivityFeed = () => {
     const { socket } = useContext(SocketContext) || {}
@@ -19,49 +27,49 @@ const ActivityFeed = () => {
     const textColor = useColorModeValue('gray.800', 'white')
     const secondaryTextColor = useColorModeValue('gray.600', 'gray.400')
 
-    // Fetch activities
-    useEffect(() => {
-        const fetchActivities = async () => {
-            try {
-                const res = await fetch(
-                    `${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/activity`,
-                    { credentials: 'include' }
-                )
-                const data = await res.json()
-                if (res.ok && data.activities) {
-                    // Filter out activities older than 6 hours and limit to 15
-                    const sixHoursAgo = new Date(Date.now() - 6 * 60 * 60 * 1000)
-                    const recentActivities = data.activities
-                        .filter(activity => new Date(activity.createdAt) >= sixHoursAgo)
-                        .slice(0, 15) // Show only 15 most recent
-                    setActivities(recentActivities)
-                }
-            } catch (error) {
-                console.error('Error fetching activities:', error)
-            } finally {
-                setLoading(false)
-            }
-        }
+    // When user follows/unfollows, following[] changes — refetch so existing 6h activities appear immediately (no full page refresh)
+    const followingFingerprint = useMemo(() => {
+        const list = user?.following
+        if (!Array.isArray(list) || list.length === 0) return ''
+        return [...list].map(followIdToString).filter(Boolean).sort().join(',')
+    }, [user?.following])
 
-        fetchActivities()
+    const fetchActivities = useCallback(async () => {
+        try {
+            const base = API_BASE_URL || (import.meta.env.PROD ? window.location.origin : 'http://localhost:5000')
+            const res = await fetch(`${base}/api/activity`, { credentials: 'include' })
+            const data = await res.json()
+            if (res.ok && data.activities) {
+                const sixHoursAgo = new Date(Date.now() - 6 * 60 * 60 * 1000)
+                const recentActivities = data.activities
+                    .filter((activity) => new Date(activity.createdAt) >= sixHoursAgo)
+                    .slice(0, 15)
+                setActivities(recentActivities)
+            }
+        } catch (error) {
+            console.error('Error fetching activities:', error)
+        } finally {
+            setLoading(false)
+        }
     }, [])
+
+    useEffect(() => {
+        setLoading(true)
+        fetchActivities()
+    }, [fetchActivities, followingFingerprint])
 
     // Listen for new activities
     useEffect(() => {
         if (!socket) return
 
         const handleNewActivity = (activity) => {
-            // CRITICAL: Only add activity if it's from a user we follow
-            // This prevents showing activities from users we don't follow
             if (!user?.following || !activity?.userId?._id) {
-                return // Skip if we don't have following list or activity has no user
+                return
             }
-            
+
             const activityUserId = activity.userId._id.toString()
-            const isFollowing = user.following.some(followId => 
-                followId.toString() === activityUserId
-            )
-            
+            const isFollowing = user.following.some((f) => followIdToString(f) === activityUserId)
+
             if (!isFollowing) {
                 // Don't add activity from users we don't follow
                 if (import.meta.env.DEV) {
@@ -87,7 +95,7 @@ const ActivityFeed = () => {
         return () => {
             socket.off('newActivity', handleNewActivity)
         }
-    }, [socket, user?.following]) // Include user.following to check if we follow the activity creator
+    }, [socket, user?.following])
 
     const getActivityIcon = (type) => {
         switch (type) {
