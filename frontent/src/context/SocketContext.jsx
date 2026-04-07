@@ -157,9 +157,18 @@ export const SocketContextProvider = ({ children }) => {
       query: { userId: userIdToStr(user._id) },
     });
 
-    // Wait for socket to connect before setting it as ready
+    // Re-assert "online" so Redis presence matches an active web session. Mobile may have set
+    // clientPresence offline while backgrounded — same userId would block in-app callUser delivery.
+    const emitClientPresenceOnline = () => {
+      newSocket.emit('clientPresence', { status: 'online' })
+    }
+
     newSocket.on('connect', () => {
       console.log('✅ Socket connected successfully! ID:', newSocket.id);
+      emitClientPresenceOnline()
+      // Win race with another device (e.g. mobile) that may emit offline right after we connect.
+      window.setTimeout(emitClientPresenceOnline, 300)
+      window.setTimeout(emitClientPresenceOnline, 2000)
     });
 
     newSocket.on('disconnect', () => {
@@ -355,6 +364,31 @@ export const SocketContextProvider = ({ children }) => {
       newSocket.close();
     };
   }, [user]);
+
+  // Keep Redis presence "online" while this tab is active so calls + presenceSubscribe match mobile.
+  // Do not emit "offline" on tab blur — socket should still receive callUser when the tab is in the background.
+  useEffect(() => {
+    if (!socket) return
+
+    const assertPresenceOnline = () => {
+      if (!socket.connected || document.visibilityState !== 'visible') return
+      socket.emit('clientPresence', { status: 'online' })
+    }
+
+    assertPresenceOnline()
+    document.addEventListener('visibilitychange', assertPresenceOnline)
+    window.addEventListener('focus', assertPresenceOnline)
+
+    const interval = window.setInterval(() => {
+      assertPresenceOnline()
+    }, 45_000)
+
+    return () => {
+      document.removeEventListener('visibilitychange', assertPresenceOnline)
+      window.removeEventListener('focus', assertPresenceOnline)
+      window.clearInterval(interval)
+    }
+  }, [socket])
 
   useEffect(() => {
     if (!socket) return;
