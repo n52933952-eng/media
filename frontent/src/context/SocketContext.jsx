@@ -42,6 +42,9 @@ export const SocketContextProvider = ({ children }) => {
   const peerRef = useRef();
   const streamRef = useRef(null);
   const iceServersRef = useRef(null);
+  /** Mobile can trickle ICE before web taps Answer — queue until peer exists and offer is applied. */
+  const pendingRemoteIceRef = useRef([]);
+  const callPartnerIdRef = useRef(null);
   const ringtoneAudio = useRef(new Audio(ringTone)); // Audio for incoming call ringtone
   const messageSoundAudio = useRef(new Audio(messageSound)); // Audio for new unread message notification
   const chessToneAudio = useRef(new Audio(chessTone)); // Audio for chess challenge notification
@@ -538,6 +541,7 @@ export const SocketContextProvider = ({ children }) => {
       // If userToCall matches current user, we're receiving the call
       if (targetId && targetId === currentUserId && fromId !== currentUserId) {
         // We are receiving the call (incoming)
+        callPartnerIdRef.current = fromId
         setCallType(incomingCallType);
         setCall({ isReceivingCall: true, from: fromId, name: callerName, signal, userToCall: targetId, callType: incomingCallType });
         setIsCalling(false);
@@ -601,8 +605,16 @@ export const SocketContextProvider = ({ children }) => {
   // Trickle ICE relay for web calls (backend already supports this event).
   useEffect(() => {
     if (!socket) return;
-    const handleIceCandidate = ({ candidate }) => {
-      if (!candidate || !peerRef.current) return;
+    const handleIceCandidate = ({ candidate, from }) => {
+      if (!candidate) return;
+      const fromId = userIdToStr(from);
+      if (callPartnerIdRef.current && fromId && fromId !== callPartnerIdRef.current) {
+        return;
+      }
+      if (!peerRef.current) {
+        pendingRemoteIceRef.current.push(candidate);
+        return;
+      }
       try {
         peerRef.current.signal(candidate);
       } catch (err) {
@@ -630,10 +642,13 @@ export const SocketContextProvider = ({ children }) => {
     }
     // Clear remote stream state
     setRemoteStream(null);
+    pendingRemoteIceRef.current = [];
+    callPartnerIdRef.current = null;
   };
 
   const callUser = async (id, recipientName = null, type = 'video') => {
     cleanupPeer();
+    callPartnerIdRef.current = userIdToStr(id)
     setCallAccepted(false);
     setCallEnded(false);
     let effectiveType = type;
@@ -781,7 +796,9 @@ export const SocketContextProvider = ({ children }) => {
 
   // Answer an incoming call
   const answerCall = async () => {
+    const partnerId = userIdToStr(call.from)
     cleanupPeer();
+    if (partnerId) callPartnerIdRef.current = partnerId
     setCallAccepted(true);
     setCallEnded(false);
     setIsCalling(false); // Stop ringing when answering
@@ -841,7 +858,6 @@ export const SocketContextProvider = ({ children }) => {
       answerPeerOptions.config = { iceServers: iceServersRef.current };
     }
     const peer = new Peer(answerPeerOptions);
-    peerRef.current = peer;
 
     peer.on('signal', (data) => {
       const fromId = userIdToStr(me || user?._id)
@@ -891,7 +907,17 @@ export const SocketContextProvider = ({ children }) => {
       }
     }
 
+    peerRef.current = peer;
     connectionRef.current = peer;
+
+    const queued = pendingRemoteIceRef.current.splice(0);
+    for (const c of queued) {
+      try {
+        peer.signal(c);
+      } catch (err) {
+        console.warn('Error applying queued ICE candidate:', err?.message || err);
+      }
+    }
   };
 
   // Leave the call, stop tracks and refresh stream
