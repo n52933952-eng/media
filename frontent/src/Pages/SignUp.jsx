@@ -13,7 +13,6 @@ import {
 	Text,
 	useColorModeValue,
 	Select,
-	Divider,
 } from "@chakra-ui/react";
 import { useState,useContext } from "react";
 
@@ -24,8 +23,6 @@ import{Link} from 'react-router-dom'
 import{useNavigate} from 'react-router-dom'
 import{UserContext} from '../context/UserContext'
 import API_BASE_URL from '../config/api'
-import { GoogleLogin } from '@react-oauth/google'
-import { GOOGLE_WEB_CLIENT_ID } from '../config/googleWebClient'
 
 
 
@@ -41,8 +38,6 @@ const[inputs,setInputs]=useState({name:"",username:"",email:"",password:"",count
 
 
  const{setUser}=useContext(UserContext)
-
- const [googleLoading, setGoogleLoading] = useState(false)
 
 
 
@@ -163,45 +158,6 @@ const toast =useToast()
     })
   }
 };
-
-  const handleGoogleSuccess = async (credentialResponse) => {
-    const idToken = credentialResponse?.credential
-    if (!idToken) {
-      toast({ title: 'Error', description: 'No Google token received', status: 'error', duration: 4000, isClosable: true })
-      return
-    }
-    setGoogleLoading(true)
-    try {
-      const baseUrl = API_BASE_URL || (import.meta.env.PROD ? window.location.origin : 'http://localhost:5000')
-      const res = await fetch(`${baseUrl}/api/user/google-login`, {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ idToken }),
-      })
-      const text = await res.text()
-      let data = {}
-      try {
-        data = text ? JSON.parse(text) : {}
-      } catch {
-        toast({ title: 'Error', description: text || `Server error (${res.status})`, status: 'error', duration: 5000, isClosable: true })
-        return
-      }
-      if (data.error) {
-        toast({ title: 'Error', description: data.error, status: 'error', duration: 5000, isClosable: true })
-        return
-      }
-      const userData = { ...data, _id: data._id || data.id }
-      localStorage.setItem('userInfo', JSON.stringify(userData))
-      setUser(userData)
-      toast({ title: 'Signed in with Google', description: 'Welcome!', status: 'success', duration: 3000, isClosable: true })
-      navigate('/home')
-    } catch (error) {
-      toast({ title: 'Error', description: error?.message || String(error), status: 'error', duration: 5000, isClosable: true })
-    } finally {
-      setGoogleLoading(false)
-    }
-  }
 
 
 
@@ -349,27 +305,10 @@ return (
 								}}
 								
                 onClick={handleSignup}
-                isDisabled={googleLoading}
 							>
 								التسجيل
 							</Button>
 						</Stack>
-						{GOOGLE_WEB_CLIENT_ID && (
-							<>
-								<Divider />
-								<Box display="flex" justifyContent="center" w="full" opacity={googleLoading ? 0.6 : 1} pointerEvents={googleLoading ? 'none' : 'auto'}>
-									<GoogleLogin
-										onSuccess={handleGoogleSuccess}
-										onError={() => toast({ title: 'Error', description: 'Google sign-in failed', status: 'error', duration: 4000, isClosable: true })}
-										text="continue_with"
-										shape="rectangular"
-										size="large"
-										width="100%"
-										locale="en"
-									/>
-								</Box>
-							</>
-						)}
 						<Stack pt={6}>
 							<Text align={"center"}>
 								لديك حساب?{" "}
