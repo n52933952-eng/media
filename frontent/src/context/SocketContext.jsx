@@ -8,6 +8,14 @@ import ringTone from '../assets/ring.mp3'; // Import ring tone
 import messageSound from '../assets/frontend_src_assets_sounds_message.mp3'; // Import message notification sound
 import chessTone from '../assets/chesstone.mp3'; // Import chess challenge tone
 
+/** Match backend + mobile: user ids are strings; API may return Mongo ObjectId objects — strict === fails for incoming calls. */
+const userIdToStr = (id) => {
+  if (id == null || id === '') return ''
+  if (typeof id === 'string') return id.trim()
+  if (typeof id === 'object' && id != null && typeof id.toString === 'function') return String(id.toString()).trim()
+  return String(id).trim()
+}
+
 export const SocketContext = createContext();
 
 export const SocketContextProvider = ({ children }) => {
@@ -146,7 +154,7 @@ export const SocketContextProvider = ({ children }) => {
       : "http://localhost:5000";
 
     const newSocket = io(socketUrl, {
-      query: { userId: user._id },
+      query: { userId: userIdToStr(user._id) },
     });
 
     // Wait for socket to connect before setting it as ready
@@ -159,7 +167,7 @@ export const SocketContextProvider = ({ children }) => {
     });
 
     setSocket(newSocket);
-    setMe(user._id);
+    setMe(userIdToStr(user._id));
 
     newSocket?.on('getOnlineUser', (users) => setOnlineUser(users));
 
@@ -395,8 +403,8 @@ export const SocketContextProvider = ({ children }) => {
     const handleCallBusy = ({ userToCall, from }) => {
       setBusyUsers(prev => {
         const newSet = new Set(prev);
-        newSet.add(userToCall);
-        newSet.add(from);
+        if (userToCall) newSet.add(userIdToStr(userToCall));
+        if (from) newSet.add(userIdToStr(from));
         return newSet;
       });
     };
@@ -415,8 +423,8 @@ export const SocketContextProvider = ({ children }) => {
     const handleCallCancelled = ({ userToCall, from }) => {
       setBusyUsers(prev => {
         const newSet = new Set(prev);
-        if (userToCall) newSet.delete(userToCall);
-        if (from) newSet.delete(from);
+        if (userToCall) newSet.delete(userIdToStr(userToCall));
+        if (from) newSet.delete(userIdToStr(from));
         return newSet;
       });
     };
@@ -469,14 +477,15 @@ export const SocketContextProvider = ({ children }) => {
     if (!socket) return;
 
     const handleCallcomming = ({ from, name: callerName, signal, userToCall, callType: incomingCallType = 'video' }) => {
-      // Check if this is an incoming call (we're the receiver) or outgoing call (we're the caller)
-      const currentUserId = me || user?._id
-      
+      const currentUserId = userIdToStr(me || user?._id)
+      const fromId = userIdToStr(from)
+      const targetId = userIdToStr(userToCall)
+
       // If userToCall matches current user, we're receiving the call
-      if (userToCall === currentUserId && from !== currentUserId) {
+      if (targetId && targetId === currentUserId && fromId !== currentUserId) {
         // We are receiving the call (incoming)
         setCallType(incomingCallType);
-        setCall({ isReceivingCall: true, from, name: callerName, signal, userToCall, callType: incomingCallType });
+        setCall({ isReceivingCall: true, from: fromId, name: callerName, signal, userToCall: targetId, callType: incomingCallType });
         setIsCalling(false);
         // Don't get media stream until user answers - saves resources if they decline
         
@@ -521,10 +530,10 @@ export const SocketContextProvider = ({ children }) => {
       } 
       // If from matches current user, we're making the call (ringing state)
       // Don't update if we already set isCalling in callUser function
-      else if (from === currentUserId && !isCalling) {
+      else if (fromId === currentUserId && !isCalling) {
         // We are making the call - show ringing state
         setIsCalling(true);
-        setCall({ isCalling: true, userToCall, from, name: callerName, callType: incomingCallType });
+        setCall({ isCalling: true, userToCall: targetId, from: fromId, name: callerName, callType: incomingCallType });
       }
     };
 
@@ -533,7 +542,7 @@ export const SocketContextProvider = ({ children }) => {
     return () => {
       socket.off("callUser", handleCallcomming);
     };
-  }, [socket]);
+  }, [socket, me, user?._id, isCalling]);
 
   // Clean up peer connections and video streams
   const cleanupPeer = () => {
@@ -558,7 +567,7 @@ export const SocketContextProvider = ({ children }) => {
     setCallEnded(false);
     setIsCalling(true); // Start ringing state when calling
     setCallType(type);
-    setCall({ isCalling: true, userToCall: id, recipientName: recipientName, callType: type });
+    setCall({ isCalling: true, userToCall: userIdToStr(id), recipientName: recipientName, callType: type });
 
     // Get appropriate media stream based on call type
     // Check if we need a new stream (different type than current)
@@ -591,7 +600,13 @@ export const SocketContextProvider = ({ children }) => {
     peerRef.current = peer;
 
     peer.on('signal', (data) => {
-      socket.emit('callUser', { userToCall: id, signalData: data, from: me, name: user.username, callType: type });
+      socket.emit('callUser', {
+        userToCall: userIdToStr(id),
+        signalData: data,
+        from: userIdToStr(me),
+        name: user.username,
+        callType: type,
+      });
     });
 
     peer.on('stream', (currentStream) => {
@@ -684,8 +699,8 @@ export const SocketContextProvider = ({ children }) => {
     if (call.from) {
       setBusyUsers(prev => {
         const newSet = new Set(prev);
-        newSet.add(call.from);
-        newSet.add(me);
+        newSet.add(userIdToStr(call.from));
+        newSet.add(userIdToStr(me));
         return newSet;
       });
     }
@@ -695,7 +710,7 @@ export const SocketContextProvider = ({ children }) => {
     peerRef.current = peer;
 
     peer.on('signal', (data) => {
-      socket.emit('answerCall', { signal: data, to: call.from });
+      socket.emit('answerCall', { signal: data, to: userIdToStr(call.from) });
     });
 
     // Handle ICE restart offer from mobile app (when connection fails)
@@ -756,8 +771,8 @@ export const SocketContextProvider = ({ children }) => {
       // If receiving call, we are declining - notify the caller
       // If making call, we are canceling - notify the receiver
       socket.emit('cancelCall', {
-        conversationId: isReceiving ? from : userToCall,
-        sender: user._id,
+        conversationId: userIdToStr(isReceiving ? from : userToCall),
+        sender: userIdToStr(user._id),
       });
     }
     
@@ -765,8 +780,8 @@ export const SocketContextProvider = ({ children }) => {
     if (from || userToCall) {
       setBusyUsers(prev => {
         const newSet = new Set(prev);
-        if (from) newSet.delete(from);
-        if (userToCall) newSet.delete(userToCall);
+        if (from) newSet.delete(userIdToStr(from));
+        if (userToCall) newSet.delete(userIdToStr(userToCall));
         return newSet;
       });
     }
