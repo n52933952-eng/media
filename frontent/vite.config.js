@@ -3,6 +3,8 @@ import react from '@vitejs/plugin-react'
 import { nodePolyfills } from 'vite-plugin-node-polyfills'
 
 export default defineConfig({
+  // App is served at site root (e.g. https://xxx.onrender.com/). Do not use a subpath unless you set base.
+  base: '/',
   plugins: [
     react(),
     nodePolyfills(),

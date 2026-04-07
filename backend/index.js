@@ -144,11 +144,19 @@ app.use('/api/*', (req, res) => {
 // Serve static files from React app (for production)
 app.use(express.static(path.join(__dirname, '../frontent/dist')))
 
-// Catch all handler: send back React's index.html file for SPA routing (only for non-API routes)
+// Catch-all: SPA index.html for client routes only.
+// If a built asset is missing, express.static falls through — do NOT send HTML for /assets/*.js
+// or the browser shows: "Expected JavaScript module but got text/html" (MIME error).
 app.get('*', (req, res) => {
-    // Don't catch API routes - they should have been handled above
     if (req.path.startsWith('/api/')) {
         return res.status(404).json({ error: 'API route not found', path: req.originalUrl })
+    }
+    const p = req.path || ''
+    if (
+        p.startsWith('/assets/') ||
+        /\.(js|mjs|css|map|ico|png|jpe?g|gif|svg|webp|woff2?|ttf|eot|json|webmanifest)$/i.test(p)
+    ) {
+        return res.status(404).type('text/plain').send('Static file not found — run npm run build and redeploy frontent/dist')
     }
     res.sendFile(path.join(__dirname, '../frontent/dist/index.html'))
 })

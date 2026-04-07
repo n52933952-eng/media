@@ -24,8 +24,7 @@ import useShowToast from '../hooks/useShowToast.js'
 
 import{UserContext} from '../context/UserContext'
 import API_BASE_URL from '../config/api'
-import { useGoogleLogin } from '@react-oauth/google'
-import { FcGoogle } from 'react-icons/fc'
+import { GoogleLogin } from '@react-oauth/google'
 
 
 
@@ -92,55 +91,43 @@ export default function Login() {
   
   }
 
-  /** Plain “Continue with Google” + account picker (not “Continue as name” on the button). */
-  const startGoogleLogin = useGoogleLogin({
-    flow: 'implicit',
-    prompt: 'select_account',
-    onSuccess: async (tokenResponse) => {
-      const idToken = tokenResponse?.id_token
-      if (!idToken) {
-        showToast('Error', 'No Google ID token received. Try again.', 'error')
+  /** Credential flow (ID token) — avoids OAuth redirect_uri / postmessage issues with the token client. */
+  const handleGoogleCredential = async (credentialResponse) => {
+    const idToken = credentialResponse?.credential
+    if (!idToken) {
+      showToast('Error', 'No Google token received', 'error')
+      return
+    }
+    setGoogleLoading(true)
+    try {
+      const baseUrl = API_BASE_URL || (import.meta.env.PROD ? window.location.origin : 'http://localhost:5000')
+      const res = await fetch(`${baseUrl}/api/user/google-login`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ idToken }),
+      })
+      const text = await res.text()
+      let data = {}
+      try {
+        data = text ? JSON.parse(text) : {}
+      } catch {
+        showToast('Error', text || `Server error (${res.status})`, 'error')
         return
       }
-      setGoogleLoading(true)
-      try {
-        const baseUrl = API_BASE_URL || (import.meta.env.PROD ? window.location.origin : 'http://localhost:5000')
-        const res = await fetch(`${baseUrl}/api/user/google-login`, {
-          method: 'POST',
-          credentials: 'include',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ idToken }),
-        })
-        const text = await res.text()
-        let data = {}
-        try {
-          data = text ? JSON.parse(text) : {}
-        } catch {
-          showToast('Error', text || `Server error (${res.status})`, 'error')
-          return
-        }
-        if (data.error) {
-          showToast('Error', data.error, 'error')
-          return
-        }
-        const userData = { ...data, _id: data._id || data.id }
-        localStorage.setItem('userInfo', JSON.stringify(userData))
-        setUser(userData)
-      } catch (error) {
-        showToast('Error', error?.message || String(error), 'error')
-      } finally {
-        setGoogleLoading(false)
+      if (data.error) {
+        showToast('Error', data.error, 'error')
+        return
       }
-    },
-    onError: (err) => {
-      const msg = err?.error_description || err?.error
-      if (msg) showToast('Error', String(msg), 'error')
-    },
-    onNonOAuthError: (e) => {
-      if (e?.type === 'popup_closed') return
-      showToast('Error', 'Google sign-in was cancelled or failed.', 'error')
-    },
-  })
+      const userData = { ...data, _id: data._id || data.id }
+      localStorage.setItem('userInfo', JSON.stringify(userData))
+      setUser(userData)
+    } catch (error) {
+      showToast('Error', error?.message || String(error), 'error')
+    } finally {
+      setGoogleLoading(false)
+    }
+  }
 
 
 
@@ -209,20 +196,19 @@ export default function Login() {
               الدخول
             </Button>
             <Divider borderColor={dividerColor} />
-            <Button
-              w="full"
-              size="lg"
-              bg={primaryBtnBg}
-              color="white"
-              _hover={{ bg: primaryBtnHoverBg }}
-              leftIcon={<FcGoogle size={22} />}
-              onClick={() => startGoogleLogin()}
-              isLoading={googleLoading}
-              isDisabled={googleLoading}
-              loadingText="Google"
-            >
-              Continue with Google
-            </Button>
+            <Box w="full" display="flex" justifyContent="center" opacity={googleLoading ? 0.7 : 1} pointerEvents={googleLoading ? 'none' : 'auto'}>
+              <GoogleLogin
+                onSuccess={handleGoogleCredential}
+                onError={() => showToast('Error', 'Google sign-in failed', 'error')}
+                text="continue_with"
+                shape="rectangular"
+                size="large"
+                width="100%"
+                locale="en"
+                theme="filled_black"
+                auto_select={false}
+              />
+            </Box>
           </Stack>
           <Text align="center" fontSize="sm" pt={1}>
             ليس لديك حساب?{' '}
