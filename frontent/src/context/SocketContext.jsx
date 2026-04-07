@@ -154,7 +154,7 @@ export const SocketContextProvider = ({ children }) => {
       : "http://localhost:5000";
 
     const newSocket = io(socketUrl, {
-      query: { userId: userIdToStr(user._id) },
+      query: { userId: userIdToStr(user._id), clientType: 'web' },
     });
 
     // Re-assert "online" so Redis presence matches an active web session. Mobile may have set

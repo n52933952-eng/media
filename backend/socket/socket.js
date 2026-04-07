@@ -992,6 +992,8 @@ export const initializeSocket = async (app) => {
         console.log("user connected", socket.id)
         
         const userIdRaw = socket.handshake.query.userId
+        const clientTypeRaw = socket.handshake.query.clientType
+        const clientType = typeof clientTypeRaw === 'string' ? clientTypeRaw.trim().toLowerCase() : ''
         const userId = normalizeUserId(userIdRaw) || userIdRaw
         console.log("🔌 [socket] User connecting with userId:", userId, userIdRaw !== userId ? `(normalized from ${userIdRaw})` : '')
         // Presence subscription support (clients can subscribe to specific userIds)
@@ -1001,6 +1003,7 @@ export const initializeSocket = async (app) => {
             const socketData = {
                 socketId: socket.id,
                 onlineAt: Date.now(),
+                clientType: clientType || undefined,
             }
             // Presence before socket so mGet snapshots never see userSocket without matching `online` (avoids false offline / asymmetric status).
             await setUserPresence(userId, 'online')
@@ -1376,7 +1379,11 @@ export const initializeSocket = async (app) => {
             const rcvPresence = await getUserPresence(receiverId)
             const pr = rcvPresence != null ? String(rcvPresence).toLowerCase() : ''
             const clientMarkedOffline = pr === 'offline'
-            const receiverSocketId = clientMarkedOffline ? null : liveReceiverSocketId
+            // Safety for mobile: keep existing offline behavior unless receiver is an active WEB socket.
+            // Web clients can be marked offline by another device (same userId), which blocks browser ringing.
+            const receiverClientType = String(receiverData?.clientType || '').toLowerCase()
+            const allowLiveSocketForWeb = clientMarkedOffline && receiverClientType === 'web' && !!liveReceiverSocketId
+            const receiverSocketId = (clientMarkedOffline && !allowLiveSocketForWeb) ? null : liveReceiverSocketId
 
             const senderData = await getUserSocket(callerId)
             const senderSocketId = senderData?.socketId
@@ -1390,7 +1397,9 @@ export const initializeSocket = async (app) => {
             )
             console.log(`📞 [callUser] Receiver socket data:`, receiverData)
 
-            if (clientMarkedOffline && liveReceiverSocketId) {
+            if (allowLiveSocketForWeb) {
+                console.log(`🌐 [callUser] Receiver marked offline but live WEB socket found — delivering in-app callUser`)
+            } else if (clientMarkedOffline && liveReceiverSocketId) {
                 console.log(`📱 [callUser] Receiver marked offline — FCM ring even though socket still connected`)
             }
 
