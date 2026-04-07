@@ -611,12 +611,24 @@ export const SocketContextProvider = ({ children }) => {
       if (callPartnerIdRef.current && fromId && fromId !== callPartnerIdRef.current) {
         return;
       }
+      // Normalise to simple-peer signal format: { candidate: { candidate: string, sdpMid, sdpMLineIndex } }
+      // Mobile sends flat RTCIceCandidate: { candidate: string, sdpMid, sdpMLineIndex }
+      // Web (after our fix) sends the same flat format
+      // Old web format (before fix): { candidate: { candidate: string, ... } } — also handled
+      let signalData;
+      if (candidate && typeof candidate.candidate === 'string') {
+        signalData = { candidate };          // flat → wrap so simple-peer sees nested
+      } else if (candidate && typeof candidate.candidate === 'object') {
+        signalData = { candidate: candidate.candidate }; // already nested → unwrap one level
+      } else {
+        signalData = { candidate };
+      }
       if (!peerRef.current) {
-        pendingRemoteIceRef.current.push(candidate);
+        pendingRemoteIceRef.current.push(signalData);
         return;
       }
       try {
-        peerRef.current.signal(candidate);
+        peerRef.current.signal(signalData);
       } catch (err) {
         console.warn('Error applying remote ICE candidate:', err?.message || err);
       }
@@ -727,9 +739,9 @@ export const SocketContextProvider = ({ children }) => {
         });
         return
       }
-      // Trickle ICE candidate -> send via dedicated socket event
+      // Trickle ICE candidate -> extract inner candidate so mobile gets flat RTCIceCandidate format
       if (data?.candidate) {
-        socket.emit('iceCandidate', { userToCall: toId, candidate: data, from: fromId });
+        socket.emit('iceCandidate', { userToCall: toId, candidate: data.candidate, from: fromId });
       }
     });
 
@@ -866,8 +878,9 @@ export const SocketContextProvider = ({ children }) => {
         socket.emit('answerCall', { signal: data, to: toId });
         return
       }
+      // Trickle ICE candidate -> extract inner candidate so mobile gets flat RTCIceCandidate format
       if (data?.candidate) {
-        socket.emit('iceCandidate', { userToCall: toId, candidate: data, from: fromId });
+        socket.emit('iceCandidate', { userToCall: toId, candidate: data.candidate, from: fromId });
       }
     });
 
