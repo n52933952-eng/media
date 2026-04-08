@@ -7,8 +7,6 @@ import {SocketContext} from '../context/SocketContext'
 import {UserContext} from '../context/UserContext'
 import SuggestedUsers from '../Components/SuggestedUsers'
 import SuggestedChannels from '../Components/SuggestedChannels'
-import ChessChallenge from '../Components/ChessChallenge'
-import CardChallenge from '../Components/CardChallenge'
 import ActivityFeed from '../Components/ActivityFeed'
 
 
@@ -465,8 +463,6 @@ const HomePage = () => {
         minW={{ lg: '220px' }}
       >
         <SuggestedChannels onUserFollowed={fetchUserPosts} />
-        <ChessChallenge />
-        <CardChallenge />
       </Box>
 
       {/* Main Feed - Center */}

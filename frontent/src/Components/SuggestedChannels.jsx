@@ -5,6 +5,8 @@ import { UserContext } from '../context/UserContext'
 import { PostContext } from '../context/PostContext'
 import useShowToast from '../hooks/useShowToast'
 import FootballIcon from './FootballIcon'
+import ChessChallenge from './ChessChallenge'
+import CardChallenge from './CardChallenge'
 
 const SuggestedChannels = ({ onUserFollowed }) => {
     const { user, setUser } = useContext(UserContext)
@@ -541,8 +543,10 @@ const SuggestedChannels = ({ onUserFollowed }) => {
                 <Box minH="400px" display="flex" alignItems="center" justifyContent="center">
                     <Spinner size="sm" />
                 </Box>
-            ) : footballAccount ? (
+            ) : (
                 <>
+                    {footballAccount && (
+                    <>
                     {/* Compact Grid: Football & Weather */}
                     <SimpleGrid columns={2} spacing={2} mb={3}>
                         {/* Football Channel */}
@@ -699,9 +703,21 @@ const SuggestedChannels = ({ onUserFollowed }) => {
                             )}
                         </VStack>
                     </SimpleGrid>
+                    </>
+                    )}
+
+                    {/* Chess & Go Fish — compact row directly under Football / Weather */}
+                    <Flex gap={2} w="full" align="stretch" mb={3}>
+                        <Box flex="1" minW={0}>
+                            <ChessChallenge compact />
+                        </Box>
+                        <Box flex="1" minW={0}>
+                            <CardChallenge compact />
+                        </Box>
+                    </Flex>
                     
                     {/* Live Stream Channels */}
-                    {channels.length > 0 && (
+                    {footballAccount && channels.length > 0 && (
                         <VStack spacing={4} align="stretch" mt={4}>
                             <Flex align="center" gap={2} mb={2}>
                                 <Text fontSize="sm" fontWeight="bold" color={textColor}>
@@ -845,7 +861,7 @@ const SuggestedChannels = ({ onUserFollowed }) => {
                         </VStack>
                     )}
                 </>
-            ) : null}
+            )}
         </Box>
     )
 }

@@ -24,7 +24,7 @@ import { SocketContext } from '../context/SocketContext'
 import useShowToast from '../hooks/useShowToast'
 import API_BASE_URL from '../config/api'
 
-const ChessChallenge = () => {
+const ChessChallenge = ({ compact = false }) => {
     const { user, setOrientation } = useContext(UserContext)
     const { socket, onlineUsers } = useContext(SocketContext)
     const { isOpen, onOpen, onClose } = useDisclosure()
@@ -285,19 +285,19 @@ const ChessChallenge = () => {
                 borderRadius="md"
                 border="1px solid"
                 borderColor={borderColor}
-                mt={4}
+                mt={compact ? 0 : 4}
                 overflow="hidden"
                 _hover={{ shadow: 'md' }}
                 transition="all 0.2s"
                 cursor="pointer"
                 onClick={handleOpenModal}
-                maxW="280px"
+                maxW={compact ? '100%' : '280px'}
                 w="100%"
             >
-                {/* Chess Image - Square */}
+                {/* Chess Image - Square (shorter aspect in compact sidebar row) */}
                 <Box
                     position="relative"
-                    paddingBottom="100%"
+                    paddingBottom={compact ? '72%' : '100%'}
                     bg="linear-gradient(135deg, #667eea 0%, #764ba2 100%)"
                     overflow="hidden"
                 >
@@ -310,9 +310,18 @@ const ChessChallenge = () => {
                         align="center"
                         justify="center"
                         flexDirection="column"
+                        px={1}
                     >
-                        <Text fontSize="6xl">♟️</Text>
-                        <Text fontSize="2xl" fontWeight="bold" color="white" mt={2}>
+                        <Text fontSize={compact ? '3xl' : '6xl'}>♟️</Text>
+                        <Text
+                            fontSize={compact ? 'sm' : '2xl'}
+                            fontWeight="bold"
+                            color="white"
+                            mt={compact ? 1 : 2}
+                            textAlign="center"
+                            lineHeight="shorter"
+                            noOfLines={2}
+                        >
                             Chess
                         </Text>
                     </Flex>
@@ -321,12 +330,16 @@ const ChessChallenge = () => {
                 {/* Button */}
                 <Button
                     colorScheme="purple"
-                    size="sm"
+                    size={compact ? 'xs' : 'sm'}
                     w="full"
                     borderRadius="0"
+                    py={compact ? 2 : undefined}
+                    fontSize={compact ? '2xs' : undefined}
+                    whiteSpace="normal"
+                    lineHeight="1.2"
                     _hover={{ bg: 'purple.600' }}
                 >
-                    ♟️ Play Chess with Friend
+                    {compact ? '♟️ Play Chess' : '♟️ Play Chess with Friend'}
                 </Button>
             </Box>
 
