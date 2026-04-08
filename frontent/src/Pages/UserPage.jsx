@@ -336,7 +336,14 @@ if(!user && loading){
    
    <Box minH="100vh">
     
-      <UserHeader users={user} activeTab={activeTab} setActiveTab={setActiveTab} onUserFollowed={fetchFollowedUserPosts}/>
+      <UserHeader
+        users={user}
+        activeTab={activeTab}
+        setActiveTab={setActiveTab}
+        onUserFollowed={fetchFollowedUserPosts}
+        postsCount={posts?.length ?? 0}
+        onProfileRefresh={fetchUser}
+      />
       
       {activeTab === 'posts' ? (
         <>

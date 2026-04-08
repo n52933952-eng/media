@@ -1,13 +1,14 @@
 import React,{useContext,useState,useEffect} from 'react'
-import{Button,VStack,Box,Avatar,Text,Flex,Menu,MenuItem,Portal,MenuList,MenuButton,Input,useColorModeValue} from '@chakra-ui/react'
+import{Button,VStack,Box,Avatar,Text,Flex,Menu,MenuItem,Portal,MenuList,MenuButton,Input,useColorModeValue,SimpleGrid} from '@chakra-ui/react'
 import { FaSquareInstagram } from "react-icons/fa6";
 import { FaRegCopy } from "react-icons/fa";
 import{useToast} from '@chakra-ui/toast'
 import{UserContext} from '../context/UserContext'
 import {Link} from 'react-router-dom'
 import useShowToast from '../hooks/useShowToast.js'
+import FollowListModal from './FollowListModal'
 
-const UserHeader = ({users, activeTab, setActiveTab, onUserFollowed}) => {
+const UserHeader = ({ users, activeTab, setActiveTab, onUserFollowed, postsCount = 0, onProfileRefresh }) => {
    
     const toast =useToast()
     
@@ -25,12 +26,10 @@ const UserHeader = ({users, activeTab, setActiveTab, onUserFollowed}) => {
      const[localFollowersCount,setLocalFollowersCount]=useState(
        users?.followersCount ?? users?.followers?.length ?? 0
      )
-     
-       
- 
-   
-  
-  console.log({"followers":following})
+     const [localFollowingCount, setLocalFollowingCount] = useState(
+       users?.followingCount ?? users?.following?.length ?? 0
+     )
+     const [followModal, setFollowModal] = useState(null) // null | 'followers' | 'following'
   
   const showToast=useShowToast()
   
@@ -38,7 +37,8 @@ const UserHeader = ({users, activeTab, setActiveTab, onUserFollowed}) => {
   useEffect(() => {
     setFollowing(users?.isFollowedByMe ?? users?.followers?.includes(currentUser?._id) ?? false)
     setLocalFollowersCount(users?.followersCount ?? users?.followers?.length ?? 0)
-  }, [users?._id])
+    setLocalFollowingCount(users?.followingCount ?? users?.following?.length ?? 0)
+  }, [users?._id, users?.followersCount, users?.followingCount, currentUser?._id])
 
   // Update instagramUrl when users prop changes
   useEffect(() => {
@@ -109,6 +109,7 @@ const UserHeader = ({users, activeTab, setActiveTab, onUserFollowed}) => {
     
     const inputBg = useColorModeValue('white', 'gray.700')
     const borderColor = useColorModeValue('gray.200', 'gray.600')
+    const statBorder = useColorModeValue('gray.200', 'gray.700')
 
 
     
@@ -236,13 +237,50 @@ const UserHeader = ({users, activeTab, setActiveTab, onUserFollowed}) => {
     {currentUser?._id !== users?._id && <Button onClick={handleFollowAndUnfollow} isLoading={updating}>
       {following ? "unfollow" : "follow"}
       </Button>}
+
+    {/* Posts / Followers / Following — same pattern as mobile (counts + tap to open lists) */}
+    <SimpleGrid columns={3} spacing={2} w="full" py={3} borderTopWidth="1px" borderBottomWidth="1px" borderColor={statBorder}>
+      <Box textAlign="center">
+        <Text fontSize="xl" fontWeight="bold">{typeof postsCount === 'number' ? postsCount : 0}</Text>
+        <Text fontSize="xs" color="gray.500">posts</Text>
+      </Box>
+      <Box
+        as="button"
+        type="button"
+        textAlign="center"
+        cursor="pointer"
+        _hover={{ opacity: 0.85 }}
+        onClick={() => setFollowModal('followers')}
+      >
+        <Text fontSize="xl" fontWeight="bold">{localFollowersCount}</Text>
+        <Text fontSize="xs" color="gray.500">followers</Text>
+      </Box>
+      <Box
+        as="button"
+        type="button"
+        textAlign="center"
+        cursor="pointer"
+        _hover={{ opacity: 0.85 }}
+        onClick={() => setFollowModal('following')}
+      >
+        <Text fontSize="xl" fontWeight="bold">{localFollowingCount}</Text>
+        <Text fontSize="xs" color="gray.500">following</Text>
+      </Box>
+    </SimpleGrid>
+
+    <FollowListModal
+      isOpen={!!followModal}
+      onClose={() => setFollowModal(null)}
+      listType={followModal || 'followers'}
+      userId={users?._id}
+      displayUsername={users?.username}
+      onMutated={() => onProfileRefresh?.()}
+    />
   
     
     <Flex w="full" justifyContent="space-between" >
    
     <Flex alignItems="center" gap={2}>
-        <Text color="gray.light">{localFollowersCount} followers</Text>
-        <Box w={"1"} h="1" bg="gray.light" borderRadius="full"></Box>
         {users?.instagram ? (
           <Text 
             as="a" 
