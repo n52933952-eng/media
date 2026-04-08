@@ -18,12 +18,18 @@ import {Button,useColorModeValue,useDisclosure,
   CloseButton,
   Flex,
   Box,
-  Checkbox
+  Checkbox,
+  Wrap,
+  WrapItem,
+  Badge
 } from "@chakra-ui/react";
 
 import { BsFileImageFill } from "react-icons/bs";
 import useShowToast from '../hooks/useShowToast.js'
 import { compressVideo, needsCompression } from '../utils/videoCompress'
+import API_BASE_URL from '../config/api'
+import { buildInitialContributorIds } from '../utils/collaborators'
+import CollaboratorPicker from './CollaboratorPicker'
 
 import{UserContext} from '../context/UserContext'
 import{PostContext} from '../context/PostContext'
@@ -46,6 +52,7 @@ const CreatePost = () => {
     const[uploadProgress,setUploadProgress]=useState(0)
     const[isUploading,setIsUploading]=useState(false)
     const[isCollaborative,setIsCollaborative]=useState(false)
+    const [selectedCollaborators, setSelectedCollaborators] = useState([])
 
 
 
@@ -214,7 +221,10 @@ const CreatePost = () => {
     formData.append('text', postText)
     if (isCollaborative) {
       formData.append('isCollaborative', 'true')
-      formData.append('contributors', JSON.stringify([user._id])) // Include creator as first contributor
+      formData.append(
+        'contributors',
+        JSON.stringify(buildInitialContributorIds(user?._id, selectedCollaborators))
+      )
     }
     
     if (image) {
@@ -237,7 +247,7 @@ const CreatePost = () => {
           }
         })
         
-        xhr.open('POST', `${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/post/create`)
+        xhr.open('POST', `${API_BASE_URL}/api/post/create`)
         xhr.withCredentials = true
         xhr.timeout = 1200000 // 20 minutes for large video uploads
         
@@ -302,6 +312,7 @@ const CreatePost = () => {
               setImagePreview("")
               setUploadProgress(0)
               setIsCollaborative(false)
+              setSelectedCollaborators([])
               setLoading(false)
             } catch (error) {
               showToast("Error", "Failed to parse server response", "error")
@@ -341,7 +352,7 @@ const CreatePost = () => {
     }
 
     // No file - just send post data
-    const res = await fetch(`${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/post/create`,{
+    const res = await fetch(`${API_BASE_URL}/api/post/create`,{
       credentials: "include",
       method:"POST",
       body: formData
@@ -390,6 +401,7 @@ const CreatePost = () => {
     setImagePreview("")
     setUploadProgress(0)
     setIsCollaborative(false)
+    setSelectedCollaborators([])
     setLoading(false)
   }
   catch(error){
@@ -425,7 +437,15 @@ const CreatePost = () => {
     
     
     
-     <Modal isOpen={isOpen} onClose={onClose} blockScrollOnMount={false} scrollBehavior="inside">
+     <Modal
+        isOpen={isOpen}
+        onClose={() => {
+          setSelectedCollaborators([])
+          onClose()
+        }}
+        blockScrollOnMount={false}
+        scrollBehavior="inside"
+      >
         <ModalOverlay />
        
         <ModalContent maxH="90vh">
@@ -447,10 +467,68 @@ const CreatePost = () => {
             <Checkbox 
               mt={3} 
               isChecked={isCollaborative}
-              onChange={(e) => setIsCollaborative(e.target.checked)}
+              onChange={(e) => {
+                const next = e.target.checked
+                setIsCollaborative(next)
+                if (!next) setSelectedCollaborators([])
+              }}
             >
               <Text fontSize="sm">🤝 Make this a collaborative post (others can contribute)</Text>
             </Checkbox>
+
+            {isCollaborative && user && (
+              <Box mt={3}>
+                <Text fontSize="xs" color="gray.500" mb={1}>
+                  Add contributors (optional). You are always included.
+                </Text>
+                <CollaboratorPicker
+                  excludeUserIds={[
+                    user._id?.toString(),
+                    ...selectedCollaborators.map((s) => String(s._id)),
+                  ].filter(Boolean)}
+                  onSelectUser={(u) => {
+                    if (!selectedCollaborators.some((x) => String(x._id) === String(u._id))) {
+                      setSelectedCollaborators((p) => [...p, u])
+                    }
+                  }}
+                />
+                {selectedCollaborators.length > 0 && (
+                  <Wrap mt={2} spacing={2}>
+                    {selectedCollaborators.map((su) => (
+                      <WrapItem key={su._id}>
+                        <Badge
+                          display="inline-flex"
+                          alignItems="center"
+                          gap={1}
+                          px={2}
+                          py={1}
+                          borderRadius="md"
+                          variant="subtle"
+                          colorScheme="blue"
+                        >
+                          {su.name || su.username}
+                          <Box
+                            as="button"
+                            type="button"
+                            aria-label="Remove"
+                            onClick={() =>
+                              setSelectedCollaborators((p) =>
+                                p.filter((x) => String(x._id) !== String(su._id))
+                              )
+                            }
+                            ml={1}
+                            fontWeight="bold"
+                            lineHeight={1}
+                          >
+                            ×
+                          </Box>
+                        </Badge>
+                      </WrapItem>
+                    ))}
+                  </Wrap>
+                )}
+              </Box>
+            )}
          
             <Input  type="file" accept="image/*,video/*" hidden ref={imageInput} onChange={handleImageChange} />
 
