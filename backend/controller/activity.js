@@ -51,6 +51,9 @@ export const createActivity = async (userId, type, options = {}) => {
             })
         }
 
+        // Plain object for Socket.IO so createdAt/updatedAt serialize as ISO strings (reliable client parsing)
+        const activityPayload = activity.toObject({ virtuals: true })
+
         // Emit to user's followers (for activity feed)
         const io = getIO()
         if (io) {
@@ -63,7 +66,7 @@ export const createActivity = async (userId, type, options = {}) => {
                     const followerIdStr = d.followerId?.toString?.() ?? String(d.followerId)
                     const socketData = socketMap[followerIdStr]
                     if (socketData && socketData.socketId) {
-                        io.to(socketData.socketId).emit('newActivity', activity)
+                        io.to(socketData.socketId).emit('newActivity', activityPayload)
                     }
                 })
             }

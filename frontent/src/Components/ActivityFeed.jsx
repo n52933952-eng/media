@@ -3,7 +3,7 @@ import { Box, Flex, Text, Avatar, VStack, HStack, Spinner, useColorModeValue, Di
 import { useNavigate } from 'react-router-dom'
 import { SocketContext } from '../context/SocketContext'
 import { UserContext } from '../context/UserContext'
-import { formatDistanceToNow } from 'date-fns'
+import { formatDistanceToNow, isValid, parseISO } from 'date-fns'
 import { CloseIcon } from '@chakra-ui/icons'
 import API_BASE_URL from '../config/api'
 
@@ -14,12 +14,35 @@ function followIdToString(f) {
     return String(f)
 }
 
+/** Normalize API/socket createdAt (ISO string, ms, Date, or Mongo-style { $date }) for relative labels */
+function parseActivityCreatedAt(value) {
+    if (value == null) return null
+    if (value instanceof Date) return isValid(value) ? value : null
+    if (typeof value === 'number' && Number.isFinite(value)) {
+        const d = new Date(value)
+        return isValid(d) ? d : null
+    }
+    if (typeof value === 'string') {
+        const fromIso = parseISO(value)
+        if (isValid(fromIso)) return fromIso
+        const d = new Date(value)
+        return isValid(d) ? d : null
+    }
+    if (typeof value === 'object' && value.$date != null) {
+        const d = new Date(value.$date)
+        return isValid(d) ? d : null
+    }
+    return null
+}
+
 const ActivityFeed = () => {
     const { socket } = useContext(SocketContext) || {}
     const { user } = useContext(UserContext) || {}
     const navigate = useNavigate()
     const [activities, setActivities] = useState([])
     const [loading, setLoading] = useState(true)
+    /** Bumps every minute so "X ago" stays current without a full refresh */
+    const [relativeTimeTick, setRelativeTimeTick] = useState(0)
 
     const bgColor = useColorModeValue('white', '#1a1a1a')
     const cardBg = useColorModeValue('white', '#252b3b')
@@ -85,6 +108,11 @@ const ActivityFeed = () => {
         return () => ac.abort()
     }, [user?._id, followingFingerprint])
 
+    useEffect(() => {
+        const id = setInterval(() => setRelativeTimeTick((n) => n + 1), 60_000)
+        return () => clearInterval(id)
+    }, [])
+
     // Listen for new activities
     useEffect(() => {
         if (!socket) return
@@ -123,6 +151,8 @@ const ActivityFeed = () => {
             socket.off('newActivity', handleNewActivity)
         }
     }, [socket, user?.following])
+
+    void relativeTimeTick
 
     const getActivityIcon = (type) => {
         switch (type) {
@@ -346,7 +376,11 @@ const ActivityFeed = () => {
                                         fontSize="2xs" 
                                         color={secondaryTextColor}
                                     >
-                                        {formatDistanceToNow(new Date(activity.createdAt), { addSuffix: true })}
+                                        {(() => {
+                                            const at = parseActivityCreatedAt(activity.createdAt)
+                                            if (!at) return '—'
+                                            return formatDistanceToNow(at, { addSuffix: true })
+                                        })()}
                                     </Text>
                                 </Flex>
                             </Flex>
