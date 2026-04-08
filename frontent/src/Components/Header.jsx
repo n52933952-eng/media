@@ -71,10 +71,14 @@ const Header = () => {
 
       
       
-       <Image cursor="pointer"
-       w={6} 
-       src={colorMode === "dark" ? "/light-logo.svg" : "/dark-logo.svg"}
-       onClick={toggleColorMode}
+       <Image
+         cursor="pointer"
+         boxSize="32px"
+         objectFit="contain"
+         src="/playsocial-icon.png"
+         alt="playsocial"
+         onClick={toggleColorMode}
+         borderRadius="md"
        />
 
 
