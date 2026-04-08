@@ -7,7 +7,7 @@ import { BsThreeDotsVertical } from "react-icons/bs";
 import Actions from '../Components/Actions'
 import useShowToast from '../hooks/useShowToast.js'
 import{useNavigate} from 'react-router-dom'
-import{formatDistanceToNow} from 'date-fns'
+import { formatDistanceToNow, format } from 'date-fns'
 import{UserContext} from '../context/UserContext'
 import{PostContext} from '../context/PostContext'
 import AddContributorModal from './AddContributorModal'
@@ -850,7 +850,23 @@ const showToast = useShowToast()
     
      <Flex alignItems="center" gap={2}>
         <Text fontSize="sm" color="gray.light" textAlign="right" width={36}>
-         {post?.createdAt && formatDistanceToNow(new Date(post.createdAt))} ago </Text>
+         {(() => {
+           const createdAt = post?.createdAt ? new Date(post.createdAt) : null
+           const updatedAt = post?.updatedAt ? new Date(post.updatedAt) : null
+           const createdOk = createdAt && !Number.isNaN(createdAt.getTime())
+           const updatedOk = updatedAt && !Number.isNaN(updatedAt.getTime())
+           const isEdited =
+             createdOk &&
+             updatedOk &&
+             Math.abs(updatedAt.getTime() - createdAt.getTime()) > 60 * 1000
+
+           if (!createdOk) return ''
+
+           const rel = `${formatDistanceToNow(createdAt)} ago`
+           if (!isEdited) return rel
+           return `${rel} · Edited ${format(updatedAt, 'PP p')}`
+         })()}
+        </Text>
         
          {/* Show delete button if user is post author OR user added this channel post */}
          {(user?._id === postedBy?._id || (post?.channelAddedBy && post.channelAddedBy === user?._id?.toString())) && (
@@ -1607,6 +1623,10 @@ const showToast = useShowToast()
         // Update post in feed
         if (setFollowPost && updatedPost) {
           setFollowPost(prev => prev.map(p => p._id === updatedPost._id ? updatedPost : p))
+        }
+        // Update local state too (profile pages may not use feed state)
+        if (updatedPost) {
+          setLocalPost({ ...updatedPost })
         }
         console.log('✅ Post updated:', updatedPost._id)
       }}

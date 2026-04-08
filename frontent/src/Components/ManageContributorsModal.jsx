@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useContext } from 'react'
 import {
   Modal,
   ModalOverlay,
@@ -21,12 +21,14 @@ import {
 import { MdPersonRemove } from "react-icons/md"
 import { FaCrown } from "react-icons/fa"
 import useShowToast from '../hooks/useShowToast'
+import { UserContext } from '../context/UserContext'
 
 const ManageContributorsModal = ({ isOpen, onClose, post, onContributorRemoved }) => {
   const [removing, setRemoving] = useState(null)
   const [loadingPost, setLoadingPost] = useState(false)
   const [populatedPost, setPopulatedPost] = useState(null)
   const showToast = useShowToast()
+  const { user } = useContext(UserContext) || {}
   
   console.log('🔵 [ManageContributorsModal] Component render - isOpen:', isOpen, 'post:', post?._id?.substring(0, 8))
 
@@ -39,6 +41,7 @@ const ManageContributorsModal = ({ isOpen, onClose, post, onContributorRemoved }
   // Use populated post if available, otherwise use the passed post
   const currentPost = populatedPost || post
   const postOwnerId = currentPost?.postedBy?._id?.toString()
+  const currentUserId = user?._id?.toString()
   const contributors = currentPost?.contributors || []
   
   // Fetch populated post when modal opens if contributors are strings
@@ -209,6 +212,11 @@ const ManageContributorsModal = ({ isOpen, onClose, post, onContributorRemoved }
                     .map((contributor) => {
                       const contributorId = (contributor._id || contributor).toString()
                       const contributorName = contributor?.name || contributor?.username || 'Unknown'
+                      const canRemove =
+                        postOwnerId && currentUserId
+                          ? (currentUserId === postOwnerId || currentUserId === contributorId)
+                          : false
+                      const isSelf = currentUserId && contributorId === currentUserId
                       
                       return (
                         <HStack
@@ -233,17 +241,19 @@ const ManageContributorsModal = ({ isOpen, onClose, post, onContributorRemoved }
                               </Text>
                             </VStack>
                           </HStack>
-                          <Tooltip label={`Remove ${contributorName}`}>
-                            <IconButton
-                              icon={<MdPersonRemove />}
-                              size="sm"
-                              colorScheme="red"
-                              variant="ghost"
-                              isLoading={removing === contributorId}
-                              onClick={() => handleRemoveContributor(contributorId, contributorName)}
-                              aria-label={`Remove ${contributorName}`}
-                            />
-                          </Tooltip>
+                          {canRemove && (
+                            <Tooltip label={isSelf ? 'Leave this collaborative post' : `Remove ${contributorName}`}>
+                              <IconButton
+                                icon={<MdPersonRemove />}
+                                size="sm"
+                                colorScheme="red"
+                                variant="ghost"
+                                isLoading={removing === contributorId}
+                                onClick={() => handleRemoveContributor(contributorId, isSelf ? 'yourself' : contributorName)}
+                                aria-label={isSelf ? 'Leave collaborative post' : `Remove ${contributorName}`}
+                              />
+                            </Tooltip>
+                          )}
                         </HStack>
                       )
                     })}

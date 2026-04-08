@@ -2117,9 +2117,12 @@ export const removeContributorFromPost = async(req, res) => {
             return res.status(400).json({ message: "This post is not collaborative" })
         }
 
-        // Only post owner can remove contributors
-        if (post.postedBy.toString() !== userId.toString()) {
-            return res.status(403).json({ message: "Only the post owner can remove contributors" })
+        // Permissions:
+        // - Post owner can remove any contributor (except themselves)
+        // - A contributor can remove themselves (leave the collaborative post)
+        const isOwner = post.postedBy.toString() === userId.toString()
+        if (!isOwner && contributorId !== userId.toString()) {
+            return res.status(403).json({ message: "You can only remove yourself from this post" })
         }
 
         // Cannot remove the post owner
@@ -2138,6 +2141,8 @@ export const removeContributorFromPost = async(req, res) => {
 
         // Remove contributor
         post.contributors.splice(contributorIndex, 1)
+        // Bump updatedAt so followers see recency (and web "Edited" label reflects membership change)
+        post.updatedAt = new Date()
         await post.save()
 
         await post.populate("contributors", "username profilePic name")
