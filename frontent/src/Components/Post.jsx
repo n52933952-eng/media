@@ -1436,6 +1436,8 @@ const showToast = useShowToast()
         {/* Collaborative Post Actions - Only show for collaborative posts */}
         {(() => {
           const isOwner = user?._id?.toString() === postedBy?._id?.toString()
+          const isContributor = post?.isCollaborative && post?.contributors && Array.isArray(post.contributors) &&
+            post.contributors.some(c => (c._id || c).toString() === user?._id?.toString())
           const isCollab = post?.isCollaborative
           const hasContributors = post?.contributors && Array.isArray(post.contributors) && post.contributors.length > 0
           
@@ -1474,12 +1476,13 @@ const showToast = useShowToast()
               {(() => {
                 console.log('🔵 [Post] Three-dot menu check:', {
                   isOwner: isOwner,
+                  isContributor: isContributor,
                   hasContributors: hasContributors,
-                  willShow: isOwner && hasContributors
+                  willShow: (isOwner || isContributor) && hasContributors
                 })
                 
-                if (!isOwner) {
-                  console.log('⚠️ [Post] User is not owner, hiding three dots')
+                if (!isOwner && !isContributor) {
+                  console.log('⚠️ [Post] User is not owner/contributor, hiding three dots')
                   return null
                 }
                 
