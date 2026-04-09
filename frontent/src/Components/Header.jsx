@@ -1,8 +1,7 @@
 import React,{useContext,useState,useEffect} from 'react'
 
-import{Image,useColorMode,Flex,Box,Badge} from '@chakra-ui/react'
+import{Image,useColorMode,Flex,Box,Badge,Avatar} from '@chakra-ui/react'
 import { TiHomeOutline } from "react-icons/ti";
-import { CgProfile } from "react-icons/cg";
 import { FaRegMessage } from "react-icons/fa6";
 import { IoNotificationsOutline } from "react-icons/io5";
 
@@ -41,26 +40,28 @@ const Header = () => {
     return (
     
      <Flex 
-       justifyContent="space-between" 
+       justifyContent="space-between"
+       alignItems="center"
        py="4"
        px="4"
      >
         
        
 
-       {user &&
-       <Box 
-         as="button"
-         onClick={(e) => {
-           e.preventDefault()
-           handleNavigation('/home', e)
-         }}
-         cursor="pointer"
-       >
+      {user &&
+      <Box
+        as="button"
+        onClick={(e) => {
+          e.preventDefault()
+          handleNavigation('/home', e)
+        }}
+        cursor="pointer"
+        display="flex"
+        alignItems="center"
+      >
         <TiHomeOutline size={24}/>
-       </Box>
-       
-       }
+      </Box>
+      }
 
     
 
@@ -150,8 +151,16 @@ const Header = () => {
               handleNavigation(`/${user?.username}`, e)
             }}
             cursor="pointer"
+            display="flex"
+            alignItems="center"
           >
-            <CgProfile size={24} />
+            <Avatar
+              size="xs"
+              src={user?.profilePic}
+              name={user?.name || user?.username}
+              w="26px"
+              h="26px"
+            />
           </Box>
         </Flex>
       )}
