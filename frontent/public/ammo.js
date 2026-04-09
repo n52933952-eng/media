@@ -955,5 +955,3 @@ else if (typeof define === 'function' && define['amd'])
   define([], function() { return Ammo; });
 else if (typeof exports === 'object')
   exports["Ammo"] = Ammo;
-
-export default Ammo;

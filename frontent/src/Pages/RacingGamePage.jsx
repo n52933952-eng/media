@@ -121,10 +121,10 @@ export default function RacingGamePage() {
       }
     }
 
-    // 45-second safety timeout
+    // 90-second safety timeout (Render.com cold starts can be slow)
     const timeoutId = setTimeout(() => {
       if (!cancelled) setLoadingPhase('error')
-    }, 45000)
+    }, 90000)
 
     if (window.Ammo && typeof window.Ammo === 'object') {
       clearTimeout(timeoutId)
