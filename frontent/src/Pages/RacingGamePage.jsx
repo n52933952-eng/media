@@ -34,6 +34,7 @@ export default function RacingGamePage() {
   // ── UI state ────────────────────────────────────────────────────────────────
   const [loading,       setLoading]       = useState(true)
   const [loadingPct,    setLoadingPct]    = useState(0)
+  const [loadingPhase,  setLoadingPhase]  = useState('engine') // 'engine' | 'assets' | 'error'
   const [countdown,     setCountdown]     = useState(null)
   const [speed,         setSpeed]         = useState(0)
   const [myGate,        setMyGate]        = useState(0)
@@ -102,24 +103,45 @@ export default function RacingGamePage() {
     const boot = (AmmoLib) => {
       if (cancelled) return
       window.Ammo = AmmoLib
+      setLoadingPhase('assets')
       initGame()
     }
 
+    // Robust init — handles Promise, non-Promise, and already-initialized cases
+    const runAmmo = (AmmoFn) => {
+      try {
+        const result = AmmoFn()
+        if (result && typeof result.then === 'function') {
+          result.then(boot).catch(() => { if (!cancelled) setLoadingPhase('error') })
+        } else {
+          boot(result || AmmoFn)
+        }
+      } catch (e) {
+        if (!cancelled) setLoadingPhase('error')
+      }
+    }
+
+    // 45-second safety timeout
+    const timeoutId = setTimeout(() => {
+      if (!cancelled) setLoadingPhase('error')
+    }, 45000)
+
     if (window.Ammo && typeof window.Ammo === 'object') {
+      clearTimeout(timeoutId)
       boot(window.Ammo)
     } else if (window.Ammo && typeof window.Ammo === 'function') {
-      window.Ammo().then(boot)
+      runAmmo(window.Ammo)
     } else {
       const tag = document.createElement('script')
       tag.src = '/ammo.js'
-      tag.onload = () => {
-        window.Ammo().then(boot)
-      }
+      tag.onload  = () => runAmmo(window.Ammo)
+      tag.onerror = () => { if (!cancelled) setLoadingPhase('error') }
       document.head.appendChild(tag)
     }
 
     return () => {
       cancelled = true
+      clearTimeout(timeoutId)
       cleanup()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -681,26 +703,63 @@ export default function RacingGamePage() {
       {/* Loading screen */}
       {loading && (
         <div style={{
-          position:'fixed', inset:0, background:'#121212',
+          position:'fixed', inset:0, background:'#0d0d14',
           display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center',
           zIndex:9999, fontFamily:'Poppins,sans-serif',
         }}>
+          {/* Keyframe animation injected via style tag */}
+          <style>{`
+            @keyframes racezBarAnim {
+              0%,100% { transform: scaleY(0.2); opacity: 0.5; }
+              50%      { transform: scaleY(1);   opacity: 1; }
+            }
+            @keyframes racezPulse { 0%,100%{opacity:.7} 50%{opacity:1} }
+          `}</style>
+
+          {/* Title */}
           <div style={{
             fontSize:'clamp(2.5rem,8vw,5rem)', fontWeight:900, color:'#fff',
-            letterSpacing:'4px', marginBottom:'40px',
-            textShadow:'0 5px 0 #000', WebkitTextStroke:'3px #000',
+            letterSpacing:'6px', marginBottom:'40px',
+            textShadow:'0 6px 0 #000, 0 0 40px rgba(255,0,128,0.4)',
+            WebkitTextStroke:'2px #000',
           }}>RACEZ.IO</div>
-          <div style={{ display:'flex', gap:'8px', marginBottom:'16px' }}>
-            {[0,0.1,0.2,0.3,0.4].map((d,i) => (
+
+          {/* Animated bars */}
+          <div style={{ display:'flex', gap:'8px', marginBottom:'20px' }}>
+            {[0,0.12,0.24,0.36,0.48].map((d,i) => (
               <div key={i} style={{
-                width:'12px', height:'50px', background:'#ff0080', borderRadius:'3px',
-                animation:`barLoad 1.5s ${d}s infinite ease-in-out`,
+                width:'12px', height:'52px', background:'#ff0080', borderRadius:'4px',
+                animation:`racezBarAnim 1.3s ${d}s infinite ease-in-out`,
               }} />
             ))}
           </div>
-          <div style={{ color:'#fff', fontWeight:700, fontSize:'1.1rem' }}>
-            Loading {loadingPct}%...
-          </div>
+
+          {/* Status text */}
+          {loadingPhase === 'error' ? (
+            <div style={{ color:'#ff4444', fontWeight:700, fontSize:'1rem', textAlign:'center', maxWidth:340 }}>
+              Failed to load physics engine.<br/>
+              <span style={{ fontSize:'0.85rem', opacity:.7 }}>
+                Please check your connection and refresh.
+              </span>
+              <br/><br/>
+              <button
+                onClick={() => window.location.reload()}
+                style={{
+                  marginTop:8, padding:'10px 28px', background:'#e63946', color:'#fff',
+                  border:'none', borderRadius:10, fontWeight:700, fontSize:'1rem', cursor:'pointer',
+                }}
+              >Retry</button>
+            </div>
+          ) : loadingPhase === 'engine' ? (
+            <div style={{ color:'rgba(255,255,255,0.8)', fontWeight:600, fontSize:'1rem',
+              animation:'racezPulse 2s infinite' }}>
+              Initializing physics engine…
+            </div>
+          ) : (
+            <div style={{ color:'rgba(255,255,255,0.8)', fontWeight:600, fontSize:'1rem' }}>
+              {loadingPct > 0 ? `Loading game assets ${loadingPct}%…` : 'Loading game assets…'}
+            </div>
+          )}
         </div>
       )}
 
