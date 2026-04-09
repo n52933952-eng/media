@@ -9,8 +9,12 @@ const SuggestedUser = ({ user, onFollowed, onUserFollowed }) => {
   const showToast = useShowToast()
   const { user: currentUser, setUser } = useContext(UserContext)
   
+  // Prefer isFollowedByMe from API (accurate, checked against Follow collection)
+  // Fall back to stale local following array only if API didn't return isFollowedByMe
   const [following, setFollowing] = useState(
-    currentUser?.following?.includes(user._id) || false
+    user?.isFollowedByMe ??
+    currentUser?.following?.some(id => id?.toString() === user._id?.toString()) ??
+    false
   )
   const [updating, setUpdating] = useState(false)
 

@@ -798,19 +798,35 @@ export const searchUsers = async(req, res) => {
         ]
 
         // Enhanced search: matches username OR name (case-insensitive, partial match)
-        const searchRegex = new RegExp(query.trim(), 'i')
+        // Using explicit $and to avoid MongoDB ambiguity when the same field
+        // appears both inside $or and at the root level
+        const searchRegex = new RegExp(query.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i')
         const users = await User.find({
-            $or: [
-                { username: searchRegex },
-                { name: searchRegex }
-            ],
-            // Exclude system accounts/channels
-            username: { $nin: systemAccounts }
+            $and: [
+                { $or: [{ username: searchRegex }, { name: searchRegex }] },
+                { username: { $nin: systemAccounts } }
+            ]
         })
-        .select('username name profilePic bio')  // Include bio for better results
-        .limit(20)  // Increased limit for contributor search
+        .select('username name profilePic bio')
+        .limit(20)
 
-        res.status(200).json(users)
+        // Attach isFollowedByMe per result using Follow collection (accurate, not stale)
+        const viewerId = req.user?._id
+        let followedSet = new Set()
+        if (viewerId && users.length > 0) {
+            const userIds = users.map(u => u._id)
+            const followDocs = await Follow.find({ followerId: viewerId, followeeId: { $in: userIds } })
+                .select('followeeId')
+                .lean()
+            followDocs.forEach(d => followedSet.add(d.followeeId.toString()))
+        }
+
+        const result = users.map(u => ({
+            ...u.toObject(),
+            isFollowedByMe: followedSet.has(u._id.toString())
+        }))
+
+        res.status(200).json(result)
     }
     catch(error) {
         console.log(error)
@@ -949,7 +965,13 @@ export const getSuggestedUsers = async(req, res) => {
             .sort(() => 0.5 - Math.random())
             .slice(0, maxSuggestions)
         
-        res.status(200).json(finalSuggestions)
+        // Add isFollowedByMe: false — all suggested users are not yet followed
+        // (backend already excludes followed users from suggestions)
+        const finalWithFlag = finalSuggestions.map(u => ({
+            ...(u.toObject ? u.toObject() : u),
+            isFollowedByMe: false
+        }))
+        res.status(200).json(finalWithFlag)
     }
     catch(error) {
         console.error('Error in getSuggestedUsers:', error)

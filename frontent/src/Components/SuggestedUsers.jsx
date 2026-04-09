@@ -197,11 +197,12 @@ const SuggestedUsers = ({ onUserFollowed }) => {
               <Flex direction="column" gap={2}>
                 {searchResults
                   .filter(searchUser => {
-                    // Filter out channel accounts from search results too
+                    // Only filter out system/channel accounts — show everyone else
+                    // (including followed users so the button reflects correct state)
                     if (channelUsernames.includes(searchUser.username)) {
                       return false
                     }
-                    return !user?.following?.includes(searchUser._id)
+                    return true
                   })
                   .map((searchUser) => (
                     <SuggestedUser 
