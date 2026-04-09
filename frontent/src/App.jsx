@@ -1,6 +1,7 @@
 import React,{useContext,useState,useEffect} from 'react'
-import{Routes,Route,Navigate,useLocation} from 'react-router-dom'
+import{Routes,Route,Navigate,useLocation,useNavigate} from 'react-router-dom'
 import { FaArrowUp } from 'react-icons/fa'
+import{SocketContext} from './context/SocketContext'
 
 import{Container, Box, Text, useColorModeValue, useColorMode} from '@chakra-ui/react'
 
@@ -29,11 +30,30 @@ import RacingChallengeNotification from './Components/RacingChallengeNotificatio
 
 const AppContent = () => {
   const location = useLocation()
+  const navigate = useNavigate()
   const{user}=useContext(UserContext)
+  const { socket } = useContext(SocketContext) || {}
   const { colorMode } = useColorMode()
 
   const [isScrolled, setIsScrolled] = useState(false)
   const [showScrollTop, setShowScrollTop] = useState(false)
+
+  // Persistent listener: when the person WE challenged accepts, navigate to the race
+  useEffect(() => {
+    if (!socket || !user) return
+    const handleRaceAccepted = (data) => {
+      if (!data?.roomId || !data?.opponentId) return
+      const pendingTo = localStorage.getItem('racePendingTo')
+      const opId = data.opponentId?.toString()
+      if (pendingTo && pendingTo === opId) {
+        localStorage.removeItem('racePendingTo')
+        localStorage.setItem('raceRoomId', data.roomId)
+        navigate(`/race/${opId}`)
+      }
+    }
+    socket.on('acceptRaceChallenge', handleRaceAccepted)
+    return () => socket.off('acceptRaceChallenge', handleRaceAccepted)
+  }, [socket, user, navigate])
 
   useEffect(() => {
     const handleScroll = () => {

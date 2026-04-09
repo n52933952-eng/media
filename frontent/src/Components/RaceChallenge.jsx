@@ -128,6 +128,7 @@ const RaceChallenge = ({ compact = false }) => {
     const handleChallenge = (opponent) => {
         if (!socket) { showToast('Error', 'Connection lost. Please refresh.', 'error'); return }
         sentToRef.current = opponent._id?.toString()
+        localStorage.setItem('racePendingTo', opponent._id?.toString())
         socket.emit('raceChallenge', {
             from:            user._id,
             to:              opponent._id,
