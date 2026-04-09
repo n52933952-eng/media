@@ -2334,9 +2334,9 @@ export const initializeSocket = async (app) => {
             }
         })
 
-        // Pure relay — no Redis, just forward position to opponent (called every ~100ms)
-        socket.on('racePosUpdate', ({ roomId, position, x, speed, lap }) => {
-            socket.to(roomId).emit('raceOpponentPos', { position, x, speed, lap })
+        // Pure relay — forward ALL position fields (web uses wx/wy/wangle, mobile uses position/x)
+        socket.on('racePosUpdate', ({ roomId, ...posData }) => {
+            socket.to(roomId).emit('raceOpponentPos', posData)
         })
 
         socket.on('raceFinished', async ({ roomId, winnerId, time }) => {
