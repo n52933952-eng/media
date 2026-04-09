@@ -13,8 +13,10 @@ const RacingChallengeNotification = () => {
     if (!raceChallenge?.isReceivingChallenge) return null
 
     const handleAccept = () => {
-        // Set roomId in localStorage BEFORE navigating so RacingGamePage reads it on mount
+        // acceptRaceChallenge sets raceRoomId in localStorage
         acceptRaceChallenge()
+        // Acceptor is the guest (not host)
+        localStorage.setItem('raceIsHost', 'false')
         navigate(`/race/${raceChallenge.from}`)
     }
 

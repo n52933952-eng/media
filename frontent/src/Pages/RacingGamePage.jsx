@@ -1,809 +1,920 @@
 import React, { useEffect, useRef, useState, useContext, useCallback } from 'react'
-import { Box, Flex, Text, Avatar, Badge, IconButton, Tooltip } from '@chakra-ui/react'
+import * as THREE from 'three'
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import { UserContext } from '../context/UserContext'
 import { SocketContext } from '../context/SocketContext'
 import API_BASE_URL from '../config/api'
-import { FaPhone, FaPhoneSlash, FaMicrophone, FaMicrophoneSlash, FaFlag, FaTrophy } from 'react-icons/fa'
-import { IoArrowBack } from 'react-icons/io5'
+import { initPhysics, updatePhysics, FIXED_PHYSICS_STEP } from '../game/racing/physics.js'
+import { createVehicle, updateSteering, resetCarPosition, updateCarPosition } from '../game/racing/car.js'
+import { loadTrackModel, loadMapDecorations, checkGroundCollision } from '../game/racing/track.js'
+import { loadGates, updateGateFading, checkGateProximity, showFinishMessage } from '../game/racing/gates.js'
 
-// ── Track geometry — stadium oval (two straights + two semicircular turns) ──────
-const T = {
-    outer: { sX: 380, sY: 280 },   // outer boundary: sX = half-straight length, sY = turn radius
-    inner: { sX: 195, sY: 125 },   // inner grass island
-}
-// Finish line: vertical strip at x = 0 on the top straight
-const FINISH_X  = 0
-const FINISH_Y1 = -(T.outer.sY - 18)   // –262  (outer edge)
-const FINISH_Y2 = -(T.inner.sY + 18)   // –143  (inner edge)
-// Start position: top straight, centre of track, facing right (+X = driving direction)
-const START = { x: 0, y: -(T.inner.sY + T.outer.sY) / 2, angle: 0 }  // y ≈ –202
+// ─── Camera constants (same as reference game) ───────────────────────────────
+const CAMERA_DISTANCE  = 10
+const CAMERA_HEIGHT    = 5
+const CAMERA_LERP      = 0.1
+const CAMERA_LOOK_AHEAD = 2
+const MAX_SPEED_KPH    = 200
+const DEFAULT_MAP      = 'map1'
 
-// ── Containment helpers ───────────────────────────────────────────────────────
-const insideOval = (wx, wy, sX, sY) => {
-    const ax = Math.abs(wx), ay = Math.abs(wy)
-    if (ax <= sX) return ay <= sY
-    const dx = ax - sX
-    return dx * dx + wy * wy <= sY * sY
-}
-const onTrack = (wx, wy) =>
-    insideOval(wx, wy, T.outer.sX, T.outer.sY) &&
-    !insideOval(wx, wy, T.inner.sX, T.inner.sY)
+export default function RacingGamePage() {
+  const { opponentId } = useParams()
+  const navigate       = useNavigate()
+  const location       = useLocation()
+  const { user }       = useContext(UserContext)
+  const {
+    socket,
+    callUser, leaveCall,
+    stream, remoteStream,
+    callAccepted, call,
+    endRaceGameOnNavigate,
+  } = useContext(SocketContext) || {}
 
-// ── Stadium-oval canvas path helper ──────────────────────────────────────────
-const ovalPath = (ctx, cx, cy, sX, sY) => {
-    ctx.beginPath()
-    ctx.arc(cx + sX, cy, sY, -Math.PI / 2, Math.PI / 2, false)
-    ctx.lineTo(cx - sX, cy + sY)
-    ctx.arc(cx - sX, cy, sY, Math.PI / 2, Math.PI * 1.5, false)
-    ctx.closePath()
-}
+  // ── UI state ────────────────────────────────────────────────────────────────
+  const [loading,       setLoading]       = useState(true)
+  const [loadingPct,    setLoadingPct]    = useState(0)
+  const [countdown,     setCountdown]     = useState(null)
+  const [speed,         setSpeed]         = useState(0)
+  const [myGate,        setMyGate]        = useState(0)
+  const [oppGate,       setOppGate]       = useState(0)
+  const [raceTime,      setRaceTime]      = useState('00:00')
+  const [raceFinished,  setRaceFinished]  = useState(false)
+  const [winner,        setWinner]        = useState(null)
+  const [opponent,      setOpponent]      = useState(null)
+  const [waitingOpp,    setWaitingOpp]    = useState(true)
+  const [callActive,    setCallActive]    = useState(false)
+  const [muted,         setMuted]         = useState(false)
 
-// ── Physics constants (drift-racing style from the article) ──────────────────
-const PHYS = {
-    engine:   2100,
-    brake:   -1500,
-    steer:    40 * Math.PI / 180,
-    wheelBase: 36,
-    grip: { normal: 5.8, drift: 0.42, lat: 7 },
-    drag:     0.44,
-    maxSpeed: 860,
-    drift: { minSpeed: 280, factor: 0.28 },
-}
-const TOTAL_LAPS  = 3
-const POS_SYNC_MS = 80
+  // ── Three.js / physics refs ─────────────────────────────────────────────────
+  const containerRef   = useRef(null)
+  const rendererRef    = useRef(null)
+  const sceneRef       = useRef(null)
+  const cameraRef      = useRef(null)
+  const clockRef       = useRef(new THREE.Clock())
+  const physicsRef     = useRef(null)        // { physicsWorld, tmpTrans }
+  const carBodyRef     = useRef(null)
+  const vehicleRef     = useRef(null)
+  const wheelMeshesRef = useRef([])
+  const carModelRef    = useRef(null)
+  const oppModelRef    = useRef(null)
+  const gateDataRef    = useRef(null)
+  const steeringRef    = useRef(0)
+  const keyStateRef    = useRef({ w:false, s:false, a:false, d:false })
+  const accumRef       = useRef(0)
+  const afRef          = useRef(null)
+  const raceStateRef   = useRef({ isMultiplayer:true, raceStarted:false, raceFinished:false, countdownStarted:false, allPlayersConnected:false })
+  const startTimeRef   = useRef(0)
+  const timerRef       = useRef(null)
+  const finishTimesRef = useRef({})
+  const roomIdRef      = useRef(null)
+  const isHostRef      = useRef(false)
+  const myColorRef     = useRef('blue')
+  const oppColorRef    = useRef('red')
+  const prevPathRef    = useRef(location.pathname)
+  const minimapRef     = useRef(null)  // { canvas, ctx, trackData }
+  const carFlipRef     = useRef({ isFlipped:false, time:0, prevUpDot:1 })
 
-// ── Car physics step (adapted from drift-racing article, no p2 needed) ────────
-const stepCar = (s, keys, dt) => {
-    const co = Math.cos(s.angle), si = Math.sin(s.angle)
-    const fwd = [co, si], rgt = [-si, co]
-    const vel = [s.vx, s.vy]
-    const fwdSpd = vel[0] * fwd[0] + vel[1] * fwd[1]
-    const latSpd = vel[0] * rgt[0] + vel[1] * rgt[1]
+  // ─── Fetch opponent profile ────────────────────────────────────────────────
+  useEffect(() => {
+    if (!opponentId) return
+    fetch(`${API_BASE_URL}/api/user/profile/${opponentId}`, { credentials:'include' })
+      .then(r => r.json())
+      .then(d => setOpponent(d))
+      .catch(() => {})
+  }, [opponentId])
 
-    let eng = 0
-    if (keys.up)        eng = PHYS.engine
-    else if (keys.down) eng = PHYS.brake
+  // ─── Determine isHost and car colors ──────────────────────────────────────
+  useEffect(() => {
+    const roomId  = localStorage.getItem('raceRoomId')
+    const isHost  = localStorage.getItem('raceIsHost') === 'true'
+    roomIdRef.current  = roomId || ''
+    isHostRef.current  = isHost
+    myColorRef.current  = isHost ? 'blue' : 'red'
+    oppColorRef.current = isHost ? 'red'  : 'blue'
+  }, [user])
 
-    const steerIn = (keys.right ? 1 : 0) - (keys.left ? 1 : 0)
-    if (steerIn !== 0 && Math.abs(fwdSpd) > 10) {
-        const sa = steerIn * PHYS.steer
-        const tr = PHYS.wheelBase / Math.tan(Math.abs(sa) || 0.0001)
-        s.angVel = (fwdSpd / tr) * steerIn
+  // ─── Load Ammo.js dynamically, then boot the game ─────────────────────────
+  useEffect(() => {
+    if (!user) return
+    let cancelled = false
+
+    const boot = (AmmoLib) => {
+      if (cancelled) return
+      window.Ammo = AmmoLib
+      initGame()
+    }
+
+    if (window.Ammo && typeof window.Ammo === 'object') {
+      boot(window.Ammo)
+    } else if (window.Ammo && typeof window.Ammo === 'function') {
+      window.Ammo().then(boot)
     } else {
-        s.angVel *= 0.80
+      const tag = document.createElement('script')
+      tag.src = '/ammo.js'
+      tag.onload = () => {
+        window.Ammo().then(boot)
+      }
+      document.head.appendChild(tag)
     }
 
-    const spd = Math.sqrt(s.vx ** 2 + s.vy ** 2)
-    const drifting = eng > 0 && steerIn !== 0 &&
-        spd > PHYS.drift.minSpeed && spd / PHYS.maxSpeed > PHYS.drift.factor
-
-    let ax = fwd[0] * eng, ay = fwd[1] * eng
-    const grip = drifting
-        ? PHYS.grip.drift * (1 + spd / PHYS.maxSpeed)
-        : PHYS.grip.normal
-    ax += rgt[0] * (-latSpd * PHYS.grip.lat * grip)
-    ay += rgt[1] * (-latSpd * PHYS.grip.lat * grip)
-
-    if (!eng) {
-        ax -= fwd[0] * fwdSpd * PHYS.drag
-        ay -= fwd[1] * fwdSpd * PHYS.drag
+    return () => {
+      cancelled = true
+      cleanup()
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user])
 
-    s.vx += ax * dt
-    s.vy += ay * dt
-    const newSpd = Math.sqrt(s.vx ** 2 + s.vy ** 2)
-    if (newSpd > PHYS.maxSpeed) {
-        s.vx = s.vx / newSpd * PHYS.maxSpeed
-        s.vy = s.vy / newSpd * PHYS.maxSpeed
-    }
+  // ─── Socket.IO multiplayer ──────────────────────────────────────────────────
+  useEffect(() => {
+    if (!socket || !roomIdRef.current) return
 
-    // Advance position — bounce off walls
-    const nx = s.x + s.vx * dt, ny = s.y + s.vy * dt
-    if (onTrack(nx, ny)) {
-        s.x = nx; s.y = ny
-    } else if (onTrack(nx, s.y)) {
-        s.x = nx; s.vx *= 0.45; s.vy *= -0.35
-    } else if (onTrack(s.x, ny)) {
-        s.y = ny; s.vy *= 0.45; s.vx *= -0.35
-    } else {
-        s.vx *= -0.35; s.vy *= -0.35
-    }
-    s.angle += s.angVel * dt
-    return { drifting, speed: newSpd }
-}
+    // Join the race room with a fresh socket room membership
+    socket.emit('joinRaceRoom', { roomId: roomIdRef.current })
 
-// ── Draw the full track ────────────────────────────────────────────────────────
-const drawTrack = (ctx, camX, camY, W, H) => {
-    const ox = W / 2 - camX   // track-centre screen x
-    const oy = H / 2 - camY   // track-centre screen y
-
-    // ── Outer grass background ──
-    ctx.fillStyle = '#2d7a2d'
-    ctx.fillRect(0, 0, W, H)
-
-    // Subtle grass grid
-    ctx.save()
-    ctx.strokeStyle = 'rgba(0,100,0,0.22)'
-    ctx.lineWidth = 1
-    const gs = 85
-    for (let gx = ((ox % gs) + gs) % gs; gx < W; gx += gs) {
-        ctx.beginPath(); ctx.moveTo(gx, 0); ctx.lineTo(gx, H); ctx.stroke()
-    }
-    for (let gy = ((oy % gs) + gs) % gs; gy < H; gy += gs) {
-        ctx.beginPath(); ctx.moveTo(0, gy); ctx.lineTo(W, gy); ctx.stroke()
-    }
-    ctx.restore()
-
-    // Decorative trees (circles) outside outer boundary
-    const treePts = [
-        [T.outer.sX + T.outer.sY + 60,  0],
-        [T.outer.sX + T.outer.sY + 60,  200],
-        [T.outer.sX + T.outer.sY + 60, -200],
-        [-(T.outer.sX + T.outer.sY + 60),  0],
-        [-(T.outer.sX + T.outer.sY + 60),  200],
-        [-(T.outer.sX + T.outer.sY + 60), -200],
-        [0,   T.outer.sY + 70],
-        [200, T.outer.sY + 70],
-        [-200, T.outer.sY + 70],
-        [0,  -(T.outer.sY + 70)],
-        [200, -(T.outer.sY + 70)],
-        [-200,-(T.outer.sY + 70)],
-    ]
-    treePts.forEach(([tx, ty]) => {
-        const sx = ox + tx, sy = oy + ty
-        ctx.fillStyle = 'rgba(0,0,0,0.2)'
-        ctx.beginPath(); ctx.ellipse(sx + 7, sy + 7, 22, 14, 0, 0, Math.PI * 2); ctx.fill()
-        ctx.fillStyle = '#1a4e1a'
-        ctx.beginPath(); ctx.arc(sx, sy, 22, 0, Math.PI * 2); ctx.fill()
-        ctx.fillStyle = '#2a7a2a'
-        ctx.beginPath(); ctx.arc(sx - 7, sy - 7, 13, 0, Math.PI * 2); ctx.fill()
-    })
-
-    // Asphalt ring (evenodd: outer oval minus inner oval)
-    ctx.beginPath()
-    ctx.arc(ox + T.outer.sX, oy, T.outer.sY, -Math.PI / 2, Math.PI / 2)
-    ctx.lineTo(ox - T.outer.sX, oy + T.outer.sY)
-    ctx.arc(ox - T.outer.sX, oy, T.outer.sY, Math.PI / 2, Math.PI * 1.5)
-    ctx.closePath()
-    ctx.arc(ox + T.inner.sX, oy, T.inner.sY, -Math.PI / 2, Math.PI / 2)
-    ctx.lineTo(ox - T.inner.sX, oy + T.inner.sY)
-    ctx.arc(ox - T.inner.sX, oy, T.inner.sY, Math.PI / 2, Math.PI * 1.5)
-    ctx.closePath()
-    ctx.fillStyle = '#1c1c20'
-    ctx.fill('evenodd')
-
-    // Subtle asphalt texture (light lines)
-    ctx.save()
-    ctx.strokeStyle = 'rgba(255,255,255,0.03)'
-    ctx.lineWidth = 1
-    for (let gx = ((ox % gs) + gs) % gs; gx < W; gx += gs) {
-        ctx.beginPath(); ctx.moveTo(gx, 0); ctx.lineTo(gx, H); ctx.stroke()
-    }
-    ctx.restore()
-
-    // Inner grass (on top of asphalt ring to cover centre)
-    ovalPath(ctx, ox, oy, T.inner.sX, T.inner.sY)
-    ctx.fillStyle = '#2a7a2a'
-    ctx.fill()
-
-    // Inner grass grid
-    ctx.save()
-    ovalPath(ctx, ox, oy, T.inner.sX, T.inner.sY)
-    ctx.clip()
-    ctx.strokeStyle = 'rgba(0,100,0,0.3)'
-    ctx.lineWidth = 1
-    for (let gx = ((ox % gs) + gs) % gs; gx < W; gx += gs) {
-        ctx.beginPath(); ctx.moveTo(gx, 0); ctx.lineTo(gx, H); ctx.stroke()
-    }
-    for (let gy = ((oy % gs) + gs) % gs; gy < H; gy += gs) {
-        ctx.beginPath(); ctx.moveTo(0, gy); ctx.lineTo(W, gy); ctx.stroke()
-    }
-    ctx.restore()
-
-    // Inner circle decoration (logo / grass marker)
-    ctx.fillStyle = '#1f6b1f'
-    ctx.beginPath()
-    ctx.arc(ox, oy, 35, 0, Math.PI * 2)
-    ctx.fill()
-    ctx.strokeStyle = '#3aaa3a'
-    ctx.lineWidth = 3
-    ctx.beginPath(); ctx.arc(ox, oy, 35, 0, Math.PI * 2); ctx.stroke()
-
-    // ── Outer curb (red / white alternating dashes) ──
-    ctx.save()
-    ctx.lineWidth = 16
-    ctx.strokeStyle = '#dd2020'
-    ctx.setLineDash([34, 34])
-    ovalPath(ctx, ox, oy, T.outer.sX, T.outer.sY)
-    ctx.stroke()
-    ctx.strokeStyle = '#f0f0f0'
-    ctx.lineDashOffset = 34
-    ovalPath(ctx, ox, oy, T.outer.sX, T.outer.sY)
-    ctx.stroke()
-    ctx.setLineDash([]); ctx.lineDashOffset = 0
-    ctx.restore()
-
-    // ── Inner curb ──
-    ctx.save()
-    ctx.lineWidth = 11
-    ctx.strokeStyle = '#dd2020'
-    ctx.setLineDash([26, 26])
-    ovalPath(ctx, ox, oy, T.inner.sX, T.inner.sY)
-    ctx.stroke()
-    ctx.strokeStyle = '#f0f0f0'
-    ctx.lineDashOffset = 26
-    ovalPath(ctx, ox, oy, T.inner.sX, T.inner.sY)
-    ctx.stroke()
-    ctx.setLineDash([]); ctx.lineDashOffset = 0
-    ctx.restore()
-
-    // ── Centre dashed lane marking ──
-    const midSX = (T.outer.sX + T.inner.sX) / 2
-    const midSY = (T.outer.sY + T.inner.sY) / 2
-    ctx.save()
-    ctx.strokeStyle = 'rgba(255,255,150,0.45)'
-    ctx.lineWidth = 3
-    ctx.setLineDash([38, 38])
-    ovalPath(ctx, ox, oy, midSX, midSY)
-    ctx.stroke()
-    ctx.setLineDash([])
-    ctx.restore()
-
-    // ── Finish line (checkered vertical strip at x = 0 on top straight) ──
-    const flSX = ox + FINISH_X
-    const flSY1 = oy + FINISH_Y1   // –262 in world → oy – 262 on screen
-    const flSY2 = oy + FINISH_Y2   // –143
-    const sqSz = 13
-    const numSq = Math.floor((flSY2 - flSY1) / sqSz)
-    for (let i = 0; i < numSq; i++) {
-        ctx.fillStyle = i % 2 === 0 ? '#ffffff' : '#111111'
-        ctx.fillRect(flSX - sqSz, flSY1 + i * sqSz, sqSz, sqSz)
-        ctx.fillStyle = i % 2 === 0 ? '#111111' : '#ffffff'
-        ctx.fillRect(flSX, flSY1 + i * sqSz, sqSz, sqSz)
-    }
-
-    // Start grid markers
-    for (let i = 0; i < 3; i++) {
-        const gx = ox + (-2 + i) * 36
-        const gy = oy + START.y + 18
-        ctx.fillStyle = 'rgba(255,255,0,0.5)'
-        ctx.fillRect(gx - 10, gy, 20, 6)
-    }
-}
-
-// ── Draw particles (drift smoke) ─────────────────────────────────────────────
-const drawParticles = (ctx, particles, camX, camY, W, H) => {
-    particles.forEach(p => {
-        const sx = W / 2 + p.x - camX
-        const sy = H / 2 + p.y - camY
-        if (sx < -60 || sx > W + 60 || sy < -60 || sy > H + 60) return
-        ctx.fillStyle = `rgba(220,220,220,${p.life * 0.35})`
-        ctx.beginPath()
-        ctx.arc(sx, sy, p.size, 0, Math.PI * 2)
-        ctx.fill()
-    })
-}
-
-// ── Draw a car — TOP-DOWN VIEW ────────────────────────────────────────────────
-// cx/cy = SCREEN coords (already world-to-screen converted), angle in radians
-const drawCar = (ctx, cx, cy, angle, bodyColor, accentColor, braking) => {
-    ctx.save()
-    ctx.translate(cx, cy)
-    ctx.rotate(angle)   // angle=0 → car faces RIGHT (+X)
-
-    const L = 42, W = 23   // car length, width
-
-    // Shadow
-    ctx.fillStyle = 'rgba(0,0,0,0.38)'
-    ctx.beginPath(); ctx.ellipse(4, 6, L * 0.52, W * 0.42, 0, 0, Math.PI * 2); ctx.fill()
-
-    // Main body
-    ctx.fillStyle = bodyColor
-    ctx.beginPath(); ctx.roundRect(-L / 2, -W / 2, L, W, 5); ctx.fill()
-
-    // Side highlight strip
-    ctx.fillStyle = 'rgba(255,255,255,0.18)'
-    ctx.fillRect(-L / 2 + 4, -W / 2, L - 8, 4)
-
-    // Body outline
-    ctx.strokeStyle = 'rgba(0,0,0,0.45)'
-    ctx.lineWidth = 1.5
-    ctx.beginPath(); ctx.roundRect(-L / 2, -W / 2, L, W, 5); ctx.stroke()
-
-    // Windshield (front = +X direction)
-    ctx.fillStyle = 'rgba(160,235,255,0.82)'
-    ctx.beginPath(); ctx.roundRect(L / 2 - 14, -W / 2 + 3, 12, W - 6, 3); ctx.fill()
-
-    // Rear window
-    ctx.fillStyle = 'rgba(130,205,235,0.65)'
-    ctx.beginPath(); ctx.roundRect(-L / 2 + 2, -W / 2 + 3, 10, W - 6, 3); ctx.fill()
-
-    // Hood divider line
-    ctx.strokeStyle = 'rgba(0,0,0,0.2)'
-    ctx.lineWidth = 1
-    ctx.beginPath(); ctx.moveTo(L / 2 - 14, -W / 2); ctx.lineTo(L / 2 - 14, W / 2); ctx.stroke()
-
-    // Headlights
-    ctx.fillStyle = '#ffffaa'
-    ctx.fillRect(L / 2 - 4, -W / 2 + 3, 4, 5)
-    ctx.fillRect(L / 2 - 4, W / 2 - 8, 4, 5)
-
-    // Tail lights
-    ctx.fillStyle = braking ? '#ff2200' : '#880000'
-    ctx.fillRect(-L / 2, -W / 2 + 3, 5, 5)
-    ctx.fillRect(-L / 2, W / 2 - 8, 5, 5)
-    if (braking) {
-        ctx.fillStyle = 'rgba(255,80,0,0.4)'
-        ctx.fillRect(-L / 2 - 3, -W / 2 + 1, 8, 8)
-        ctx.fillRect(-L / 2 - 3, W / 2 - 9, 8, 8)
-    }
-
-    // Wheels (4 corners)
-    ctx.fillStyle = '#111'
-    const wp = [
-        [L / 2 - 11, -W / 2 - 5],
-        [L / 2 - 11,  W / 2 + 1],
-        [-L / 2 + 6, -W / 2 - 5],
-        [-L / 2 + 6,  W / 2 + 1],
-    ]
-    wp.forEach(([wx, wy]) => {
-        ctx.beginPath(); ctx.roundRect(wx - 5, wy, 10, 5, 1); ctx.fill()
-        ctx.fillStyle = '#666'
-        ctx.beginPath(); ctx.roundRect(wx - 3, wy + 1, 6, 3, 1); ctx.fill()
-        ctx.fillStyle = '#111'
-    })
-
-    // Rear spoiler
-    ctx.fillStyle = '#1a1a1a'
-    ctx.fillRect(-L / 2 - 6, -W / 2 + 2, 5, W - 4)
-    ctx.fillStyle = accentColor
-    ctx.fillRect(-L / 2 - 6, -W / 2 + 2, 5, 4)
-    ctx.fillRect(-L / 2 - 6, W / 2 - 6, 5, 4)
-
-    // Racing number plate
-    ctx.fillStyle = 'rgba(255,255,255,0.7)'
-    ctx.beginPath(); ctx.roundRect(-4, -5, 14, 10, 2); ctx.fill()
-    ctx.fillStyle = '#111'
-    ctx.font = 'bold 8px Arial'
-    ctx.textAlign = 'center'
-    ctx.fillText('1', 3, 5)
-
-    ctx.restore()
-}
-
-// ── Draw minimap ──────────────────────────────────────────────────────────────
-const drawMinimap = (ctx, W, H, carX, carY, oppX, oppY) => {
-    const MC = { x: W - 95, y: H - 95 }
-    const SC = 0.08
-    ctx.save()
-    ctx.fillStyle = 'rgba(0,0,0,0.62)'
-    ctx.beginPath(); ctx.arc(MC.x, MC.y, 80, 0, Math.PI * 2); ctx.fill()
-    ctx.strokeStyle = 'rgba(255,255,255,0.25)'
-    ctx.lineWidth = 1
-    ctx.beginPath(); ctx.arc(MC.x, MC.y, 80, 0, Math.PI * 2); ctx.stroke()
-
-    // Asphalt ring on minimap
-    const drawMMOval = (sX, sY) => {
-        ctx.arc(MC.x + sX * SC, MC.y, sY * SC, -Math.PI / 2, Math.PI / 2)
-        ctx.lineTo(MC.x - sX * SC, MC.y + sY * SC)
-        ctx.arc(MC.x - sX * SC, MC.y, sY * SC, Math.PI / 2, Math.PI * 1.5)
-        ctx.closePath()
-    }
-    ctx.beginPath(); drawMMOval(T.outer.sX, T.outer.sY)
-    ctx.beginPath(); drawMMOval(T.outer.sX, T.outer.sY); drawMMOval(T.inner.sX, T.inner.sY)
-    ctx.fillStyle = '#2e2e2e'; ctx.fill('evenodd')
-    ctx.fillStyle = '#2a7a2a'
-    ctx.beginPath(); drawMMOval(T.inner.sX, T.inner.sY); ctx.fill()
-
-    // Finish line
-    ctx.fillStyle = '#ffffff'
-    ctx.fillRect(MC.x - 1, MC.y + FINISH_Y1 * SC, 2, (FINISH_Y2 - FINISH_Y1) * SC)
-
-    // Player dot
-    ctx.fillStyle = '#e74c3c'
-    ctx.beginPath(); ctx.arc(MC.x + carX * SC, MC.y + carY * SC, 5, 0, Math.PI * 2); ctx.fill()
-    ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5
-    ctx.beginPath(); ctx.arc(MC.x + carX * SC, MC.y + carY * SC, 5, 0, Math.PI * 2); ctx.stroke()
-
-    // Opponent dot
-    ctx.fillStyle = '#3366ff'
-    ctx.beginPath(); ctx.arc(MC.x + oppX * SC, MC.y + oppY * SC, 5, 0, Math.PI * 2); ctx.fill()
-    ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5
-    ctx.beginPath(); ctx.arc(MC.x + oppX * SC, MC.y + oppY * SC, 5, 0, Math.PI * 2); ctx.stroke()
-
-    ctx.restore()
-}
-
-// ── Main component ─────────────────────────────────────────────────────────────
-const RacingGamePage = () => {
-    const { opponentId } = useParams()
-    const navigate       = useNavigate()
-    const location       = useLocation()
-    const { user }       = useContext(UserContext)
-    const { socket, endRaceGameOnNavigate, callUser, leaveCall, callAccepted, stream } = useContext(SocketContext) || {}
-
-    const canvasRef       = useRef(null)
-    const keysRef         = useRef({ up: false, down: false, left: false, right: false })
-    const carRef          = useRef({ ...START, vx: 0, vy: 0, angVel: 0 })
-    const oppRef          = useRef({ x: -40, y: START.y, angle: 0, speed: 0, lap: 0 })
-    const particlesRef    = useRef([])
-    const camRef          = useRef({ x: START.x, y: START.y })
-    const lapRef          = useRef({ laps: 0, prevX: START.x, beenLeft: false })
-    const animRef         = useRef(null)
-    const lastTimeRef     = useRef(null)
-    const syncTimerRef    = useRef(null)
-    const previousPathRef = useRef(location.pathname)
-
-    const [roomId,     setRoomId]     = useState(() => localStorage.getItem('raceRoomId'))
-    const [opponent,   setOpponent]   = useState(null)
-    const [gameLive,   setGameLive]   = useState(false)
-    const [gameOver,   setGameOver]   = useState(false)
-    const [winnerId,   setWinnerId]   = useState(null)
-    const [myLap,      setMyLap]      = useState(0)
-    const [oppLap,     setOppLap]     = useState(0)
-    const [mySpeed,    setMySpeed]    = useState(0)
-    const [countdown,  setCountdown]  = useState(null)
-    const [isMuted,    setIsMuted]    = useState(false)
-    const [inCall,     setInCall]     = useState(false)
-    const [callActive, setCallActive] = useState(false)
-
-    // roomId might arrive after mount if we're the challenger
-    useEffect(() => {
-        if (!socket) return
-        const h = ({ roomId: rId }) => {
-            if (rId) { localStorage.setItem('raceRoomId', rId); setRoomId(rId) }
+    const onPlayerJoined = ({ count }) => {
+      if (count >= 2) {
+        setWaitingOpp(false)
+        raceStateRef.current.allPlayersConnected = true
+        if (isHostRef.current && !raceStateRef.current.countdownStarted) {
+          raceStateRef.current.countdownStarted = true
+          startCountdown()
+          socket.emit('raceCountdownStart', { roomId: roomIdRef.current })
         }
-        socket.on('acceptRaceChallenge', h)
-        return () => socket.off('acceptRaceChallenge', h)
-    }, [socket])
+      }
+    }
 
-    // Fetch opponent profile
-    useEffect(() => {
-        if (!opponentId) return
-        const base = API_BASE_URL || (import.meta.env.PROD ? window.location.origin : 'http://localhost:5000')
-        fetch(`${base}/api/user/getUserPro/${opponentId}`, { credentials: 'include' })
-            .then(r => r.ok ? r.json() : null)
-            .then(d => { if (d?._id) setOpponent(d) })
-            .catch(() => {})
-    }, [opponentId])
+    const onCountdownStart = () => {
+      if (!isHostRef.current && !raceStateRef.current.countdownStarted) {
+        raceStateRef.current.countdownStarted = true
+        setWaitingOpp(false)
+        startCountdown()
+      }
+    }
 
-    useEffect(() => { if (callAccepted) setCallActive(true) }, [callAccepted])
+    const onOpponentPos = (data) => {
+      updateOpponentCarPosition(data)
+      if (data.raceProgress) setOppGate(data.raceProgress.currentGateIndex || 0)
+    }
 
-    // Socket: opponent position, race result, opponent left
-    useEffect(() => {
-        if (!socket || !roomId) return
-        const onPos = (data) => {
-            if (data.wx !== undefined) {
-                oppRef.current = { x: data.wx, y: data.wy, angle: data.wangle ?? 0, speed: data.speed ?? 0, lap: data.lap ?? 0 }
-            }
-            setOppLap(data.lap ?? 0)
+    const onRaceResult = ({ winnerId }) => {
+      const myId = user?._id?.toString()
+      setWinner(winnerId?.toString() === myId ? 'you' : 'opponent')
+      setRaceFinished(true)
+      raceStateRef.current.raceFinished = true
+      if (timerRef.current) clearInterval(timerRef.current)
+    }
+
+    const onOpponentLeft = () => {
+      setWinner('you')
+      setRaceFinished(true)
+      raceStateRef.current.raceFinished = true
+    }
+
+    socket.on('racePlayerJoined',  onPlayerJoined)
+    socket.on('raceCountdownStart', onCountdownStart)
+    socket.on('raceOpponentPos',   onOpponentPos)
+    socket.on('raceResult',        onRaceResult)
+    socket.on('raceOpponentLeft',  onOpponentLeft)
+
+    return () => {
+      socket.off('racePlayerJoined',  onPlayerJoined)
+      socket.off('raceCountdownStart', onCountdownStart)
+      socket.off('raceOpponentPos',   onOpponentPos)
+      socket.off('raceResult',        onRaceResult)
+      socket.off('raceOpponentLeft',  onOpponentLeft)
+    }
+  }, [socket, user])
+
+  // ─── Keyboard controls ──────────────────────────────────────────────────────
+  useEffect(() => {
+    const down = (e) => {
+      if (e.key==='w'||e.key==='ArrowUp')    keyStateRef.current.w = true
+      if (e.key==='s'||e.key==='ArrowDown')  keyStateRef.current.s = true
+      if (e.key==='a'||e.key==='ArrowLeft')  keyStateRef.current.a = true
+      if (e.key==='d'||e.key==='ArrowRight') keyStateRef.current.d = true
+      if (e.key==='r') resetCar()
+    }
+    const up = (e) => {
+      if (e.key==='w'||e.key==='ArrowUp')    keyStateRef.current.w = false
+      if (e.key==='s'||e.key==='ArrowDown')  keyStateRef.current.s = false
+      if (e.key==='a'||e.key==='ArrowLeft')  keyStateRef.current.a = false
+      if (e.key==='d'||e.key==='ArrowRight') keyStateRef.current.d = false
+    }
+    window.addEventListener('keydown', down)
+    window.addEventListener('keyup', up)
+    return () => {
+      window.removeEventListener('keydown', down)
+      window.removeEventListener('keyup', up)
+    }
+  }, [])
+
+  // ─── Position broadcast ─────────────────────────────────────────────────────
+  useEffect(() => {
+    const id = setInterval(() => {
+      if (!socket || !carModelRef.current || !roomIdRef.current) return
+      if (!raceStateRef.current.raceStarted) return
+      const gd = gateDataRef.current
+      let distToGate = 1000000
+      if (gd?.gates && gd.currentGateIndex < gd.gates.length) {
+        const g = gd.gates[gd.currentGateIndex]
+        if (g) {
+          const gp = new THREE.Vector3(); g.getWorldPosition(gp)
+          const dx = carModelRef.current.position.x - gp.x
+          const dy = carModelRef.current.position.y - gp.y
+          const dz = carModelRef.current.position.z - gp.z
+          distToGate = dx*dx + dy*dy + dz*dz
         }
-        const onRes  = ({ winnerId: w }) => { setWinnerId(w); setGameOver(true); cancelAnimationFrame(animRef.current); clearInterval(syncTimerRef.current) }
-        const onLeft = () => { setGameOver(true); setWinnerId(user?._id); cancelAnimationFrame(animRef.current); clearInterval(syncTimerRef.current) }
-        socket.on('raceOpponentPos',  onPos)
-        socket.on('raceResult',       onRes)
-        socket.on('raceOpponentLeft', onLeft)
-        return () => { socket.off('raceOpponentPos', onPos); socket.off('raceResult', onRes); socket.off('raceOpponentLeft', onLeft) }
-    }, [socket, roomId, user?._id])
+      }
+      const pos = carModelRef.current.position
+      const quat = carModelRef.current.quaternion
+      socket.emit('racePosUpdate', {
+        roomId: roomIdRef.current,
+        position:   { x:+pos.x.toFixed(2),  y:+pos.y.toFixed(2),  z:+pos.z.toFixed(2)  },
+        quaternion: { x:+quat.x.toFixed(4), y:+quat.y.toFixed(4), z:+quat.z.toFixed(4), w:+quat.w.toFixed(4)||1 },
+        raceProgress: { currentGateIndex: gd?.currentGateIndex||0, distanceToNextGate: distToGate },
+        ...(raceStateRef.current.raceFinished && finishTimesRef.current[user?._id]
+          ? { finishTime: finishTimesRef.current[user._id] }
+          : {}),
+      })
+    }, 80)
+    return () => clearInterval(id)
+  }, [socket, user])
 
-    // Countdown — starts when roomId is available
-    useEffect(() => {
-        if (!roomId) return
-        let c = 3
-        setCountdown(c)
-        const iv = setInterval(() => {
-            c--; setCountdown(c)
-            if (c <= 0) { clearInterval(iv); setCountdown(null); setGameLive(true) }
+  // ─── Navigation guard ───────────────────────────────────────────────────────
+  useEffect(() => {
+    const onPop = () => {
+      if (localStorage.getItem('raceRoomId') && endRaceGameOnNavigate) {
+        endRaceGameOnNavigate()
+      }
+    }
+    window.addEventListener('popstate', onPop)
+    return () => window.removeEventListener('popstate', onPop)
+  }, [endRaceGameOnNavigate])
+
+  useEffect(() => {
+    if (location.pathname !== prevPathRef.current && !location.pathname.startsWith('/race/')) {
+      if (localStorage.getItem('raceRoomId') && endRaceGameOnNavigate) endRaceGameOnNavigate()
+    }
+    prevPathRef.current = location.pathname
+  }, [location.pathname, endRaceGameOnNavigate])
+
+  // ─── GAME INIT ──────────────────────────────────────────────────────────────
+  const initGame = useCallback(() => {
+    const container = containerRef.current
+    if (!container || !window.Ammo) return
+
+    const W = container.clientWidth
+    const H = container.clientHeight
+
+    // ── Scene ──────────────────────────────────────────────────────────────
+    const scene = new THREE.Scene()
+    sceneRef.current = scene
+    setupSkybox(scene)
+    setupLighting(scene)
+
+    // ── Camera ─────────────────────────────────────────────────────────────
+    const camera = new THREE.PerspectiveCamera(45, W/H, 0.1, 2000)
+    camera.position.set(0, 10, 20)
+    cameraRef.current = camera
+
+    // ── Renderer ───────────────────────────────────────────────────────────
+    const renderer = new THREE.WebGLRenderer({ antialias:true })
+    renderer.setPixelRatio(window.devicePixelRatio)
+    renderer.setSize(W, H)
+    renderer.shadowMap.enabled = true
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap
+    container.appendChild(renderer.domElement)
+    rendererRef.current = renderer
+
+    window.addEventListener('resize', () => {
+      if (!cameraRef.current || !rendererRef.current) return
+      const w = container.clientWidth, h = container.clientHeight
+      cameraRef.current.aspect = w/h
+      cameraRef.current.updateProjectionMatrix()
+      rendererRef.current.setSize(w, h)
+    })
+
+    // ── Physics ────────────────────────────────────────────────────────────
+    const physics = initPhysics(window.Ammo)
+    physicsRef.current = physics
+
+    // ── Loading manager ────────────────────────────────────────────────────
+    const lm = new THREE.LoadingManager()
+    lm.onProgress = (_, loaded, total) => setLoadingPct(Math.round(loaded/total*100))
+    lm.onLoad = () => setLoading(false)
+    window.loadingManager = lm
+
+    // ── Globals for game modules ───────────────────────────────────────────
+    window.raceState        = raceStateRef.current
+    window.playerFinishTimes = finishTimesRef.current
+    window.startCountdown   = startCountdown
+    window.updateLeaderboard = () => {}  // no-op; we use React state
+
+    // ── GameConfig for car.js color detection ──────────────────────────────
+    const roomId = roomIdRef.current
+    sessionStorage.setItem('gameConfig', JSON.stringify({
+      roomId,
+      players: [
+        { id: user._id,    playerColor: myColorRef.current,  isHost:  isHostRef.current },
+        { id: opponentId,  playerColor: oppColorRef.current, isHost: !isHostRef.current },
+      ],
+    }))
+    localStorage.setItem('myPlayerId', user._id)
+
+    // ── Track ──────────────────────────────────────────────────────────────
+    loadTrackModel(window.Ammo, DEFAULT_MAP, scene, physics.physicsWorld, lm, (trackModel) => {
+      if (trackModel) { /* minimap could use this */ }
+    })
+    loadMapDecorations(DEFAULT_MAP, scene, renderer, camera, lm)
+
+    // ── Gates ──────────────────────────────────────────────────────────────
+    const gd = loadGates(DEFAULT_MAP, scene, lm, (loaded) => {
+      gateDataRef.current = loaded
+      window.gateData = loaded
+    })
+    gateDataRef.current = gd
+    window.gateData = gd
+
+    // ── Player car (with physics) ───────────────────────────────────────────
+    const carComps = createVehicle(window.Ammo, scene, physics.physicsWorld, [], (loaded) => {
+      carBodyRef.current  = loaded.carBody
+      vehicleRef.current  = loaded.vehicle
+      wheelMeshesRef.current = loaded.wheelMeshes
+      carModelRef.current    = loaded.carModel
+      steeringRef.current    = loaded.currentSteeringAngle
+
+      // ── Opponent car (visual only, no physics) ─────────────────────────
+      loadOpponentCar(scene)
+
+      // ── Minimap ────────────────────────────────────────────────────────
+      initMinimap()
+
+      // ── Start render loop ──────────────────────────────────────────────
+      animate()
+    }, myColorRef.current)
+    carBodyRef.current = carComps.carBody
+    vehicleRef.current = carComps.vehicle
+  }, [user, opponentId])
+
+  // ─── Opponent car (visual only) ────────────────────────────────────────────
+  const loadOpponentCar = (scene) => {
+    const loader = new GLTFLoader()
+    loader.load(`/models/car_${oppColorRef.current}.glb`, (gltf) => {
+      const model = gltf.scene.clone()
+      model.scale.set(4, 4, 4)
+      model.position.set(0, 100, 0) // hide until first update
+      model.traverse(n => {
+        if (n.isMesh) {
+          n.material = n.material.clone()
+          n.material.transparent = true
+          n.material.opacity = 0.85
+        }
+      })
+      // Name label
+      const label = makeTextSprite(opponent?.name || opponent?.username || 'Opponent')
+      label.position.set(0, 0.4, 0)
+      label.scale.set(6, 1.5, 1)
+      model.add(label)
+      scene.add(model)
+      oppModelRef.current = model
+    })
+  }
+
+  // ─── Update opponent car position from socket data ─────────────────────────
+  const updateOpponentCarPosition = (data) => {
+    const model = oppModelRef.current
+    if (!model || !data.position) return
+    model.visible = true
+    model.position.set(data.position.x, data.position.y, data.position.z)
+    if (data.quaternion) {
+      model.quaternion.set(data.quaternion.x, data.quaternion.y, data.quaternion.z, data.quaternion.w)
+    }
+  }
+
+  // ─── Skybox (cartoon gradient — matches reference game) ───────────────────
+  const setupSkybox = (scene) => {
+    const geo = new THREE.SphereGeometry(1000, 32, 32)
+    const mat = new THREE.ShaderMaterial({
+      uniforms: {
+        topColor:    { value: new THREE.Color(0x88ccff) },
+        bottomColor: { value: new THREE.Color(0xbbe2ff) },
+        offset:      { value: 0 },
+        exponent:    { value: 0.6 },
+      },
+      vertexShader: `
+        varying vec3 vWorldPosition;
+        void main() {
+          vec4 worldPos = modelMatrix * vec4(position, 1.0);
+          vWorldPosition = worldPos.xyz;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }`,
+      fragmentShader: `
+        uniform vec3 topColor; uniform vec3 bottomColor;
+        uniform float offset; uniform float exponent;
+        varying vec3 vWorldPosition;
+        void main() {
+          float h = normalize(vWorldPosition + offset).y;
+          float t = max(pow(max(h,0.0), exponent), 0.0);
+          gl_FragColor = vec4(mix(bottomColor, topColor, t), 1.0);
+        }`,
+      side: THREE.BackSide,
+    })
+    scene.add(new THREE.Mesh(geo, mat))
+  }
+
+  // ─── Lighting (matches reference game) ────────────────────────────────────
+  const setupLighting = (scene) => {
+    scene.add(new THREE.AmbientLight(0xcccccc, 2))
+    const sun = new THREE.DirectionalLight(0xffffff, 3.5)
+    sun.position.set(40, 250, 30)
+    scene.add(sun)
+  }
+
+  // ─── Countdown (3 → 2 → 1 → GO!) ─────────────────────────────────────────
+  const startCountdown = useCallback(() => {
+    let val = 3
+    setCountdown(val)
+    const id = setInterval(() => {
+      val--
+      if (val > 0) {
+        setCountdown(val)
+      } else if (val === 0) {
+        setCountdown('GO!')
+      } else {
+        clearInterval(id)
+        setCountdown(null)
+        raceStateRef.current.raceStarted = true
+        // Start race timer
+        startTimeRef.current = Date.now()
+        timerRef.current = setInterval(() => {
+          const elapsed = Math.floor((Date.now() - startTimeRef.current) / 1000)
+          const m = String(Math.floor(elapsed/60)).padStart(2,'0')
+          const s = String(elapsed%60).padStart(2,'0')
+          setRaceTime(`${m}:${s}`)
         }, 1000)
-        return () => clearInterval(iv)
-    }, [roomId])
+      }
+    }, 1000)
+  }, [])
 
-    // Keyboard listeners
-    useEffect(() => {
-        const dn = (e) => {
-            if (e.key === 'ArrowUp'    || e.key === 'w' || e.key === 'W') keysRef.current.up    = true
-            if (e.key === 'ArrowDown'  || e.key === 's' || e.key === 'S') keysRef.current.down  = true
-            if (e.key === 'ArrowLeft'  || e.key === 'a' || e.key === 'A') keysRef.current.left  = true
-            if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') keysRef.current.right = true
-            if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.key)) e.preventDefault()
-        }
-        const up = (e) => {
-            if (e.key === 'ArrowUp'    || e.key === 'w' || e.key === 'W') keysRef.current.up    = false
-            if (e.key === 'ArrowDown'  || e.key === 's' || e.key === 'S') keysRef.current.down  = false
-            if (e.key === 'ArrowLeft'  || e.key === 'a' || e.key === 'A') keysRef.current.left  = false
-            if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') keysRef.current.right = false
-        }
-        window.addEventListener('keydown', dn)
-        window.addEventListener('keyup',   up)
-        return () => { window.removeEventListener('keydown', dn); window.removeEventListener('keyup', up) }
-    }, [])
-
-    // ── Main game loop ──────────────────────────────────────────────────────────
-    useEffect(() => {
-        if (!gameLive || gameOver) return
-        const canvas = canvasRef.current
-        if (!canvas) return
-        const ctx = canvas.getContext('2d')
-        const W = canvas.width, H = canvas.height
-
-        const loop = (ts) => {
-            if (!lastTimeRef.current) lastTimeRef.current = ts
-            const dt = Math.min((ts - lastTimeRef.current) / 1000, 0.05)
-            lastTimeRef.current = ts
-
-            // Physics update
-            const car   = carRef.current
-            const keys  = keysRef.current
-            const prevX = car.x
-            const { drifting, speed } = stepCar(car, keys, dt)
-            setMySpeed(Math.round(speed))
-
-            // Lap counting — cross x=0 on top straight going right, after having gone left
-            if (car.x < FINISH_X - 100) lapRef.current.beenLeft = true
-            if (lapRef.current.beenLeft &&
-                prevX < FINISH_X && car.x >= FINISH_X &&
-                car.y >= FINISH_Y1 && car.y <= FINISH_Y2) {
-                lapRef.current.laps++
-                lapRef.current.beenLeft = false
-                setMyLap(lapRef.current.laps)
-                if (lapRef.current.laps >= TOTAL_LAPS && socket && roomId) {
-                    socket.emit('raceFinished', { roomId, winnerId: user?._id, time: Date.now() })
-                    setWinnerId(user?._id)
-                    setGameOver(true)
-                    cancelAnimationFrame(animRef.current)
-                    clearInterval(syncTimerRef.current)
-                    return
-                }
-            }
-
-            // Drift smoke particles
-            if (drifting) {
-                const bx = car.x - Math.cos(car.angle) * 20
-                const by = car.y - Math.sin(car.angle) * 20
-                particlesRef.current.push({
-                    x: bx + (Math.random() - 0.5) * 16,
-                    y: by + (Math.random() - 0.5) * 16,
-                    vx: (Math.random() - 0.5) * 55 - Math.cos(car.angle) * 25,
-                    vy: (Math.random() - 0.5) * 55 - Math.sin(car.angle) * 25,
-                    life: 1.0,
-                    size: 7 + Math.random() * 9,
-                })
-                while (particlesRef.current.length > 120) particlesRef.current.shift()
-            }
-            particlesRef.current = particlesRef.current
-                .map(p => ({ ...p, life: p.life - dt * 0.85, size: p.size * (1 + dt * 0.4), vx: p.vx * 0.94, vy: p.vy * 0.94, x: p.x + p.vx * dt, y: p.y + p.vy * dt }))
-                .filter(p => p.life > 0)
-
-            // Camera smooth follow with look-ahead
-            const lookAheadDist = 70
-            const targetCamX = car.x + Math.cos(car.angle) * lookAheadDist
-            const targetCamY = car.y + Math.sin(car.angle) * lookAheadDist
-            camRef.current.x += (targetCamX - camRef.current.x) * 0.08
-            camRef.current.y += (targetCamY - camRef.current.y) * 0.08
-            const camX = camRef.current.x, camY = camRef.current.y
-
-            // ── Render ──────────────────────────────────────────────────────
-            ctx.clearRect(0, 0, W, H)
-            drawTrack(ctx, camX, camY, W, H)
-            drawParticles(ctx, particlesRef.current, camX, camY, W, H)
-
-            // Opponent car
-            const opp = oppRef.current
-            const oppSX = W / 2 + opp.x - camX
-            const oppSY = H / 2 + opp.y - camY
-            drawCar(ctx, oppSX, oppSY, opp.angle, '#2255cc', '#66aaff', opp.speed < 50)
-
-            // Player car
-            const carSX = W / 2 + car.x - camX
-            const carSY = H / 2 + car.y - camY
-            drawCar(ctx, carSX, carSY, car.angle, '#e74c3c', '#ffcc00', keys.down || speed < 50)
-
-            // Minimap
-            drawMinimap(ctx, W, H, car.x, car.y, opp.x, opp.y)
-
-            animRef.current = requestAnimationFrame(loop)
-        }
-
-        animRef.current = requestAnimationFrame(loop)
-        return () => cancelAnimationFrame(animRef.current)
-    }, [gameLive, gameOver, socket, roomId, user?._id])
-
-    // Position sync
-    useEffect(() => {
-        if (!gameLive || gameOver || !socket || !roomId) return
-        syncTimerRef.current = setInterval(() => {
-            const c = carRef.current
-            socket.emit('racePosUpdate', {
-                roomId,
-                wx: c.x, wy: c.y, wangle: c.angle,
-                speed: Math.sqrt(c.vx ** 2 + c.vy ** 2),
-                lap: lapRef.current.laps,
-            })
-        }, POS_SYNC_MS)
-        return () => clearInterval(syncTimerRef.current)
-    }, [gameLive, gameOver, socket, roomId])
-
-    // Navigation guards
-    useEffect(() => {
-        const onPop = () => { if (localStorage.getItem('raceRoomId') && endRaceGameOnNavigate) endRaceGameOnNavigate() }
-        window.addEventListener('popstate', onPop)
-        return () => window.removeEventListener('popstate', onPop)
-    }, [endRaceGameOnNavigate])
-
-    useEffect(() => {
-        const cur = location.pathname, prev = previousPathRef.current
-        if (prev.startsWith('/race/') && !cur.startsWith('/race/') && localStorage.getItem('raceRoomId') && endRaceGameOnNavigate)
-            endRaceGameOnNavigate()
-        previousPathRef.current = cur
-    }, [location.pathname, endRaceGameOnNavigate])
-
-    useEffect(() => {
-        return () => {
-            setTimeout(() => {
-                if (!window.location.pathname.startsWith('/race/') && localStorage.getItem('raceRoomId') && endRaceGameOnNavigate)
-                    endRaceGameOnNavigate()
-            }, 50)
-        }
-    }, [endRaceGameOnNavigate])
-
-    const handleLeave = useCallback(() => {
-        if (inCall || callActive) leaveCall?.()
-        if (endRaceGameOnNavigate) endRaceGameOnNavigate()
-        navigate('/home')
-    }, [endRaceGameOnNavigate, navigate, inCall, callActive, leaveCall])
-
-    const handleCallBtn = () => {
-        if (callActive || inCall) { leaveCall?.(); setCallActive(false); setInCall(false) }
-        else { callUser?.(opponentId, 'audio'); setInCall(true) }
-    }
-
-    const toggleMute = () => {
-        stream?.getAudioTracks().forEach(t => { t.enabled = isMuted })
-        setIsMuted(m => !m)
-    }
-
-    return (
-        <Box position="fixed" inset={0} bg="#1c1c20" display="flex" flexDirection="column" overflow="hidden" userSelect="none">
-            {/* Top HUD */}
-            <Flex
-                position="absolute" top={0} left={0} right={0}
-                px={4} py={2} zIndex={20}
-                justify="space-between" align="center"
-                bg="rgba(0,0,0,0.72)"
-                backdropFilter="blur(10px)"
-                borderBottom="1px solid rgba(255,200,0,0.2)"
-            >
-                {/* Left: back + player */}
-                <Flex align="center" gap={3}>
-                    <Tooltip label="Leave race">
-                        <IconButton icon={<IoArrowBack />} size="sm" variant="ghost"
-                            color="white" onClick={handleLeave} aria-label="Leave"
-                            _hover={{ bg: 'rgba(255,100,0,0.25)' }} />
-                    </Tooltip>
-                    <Avatar size="sm" src={user?.profilePic} name={user?.name || user?.username}
-                        border="2px solid #e74c3c" />
-                    <Box>
-                        <Text color="white" fontWeight="bold" fontSize="sm" lineHeight={1}>{user?.name || user?.username}</Text>
-                        <Text color="#ff7700" fontSize="xs">Lap {Math.min(myLap + 1, TOTAL_LAPS)}/{TOTAL_LAPS}</Text>
-                    </Box>
-                </Flex>
-
-                {/* Center: speed */}
-                <Flex direction="column" align="center">
-                    <Text color="#ffdd00" fontWeight="black" fontSize="2xl" lineHeight={1}>{mySpeed}</Text>
-                    <Text color="gray.400" fontSize="9px" letterSpacing="wider">KM/H</Text>
-                </Flex>
-
-                {/* Right: opponent + voice */}
-                <Flex align="center" gap={3}>
-                    <Box textAlign="right">
-                        <Text color="white" fontWeight="bold" fontSize="sm" lineHeight={1}>{opponent?.name || opponent?.username || 'Opponent'}</Text>
-                        <Text color="#7eb8ff" fontSize="xs">Lap {Math.min(oppLap + 1, TOTAL_LAPS)}/{TOTAL_LAPS}</Text>
-                    </Box>
-                    <Avatar size="sm" src={opponent?.profilePic} name={opponent?.name || opponent?.username}
-                        border="2px solid #2255dd" />
-                    <Flex gap={1}>
-                        {(callActive || inCall) && (
-                            <Tooltip label={isMuted ? 'Unmute' : 'Mute'}>
-                                <IconButton icon={isMuted ? <FaMicrophoneSlash /> : <FaMicrophone />}
-                                    size="sm" colorScheme={isMuted ? 'red' : 'green'}
-                                    onClick={toggleMute} aria-label="mute" />
-                            </Tooltip>
-                        )}
-                        <Tooltip label={(callActive || inCall) ? 'End call' : 'Voice call'}>
-                            <IconButton icon={(callActive || inCall) ? <FaPhoneSlash /> : <FaPhone />}
-                                size="sm" colorScheme={(callActive || inCall) ? 'red' : 'green'}
-                                onClick={handleCallBtn} aria-label="call" />
-                        </Tooltip>
-                    </Flex>
-                </Flex>
-            </Flex>
-
-            {/* Canvas */}
-            <canvas ref={canvasRef} width={960} height={580}
-                style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
-
-            {/* Key hints */}
-            <Flex position="absolute" bottom={3} left={0} right={0} justify="center" gap={3} zIndex={10}>
-                {['↑ / W  Accelerate', '↓ / S  Brake', '← / A  Left', '→ / D  Right'].map(k => (
-                    <Badge key={k} bg="rgba(255,200,0,0.15)" color="rgba(255,230,100,0.9)"
-                        px={2} py={1} borderRadius="md" fontSize="10px" border="1px solid rgba(255,180,0,0.3)">
-                        {k}
-                    </Badge>
-                ))}
-            </Flex>
-
-            {/* Countdown overlay */}
-            {countdown !== null && countdown > 0 && (
-                <Flex position="absolute" inset={0} zIndex={30} align="center" justify="center"
-                    bg="rgba(0,0,0,0.6)" pointerEvents="none" flexDirection="column" gap={3}>
-                    <Text fontSize="11px" color="rgba(255,200,100,0.75)" letterSpacing="widest" textTransform="uppercase">
-                        Get Ready!
-                    </Text>
-                    <Text fontSize="120px" fontWeight="black" lineHeight={1}
-                        color={countdown === 1 ? '#ff3300' : countdown === 2 ? '#ffcc00' : '#ffffff'}
-                        style={{ textShadow: `0 0 60px ${countdown === 1 ? '#ff3300' : countdown === 2 ? '#ffcc00' : '#aaaaff'}` }}>
-                        {countdown}
-                    </Text>
-                </Flex>
-            )}
-            {countdown === 0 && !gameLive && (
-                <Flex position="absolute" inset={0} zIndex={30} align="center" justify="center" bg="rgba(0,0,0,0.45)" pointerEvents="none">
-                    <Text fontSize="90px" fontWeight="black" lineHeight={1} color="#33ff66"
-                        style={{ textShadow: '0 0 50px #00ff44' }}>GO!</Text>
-                </Flex>
-            )}
-
-            {/* Waiting for room */}
-            {!roomId && !gameOver && (
-                <Flex position="absolute" inset={0} zIndex={30} align="center" justify="center" bg="rgba(0,0,0,0.82)">
-                    <Box textAlign="center">
-                        <Text fontSize="52px" mb={2}>🏎️</Text>
-                        <Text color="white" fontSize="xl" fontWeight="bold" mb={2}>Waiting for race to start…</Text>
-                        <Text color="rgba(255,180,0,0.7)" fontSize="sm">Connecting to opponent</Text>
-                    </Box>
-                </Flex>
-            )}
-
-            {/* Game over */}
-            {gameOver && (
-                <Flex position="absolute" inset={0} zIndex={40} align="center" justify="center" bg="rgba(0,0,0,0.85)">
-                    <Box bg="linear-gradient(135deg,#0a0a1e,#1a1a0e)"
-                        borderRadius="2xl" p={10} textAlign="center"
-                        border="2px solid rgba(255,200,0,0.35)"
-                        boxShadow="0 0 80px rgba(255,180,0,0.25)" minW="340px">
-                        {winnerId === user?._id ? (
-                            <>
-                                <FaTrophy size={60} color="#FFD700" style={{ margin: '0 auto 14px' }} />
-                                <Text fontSize="3xl" fontWeight="black" color="#FFD700" mb={2}>🏆 You Win!</Text>
-                                <Text color="rgba(255,230,150,0.8)" mb={8}>You crossed the finish line first!</Text>
-                            </>
-                        ) : winnerId ? (
-                            <>
-                                <FaFlag size={52} color="#888" style={{ margin: '0 auto 14px' }} />
-                                <Text fontSize="3xl" fontWeight="black" color="gray.400" mb={2}>Race Over</Text>
-                                <Text color="rgba(200,200,200,0.7)" mb={8}>Your opponent was faster.</Text>
-                            </>
-                        ) : (
-                            <>
-                                <FaFlag size={52} color="#e74c3c" style={{ margin: '0 auto 14px' }} />
-                                <Text fontSize="3xl" fontWeight="black" color="#e74c3c" mb={2}>Opponent Left</Text>
-                                <Text color="rgba(200,200,200,0.7)" mb={8}>You win by default!</Text>
-                            </>
-                        )}
-                        <Box as="button" px={10} py={3} borderRadius="xl"
-                            bg="linear-gradient(90deg,#cc7700,#ffcc00)"
-                            color="#111" fontWeight="bold" fontSize="md"
-                            _hover={{ transform: 'scale(1.05)' }} transition="all 0.2s"
-                            onClick={handleLeave}>
-                            Back to Home
-                        </Box>
-                    </Box>
-                </Flex>
-            )}
-        </Box>
+  // ─── Reset car to last gate ────────────────────────────────────────────────
+  const resetCar = () => {
+    if (!window.Ammo || !carBodyRef.current || !gateDataRef.current) return
+    steeringRef.current = resetCarPosition(
+      window.Ammo, carBodyRef.current, vehicleRef.current, steeringRef.current,
+      gateDataRef.current.currentGatePosition, gateDataRef.current.currentGateQuaternion
     )
-}
+  }
 
-export default RacingGamePage
+  // ─── Camera follow ─────────────────────────────────────────────────────────
+  const updateCamera = () => {
+    const cam = cameraRef.current
+    const car = carModelRef.current
+    if (!cam || !car) return
+    const carDir = new THREE.Vector3()
+    car.getWorldDirection(carDir)
+    const offset = carDir.clone().multiplyScalar(-CAMERA_DISTANCE)
+    const target = car.position.clone().add(offset).add(new THREE.Vector3(0, CAMERA_HEIGHT, 0))
+    cam.position.lerp(target, CAMERA_LERP)
+    cam.lookAt(car.position.clone().add(carDir.clone().multiplyScalar(CAMERA_LOOK_AHEAD)))
+  }
+
+  // ─── Car flip check (auto-reset) ───────────────────────────────────────────
+  const checkFlipped = (dt) => {
+    const car = carModelRef.current
+    if (!car) return
+    const up = new THREE.Vector3(0,1,0).applyQuaternion(car.quaternion)
+    const dot = up.dot(new THREE.Vector3(0,1,0))
+    const f = carFlipRef.current
+    if (dot < 0.5 && Math.abs(dot - f.prevUpDot) < 0.01) {
+      f.isFlipped = true
+      f.time += dt
+      if (f.time > 1.5) { f.isFlipped = false; f.time = 0; resetCar() }
+    } else {
+      f.isFlipped = false; f.time = 0
+    }
+    f.prevUpDot = dot
+  }
+
+  // ─── Speedometer ───────────────────────────────────────────────────────────
+  const updateSpeedDisplay = (kph) => {
+    const pct = Math.min(kph / MAX_SPEED_KPH, 1)
+    const rot = pct * 180
+    const fill   = document.querySelector('.race-gauge-fill')
+    const needle = document.querySelector('.race-gauge-needle')
+    const val    = document.querySelector('.race-speed-value')
+    if (fill)   fill.style.transform   = `rotate(${rot}deg)`
+    if (needle) needle.style.transform = `rotate(${rot - 90}deg)`
+    if (val)    val.textContent = Math.round(Math.max(kph - 1, 0))
+    setSpeed(Math.round(Math.max(kph - 1, 0)))
+  }
+
+  // ─── Minimap (simple 2D canvas) ────────────────────────────────────────────
+  const initMinimap = () => {
+    const canvas = document.createElement('canvas')
+    canvas.id = 'race-minimap'
+    canvas.width  = 160; canvas.height = 160
+    Object.assign(canvas.style, {
+      position: 'fixed', bottom: '240px', right: '20px',
+      width: '160px', height: '160px',
+      background: 'rgba(0,0,0,0.5)', borderRadius: '50%',
+      boxShadow: '0 0 10px rgba(0,0,0,0.7)', zIndex: '500',
+      pointerEvents: 'none',
+    })
+    document.body.appendChild(canvas)
+    minimapRef.current = { canvas, ctx: canvas.getContext('2d') }
+  }
+
+  const drawMinimap = () => {
+    const mm = minimapRef.current
+    const car = carModelRef.current
+    if (!mm || !car) return
+    const { ctx } = mm
+    const S = 160; const CX = S/2; const CY = S/2; const SCALE = 0.3
+    ctx.clearRect(0, 0, S, S)
+    // Circle clip
+    ctx.save()
+    ctx.beginPath(); ctx.arc(CX, CY, CX-2, 0, Math.PI*2); ctx.clip()
+    // Background
+    ctx.fillStyle = 'rgba(20,20,20,0.8)'; ctx.fillRect(0,0,S,S)
+    // Draw player dot
+    const px = CX + car.position.x * SCALE
+    const py = CY - car.position.z * SCALE
+    ctx.fillStyle = myColorRef.current === 'blue' ? '#4dc9ff' : '#ff4444'
+    ctx.beginPath(); ctx.arc(px, py, 6, 0, Math.PI*2); ctx.fill()
+    // Draw opponent dot
+    const opp = oppModelRef.current
+    if (opp && opp.visible) {
+      const ox = CX + opp.position.x * SCALE
+      const oy = CY - opp.position.z * SCALE
+      ctx.fillStyle = oppColorRef.current === 'blue' ? '#4dc9ff' : '#ff4444'
+      ctx.beginPath(); ctx.arc(ox, oy, 6, 0, Math.PI*2); ctx.fill()
+    }
+    ctx.restore()
+  }
+
+  // ─── Main render loop ───────────────────────────────────────────────────────
+  const animate = useCallback(() => {
+    afRef.current = requestAnimationFrame(animate)
+    const dt = Math.min(clockRef.current.getDelta(), 0.1)
+    accumRef.current += dt
+
+    const phys = physicsRef.current
+    if (!phys) return
+
+    while (accumRef.current >= FIXED_PHYSICS_STEP) {
+      const result = updatePhysics(
+        FIXED_PHYSICS_STEP, window.Ammo,
+        phys,
+        {
+          carBody: carBodyRef.current,
+          vehicle: vehicleRef.current,
+          carModel: carModelRef.current,
+          wheelMeshes: wheelMeshesRef.current,
+          keyState: keyStateRef.current,
+          currentSteeringAngle: steeringRef.current,
+          updateSteering,
+        },
+        [],
+        raceStateRef.current
+      )
+      if (result) {
+        updateSpeedDisplay(result.currentSpeed || 0)
+        steeringRef.current = result.currentSteeringAngle ?? steeringRef.current
+      }
+
+      updateCarPosition(window.Ammo, vehicleRef.current, carModelRef.current, wheelMeshesRef.current)
+
+      checkGroundCollision(window.Ammo, carBodyRef.current, () => resetCar())
+      checkFlipped(FIXED_PHYSICS_STEP)
+      updateCamera()
+
+      // Gate check
+      if (gateDataRef.current && carModelRef.current) {
+        const finished = checkGateProximity(carModelRef.current, gateDataRef.current)
+        window.gateData = gateDataRef.current
+        setMyGate(gateDataRef.current.currentGateIndex || 0)
+        if (finished && !raceStateRef.current.raceFinished) {
+          raceStateRef.current.raceFinished = true
+          const elapsed = Math.floor((Date.now() - startTimeRef.current) / 1000)
+          const m = String(Math.floor(elapsed/60)).padStart(2,'0')
+          const s = String(elapsed%60).padStart(2,'0')
+          finishTimesRef.current[user?._id] = `${m}:${s}`
+          showFinishMessage(gateDataRef.current.totalGates, null)
+          if (timerRef.current) clearInterval(timerRef.current)
+          // Notify server
+          if (socket && roomIdRef.current) {
+            socket.emit('raceFinished', {
+              roomId: roomIdRef.current,
+              winnerId: user?._id,
+              time: finishTimesRef.current[user?._id],
+            })
+          }
+        }
+        updateGateFading(gateDataRef.current.fadingGates)
+      }
+
+      accumRef.current -= FIXED_PHYSICS_STEP
+    }
+
+    drawMinimap()
+    rendererRef.current?.render(sceneRef.current, cameraRef.current)
+  }, [socket, user])
+
+  // ─── Cleanup ────────────────────────────────────────────────────────────────
+  const cleanup = useCallback(() => {
+    if (afRef.current)    cancelAnimationFrame(afRef.current)
+    if (timerRef.current) clearInterval(timerRef.current)
+    const renderer = rendererRef.current
+    if (renderer) { renderer.dispose(); renderer.domElement?.remove() }
+    const mm = minimapRef.current?.canvas
+    if (mm) mm.remove()
+    // Remove any showFinishMessage DOM elements
+    document.getElementById('finish-ui')?.remove()
+    document.getElementById('final-leaderboard')?.remove()
+  }, [])
+
+  // ─── Text sprite helper ────────────────────────────────────────────────────
+  const makeTextSprite = (text) => {
+    const cv = document.createElement('canvas'); cv.width=256; cv.height=64
+    const ctx = cv.getContext('2d')
+    ctx.font = 'bold 32px Poppins,sans-serif'
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
+    ctx.strokeStyle = '#000'; ctx.lineWidth = 4; ctx.strokeText(text, 128, 32)
+    ctx.fillStyle = '#fff'; ctx.fillText(text, 128, 32)
+    const mat = new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(cv), transparent:true })
+    return new THREE.Sprite(mat)
+  }
+
+  // ─── Voice call ────────────────────────────────────────────────────────────
+  const handleCallOpp = () => {
+    if (!callActive && opponentId) {
+      callUser?.(opponentId, opponent?.name || 'Opponent', 'audio')
+      setCallActive(true)
+    } else {
+      leaveCall?.()
+      setCallActive(false)
+    }
+  }
+  const handleMute = () => {
+    if (stream) {
+      stream.getAudioTracks().forEach(t => t.enabled = muted)
+      setMuted(m => !m)
+    }
+  }
+
+  // ─── Navigate back / leave race ────────────────────────────────────────────
+  const handleLeave = () => {
+    if (window.confirm('Leave the race?')) {
+      if (endRaceGameOnNavigate) endRaceGameOnNavigate()
+      navigate('/')
+    }
+  }
+
+  // ─── Render ─────────────────────────────────────────────────────────────────
+  return (
+    <div style={{ width:'100vw', height:'100vh', position:'relative', overflow:'hidden', background:'#000' }}>
+
+      {/* Three.js container */}
+      <div ref={containerRef} style={{ width:'100%', height:'100%' }} />
+
+      {/* Loading screen */}
+      {loading && (
+        <div style={{
+          position:'fixed', inset:0, background:'#121212',
+          display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center',
+          zIndex:9999, fontFamily:'Poppins,sans-serif',
+        }}>
+          <div style={{
+            fontSize:'clamp(2.5rem,8vw,5rem)', fontWeight:900, color:'#fff',
+            letterSpacing:'4px', marginBottom:'40px',
+            textShadow:'0 5px 0 #000', WebkitTextStroke:'3px #000',
+          }}>RACEZ.IO</div>
+          <div style={{ display:'flex', gap:'8px', marginBottom:'16px' }}>
+            {[0,0.1,0.2,0.3,0.4].map((d,i) => (
+              <div key={i} style={{
+                width:'12px', height:'50px', background:'#ff0080', borderRadius:'3px',
+                animation:`barLoad 1.5s ${d}s infinite ease-in-out`,
+              }} />
+            ))}
+          </div>
+          <div style={{ color:'#fff', fontWeight:700, fontSize:'1.1rem' }}>
+            Loading {loadingPct}%...
+          </div>
+        </div>
+      )}
+
+      {/* Waiting for opponent */}
+      {!loading && waitingOpp && !raceStateRef.current.countdownStarted && (
+        <div style={{
+          position:'fixed', top:'50%', left:'50%', transform:'translate(-50%,-50%)',
+          background:'rgba(0,0,0,0.75)', backdropFilter:'blur(12px)',
+          color:'#fff', padding:'30px 50px', borderRadius:'12px', textAlign:'center',
+          fontFamily:'Poppins,sans-serif', fontSize:'22px', zIndex:1000,
+          boxShadow:'0 0 30px rgba(0,0,0,0.7)',
+        }}>
+          <div style={{ fontSize:'14px', opacity:.6, marginBottom:'8px' }}>Race</div>
+          <div>Waiting for opponent...</div>
+          <div style={{ marginTop:'16px', fontSize:'16px', opacity:.75 }}>
+            {opponent ? `vs ${opponent.name || opponent.username}` : ''}
+          </div>
+        </div>
+      )}
+
+      {/* Countdown overlay */}
+      {countdown !== null && (
+        <div style={{
+          position:'fixed', top:'50%', left:'50%', transform:'translate(-50%,-50%)',
+          background:'rgba(0,0,0,0.6)', color:'#fff',
+          padding:'30px 60px', borderRadius:'12px', textAlign:'center',
+          fontFamily:'Poppins,sans-serif', fontSize:'72px', fontWeight:900,
+          zIndex:1000, textShadow:'0 0 20px rgba(255,255,255,0.6)',
+          boxShadow:'0 0 30px rgba(0,0,0,0.7)',
+        }}>
+          {countdown}
+        </div>
+      )}
+
+      {/* HUD — top left: player names + gate progress */}
+      {!loading && (
+        <div style={{
+          position:'fixed', top:'20px', left:'20px', zIndex:500,
+          background:'rgba(0,0,0,0.55)', backdropFilter:'blur(8px)',
+          borderRadius:'10px', padding:'12px 18px', color:'#fff',
+          fontFamily:'Poppins,sans-serif', minWidth:'200px',
+          boxShadow:'0 0 20px rgba(0,0,0,0.5)',
+        }}>
+          <div style={{ fontSize:'11px', opacity:.5, marginBottom:'6px', letterSpacing:'2px' }}>LEADERBOARD</div>
+          <div style={{ display:'flex', alignItems:'center', gap:'10px', marginBottom:'6px' }}>
+            <div style={{ width:12, height:12, borderRadius:'50%', background: myColorRef.current==='blue' ? '#4dc9ff' : '#ff4444' }} />
+            <span style={{ fontWeight:700, flex:1 }}>You</span>
+            <span style={{ opacity:.7 }}>Gate {myGate}</span>
+          </div>
+          <div style={{ display:'flex', alignItems:'center', gap:'10px' }}>
+            <div style={{ width:12, height:12, borderRadius:'50%', background: oppColorRef.current==='blue' ? '#4dc9ff' : '#ff4444' }} />
+            <span style={{ flex:1, opacity:.8 }}>{opponent?.name || opponent?.username || 'Opponent'}</span>
+            <span style={{ opacity:.7 }}>Gate {oppGate}</span>
+          </div>
+        </div>
+      )}
+
+      {/* HUD — top center: timer */}
+      {!loading && raceStateRef.current.raceStarted && (
+        <div style={{
+          position:'fixed', top:'20px', left:'50%', transform:'translateX(-50%)',
+          background:'rgba(0,0,0,0.55)', backdropFilter:'blur(8px)',
+          borderRadius:'10px', padding:'10px 24px', color:'#fff',
+          fontFamily:'Poppins,sans-serif', fontSize:'28px', fontWeight:700,
+          zIndex:500, textShadow:'0 0 10px rgba(255,255,255,0.4)',
+          boxShadow:'0 0 20px rgba(0,0,0,0.5)',
+        }}>
+          {raceTime}
+        </div>
+      )}
+
+      {/* Speedometer — bottom right */}
+      {!loading && (
+        <div id="racing-ui" style={{
+          position:'fixed', bottom:'30px', right:'30px', zIndex:500,
+          pointerEvents:'none', userSelect:'none',
+        }}>
+          <div style={{ width:'160px' }}>
+            <div style={{
+              position:'relative', borderRadius:'50%',
+              background:'rgba(0,0,0,0.55)', padding:'16px',
+              boxShadow:'0 0 20px rgba(0,0,0,0.5)', backdropFilter:'blur(8px)',
+            }}>
+              <div style={{
+                position:'relative', width:'100%', paddingBottom:'50%',
+                background:'#222', borderTopLeftRadius:'100px',
+                borderTopRightRadius:'100px', overflow:'hidden',
+              }}>
+                <div className="race-gauge-fill" style={{
+                  position:'absolute', top:'100%', left:0,
+                  width:'100%', height:'100%', transformOrigin:'top center',
+                  transform:'rotate(0deg)',
+                  background:'linear-gradient(to right, #4dc9ff, #ff0080)',
+                  transition:'transform 0.1s',
+                }} />
+                <div className="race-gauge-needle" style={{
+                  position:'absolute', width:'4px', height:'50%',
+                  background:'#ff0000', bottom:0, left:'50%', marginLeft:'-2px',
+                  transformOrigin:'bottom center', transform:'rotate(-90deg)',
+                  transition:'transform 0.1s', zIndex:10,
+                }} />
+              </div>
+              <div className="race-speed-value" style={{
+                fontFamily:'Poppins,sans-serif', fontSize:'36px', fontWeight:700,
+                color:'#fff', marginTop:'8px', textAlign:'center',
+                textShadow:'0 0 10px rgba(255,255,255,0.5)',
+              }}>0</div>
+              <div style={{
+                fontFamily:'Poppins,sans-serif', fontSize:'12px',
+                color:'#aaa', textAlign:'center',
+              }}>KPH</div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Voice call button + mute — bottom left */}
+      {!loading && (
+        <div style={{
+          position:'fixed', bottom:'20px', left:'20px', zIndex:500,
+          display:'flex', flexDirection:'column', gap:'10px',
+        }}>
+          <button onClick={handleCallOpp} title={callActive ? 'End call' : 'Voice call opponent'} style={{
+            width:48, height:48, borderRadius:'50%', border:'none', cursor:'pointer',
+            background: callActive ? '#ef4444' : '#22c55e',
+            color:'#fff', fontSize:'20px', display:'flex', alignItems:'center', justifyContent:'center',
+            boxShadow:'0 4px 0 rgba(0,0,0,0.4)', fontFamily:'sans-serif',
+          }}>
+            {callActive ? '📵' : '📞'}
+          </button>
+          {callActive && (
+            <button onClick={handleMute} title={muted ? 'Unmute' : 'Mute'} style={{
+              width:48, height:48, borderRadius:'50%', border:'none', cursor:'pointer',
+              background: muted ? '#6b7280' : '#3b82f6',
+              color:'#fff', fontSize:'18px', display:'flex', alignItems:'center', justifyContent:'center',
+              boxShadow:'0 4px 0 rgba(0,0,0,0.4)',
+            }}>
+              {muted ? '🔇' : '🎙️'}
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Leave button */}
+      {!loading && (
+        <button onClick={handleLeave} title="Leave race" style={{
+          position:'fixed', bottom:'20px', left:'80px', zIndex:500,
+          width:44, height:44, borderRadius:'50%',
+          background:'#ff0080', border:'2px solid #b30059',
+          boxShadow:'0 3px 0 #b30059', color:'#fff', fontSize:'18px',
+          cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center',
+        }}>🚪</button>
+      )}
+
+      {/* Controls hint */}
+      {!loading && raceStateRef.current.raceStarted && (
+        <div style={{
+          position:'fixed', bottom:'20px', right:'220px', zIndex:500,
+          color:'rgba(255,255,255,0.4)', fontFamily:'Poppins,sans-serif', fontSize:'12px',
+          textAlign:'right', pointerEvents:'none',
+        }}>
+          W/↑ Accelerate &nbsp;·&nbsp; S/↓ Brake &nbsp;·&nbsp; A/D Steer &nbsp;·&nbsp; R Reset
+        </div>
+      )}
+
+      {/* Game over overlay */}
+      {raceFinished && winner && (
+        <div style={{
+          position:'fixed', inset:0, background:'rgba(0,0,0,0.7)',
+          display:'flex', alignItems:'center', justifyContent:'center', zIndex:2000,
+        }}>
+          <div style={{
+            background:'rgba(0,0,0,0.85)', backdropFilter:'blur(16px)',
+            borderRadius:'16px', padding:'48px 64px', textAlign:'center',
+            fontFamily:'Poppins,sans-serif', color:'#fff',
+            boxShadow:'0 0 40px rgba(0,0,0,0.8)',
+            animation:'slideIn 0.8s cubic-bezier(0.12,0.93,0.27,0.98)',
+          }}>
+            <div style={{ fontSize:'64px', marginBottom:'16px' }}>
+              {winner === 'you' ? '🏆' : '🏁'}
+            </div>
+            <div style={{
+              fontSize:'36px', fontWeight:900, marginBottom:'12px',
+              color: winner === 'you' ? '#ffd700' : '#fff',
+              textShadow: winner === 'you' ? '0 0 20px rgba(255,215,0,0.6)' : 'none',
+            }}>
+              {winner === 'you' ? 'YOU WIN!' : 'RACE FINISHED'}
+            </div>
+            <div style={{ fontSize:'18px', opacity:.7, marginBottom:'32px' }}>
+              {winner === 'you' ? `Time: ${raceTime}` : `Better luck next time`}
+            </div>
+            <button onClick={() => { if (endRaceGameOnNavigate) endRaceGameOnNavigate(); navigate('/') }} style={{
+              padding:'14px 40px', borderRadius:'8px', border:'2px solid #b30059',
+              background:'#ff0080', color:'#fff', fontSize:'16px', fontWeight:700,
+              cursor:'pointer', fontFamily:'Poppins,sans-serif',
+              boxShadow:'0 4px 0 #b30059',
+            }}>
+              HOME
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* CSS keyframes */}
+      <style>{`
+        @keyframes barLoad {
+          0%,100% { transform: scaleY(0.1); }
+          50% { transform: scaleY(1); }
+        }
+        @keyframes slideIn {
+          from { opacity:0; transform: translateX(-60%) translateY(-50%) scale(0.8); }
+          to   { opacity:1; transform: translateX(-50%) translateY(-50%) scale(1); }
+        }
+      `}</style>
+    </div>
+  )
+}

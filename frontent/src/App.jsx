@@ -48,6 +48,8 @@ const AppContent = () => {
       if (pendingTo && pendingTo === opId) {
         localStorage.removeItem('racePendingTo')
         localStorage.setItem('raceRoomId', data.roomId)
+        // Mark this user as the host (challenger) so RacingGamePage knows
+        localStorage.setItem('raceIsHost', 'true')
         navigate(`/race/${opId}`)
       }
     }

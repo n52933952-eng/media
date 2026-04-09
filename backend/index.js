@@ -149,6 +149,12 @@ app.use('/api/*', (req, res) => {
     res.status(404).json({ error: 'API route not found', path: req.originalUrl })
 })
 
+// Serve 3D car + track models at /models (used by Three.js in RacingGamePage)
+app.use('/models', express.static(path.join(__dirname, '../frontent/dist/models')))
+
+// Serve ammo.js physics engine at root (used by RacingGamePage)
+app.use('/ammo.js', express.static(path.join(__dirname, '../frontent/dist/ammo.js')))
+
 // Serve static files from React app (for production)
 app.use(express.static(path.join(__dirname, '../frontent/dist')))
 

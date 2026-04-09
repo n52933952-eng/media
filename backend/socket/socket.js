@@ -2334,7 +2334,27 @@ export const initializeSocket = async (app) => {
             }
         })
 
-        // Pure relay — forward ALL position fields (web uses wx/wy/wangle, mobile uses position/x)
+        // Join a race room — called by the game component when it mounts
+        // (the React app's main socket already joined via acceptRaceChallenge, but the
+        //  game page re-joins to guarantee membership and signal readiness)
+        socket.on('joinRaceRoom', ({ roomId }) => {
+            if (!roomId) return
+            socket.join(roomId)
+            console.log(`🏎️ Socket ${socket.id} joined race room ${roomId}`)
+            // Count live sockets in this room
+            const roomSockets = io.sockets.adapter.rooms.get(roomId)
+            const count = roomSockets ? roomSockets.size : 0
+            // Notify everyone in the room (including sender) how many have joined
+            io.to(roomId).emit('racePlayerJoined', { count })
+        })
+
+        // Host signals countdown start — relay to the rest of the room (guest)
+        socket.on('raceCountdownStart', ({ roomId }) => {
+            if (!roomId) return
+            socket.to(roomId).emit('raceCountdownStart')
+        })
+
+        // Pure relay — forward ALL position fields
         socket.on('racePosUpdate', ({ roomId, ...posData }) => {
             socket.to(roomId).emit('raceOpponentPos', posData)
         })
