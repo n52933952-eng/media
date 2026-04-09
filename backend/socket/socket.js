@@ -688,6 +688,47 @@ const hasActiveCardGame = async (userId) => {
     return roomId !== null
 }
 
+// ── 🏎️ Racing Game Redis helpers ──────────────────────────────────────────────
+const setActiveRaceGame = async (userId, roomId) => {
+    redisService.ensureRedis()
+    await redisService.redisSet(`activeRaceGame:${userId}`, roomId, 3600)
+}
+const getActiveRaceGame = async (userId) => {
+    redisService.ensureRedis()
+    try {
+        const v = await redisService.redisGet(`activeRaceGame:${userId}`)
+        return v || null
+    } catch (e) {
+        console.error(`❌ [racing] getActiveRaceGame ${userId}:`, e.message)
+        return null
+    }
+}
+const deleteActiveRaceGame = async (userId) => {
+    redisService.ensureRedis()
+    await redisService.redisDel(`activeRaceGame:${userId}`)
+}
+const hasActiveRaceGame = async (userId) => {
+    redisService.ensureRedis()
+    const r = await getActiveRaceGame(userId)
+    return r !== null
+}
+const setRaceGameState = async (roomId, state) => {
+    redisService.ensureRedis()
+    await redisService.redisSet(`raceGameState:${roomId}`, state, 3600)
+}
+const getRaceGameState = async (roomId) => {
+    redisService.ensureRedis()
+    try {
+        return await redisService.redisGet(`raceGameState:${roomId}`)
+    } catch (e) {
+        return null
+    }
+}
+const deleteRaceGameState = async (roomId) => {
+    redisService.ensureRedis()
+    await redisService.redisDel(`raceGameState:${roomId}`)
+}
+
 // Helper functions for activeCalls - Redis only
 const setActiveCall = async (callId, callData) => {
     redisService.ensureRedis()
@@ -2243,6 +2284,84 @@ export const initializeSocket = async (app) => {
             }
         })
 
+        // ── 🏎️ Racing Game Events ────────────────────────────────────────────────────
+
+        socket.on('raceChallenge', async ({ from, to, fromName, fromUsername, fromProfilePic }) => {
+            const fromId = normalizeUserId(from) || from
+            const toId = normalizeUserId(to) || to
+            console.log(`🏎️ Race challenge from ${fromId} to ${toId}`)
+            const recipientData = await getUserSocket(toId)
+            if (recipientData?.socketId) {
+                io.to(recipientData.socketId).emit('raceChallenge', { from: fromId, fromName, fromUsername, fromProfilePic })
+            } else {
+                console.warn(`⚠️ [raceChallenge] No socket for ${toId}`)
+            }
+        })
+
+        socket.on('acceptRaceChallenge', async ({ from, to, roomId }) => {
+            const fromId = normalizeUserId(from) || from  // accepter
+            const toId = normalizeUserId(to) || to         // challenger
+            if (!roomId) return
+            console.log(`🏎️ Race challenge accepted — room: ${roomId}`)
+
+            await setActiveRaceGame(fromId, roomId)
+            await setActiveRaceGame(toId, roomId)
+
+            const gameState = { player1: toId, player2: fromId, startTime: Date.now(), totalLaps: 3 }
+            await setRaceGameState(roomId, gameState)
+
+            const challengerSock = await getUserSocket(toId)
+            const accepterSock = await getUserSocket(fromId)
+
+            if (challengerSock?.socketId) {
+                const s = io.sockets.sockets.get(challengerSock.socketId)
+                if (s) s.join(roomId)
+                io.to(challengerSock.socketId).emit('acceptRaceChallenge', { roomId, opponentId: fromId })
+            }
+            if (accepterSock?.socketId) {
+                const s = io.sockets.sockets.get(accepterSock.socketId)
+                if (s) s.join(roomId)
+                io.to(accepterSock.socketId).emit('acceptRaceChallenge', { roomId, opponentId: toId })
+            }
+            console.log(`🏎️ Race room ${roomId} created for ${toId} vs ${fromId}`)
+        })
+
+        socket.on('declineRaceChallenge', async ({ from, to }) => {
+            const toId = normalizeUserId(to) || to
+            const toData = await getUserSocket(toId)
+            if (toData?.socketId) {
+                io.to(toData.socketId).emit('raceDeclined')
+            }
+        })
+
+        // Pure relay — no Redis, just forward position to opponent (called every ~100ms)
+        socket.on('racePosUpdate', ({ roomId, position, x, speed, lap }) => {
+            socket.to(roomId).emit('raceOpponentPos', { position, x, speed, lap })
+        })
+
+        socket.on('raceFinished', async ({ roomId, winnerId, time }) => {
+            io.to(roomId).emit('raceResult', { winnerId, time })
+            // Cleanup state after a short delay to let both clients receive the result
+            setTimeout(async () => {
+                const state = await getRaceGameState(roomId)
+                if (state) {
+                    await deleteActiveRaceGame(state.player1).catch(() => {})
+                    await deleteActiveRaceGame(state.player2).catch(() => {})
+                    await deleteRaceGameState(roomId).catch(() => {})
+                }
+            }, 15000)
+        })
+
+        socket.on('raceGameEnd', async ({ roomId, player1, player2 }) => {
+            const p1 = normalizeUserId(player1) || player1
+            const p2 = normalizeUserId(player2) || player2
+            console.log(`🏎️ Race ended (navigation/quit): room ${roomId}`)
+            socket.to(roomId).emit('raceOpponentLeft')
+            await deleteActiveRaceGame(p1).catch(() => {})
+            await deleteActiveRaceGame(p2).catch(() => {})
+            await deleteRaceGameState(roomId).catch(() => {})
+        })
+
         // Card Game Challenge Events (Same pattern as Chess)
         socket.on("cardChallenge", async ({ from, to, fromName, fromUsername, fromProfilePic }) => {
             const fromId = normalizeUserId(from) || from
@@ -2942,6 +3061,35 @@ export const initializeSocket = async (app) => {
                     await deleteChessGameState(gameRoomId)
                     console.log(`🗑️ Cleaned up game state for room ${gameRoomId}`)
                 }, 10000) // Wait 10 seconds before ending game
+            }
+
+            // ── 🏎️ Handle racing game disconnection ────────────────────────────────────
+            if (disconnectedUserId && await hasActiveRaceGame(disconnectedUserId)) {
+                const raceRoomId = await getActiveRaceGame(disconnectedUserId)
+                console.log(`🏎️ User ${disconnectedUserId} disconnected during race: ${raceRoomId}`)
+                setTimeout(async () => {
+                    const stillInRace = await hasActiveRaceGame(disconnectedUserId)
+                    const reconnected = await getUserSocket(disconnectedUserId)
+                    if (stillInRace && reconnected) {
+                        console.log(`✅ Racer ${disconnectedUserId} reconnected — race continues!`)
+                        return
+                    }
+                    console.log(`❌ Racer ${disconnectedUserId} did not reconnect — ending race`)
+                    const state = await getRaceGameState(raceRoomId)
+                    let otherPlayerId = null
+                    if (state) {
+                        otherPlayerId = state.player1 === disconnectedUserId ? state.player2 : state.player1
+                    }
+                    if (otherPlayerId) {
+                        const otherData = await getUserSocket(otherPlayerId)
+                        if (otherData?.socketId) {
+                            io.to(otherData.socketId).emit('raceOpponentLeft')
+                        }
+                        await deleteActiveRaceGame(otherPlayerId).catch(() => {})
+                    }
+                    await deleteActiveRaceGame(disconnectedUserId).catch(() => {})
+                    await deleteRaceGameState(raceRoomId).catch(() => {})
+                }, 10000)
             }
 
             // Handle card game disconnection (same pattern as chess)

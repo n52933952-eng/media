@@ -1237,6 +1237,66 @@ export const SocketContextProvider = ({ children }) => {
     }
   };
 
+  // ── 🏎️ Racing Game ────────────────────────────────────────────────────────────
+  const [raceChallenge, setRaceChallenge] = useState(null);
+
+  useEffect(() => {
+    if (!socket) return;
+
+    const handleRaceChallenge = (data) => {
+      setRaceChallenge({
+        from: data.from,
+        fromName: data.fromName,
+        fromUsername: data.fromUsername,
+        fromProfilePic: data.fromProfilePic,
+        isReceivingChallenge: true,
+      });
+    };
+
+    const handleRaceDeclined = () => setRaceChallenge(null);
+
+    const handleAcceptRaceChallenge = ({ roomId, opponentId }) => {
+      localStorage.setItem('raceRoomId', roomId);
+    };
+
+    socket.on('raceChallenge',       handleRaceChallenge);
+    socket.on('raceDeclined',        handleRaceDeclined);
+    socket.on('acceptRaceChallenge', handleAcceptRaceChallenge);
+
+    return () => {
+      socket.off('raceChallenge',       handleRaceChallenge);
+      socket.off('raceDeclined',        handleRaceDeclined);
+      socket.off('acceptRaceChallenge', handleAcceptRaceChallenge);
+    };
+  }, [socket]);
+
+  const acceptRaceChallenge = () => {
+    if (!socket || !raceChallenge) return;
+    const roomId = `race_${raceChallenge.from}_${user._id}_${Date.now()}`;
+    localStorage.setItem('raceRoomId', roomId);
+    socket.emit('acceptRaceChallenge', { from: user._id, to: raceChallenge.from, roomId });
+    setRaceChallenge(null);
+  };
+
+  const declineRaceChallenge = () => {
+    if (!socket || !raceChallenge) return;
+    socket.emit('declineRaceChallenge', { from: user._id, to: raceChallenge.from });
+    setRaceChallenge(null);
+  };
+
+  const endRaceGameOnNavigate = () => {
+    const roomId = localStorage.getItem('raceRoomId');
+    if (roomId && socket) {
+      const match = roomId.match(/^race_(.+?)_(.+?)_(\d+)$/);
+      if (match) {
+        socket.emit('raceGameEnd', { roomId, player1: match[1], player2: match[2] });
+      } else {
+        socket.emit('raceGameEnd', { roomId });
+      }
+      localStorage.removeItem('raceRoomId');
+    }
+  };
+
   // Function to update which conversation is currently open (for notification sound control)
   const setSelectedConversationId = (userId) => {
     console.log('🔊 Setting selectedConversationId:', userId || 'none')
@@ -1275,6 +1335,10 @@ export const SocketContextProvider = ({ children }) => {
         acceptCardChallenge, // Function to accept card challenge
         declineCardChallenge, // Function to decline card challenge
         endCardGameOnNavigate, // Function to end card game when navigating away
+        raceChallenge, // Export race challenge state
+        acceptRaceChallenge, // Function to accept race challenge
+        declineRaceChallenge, // Function to decline race challenge
+        endRaceGameOnNavigate, // Function to end race when navigating away
       }}
     >
       {children}

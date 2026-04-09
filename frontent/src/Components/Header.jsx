@@ -15,20 +15,18 @@ const Header = () => {
   const{colorMode,toggleColorMode}=useColorMode()
 
    const{user}=useContext(UserContext)
-   const {socket, totalUnreadCount, notificationCount, endChessGameOnNavigate, endCardGameOnNavigate} = useContext(SocketContext) || {}
+   const {socket, totalUnreadCount, notificationCount, endChessGameOnNavigate, endCardGameOnNavigate, endRaceGameOnNavigate} = useContext(SocketContext) || {}
    const navigate = useNavigate()
 
    // End any active game before navigating away
    const handleNavigation = (path, e) => {
-     const gameLive = localStorage.getItem('gameLive') === 'true'
+     const gameLive  = localStorage.getItem('gameLive') === 'true'
      const cardRoomId = localStorage.getItem('cardRoomId')
+     const raceRoomId = localStorage.getItem('raceRoomId')
 
-     if (gameLive && endChessGameOnNavigate) {
-       endChessGameOnNavigate()
-     }
-     if (cardRoomId && endCardGameOnNavigate) {
-       endCardGameOnNavigate()
-     }
+     if (gameLive && endChessGameOnNavigate)    endChessGameOnNavigate()
+     if (cardRoomId && endCardGameOnNavigate)   endCardGameOnNavigate()
+     if (raceRoomId && endRaceGameOnNavigate)   endRaceGameOnNavigate()
 
      navigate(path)
    }

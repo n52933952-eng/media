@@ -21,9 +21,11 @@ import NewsPage from './Pages/NewsPage'
 import NotificationsPage from './Pages/NotificationsPage'
 import ChessGamePage from './Pages/ChessGamePage'
 import CardGamePage from './Pages/CardGamePage'
+import RacingGamePage from './Pages/RacingGamePage'
 import CallNotification from './Components/CallNotification'
 import ChessChallengeNotification from './Components/ChessChallengeNotification'
 import CardChallengeNotification from './Components/CardChallengeNotification'
+import RacingChallengeNotification from './Components/RacingChallengeNotification'
 
 const AppContent = () => {
   const location = useLocation()
@@ -48,7 +50,7 @@ const AppContent = () => {
   // Check if current path is a user page (e.g., /username, but not /username/post/123 or other routes)
   const pathParts = location.pathname.split('/').filter(Boolean)
   const isUserPage = pathParts.length === 1 && 
-                     !['sign', 'update', 'football', 'weather', 'news', 'notifications', 'chess', 'card', 'home', 'messages'].includes(pathParts[0])
+                     !['sign', 'update', 'football', 'weather', 'news', 'notifications', 'chess', 'card', 'race', 'home', 'messages'].includes(pathParts[0])
   // Check if it's the current user's own page
   const isOwnUserPage = isUserPage && user && pathParts[0] === user.username
 
@@ -62,6 +64,9 @@ const AppContent = () => {
       
       {/* Global Card (Go Fish) Challenge Notification - shows on all pages */}
       {user && <CardChallengeNotification />}
+
+      {/* Global Racing Challenge Notification - shows on all pages */}
+      {user && <RacingChallengeNotification />}
       
       {/* Fixed header — always stays at top regardless of parent overflow */}
       <Box
@@ -133,6 +138,7 @@ const AppContent = () => {
                 <Route path="/notifications" element={user ? <NotificationsPage /> : <Navigate to="/" />} />
                 <Route path="/chess/:opponentId" element={user ? <ChessGamePage /> : <Navigate to="/" />} />
                 <Route path="/card/:opponentId" element={user ? <CardGamePage /> : <Navigate to="/" />} />
+                <Route path="/race/:opponentId" element={user ? <RacingGamePage /> : <Navigate to="/" />} />
                 <Route path="/:username/post/:id" element={<PostPage/>}/>
               </Routes>
               {user && isOwnUserPage && <CreatePost/>}
