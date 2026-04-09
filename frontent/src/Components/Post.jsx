@@ -849,25 +849,33 @@ const showToast = useShowToast()
     
     
      <Flex alignItems="center" gap={2}>
-        <Text fontSize="sm" color="gray.light" textAlign="right" width={36}>
-         {(() => {
-           const createdAt = post?.createdAt ? new Date(post.createdAt) : null
-           const updatedAt = post?.updatedAt ? new Date(post.updatedAt) : null
-           const createdOk = createdAt && !Number.isNaN(createdAt.getTime())
-           const updatedOk = updatedAt && !Number.isNaN(updatedAt.getTime())
-           const isEdited =
-             createdOk &&
-             updatedOk &&
-             Math.abs(updatedAt.getTime() - createdAt.getTime()) > 60 * 1000
+        {/* Timestamp: relative on top, Edited on second line if needed */}
+        {(() => {
+          const createdAt = post?.createdAt ? new Date(post.createdAt) : null
+          const updatedAt = post?.updatedAt ? new Date(post.updatedAt) : null
+          const createdOk = createdAt && !Number.isNaN(createdAt.getTime())
+          const updatedOk = updatedAt && !Number.isNaN(updatedAt.getTime())
+          const isEdited =
+            createdOk &&
+            updatedOk &&
+            Math.abs(updatedAt.getTime() - createdAt.getTime()) > 60 * 1000
 
-           if (!createdOk) return ''
+          if (!createdOk) return null
 
-           const rel = `${formatDistanceToNow(createdAt)} ago`
-           if (!isEdited) return rel
-           return `${rel} · Edited ${format(updatedAt, 'PP p')}`
-         })()}
-        </Text>
-        
+          return (
+            <Flex direction="column" alignItems="flex-end" gap={0}>
+              <Text fontSize="sm" color="gray.light" textAlign="right" whiteSpace="nowrap">
+                {formatDistanceToNow(createdAt)} ago
+              </Text>
+              {isEdited && (
+                <Text fontSize="xs" color="gray.light" textAlign="right" whiteSpace="nowrap">
+                  · Edited {format(updatedAt, 'PP p')}
+                </Text>
+              )}
+            </Flex>
+          )
+        })()}
+
          {/* Show delete button if user is post author OR user added this channel post */}
          {(user?._id === postedBy?._id || (post?.channelAddedBy && post.channelAddedBy === user?._id?.toString())) && (
            <MdOutlineDeleteOutline 

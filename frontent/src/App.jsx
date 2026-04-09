@@ -146,8 +146,8 @@ const AppContent = () => {
         <Box
           as="button"
           position="fixed"
-          bottom="28px"
-          right="28px"
+          bottom="100px"
+          right="20px"
           zIndex={200}
           onClick={() => window.scrollTo({ top: 0, behavior: 'instant' })}
           bg={colorMode === 'dark' ? 'whiteAlpha.200' : 'blackAlpha.100'}

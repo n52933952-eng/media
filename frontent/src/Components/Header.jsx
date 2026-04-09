@@ -80,7 +80,7 @@ const Header = () => {
 
       {user && (
         <Flex gap={4} alignItems="center">
-          <Box position="relative">
+          <Box position="relative" display="flex" alignItems="center">
             <Box
               as="button"
               onClick={(e) => {
@@ -88,6 +88,8 @@ const Header = () => {
                 handleNavigation('/messages', e)
               }}
               cursor="pointer"
+              display="flex"
+              alignItems="center"
             >
               <FaRegMessage size={24} />
             </Box>
@@ -112,7 +114,7 @@ const Header = () => {
             )}
           </Box>
           
-          <Box position="relative">
+          <Box position="relative" display="flex" alignItems="center">
             <Box
               as="button"
               onClick={(e) => {
@@ -120,6 +122,8 @@ const Header = () => {
                 handleNavigation('/notifications', e)
               }}
               cursor="pointer"
+              display="flex"
+              alignItems="center"
             >
               <IoNotificationsOutline size={24} />
             </Box>
@@ -156,12 +160,9 @@ const Header = () => {
             lineHeight="0"
           >
             <Avatar
-              size="xs"
               src={user?.profilePic}
               name={user?.name || user?.username}
-              w="26px"
-              h="26px"
-              display="block"
+              style={{ width: '26px', height: '26px', minWidth: '26px', display: 'block' }}
             />
           </Box>
         </Flex>

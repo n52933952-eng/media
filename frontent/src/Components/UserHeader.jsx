@@ -298,10 +298,10 @@ const UserHeader = ({ users, activeTab, setActiveTab, onUserFollowed, postsCount
     </Flex>
     
     
-    <Flex>
+    <Flex gap={3} alignItems="center">
       {/* Instagram Icon - Only show on own profile */}
       {currentUser?._id === users?._id && (
-        <Box className="icon-container" position="relative">
+        <Box display="flex" alignItems="center">
           <FaSquareInstagram 
             size={24} 
             cursor="pointer" 
@@ -310,9 +310,9 @@ const UserHeader = ({ users, activeTab, setActiveTab, onUserFollowed, postsCount
         </Box>
       )}
       
-      <Box className="icon-container">
+      <Box display="flex" alignItems="center">
           <Menu>
-            <MenuButton>
+            <MenuButton display="flex" alignItems="center">
             <FaRegCopy size={24} cursor="pointer" />
            </MenuButton>
          <Portal>
