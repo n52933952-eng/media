@@ -153,6 +153,7 @@ const Header = () => {
             cursor="pointer"
             display="flex"
             alignItems="center"
+            lineHeight="0"
           >
             <Avatar
               size="xs"
@@ -160,6 +161,7 @@ const Header = () => {
               name={user?.name || user?.username}
               w="26px"
               h="26px"
+              display="block"
             />
           </Box>
         </Flex>

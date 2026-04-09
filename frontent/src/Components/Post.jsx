@@ -1390,7 +1390,7 @@ const showToast = useShowToast()
   )}
   
   
-  <Flex gap={3} my={1} align="center">
+  <Flex gap={2} my={1} align="center" flexWrap="wrap">
     <Actions post={post}/>
     
     {/* Edit Post Button - Show for:
@@ -1419,7 +1419,7 @@ const showToast = useShowToast()
       if (!canEdit) return null
       
       return (
-        <HStack spacing={2}>
+        <Flex align="center" gap={2} flexWrap="wrap">
         <Button
           size="xs"
           variant="outline"
@@ -1518,7 +1518,7 @@ const showToast = useShowToast()
             </>
           )
         })()}
-      </HStack>
+      </Flex>
       )
     })()}
     
