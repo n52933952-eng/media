@@ -1,6 +1,6 @@
 import React,{useContext,useState,useEffect} from 'react'
 
-import{Image,useColorMode,Flex,Box,Badge,useColorModeValue} from '@chakra-ui/react'
+import{Image,useColorMode,Flex,Box,Badge} from '@chakra-ui/react'
 import { TiHomeOutline } from "react-icons/ti";
 import { CgProfile } from "react-icons/cg";
 import { FaRegMessage } from "react-icons/fa6";
@@ -14,8 +14,6 @@ import{Link, useNavigate} from 'react-router-dom'
 const Header = () => {
   
   const{colorMode,toggleColorMode}=useColorMode()
-  const bgColor = useColorModeValue('white', '#101010')
-  const borderColor = useColorModeValue('gray.200', 'gray.700')
 
    const{user}=useContext(UserContext)
    const {socket, totalUnreadCount, notificationCount, endChessGameOnNavigate} = useContext(SocketContext) || {}
@@ -46,9 +44,6 @@ const Header = () => {
        justifyContent="space-between" 
        py="4"
        px="4"
-       bg={bgColor}
-       backdropFilter="blur(10px)"
-       bgGradient={colorMode === 'dark' ? 'linear(to-b, #101010, #101010)' : 'linear(to-b, white, white)'}
      >
         
        

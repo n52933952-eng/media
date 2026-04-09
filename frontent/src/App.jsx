@@ -1,7 +1,8 @@
-import React,{useContext} from 'react'
+import React,{useContext,useState,useEffect} from 'react'
 import{Routes,Route,Navigate,useLocation} from 'react-router-dom'
+import { FaArrowUp } from 'react-icons/fa'
 
-import{Container, Box, Text, useColorModeValue} from '@chakra-ui/react'
+import{Container, Box, Text, useColorModeValue, useColorMode} from '@chakra-ui/react'
 
 import UserPage from './Pages/UserPage'
 import PostPage from './Pages/PostPage'
@@ -27,7 +28,21 @@ import CardChallengeNotification from './Components/CardChallengeNotification'
 const AppContent = () => {
   const location = useLocation()
   const{user}=useContext(UserContext)
-  
+  const { colorMode } = useColorMode()
+
+  const [isScrolled, setIsScrolled] = useState(false)
+  const [showScrollTop, setShowScrollTop] = useState(false)
+
+  useEffect(() => {
+    const handleScroll = () => {
+      const y = window.scrollY
+      setIsScrolled(y > 50)
+      setShowScrollTop(y > 300)
+    }
+    window.addEventListener('scroll', handleScroll, { passive: true })
+    return () => window.removeEventListener('scroll', handleScroll)
+  }, [])
+
   const isHomePage = location.pathname === "/home"
   const isMessagesPage = location.pathname === "/messages"
   // Check if current path is a user page (e.g., /username, but not /username/post/123 or other routes)
@@ -48,10 +63,29 @@ const AppContent = () => {
       {/* Global Card (Go Fish) Challenge Notification - shows on all pages */}
       {user && <CardChallengeNotification />}
       
-      {/* Header always centered at 620px - same as other pages */}
-      <Container maxW="620px" px={{ base: 4, md: 6 }} position="relative" zIndex={10}>
-        <Header/>
-      </Container>
+      {/* Sticky header — full-width bg so it covers the whole row when scrolled */}
+      <Box
+        position="sticky"
+        top={0}
+        zIndex={100}
+        w="full"
+        bg={
+          isScrolled
+            ? colorMode === 'dark'
+              ? 'rgba(16,16,16,0.92)'
+              : 'rgba(255,255,255,0.92)'
+            : colorMode === 'dark'
+              ? '#101010'
+              : 'white'
+        }
+        backdropFilter={isScrolled ? 'blur(12px)' : 'none'}
+        boxShadow={isScrolled ? '0 1px 14px rgba(0,0,0,0.18)' : 'none'}
+        transition="background 0.25s ease, box-shadow 0.25s ease"
+      >
+        <Container maxW="620px" px={{ base: 4, md: 6 }} position="relative">
+          <Header/>
+        </Container>
+      </Box>
       
       {/* Logout button - always visible, fixed position */}
       {user && <LogOutButton/>}
@@ -102,6 +136,27 @@ const AppContent = () => {
             </Container>
           )}
         </>
+      )}
+
+      {/* Scroll-to-top button — appears after scrolling 300px, instant jump */}
+      {showScrollTop && (
+        <Box
+          as="button"
+          position="fixed"
+          bottom="28px"
+          right="28px"
+          zIndex={200}
+          onClick={() => window.scrollTo({ top: 0, behavior: 'instant' })}
+          bg={colorMode === 'dark' ? 'whiteAlpha.200' : 'blackAlpha.100'}
+          _hover={{ bg: colorMode === 'dark' ? 'whiteAlpha.300' : 'blackAlpha.200', transform: 'scale(1.1)' }}
+          borderRadius="full"
+          p={3}
+          boxShadow="lg"
+          transition="all 0.2s ease"
+          aria-label="Back to top"
+        >
+          <FaArrowUp size={18} />
+        </Box>
       )}
     </>
   )
