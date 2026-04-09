@@ -7,6 +7,7 @@ import useShowToast from '../hooks/useShowToast'
 import FootballIcon from './FootballIcon'
 import ChessChallenge from './ChessChallenge'
 import CardChallenge from './CardChallenge'
+import RaceChallenge from './RaceChallenge'
 
 const SuggestedChannels = ({ onUserFollowed }) => {
     const { user, setUser } = useContext(UserContext)
@@ -706,13 +707,16 @@ const SuggestedChannels = ({ onUserFollowed }) => {
                     </>
                     )}
 
-                    {/* Chess & Go Fish — compact row directly under Football / Weather */}
+                    {/* Chess, Go Fish & Street Race — compact row */}
                     <Flex gap={2} w="full" align="stretch" mb={3}>
                         <Box flex="1" minW={0}>
                             <ChessChallenge compact />
                         </Box>
                         <Box flex="1" minW={0}>
                             <CardChallenge compact />
+                        </Box>
+                        <Box flex="1" minW={0}>
+                            <RaceChallenge compact />
                         </Box>
                     </Flex>
                     
