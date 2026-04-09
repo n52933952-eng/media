@@ -23,7 +23,7 @@ import {
     WrapItem,
     Image,
 } from '@chakra-ui/react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import { UserContext } from '../context/UserContext'
 import { SocketContext } from '../context/SocketContext'
 import { PostContext } from '../context/PostContext'
@@ -92,6 +92,7 @@ const PlayingCard = ({ suit, value, onClick, highlighted, disabled }) => {
 const CardGamePage = () => {
     const { opponentId } = useParams()
     const navigate = useNavigate()
+    const location = useLocation()
     const toast = useToast()
     const { user } = useContext(UserContext)
     const { socket, endCardGameOnNavigate } = useContext(SocketContext)
@@ -127,6 +128,57 @@ const CardGamePage = () => {
     const currentRoomRef = useRef(roomId)
     const prevScoreRef = useRef(0)
     const prevBooksRef = useRef(0)
+    const previousPathRef = useRef(null)
+
+    // Browser back button guard
+    useEffect(() => {
+        if (previousPathRef.current === null) {
+            previousPathRef.current = location.pathname
+        }
+
+        const handlePopState = () => {
+            const activeRoom = localStorage.getItem('cardRoomId')
+            if (activeRoom && endCardGameOnNavigate) {
+                endCardGameOnNavigate()
+            }
+        }
+
+        window.addEventListener('popstate', handlePopState)
+
+        // React Router navigation away from card page
+        const currentPath = location.pathname
+        const previousPath = previousPathRef.current
+        const isCardPage = currentPath.startsWith('/card/')
+        const wasOnCardPage = previousPath && previousPath.startsWith('/card/')
+
+        if (wasOnCardPage && !isCardPage && previousPath !== currentPath) {
+            const activeRoom = localStorage.getItem('cardRoomId')
+            if (activeRoom && endCardGameOnNavigate) {
+                endCardGameOnNavigate()
+            }
+        }
+
+        previousPathRef.current = currentPath
+
+        return () => {
+            window.removeEventListener('popstate', handlePopState)
+        }
+    }, [location.pathname, endCardGameOnNavigate])
+
+    // Unmount cleanup (catches logout / any unmount that isn't a page refresh)
+    useEffect(() => {
+        return () => {
+            const activeRoom = localStorage.getItem('cardRoomId')
+            if (activeRoom && endCardGameOnNavigate) {
+                setTimeout(() => {
+                    const stillOnCardPage = window.location.pathname.startsWith('/card/')
+                    if (!stillOnCardPage) {
+                        endCardGameOnNavigate()
+                    }
+                }, 50)
+            }
+        }
+    }, [endCardGameOnNavigate])
 
     // Fetch opponent profile
     useEffect(() => {

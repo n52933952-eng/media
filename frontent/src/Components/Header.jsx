@@ -15,22 +15,21 @@ const Header = () => {
   const{colorMode,toggleColorMode}=useColorMode()
 
    const{user}=useContext(UserContext)
-   const {socket, totalUnreadCount, notificationCount, endChessGameOnNavigate} = useContext(SocketContext) || {}
+   const {socket, totalUnreadCount, notificationCount, endChessGameOnNavigate, endCardGameOnNavigate} = useContext(SocketContext) || {}
    const navigate = useNavigate()
 
-   // Function to handle navigation with chess game cleanup
+   // End any active game before navigating away
    const handleNavigation = (path, e) => {
-     // Check if a chess game is currently live
      const gameLive = localStorage.getItem('gameLive') === 'true'
-     
-     if (gameLive) {
-       // End the chess game before navigating
-       if (endChessGameOnNavigate) {
-         endChessGameOnNavigate()
-       }
+     const cardRoomId = localStorage.getItem('cardRoomId')
+
+     if (gameLive && endChessGameOnNavigate) {
+       endChessGameOnNavigate()
      }
-     
-     // Navigate to the new path
+     if (cardRoomId && endCardGameOnNavigate) {
+       endCardGameOnNavigate()
+     }
+
      navigate(path)
    }
   
