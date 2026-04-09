@@ -63,12 +63,13 @@ const AppContent = () => {
       {/* Global Card (Go Fish) Challenge Notification - shows on all pages */}
       {user && <CardChallengeNotification />}
       
-      {/* Sticky header — full-width bg so it covers the whole row when scrolled */}
+      {/* Fixed header — always stays at top regardless of parent overflow */}
       <Box
-        position="sticky"
+        position="fixed"
         top={0}
+        left={0}
+        right={0}
         zIndex={100}
-        w="full"
         bg={
           isScrolled
             ? colorMode === 'dark'
@@ -86,6 +87,8 @@ const AppContent = () => {
           <Header/>
         </Container>
       </Box>
+      {/* Spacer to push page content below the fixed header (~72px = py-4 top+bottom + icon height) */}
+      <Box h="72px" />
       
       {/* Logout button - always visible, fixed position */}
       {user && <LogOutButton/>}
