@@ -1092,10 +1092,10 @@ export default function RacingGamePage() {
           {/* Title */}
           <div style={{
             fontSize:'clamp(2.5rem,8vw,5rem)', fontWeight:900, color:'#fff',
-            letterSpacing:'6px', marginBottom:'40px',
+            letterSpacing:'clamp(2px,1.2vw,6px)', marginBottom:'40px',
             textShadow:'0 6px 0 #000, 0 0 40px rgba(255,0,128,0.4)',
             WebkitTextStroke:'2px #000',
-          }}>RACEZ.IO</div>
+          }}>playsocial</div>
 
           {/* Animated bars */}
           <div style={{ display:'flex', gap:'8px', marginBottom:'20px' }}>
