@@ -2290,6 +2290,15 @@ export const initializeSocket = async (app) => {
             const fromId = normalizeUserId(from) || from
             const toId = normalizeUserId(to) || to
             console.log(`🏎️ Race challenge from ${fromId} to ${toId}`)
+            // Block if either player is already in a race, chess, or card game
+            if (await isBlockedForGameChallenge(fromId) || await isBlockedForGameChallenge(toId)) {
+                const senderSock = await getUserSocket(fromId)
+                if (senderSock?.socketId) {
+                    io.to(senderSock.socketId).emit('gameChallengeBlocked', { game: 'race', to: toId })
+                }
+                console.warn(`🏎️ [raceChallenge] Blocked (user busy)`, { fromId, toId })
+                return
+            }
             const recipientData = await getUserSocket(toId)
             if (recipientData?.socketId) {
                 io.to(recipientData.socketId).emit('raceChallenge', { from: fromId, fromName, fromUsername, fromProfilePic })
@@ -2354,19 +2363,38 @@ export const initializeSocket = async (app) => {
             socket.to(roomId).emit('raceCountdownStart')
         })
 
-        // Pure relay — forward ALL position fields
+        // Position relay — server-side rate limit: max 20 updates/sec per socket
+        // Prevents buggy/malicious clients from flooding opponents
+        const racePosLastSent = new Map()
+        const RACE_POS_MIN_INTERVAL_MS = 50 // 20 Hz max
         socket.on('racePosUpdate', ({ roomId, ...posData }) => {
+            if (!roomId) return
+            const now = Date.now()
+            const last = racePosLastSent.get(roomId) || 0
+            if (now - last < RACE_POS_MIN_INTERVAL_MS) return
+            racePosLastSent.set(roomId, now)
             socket.to(roomId).emit('raceOpponentPos', posData)
         })
 
         socket.on('raceFinished', async ({ roomId, winnerId, time }) => {
+            // Broadcast to the socket room
             io.to(roomId).emit('raceResult', { winnerId, time })
-            // Cleanup state after a short delay to let both clients receive the result
+            // Also notify both players directly by userId (fallback if one hasn't joined the room yet)
+            const state = await getRaceGameState(roomId).catch(() => null)
+            if (state) {
+                const [p1Data, p2Data] = await Promise.all([
+                    getUserSocket(normalizeUserId(state.player1) || state.player1).catch(() => null),
+                    getUserSocket(normalizeUserId(state.player2) || state.player2).catch(() => null),
+                ])
+                if (p1Data?.socketId) io.to(p1Data.socketId).emit('raceResult', { winnerId, time })
+                if (p2Data?.socketId) io.to(p2Data.socketId).emit('raceResult', { winnerId, time })
+            }
+            // Cleanup after a delay to let both clients receive the result
             setTimeout(async () => {
-                const state = await getRaceGameState(roomId)
-                if (state) {
-                    await deleteActiveRaceGame(state.player1).catch(() => {})
-                    await deleteActiveRaceGame(state.player2).catch(() => {})
+                const st = await getRaceGameState(roomId).catch(() => null)
+                if (st) {
+                    await deleteActiveRaceGame(st.player1).catch(() => {})
+                    await deleteActiveRaceGame(st.player2).catch(() => {})
                     await deleteRaceGameState(roomId).catch(() => {})
                 }
             }, 15000)
@@ -2376,7 +2404,34 @@ export const initializeSocket = async (app) => {
             const p1 = normalizeUserId(player1) || player1
             const p2 = normalizeUserId(player2) || player2
             console.log(`🏎️ Race ended (navigation/quit): room ${roomId}`)
+
+            // 1. Broadcast to anyone already in the socket room
             socket.to(roomId).emit('raceOpponentLeft')
+
+            // 2. Also notify the opponent directly by userId —
+            //    guarantees delivery even if they haven't called joinRaceRoom yet
+            const senderNorm = normalizeUserId(socket.handshake.query.userId)
+            let otherPlayerId = null
+            if (p1 && p2) {
+                otherPlayerId = senderNorm === p1 ? p2 : p1
+            }
+            if (!otherPlayerId) {
+                // fallback: read from Redis state
+                const st = await getRaceGameState(roomId).catch(() => null)
+                if (st) {
+                    const sp1 = normalizeUserId(st.player1)
+                    const sp2 = normalizeUserId(st.player2)
+                    otherPlayerId = senderNorm === sp1 ? sp2 : sp1
+                }
+            }
+            if (otherPlayerId) {
+                const otherData = await getUserSocket(otherPlayerId).catch(() => null)
+                if (otherData?.socketId) {
+                    io.to(otherData.socketId).emit('raceOpponentLeft')
+                }
+            }
+
+            // 3. Cleanup Redis
             await deleteActiveRaceGame(p1).catch(() => {})
             await deleteActiveRaceGame(p2).catch(() => {})
             await deleteRaceGameState(roomId).catch(() => {})
@@ -3098,7 +3153,10 @@ export const initializeSocket = async (app) => {
                     const state = await getRaceGameState(raceRoomId)
                     let otherPlayerId = null
                     if (state) {
-                        otherPlayerId = state.player1 === disconnectedUserId ? state.player2 : state.player1
+                        const sp1 = normalizeUserId(state.player1) || state.player1
+                        const sp2 = normalizeUserId(state.player2) || state.player2
+                        const dNorm = normalizeUserId(disconnectedUserId) || disconnectedUserId
+                        otherPlayerId = sp1 === dNorm ? sp2 : sp1
                     }
                     if (otherPlayerId) {
                         const otherData = await getUserSocket(otherPlayerId)

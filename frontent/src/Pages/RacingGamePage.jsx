@@ -75,6 +75,12 @@ export default function RacingGamePage() {
   const prevPathRef    = useRef(location.pathname)
   const minimapRef     = useRef(null)  // { canvas, ctx, trackData }
   const carFlipRef     = useRef({ isFlipped:false, time:0, prevUpDot:1 })
+  // Pre-allocated Vector3 objects to avoid per-frame GC pressure
+  const _camDir        = useRef(new THREE.Vector3())
+  const _camOffset     = useRef(new THREE.Vector3())
+  const _camTarget     = useRef(new THREE.Vector3())
+  const _flipUp        = useRef(new THREE.Vector3())
+  const _flipAxis      = useRef(new THREE.Vector3(0, 1, 0))
 
   // ─── Fetch opponent profile ────────────────────────────────────────────────
   useEffect(() => {
@@ -188,9 +194,13 @@ export default function RacingGamePage() {
     }
 
     const onOpponentLeft = () => {
-      setWinner('you')
-      setRaceFinished(true)
+      // Opponent quit — stop loading, stop timer, show result regardless of state
+      setLoading(false)
+      setLoadingPhase('assets')
+      if (timerRef.current) clearInterval(timerRef.current)
       raceStateRef.current.raceFinished = true
+      setWinner('opponent_left')
+      setRaceFinished(true)
     }
 
     socket.on('racePlayerJoined',  onPlayerJoined)
@@ -265,14 +275,32 @@ export default function RacingGamePage() {
 
   // ─── Navigation guard ───────────────────────────────────────────────────────
   useEffect(() => {
+    // Browser back/forward button (SPA navigation)
     const onPop = () => {
       if (localStorage.getItem('raceRoomId') && endRaceGameOnNavigate) {
         endRaceGameOnNavigate()
       }
     }
+    // Tab close or hard refresh — emit synchronously then let page unload
+    const onBeforeUnload = (e) => {
+      const roomId = localStorage.getItem('raceRoomId')
+      if (roomId && socket) {
+        const match = roomId.match(/^race_(.+?)_(.+?)_\d+$/)
+        if (match) {
+          socket.emit('raceGameEnd', { roomId, player1: match[1], player2: match[2] })
+        } else {
+          socket.emit('raceGameEnd', { roomId })
+        }
+        localStorage.removeItem('raceRoomId')
+      }
+    }
     window.addEventListener('popstate', onPop)
-    return () => window.removeEventListener('popstate', onPop)
-  }, [endRaceGameOnNavigate])
+    window.addEventListener('beforeunload', onBeforeUnload)
+    return () => {
+      window.removeEventListener('popstate', onPop)
+      window.removeEventListener('beforeunload', onBeforeUnload)
+    }
+  }, [endRaceGameOnNavigate, socket])
 
   useEffect(() => {
     if (location.pathname !== prevPathRef.current && !location.pathname.startsWith('/race/')) {
@@ -301,11 +329,12 @@ export default function RacingGamePage() {
     cameraRef.current = camera
 
     // ── Renderer ───────────────────────────────────────────────────────────
-    const renderer = new THREE.WebGLRenderer({ antialias:true })
-    renderer.setPixelRatio(window.devicePixelRatio)
+    const renderer = new THREE.WebGLRenderer({ antialias: window.devicePixelRatio <= 1 })
+    // Cap at 2x DPR — going higher gives diminishing visual returns but costs GPU hard
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
     renderer.setSize(W, H)
-    renderer.shadowMap.enabled = true
-    renderer.shadowMap.type = THREE.PCFSoftShadowMap
+    // No light has castShadow=true so keep shadowMap off to save GPU bandwidth
+    renderer.shadowMap.enabled = false
     container.appendChild(renderer.domElement)
     rendererRef.current = renderer
 
@@ -493,20 +522,23 @@ export default function RacingGamePage() {
     const cam = cameraRef.current
     const car = carModelRef.current
     if (!cam || !car) return
-    const carDir = new THREE.Vector3()
-    car.getWorldDirection(carDir)
-    const offset = carDir.clone().multiplyScalar(-CAMERA_DISTANCE)
-    const target = car.position.clone().add(offset).add(new THREE.Vector3(0, CAMERA_HEIGHT, 0))
-    cam.position.lerp(target, CAMERA_LERP)
-    cam.lookAt(car.position.clone().add(carDir.clone().multiplyScalar(CAMERA_LOOK_AHEAD)))
+    // Reuse pre-allocated vectors to avoid GC pressure
+    car.getWorldDirection(_camDir.current)
+    _camOffset.current.copy(_camDir.current).multiplyScalar(-CAMERA_DISTANCE)
+    _camTarget.current.copy(car.position).add(_camOffset.current)
+    _camTarget.current.y += CAMERA_HEIGHT
+    cam.position.lerp(_camTarget.current, CAMERA_LERP)
+    _camOffset.current.copy(_camDir.current).multiplyScalar(CAMERA_LOOK_AHEAD)
+    _camOffset.current.add(car.position)
+    cam.lookAt(_camOffset.current)
   }
 
   // ─── Car flip check (auto-reset) ───────────────────────────────────────────
   const checkFlipped = (dt) => {
     const car = carModelRef.current
     if (!car) return
-    const up = new THREE.Vector3(0,1,0).applyQuaternion(car.quaternion)
-    const dot = up.dot(new THREE.Vector3(0,1,0))
+    _flipUp.current.copy(_flipAxis.current).applyQuaternion(car.quaternion)
+    const dot = _flipUp.current.dot(_flipAxis.current)
     const f = carFlipRef.current
     if (dot < 0.5 && Math.abs(dot - f.prevUpDot) < 0.01) {
       f.isFlipped = true
@@ -519,15 +551,18 @@ export default function RacingGamePage() {
   }
 
   // ─── Speedometer ───────────────────────────────────────────────────────────
+  // Cache DOM refs so we don't query the DOM 60× per second
+  const speedoElemsRef = useRef({ fill: null, needle: null, val: null })
   const updateSpeedDisplay = (kph) => {
     const pct = Math.min(kph / MAX_SPEED_KPH, 1)
     const rot = pct * 180
-    const fill   = document.querySelector('.race-gauge-fill')
-    const needle = document.querySelector('.race-gauge-needle')
-    const val    = document.querySelector('.race-speed-value')
-    if (fill)   fill.style.transform   = `rotate(${rot}deg)`
-    if (needle) needle.style.transform = `rotate(${rot - 90}deg)`
-    if (val)    val.textContent = Math.round(Math.max(kph - 1, 0))
+    const e = speedoElemsRef.current
+    if (!e.fill)   e.fill   = document.querySelector('.race-gauge-fill')
+    if (!e.needle) e.needle = document.querySelector('.race-gauge-needle')
+    if (!e.val)    e.val    = document.querySelector('.race-speed-value')
+    if (e.fill)   e.fill.style.transform   = `rotate(${rot}deg)`
+    if (e.needle) e.needle.style.transform = `rotate(${rot - 90}deg)`
+    if (e.val)    e.val.textContent = Math.round(Math.max(kph - 1, 0))
     setSpeed(Math.round(Math.max(kph - 1, 0)))
   }
 
@@ -583,6 +618,9 @@ export default function RacingGamePage() {
 
     const phys = physicsRef.current
     if (!phys) return
+
+    // Clamp accumulated time — prevents "spiral of death" when a frame takes too long
+    accumRef.current = Math.min(accumRef.current, FIXED_PHYSICS_STEP * 4)
 
     while (accumRef.current >= FIXED_PHYSICS_STEP) {
       const result = updatePhysics(
@@ -939,17 +977,21 @@ export default function RacingGamePage() {
             animation:'slideIn 0.8s cubic-bezier(0.12,0.93,0.27,0.98)',
           }}>
             <div style={{ fontSize:'64px', marginBottom:'16px' }}>
-              {winner === 'you' ? '🏆' : '🏁'}
+              {winner === 'you' || winner === 'opponent_left' ? '🏆' : '🏁'}
             </div>
             <div style={{
               fontSize:'36px', fontWeight:900, marginBottom:'12px',
-              color: winner === 'you' ? '#ffd700' : '#fff',
-              textShadow: winner === 'you' ? '0 0 20px rgba(255,215,0,0.6)' : 'none',
+              color: (winner === 'you' || winner === 'opponent_left') ? '#ffd700' : '#fff',
+              textShadow: (winner === 'you' || winner === 'opponent_left') ? '0 0 20px rgba(255,215,0,0.6)' : 'none',
             }}>
-              {winner === 'you' ? 'YOU WIN!' : 'RACE FINISHED'}
+              {winner === 'you' ? 'YOU WIN!'
+                : winner === 'opponent_left' ? 'OPPONENT LEFT'
+                : 'RACE FINISHED'}
             </div>
             <div style={{ fontSize:'18px', opacity:.7, marginBottom:'32px' }}>
-              {winner === 'you' ? `Time: ${raceTime}` : `Better luck next time`}
+              {winner === 'you' ? `Time: ${raceTime}`
+                : winner === 'opponent_left' ? 'Your opponent quit the race'
+                : `Better luck next time`}
             </div>
             <button onClick={() => { if (endRaceGameOnNavigate) endRaceGameOnNavigate(); navigate('/') }} style={{
               padding:'14px 40px', borderRadius:'8px', border:'2px solid #b30059',
