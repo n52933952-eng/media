@@ -1,4 +1,4 @@
-import React, { useState, useContext, useEffect } from 'react'
+import React, { useState, useContext, useEffect, useCallback } from 'react'
 import {
     Box,
     Button,
@@ -41,6 +41,26 @@ const ChessChallenge = ({ compact = false }) => {
     const textColor = useColorModeValue('gray.800', 'white')
     const secondaryTextColor = useColorModeValue('gray.600', 'gray.400')
 
+    const baseUrl = API_BASE_URL || (import.meta.env.PROD ? window.location.origin : 'http://localhost:5000')
+
+    /** Returns current busy ids (also updates state). Use the return value when filtering in the same tick — React state is async. */
+    const fetchBusyGameUserIds = useCallback(async () => {
+        try {
+            const busyRes = await fetch(`${baseUrl}/api/user/busyGameUsers`, {
+                credentials: 'include',
+            })
+            if (busyRes.ok) {
+                const { busyUserIds } = await busyRes.json()
+                const ids = busyUserIds || []
+                setBusyUsers(ids)
+                return ids
+            }
+        } catch (err) {
+            console.warn('⚠️ [ChessChallenge] Failed to fetch busy game users:', err)
+        }
+        return []
+    }, [baseUrl])
+
     // Normalize ID (backend may return string or { _id: "..." })
     const toIdStr = (id) => {
         const raw = id?._id ?? id
@@ -55,22 +75,10 @@ const ChessChallenge = ({ compact = false }) => {
         try {
             setLoading(true)
             setHasConnections(false)
-            const baseUrl = API_BASE_URL || (import.meta.env.PROD ? window.location.origin : 'http://localhost:5000')
-            
-            // First, fetch all users who are currently in active chess games
-            try {
-                const busyRes = await fetch(`${baseUrl}/api/user/busyChessUsers`, {
-                    credentials: 'include'
-                })
-                if (busyRes.ok) {
-                    const { busyUserIds } = await busyRes.json()
-                    setBusyUsers(busyUserIds || [])
-                    if (import.meta.env.DEV) {
-                        console.log('♟️ [ChessChallenge] Found busy users from Redis:', busyUserIds)
-                    }
-                }
-            } catch (err) {
-                console.warn('⚠️ [ChessChallenge] Failed to fetch busy users:', err)
+            // Anyone in chess, card, or race — use returned ids for filtering (state updates async)
+            const busyIdsNow = await fetchBusyGameUserIds()
+            if (import.meta.env.DEV) {
+                console.log('♟️ [ChessChallenge] Synced busy game users from Redis')
             }
             
             // Fetch following + followers using the Follow-collection-backed endpoints
@@ -165,10 +173,7 @@ const ChessChallenge = ({ compact = false }) => {
                     : globalOnlineSet.has(userIdStr)
                 
                 const isNotSelf = userIdStr !== currentUserIdStr
-                const isNotBusy = !busyUsers.some(busyId => {
-                    const busyIdStr = busyId?.toString()
-                    return busyIdStr === userIdStr
-                })
+                const isNotBusy = !busyIdsNow.some((busyId) => busyId?.toString() === userIdStr)
                 
                 if (import.meta.env.DEV && isOnline && isNotSelf) {
                     console.log(`✅ [ChessChallenge] User ${u.username} (${userIdStr}) is online and available`)
@@ -191,17 +196,19 @@ const ChessChallenge = ({ compact = false }) => {
         }
     }
 
-    // Listen for busy users via socket
+    // Keep busy list in sync when any game starts/ends (chess, card, race)
     useEffect(() => {
         if (!socket) return
 
-        socket.on('userBusyChess', ({ userId }) => {
-            setBusyUsers(prev => [...prev, userId])
-        })
-
-        socket.on('userAvailableChess', ({ userId }) => {
-            setBusyUsers(prev => prev.filter(id => id !== userId))
-        })
+        const syncBusy = () => {
+            fetchBusyGameUserIds()
+        }
+        socket.on('userBusyChess', syncBusy)
+        socket.on('userAvailableChess', syncBusy)
+        socket.on('userBusyCard', syncBusy)
+        socket.on('userAvailableCard', syncBusy)
+        socket.on('userBusyRace', syncBusy)
+        socket.on('userAvailableRace', syncBusy)
 
         // Listen for challenge acceptance (sender side - CHALLENGER ONLY)
         // CRITICAL: Only process if we're the challenger
@@ -232,11 +239,15 @@ const ChessChallenge = ({ compact = false }) => {
         })
 
         return () => {
-            socket.off('userBusyChess')
-            socket.off('userAvailableChess')
+            socket.off('userBusyChess', syncBusy)
+            socket.off('userAvailableChess', syncBusy)
+            socket.off('userBusyCard', syncBusy)
+            socket.off('userAvailableCard', syncBusy)
+            socket.off('userBusyRace', syncBusy)
+            socket.off('userAvailableRace', syncBusy)
             socket.off('acceptChessChallenge')
         }
-    }, [socket, navigate, showToast])
+    }, [socket, navigate, showToast, setOrientation, fetchBusyGameUserIds])
 
     const handleOpenModal = () => {
         fetchAvailableUsers()

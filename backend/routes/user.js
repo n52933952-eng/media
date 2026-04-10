@@ -1,7 +1,7 @@
 import express from 'express'
 
 const router = express.Router()
-import{SignUp,LoginUser,GoogleLogin,LogOut,FollowAndUnfollow,getUserProfile,UpdateUser,searchUsers,getSuggestedUsers,getBusyChessUsers,getBusyCardUsers,getFollowingUsers,getFollowersUsers,removeFollower,DeleteMyAccount} from '../controller/user.js'
+import{SignUp,LoginUser,GoogleLogin,LogOut,FollowAndUnfollow,getUserProfile,UpdateUser,searchUsers,getSuggestedUsers,getBusyChessUsers,getBusyCardUsers,getBusyGameUsers,getFollowingUsers,getFollowersUsers,removeFollower,DeleteMyAccount} from '../controller/user.js'
 import protectRoute  from '../middlware/protectRoute.js'
 import upload from '../middlware/upload.js'
 import User from '../models/user.js'
@@ -24,6 +24,7 @@ router.get("/followers",protectRoute,getFollowersUsers)  // GET /api/user/follow
 router.delete("/follower/:id",protectRoute,removeFollower)  // DELETE /api/user/follower/:userId — remove from your followers
 router.get("/busyChessUsers",protectRoute,getBusyChessUsers)  // GET /api/user/busyChessUsers
 router.get("/busyCardUsers",protectRoute,getBusyCardUsers)  // GET /api/user/busyCardUsers
+router.get("/busyGameUsers",protectRoute,getBusyGameUsers)  // GET /api/user/busyGameUsers — chess + card + race
 router.post("/save-fcm-token",protectRoute,async (req,res) => {
   try {
     const { fcmToken } = req.body

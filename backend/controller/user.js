@@ -1083,6 +1083,61 @@ export const getBusyCardUsers = async (req, res) => {
     }
 }
 
+/** Users in any active chess, card, or race match — for "pick online opponent" lists. */
+const scanRedisUserIdsForPattern = async (client, match, keyPrefix) => {
+    const out = new Set()
+    let cursor = '0'
+    let scanCount = 0
+    const maxIterations = 100
+    do {
+        scanCount++
+        if (scanCount > maxIterations) {
+            console.error(`❌ [scanRedisUserIdsForPattern] Max iterations for ${match}`)
+            break
+        }
+        const result = await client.scan(cursor, {
+            MATCH: match,
+            COUNT: 100,
+        })
+        let nextCursor
+        let keys
+        if (Array.isArray(result)) {
+            nextCursor = result[0]
+            keys = result[1] || []
+        } else if (result && typeof result === 'object') {
+            nextCursor = result.cursor
+            keys = result.keys || []
+        } else {
+            break
+        }
+        cursor = nextCursor.toString()
+        keys.forEach((key) => {
+            const userId = String(key).replace(keyPrefix, '')
+            if (userId) out.add(userId)
+        })
+    } while (cursor !== '0')
+    return out
+}
+
+export const getBusyGameUsers = async (req, res) => {
+    try {
+        redisService.ensureRedis()
+        const client = redisService.getRedis()
+        const busy = new Set()
+        const merge = async (match, prefix) => {
+            const ids = await scanRedisUserIdsForPattern(client, match, prefix)
+            ids.forEach((id) => busy.add(id))
+        }
+        await merge('activeChessGame:*', 'activeChessGame:')
+        await merge('activeCardGame:*', 'activeCardGame:')
+        await merge('activeRaceGame:*', 'activeRaceGame:')
+        res.status(200).json({ busyUserIds: [...busy] })
+    } catch (error) {
+        console.error('Error in getBusyGameUsers:', error)
+        res.status(500).json({ error: error.message || 'Failed to get busy game users' })
+    }
+}
+
 // Get users that current user is following (for messages, chess challenge list, etc.)
 // Without `limit`/`skip` query: returns a plain array (max 500) — backward compatible.
 // With `limit` or `skip`: returns { users, hasMore, nextSkip } for pagination.

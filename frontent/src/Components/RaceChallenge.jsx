@@ -1,4 +1,4 @@
-import React, { useState, useContext, useEffect, useRef } from 'react'
+import React, { useState, useContext, useEffect, useRef, useCallback } from 'react'
 import {
     Box, Button, VStack, Text, useColorModeValue,
     Modal, ModalOverlay, ModalContent, ModalHeader, ModalBody, ModalCloseButton,
@@ -28,19 +28,34 @@ const RaceChallenge = ({ compact = false }) => {
     const textColor          = useColorModeValue('gray.800', 'white')
     const secondaryTextColor = useColorModeValue('gray.600', 'gray.400')
 
+    const base = API_BASE_URL || (import.meta.env.PROD ? window.location.origin : 'http://localhost:5000')
+
+    const fetchBusyGameUserIds = useCallback(async () => {
+        try {
+            const busyRes = await fetch(`${base}/api/user/busyGameUsers`, { credentials: 'include' })
+            if (busyRes.ok) {
+                const { busyUserIds } = await busyRes.json()
+                const ids = busyUserIds || []
+                setBusyUsers(ids)
+                return ids
+            }
+        } catch { /* ignore */ }
+        return []
+    }, [base])
+
     // ── Fetch online friends who are available ────────────────────────────────
     const fetchAvailableUsers = async () => {
         if (!user) return
         setLoading(true)
         setHasConnections(false)
         try {
-            const base = API_BASE_URL || (import.meta.env.PROD ? window.location.origin : 'http://localhost:5000')
+            const busyIdsNow = await fetchBusyGameUserIds()
 
             let allUsers = []
             try {
                 const [fwRes, frRes] = await Promise.all([
-                    fetch(`${base}/api/user/following`,  { credentials: 'include' }),
-                    fetch(`${base}/api/user/followers`,  { credentials: 'include' }),
+                    fetch(`${base}/api/user/following`, { credentials: 'include' }),
+                    fetch(`${base}/api/user/followers`, { credentials: 'include' }),
                 ])
                 const toList = async (r) => {
                     if (!r.ok) return []
@@ -82,10 +97,10 @@ const RaceChallenge = ({ compact = false }) => {
                 )).filter(Boolean)
             )
 
-            setAvailableUsers(allUsers.filter(u => {
+            setAvailableUsers(allUsers.filter((u) => {
                 const id = u._id?.toString()
                 const online = presenceSet.size > 0 ? presenceSet.has(id) : globalSet.has(id)
-                const notBusy = !busyUsers.some(b => b?.toString() === id)
+                const notBusy = !busyIdsNow.some((b) => b?.toString() === id)
                 return id !== user._id?.toString() && online && notBusy
             }))
         } catch (e) {
@@ -99,8 +114,9 @@ const RaceChallenge = ({ compact = false }) => {
     useEffect(() => {
         if (!socket) return
 
-        const onBusy      = ({ userId }) => setBusyUsers(p => [...p, userId])
-        const onAvailable = ({ userId }) => setBusyUsers(p => p.filter(id => id !== userId))
+        const syncBusy = () => {
+            fetchBusyGameUserIds()
+        }
         const onAccepted  = (data) => {
             if (!data?.roomId) return
             const weChallenger = sentToRef.current && data.opponentId?.toString() === sentToRef.current.toString()
@@ -124,20 +140,28 @@ const RaceChallenge = ({ compact = false }) => {
             showToast('Cannot Challenge', 'That player is currently busy in a game or call.', 'warning')
         }
 
-        socket.on('userBusyRace',        onBusy)
-        socket.on('userAvailableRace',   onAvailable)
+        socket.on('userBusyChess', syncBusy)
+        socket.on('userAvailableChess', syncBusy)
+        socket.on('userBusyCard', syncBusy)
+        socket.on('userAvailableCard', syncBusy)
+        socket.on('userBusyRace', syncBusy)
+        socket.on('userAvailableRace', syncBusy)
         socket.on('acceptRaceChallenge', onAccepted)
         socket.on('raceDeclined',        onDeclined)
         socket.on('gameChallengeBlocked', onBlocked)
 
         return () => {
-            socket.off('userBusyRace',        onBusy)
-            socket.off('userAvailableRace',   onAvailable)
+            socket.off('userBusyChess', syncBusy)
+            socket.off('userAvailableChess', syncBusy)
+            socket.off('userBusyCard', syncBusy)
+            socket.off('userAvailableCard', syncBusy)
+            socket.off('userBusyRace', syncBusy)
+            socket.off('userAvailableRace', syncBusy)
             socket.off('acceptRaceChallenge', onAccepted)
-            socket.off('raceDeclined',        onDeclined)
+            socket.off('raceDeclined', onDeclined)
             socket.off('gameChallengeBlocked', onBlocked)
         }
-    }, [socket, navigate, showToast, user])
+    }, [socket, navigate, showToast, user, fetchBusyGameUserIds])
 
     const handleOpenModal = () => { fetchAvailableUsers(); onOpen() }
 
