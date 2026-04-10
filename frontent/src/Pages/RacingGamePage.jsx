@@ -18,6 +18,9 @@ const CAMERA_LOOK_AHEAD = 2
 const MAX_SPEED_KPH    = 200
 const DEFAULT_MAP      = 'map1'
 
+/** Pixels from top of viewport — must clear fixed app header (~72px) + gap so HUD is not hidden under it */
+const RACE_TOP_OFFSET_PX = 88
+
 /** Match SocketContext / backend: ids may be ObjectId or string */
 function userIdToStr(id) {
   if (id == null || id === '') return ''
@@ -54,6 +57,8 @@ export default function RacingGamePage() {
   const [waitingOpp,    setWaitingOpp]    = useState(true)
   const [callActive,    setCallActive]    = useState(false)
   const [muted,         setMuted]         = useState(false)
+  /** Drives React re-renders when the race clock starts (avoid relying on raceStateRef in JSX). */
+  const [raceLive,      setRaceLive]      = useState(false)
 
   // ── Three.js / physics refs ─────────────────────────────────────────────────
   const containerRef   = useRef(null)
@@ -244,12 +249,15 @@ export default function RacingGamePage() {
   }, [callAccepted, callEnded])
 
   // ─── Play opponent voice in-page (WebRTC MediaStream → <audio>) ─────────────
+  // Same remote stream path as chat/calls — Safari/macOS may block autoplay until play() succeeds.
   useEffect(() => {
     const el = remoteAudioRef.current
     if (!el) return
     if (remoteStream) {
       el.srcObject = remoteStream
       el.volume = 1
+      el.setAttribute('playsinline', 'true')
+      el.setAttribute('webkit-playsinline', 'true')
       const p = el.play?.()
       if (p && typeof p.catch === 'function') p.catch(() => {})
     } else {
@@ -356,8 +364,18 @@ export default function RacingGamePage() {
     const container = containerRef.current
     if (!container || !window.Ammo) return
 
-    const W = container.clientWidth
-    const H = container.clientHeight
+    const tryStart = () => {
+      const W = container.clientWidth
+      const H = container.clientHeight
+      // Wait until flex / fixed layout has real dimensions (avoids half-width canvas + black bar)
+      if (W < 16 || H < 16) {
+        requestAnimationFrame(tryStart)
+        return
+      }
+      startGame(W, H)
+    }
+
+    const startGame = (W, H) => {
 
     // ── Scene ──────────────────────────────────────────────────────────────
     const scene = new THREE.Scene()
@@ -384,15 +402,29 @@ export default function RacingGamePage() {
     rendererRef.current = renderer
 
     const onResize = () => {
-      if (!cameraRef.current || !rendererRef.current) return
-      const w = container.clientWidth, h = container.clientHeight
-      cameraRef.current.aspect = w/h
+      if (!cameraRef.current || !rendererRef.current || !container) return
+      const w = container.clientWidth
+      const h = container.clientHeight
+      if (w < 8 || h < 8) return
+      cameraRef.current.aspect = w / h
       cameraRef.current.updateProjectionMatrix()
       rendererRef.current.setSize(w, h)
     }
-    window.addEventListener('resize', onResize)
-    // Store cleanup fn so it can be called on unmount
-    resizeCleanupRef.current = () => window.removeEventListener('resize', onResize)
+    let ro = null
+    if (typeof ResizeObserver !== 'undefined') {
+      ro = new ResizeObserver(() => onResize())
+      ro.observe(container)
+    } else {
+      window.addEventListener('resize', onResize)
+    }
+    resizeCleanupRef.current = () => {
+      if (ro) {
+        ro.disconnect()
+        ro = null
+      } else {
+        window.removeEventListener('resize', onResize)
+      }
+    }
 
     // ── Physics ────────────────────────────────────────────────────────────
     const physics = initPhysics(window.Ammo)
@@ -454,6 +486,9 @@ export default function RacingGamePage() {
     }, myColorRef.current)
     carBodyRef.current = carComps.carBody
     vehicleRef.current = carComps.vehicle
+    }
+
+    tryStart()
   }, [user, opponentId])
 
   // ─── Opponent car (visual only) ────────────────────────────────────────────
@@ -552,6 +587,7 @@ export default function RacingGamePage() {
         clearInterval(id)
         setCountdown(null)
         raceStateRef.current.raceStarted = true
+        setRaceLive(true)
         // Start race timer
         startTimeRef.current = Date.now()
         timerRef.current = setInterval(() => {
@@ -631,7 +667,7 @@ export default function RacingGamePage() {
       position: 'fixed', bottom: '240px', right: '20px',
       width: '160px', height: '160px',
       background: 'rgba(0,0,0,0.5)', borderRadius: '50%',
-      boxShadow: '0 0 10px rgba(0,0,0,0.7)', zIndex: '500',
+      boxShadow: '0 0 10px rgba(0,0,0,0.7)', zIndex: '1000',
       pointerEvents: 'none',
     })
     document.body.appendChild(canvas)
@@ -842,8 +878,27 @@ export default function RacingGamePage() {
         style={{ position:'fixed', width:0, height:0, opacity:0, pointerEvents:'none' }}
       />
 
-      {/* Three.js container — flex child fills width/height so the canvas is never letterboxed */}
-      <div ref={containerRef} style={{ flex: 1, minHeight: 0, width: '100%', position: 'relative' }} />
+      {/* Three.js host: absolute inset fills the flex area so the canvas always matches the visible game area */}
+      <div
+        style={{
+          flex: 1,
+          minHeight: 0,
+          minWidth: 0,
+          width: '100%',
+          position: 'relative',
+          overflow: 'hidden',
+        }}
+      >
+        <div
+          ref={containerRef}
+          style={{
+            position: 'absolute',
+            inset: 0,
+            width: '100%',
+            height: '100%',
+          }}
+        />
+      </div>
 
       {/* Loading screen */}
       {loading && (
@@ -939,10 +994,10 @@ export default function RacingGamePage() {
         </div>
       )}
 
-      {/* HUD — top left: player names + gate progress */}
+      {/* HUD — top left: player names + gate progress (below fixed app header) */}
       {!loading && (
         <div style={{
-          position:'fixed', top:'20px', left:'20px', zIndex:500,
+          position:'fixed', top:`${RACE_TOP_OFFSET_PX}px`, left:'20px', zIndex:1000,
           background:'rgba(0,0,0,0.55)', backdropFilter:'blur(8px)',
           borderRadius:'10px', padding:'12px 18px', color:'#fff',
           fontFamily:'Poppins,sans-serif', minWidth:'200px',
@@ -963,13 +1018,13 @@ export default function RacingGamePage() {
       )}
 
       {/* HUD — top center: timer */}
-      {!loading && raceStateRef.current.raceStarted && (
+      {!loading && raceLive && (
         <div style={{
-          position:'fixed', top:'20px', left:'50%', transform:'translateX(-50%)',
+          position:'fixed', top:`${RACE_TOP_OFFSET_PX}px`, left:'50%', transform:'translateX(-50%)',
           background:'rgba(0,0,0,0.55)', backdropFilter:'blur(8px)',
           borderRadius:'10px', padding:'10px 24px', color:'#fff',
           fontFamily:'Poppins,sans-serif', fontSize:'28px', fontWeight:700,
-          zIndex:500, textShadow:'0 0 10px rgba(255,255,255,0.4)',
+          zIndex:1000, textShadow:'0 0 10px rgba(255,255,255,0.4)',
           boxShadow:'0 0 20px rgba(0,0,0,0.5)',
         }}>
           {raceTime}
@@ -979,7 +1034,7 @@ export default function RacingGamePage() {
       {/* Speedometer — bottom right */}
       {!loading && (
         <div id="racing-ui" style={{
-          position:'fixed', bottom:'30px', right:'30px', zIndex:500,
+          position:'fixed', bottom:'30px', right:'30px', zIndex:1000,
           pointerEvents:'none', userSelect:'none',
         }}>
           <div style={{ width:'160px' }}>
@@ -1021,17 +1076,17 @@ export default function RacingGamePage() {
         </div>
       )}
 
-      {/* Voice call — compact in-game bar (audio stays on this screen via <audio> above) */}
+      {/* Voice: uses SocketContext callUser / leaveCall (same pipeline as chat calls — not duplicated WebRTC) */}
       {!loading && (
         <div style={{
-          position:'fixed', bottom:'20px', left:'20px', right:'220px', zIndex:500,
+          position:'fixed', bottom:'20px', left:'20px', right:'220px', zIndex:1000,
           display:'flex', flexDirection:'column', gap:'10px', maxWidth:420,
         }}>
           <div style={{
             fontFamily:'Poppins,sans-serif', fontSize:'11px', color:'rgba(255,255,255,0.45)',
             letterSpacing:'0.04em', textTransform:'uppercase',
           }}>
-            Voice chat — same as live games (tap phone, allow mic)
+            Voice with opponent — tap the phone, accept mic. Safari on Mac: allow when the browser asks.
           </div>
           {callActive && (
             <div style={{
@@ -1072,7 +1127,7 @@ export default function RacingGamePage() {
       {/* Leave button (offset so it does not overlap call + mute) */}
       {!loading && (
         <button onClick={handleLeave} title="Leave race" style={{
-          position:'fixed', bottom:'20px', left:'200px', zIndex:500,
+          position:'fixed', bottom:'20px', left:'200px', zIndex:1000,
           width:44, height:44, borderRadius:'50%',
           background:'#ff0080', border:'2px solid #b30059',
           boxShadow:'0 3px 0 #b30059', color:'#fff', fontSize:'18px',
@@ -1081,9 +1136,9 @@ export default function RacingGamePage() {
       )}
 
       {/* Controls hint */}
-      {!loading && raceStateRef.current.raceStarted && (
+      {!loading && raceLive && (
         <div style={{
-          position:'fixed', bottom:'20px', right:'220px', zIndex:500,
+          position:'fixed', bottom:'20px', right:'220px', zIndex:1000,
           color:'rgba(255,255,255,0.4)', fontFamily:'Poppins,sans-serif', fontSize:'12px',
           textAlign:'right', pointerEvents:'none',
         }}>

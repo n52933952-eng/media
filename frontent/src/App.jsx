@@ -147,6 +147,9 @@ const AppContent = () => {
           right="0"
           bottom="0"
           w="100%"
+          maxW="100%"
+          m={0}
+          p={0}
           zIndex={1}
           overflow="hidden"
           bg="#000"
