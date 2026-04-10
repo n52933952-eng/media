@@ -18,6 +18,9 @@ const CAMERA_LOOK_AHEAD = 2
 const MAX_SPEED_KPH    = 200
 const DEFAULT_MAP      = 'map1'
 
+/** World-space half spacing between host (left lane) and guest at the start line — car centers, meters */
+const START_LINE_LANE_OFFSET = 1.85
+
 /** Pixels from top of viewport — must clear fixed app header (~72px) + gap so HUD is not hidden under it */
 const RACE_TOP_OFFSET_PX = 88
 
@@ -460,9 +463,35 @@ export default function RacingGamePage() {
     loadMapDecorations(DEFAULT_MAP, scene, renderer, camera, lm)
 
     // ── Gates ──────────────────────────────────────────────────────────────
+    const syncStartLineFromGate0 = (gateData) => {
+      const g0 = gateData?.gates?.[0]
+      if (!g0) return
+      g0.updateMatrixWorld(true)
+      g0.getWorldPosition(gateData.currentGatePosition)
+      g0.getWorldQuaternion(gateData.currentGateQuaternion)
+    }
+
+    const snapPlayerToStartLine = () => {
+      const gd = gateDataRef.current
+      if (!gd?.gates?.[0] || !window.Ammo || !carBodyRef.current || !vehicleRef.current) return
+      syncStartLineFromGate0(gd)
+      const lane = isHostRef.current ? START_LINE_LANE_OFFSET : -START_LINE_LANE_OFFSET
+      steeringRef.current = resetCarPosition(
+        window.Ammo,
+        carBodyRef.current,
+        vehicleRef.current,
+        steeringRef.current,
+        gd.currentGatePosition,
+        gd.currentGateQuaternion,
+        lane
+      )
+    }
+
     const gd = loadGates(DEFAULT_MAP, scene, lm, (loaded) => {
       gateDataRef.current = loaded
       window.gateData = loaded
+      syncStartLineFromGate0(loaded)
+      snapPlayerToStartLine()
     })
     gateDataRef.current = gd
     window.gateData = gd
@@ -474,6 +503,8 @@ export default function RacingGamePage() {
       wheelMeshesRef.current = loaded.wheelMeshes
       carModelRef.current    = loaded.carModel
       steeringRef.current    = loaded.currentSteeringAngle
+
+      snapPlayerToStartLine()
 
       // ── Opponent car (visual only, no physics) ─────────────────────────
       loadOpponentCar(scene)
@@ -603,9 +634,11 @@ export default function RacingGamePage() {
   // ─── Reset car to last gate ────────────────────────────────────────────────
   const resetCar = () => {
     if (!window.Ammo || !carBodyRef.current || !gateDataRef.current) return
+    const lane = isHostRef.current ? START_LINE_LANE_OFFSET : -START_LINE_LANE_OFFSET
     steeringRef.current = resetCarPosition(
       window.Ammo, carBodyRef.current, vehicleRef.current, steeringRef.current,
-      gateDataRef.current.currentGatePosition, gateDataRef.current.currentGateQuaternion
+      gateDataRef.current.currentGatePosition, gateDataRef.current.currentGateQuaternion,
+      lane
     )
   }
 

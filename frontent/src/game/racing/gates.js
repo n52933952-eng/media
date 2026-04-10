@@ -332,7 +332,7 @@ export function showFinishMessage(totalGates, resetCallback) {
 }
 
 // Function to reset race gates
-export function resetRace(gateData, ammo, carBody, vehicle, currentSteeringAngle, resetCarPosition) {
+export function resetRace(gateData, ammo, carBody, vehicle, currentSteeringAngle, resetCarPosition, laneOffsetMeters = 0) {
   const { gates, fadingGates } = gateData;
   
   // Reset gate states
@@ -355,7 +355,8 @@ export function resetRace(gateData, ammo, carBody, vehicle, currentSteeringAngle
       vehicle, 
       currentSteeringAngle, 
       gateData.currentGatePosition, 
-      gateData.currentGateQuaternion
+      gateData.currentGateQuaternion,
+      laneOffsetMeters
     );
   }
   
