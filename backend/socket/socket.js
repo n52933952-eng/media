@@ -3077,13 +3077,22 @@ export const initializeSocket = async (app) => {
                 const gameRoomId = await getActiveChessGame(disconnectedUserId)
                 console.log(`♟️ User ${disconnectedUserId} disconnected while in game: ${gameRoomId}`)
                 console.log(`⏳ Waiting 10 seconds to see if user reconnects (page refresh)...`)
-                
-                // Find the other player
+
+                // Parse other player directly from roomId (chess_p1_p2_ts) — works on any server instance
                 let otherPlayerId = null
-                for (const [userId, roomId] of activeChessGames.entries()) {
-                    if (roomId === gameRoomId && userId !== disconnectedUserId) {
-                        otherPlayerId = userId
-                        break
+                const chessRoomMatch = gameRoomId && gameRoomId.match(/^chess_(.+?)_(.+?)_\d+$/)
+                if (chessRoomMatch) {
+                    const p1 = normalizeUserId(chessRoomMatch[1]) || chessRoomMatch[1]
+                    const p2 = normalizeUserId(chessRoomMatch[2]) || chessRoomMatch[2]
+                    otherPlayerId = p1 === disconnectedUserId ? p2 : p1
+                }
+                // Fallback: search in-memory cache (single-server only)
+                if (!otherPlayerId) {
+                    for (const [userId, roomId] of activeChessGames.entries()) {
+                        if (roomId === gameRoomId && userId !== disconnectedUserId) {
+                            otherPlayerId = userId
+                            break
+                        }
                     }
                 }
                 
@@ -3177,13 +3186,20 @@ export const initializeSocket = async (app) => {
                 console.log(`🃏 User ${disconnectedUserId} disconnected while in card game: ${gameRoomId}`)
                 console.log(`⏳ Waiting 10 seconds to see if user reconnects (page refresh)...`)
                 
-                // Find the other player from game state
+                // Find the other player — primary: parse roomId (multi-server safe)
                 let otherPlayerId = null
-                const gameState = await getCardGameState(gameRoomId)
-                if (gameState && gameState.players) {
-                    const otherPlayer = gameState.players.find((p) => p.userId !== disconnectedUserId)
-                    if (otherPlayer) {
-                        otherPlayerId = otherPlayer.userId
+                const cardRoomMatch = gameRoomId && gameRoomId.match(/^card_(.+?)_(.+?)_\d+$/)
+                if (cardRoomMatch) {
+                    const p1 = normalizeUserId(cardRoomMatch[1]) || cardRoomMatch[1]
+                    const p2 = normalizeUserId(cardRoomMatch[2]) || cardRoomMatch[2]
+                    otherPlayerId = p1 === disconnectedUserId ? p2 : p1
+                }
+                // Fallback: use Redis game state (in case room ID format ever changes)
+                if (!otherPlayerId) {
+                    const gameState = await getCardGameState(gameRoomId).catch(() => null)
+                    if (gameState && gameState.players) {
+                        const otherPlayer = gameState.players.find((p) => p.userId !== disconnectedUserId)
+                        if (otherPlayer) otherPlayerId = otherPlayer.userId
                     }
                 }
                 
