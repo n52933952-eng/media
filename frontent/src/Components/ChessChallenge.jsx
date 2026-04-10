@@ -311,6 +311,7 @@ const ChessChallenge = ({ compact = false }) => {
                     paddingBottom={compact ? '72%' : '100%'}
                     bg="linear-gradient(135deg, #667eea 0%, #764ba2 100%)"
                     overflow="hidden"
+                    sx={{ isolation: 'isolate' }}
                 >
                     <Flex
                         position="absolute"
@@ -322,28 +323,37 @@ const ChessChallenge = ({ compact = false }) => {
                         justify="center"
                         flexDirection="column"
                         px={1}
+                        overflow="hidden"
                     >
-                        <Text fontSize={compact ? '3xl' : '6xl'}>♟️</Text>
-                        <Text
-                            fontSize={compact ? 'sm' : '2xl'}
-                            fontWeight="bold"
-                            color="white"
-                            mt={compact ? 1 : 2}
-                            textAlign="center"
-                            lineHeight="shorter"
-                            noOfLines={2}
-                        >
-                            Chess
+                        <Text fontSize={compact ? '4xl' : '6xl'} lineHeight={1} userSelect="none" aria-hidden>
+                            ♟️
                         </Text>
+                        {!compact && (
+                            <Text
+                                fontSize="2xl"
+                                fontWeight="bold"
+                                color="white"
+                                mt={2}
+                                textAlign="center"
+                                lineHeight="shorter"
+                                noOfLines={2}
+                            >
+                                Chess
+                            </Text>
+                        )}
                     </Flex>
                 </Box>
 
-                {/* Button */}
+                {/* Button — slight overlap removes subpixel hairline between gradient and footer */}
                 <Button
                     colorScheme="purple"
                     size={compact ? 'xs' : 'sm'}
                     w="full"
                     borderRadius="0"
+                    borderTopWidth="0"
+                    mt="-1px"
+                    position="relative"
+                    zIndex={1}
                     py={compact ? 2 : undefined}
                     fontSize={compact ? '2xs' : undefined}
                     whiteSpace="normal"

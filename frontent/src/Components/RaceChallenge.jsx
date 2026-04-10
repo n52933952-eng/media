@@ -205,18 +205,20 @@ const RaceChallenge = ({ compact = false }) => {
                     paddingBottom={compact ? '72%' : '100%'}
                     bg="linear-gradient(135deg, #0f172a 0%, #1e3a5f 40%, #e63946 100%)"
                     overflow="hidden"
+                    sx={{ isolation: 'isolate' }}
                 >
-                    {/* Road stripes */}
-                    {[...Array(6)].map((_, i) => (
+                    {/* Road stripes — fewer / subtler in compact row to avoid bright seams */}
+                    {[...Array(compact ? 4 : 6)].map((_, i) => (
                         <Box
                             key={i}
                             position="absolute"
-                            bottom={`${i * 18}%`}
+                            bottom={`${i * (compact ? 22 : 18)}%`}
                             left="50%"
                             transform="translateX(-50%) perspective(80px) rotateX(45deg)"
-                            w="8px" h={compact ? '10%' : '8%'}
-                            bg="rgba(255,255,255,0.6)"
+                            w="8px" h={compact ? '8%' : '8%'}
+                            bg={compact ? 'rgba(255,255,255,0.35)' : 'rgba(255,255,255,0.6)'}
                             borderRadius="2px"
+                            pointerEvents="none"
                         />
                     ))}
                     <Flex
@@ -226,20 +228,25 @@ const RaceChallenge = ({ compact = false }) => {
                         justify="center"
                         flexDirection="column"
                         px={1}
+                        overflow="hidden"
                     >
-                        <Text fontSize={compact ? '3xl' : '5xl'} lineHeight={1}>🏎️</Text>
-                        <Text
-                            fontSize={compact ? 'sm' : 'xl'}
-                            fontWeight="black"
-                            color="white"
-                            mt={compact ? 1 : 2}
-                            textAlign="center"
-                            letterSpacing="wider"
-                            textTransform="uppercase"
-                            style={{ textShadow: '0 2px 8px rgba(0,0,0,0.6)' }}
-                        >
-                            Street Race
+                        <Text fontSize={compact ? '4xl' : '5xl'} lineHeight={1} userSelect="none" aria-hidden>
+                            🏎️
                         </Text>
+                        {!compact && (
+                            <Text
+                                fontSize="xl"
+                                fontWeight="black"
+                                color="white"
+                                mt={2}
+                                textAlign="center"
+                                letterSpacing="wider"
+                                textTransform="uppercase"
+                                style={{ textShadow: '0 2px 8px rgba(0,0,0,0.6)' }}
+                            >
+                                Street Race
+                            </Text>
+                        )}
                     </Flex>
                 </Box>
                 <Button
@@ -248,6 +255,10 @@ const RaceChallenge = ({ compact = false }) => {
                     size={compact ? 'xs' : 'sm'}
                     w="full"
                     borderRadius="0"
+                    borderTopWidth="0"
+                    mt="-1px"
+                    position="relative"
+                    zIndex={1}
                     py={compact ? 2 : undefined}
                     fontSize={compact ? '2xs' : undefined}
                     whiteSpace="normal"

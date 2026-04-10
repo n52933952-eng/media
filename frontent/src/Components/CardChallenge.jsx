@@ -215,6 +215,7 @@ const CardChallenge = ({ compact = false }) => {
                     paddingBottom={compact ? '72%' : '100%'}
                     bg="linear-gradient(135deg, #9333EA 0%, #C026D3 100%)"
                     overflow="hidden"
+                    sx={{ isolation: 'isolate' }}
                 >
                     <Flex
                         position="absolute"
@@ -223,19 +224,24 @@ const CardChallenge = ({ compact = false }) => {
                         justify="center"
                         flexDirection="column"
                         px={1}
+                        overflow="hidden"
                     >
-                        <Text fontSize={compact ? '3xl' : '6xl'}>🃏</Text>
-                        <Text
-                            fontSize={compact ? 'sm' : '2xl'}
-                            fontWeight="bold"
-                            color="white"
-                            mt={compact ? 1 : 2}
-                            textAlign="center"
-                            lineHeight="shorter"
-                            noOfLines={2}
-                        >
-                            Go Fish
+                        <Text fontSize={compact ? '4xl' : '6xl'} lineHeight={1} userSelect="none" aria-hidden>
+                            🃏
                         </Text>
+                        {!compact && (
+                            <Text
+                                fontSize="2xl"
+                                fontWeight="bold"
+                                color="white"
+                                mt={2}
+                                textAlign="center"
+                                lineHeight="shorter"
+                                noOfLines={2}
+                            >
+                                Go Fish
+                            </Text>
+                        )}
                     </Flex>
                 </Box>
                 <Button
@@ -243,6 +249,10 @@ const CardChallenge = ({ compact = false }) => {
                     size={compact ? 'xs' : 'sm'}
                     w="full"
                     borderRadius="0"
+                    borderTopWidth="0"
+                    mt="-1px"
+                    position="relative"
+                    zIndex={1}
                     py={compact ? 2 : undefined}
                     fontSize={compact ? '2xs' : undefined}
                     whiteSpace="normal"
