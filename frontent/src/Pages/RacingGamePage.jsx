@@ -27,7 +27,7 @@ export default function RacingGamePage() {
     socket,
     callUser, leaveCall,
     stream, remoteStream,
-    callAccepted, call,
+    callAccepted, callEnded, call,
     endRaceGameOnNavigate,
   } = useContext(SocketContext) || {}
 
@@ -82,6 +82,7 @@ export default function RacingGamePage() {
   const _flipUp        = useRef(new THREE.Vector3())
   const _flipAxis      = useRef(new THREE.Vector3(0, 1, 0))
   const resizeCleanupRef = useRef(null)
+  const remoteAudioRef = useRef(null)
 
   // ─── Fetch opponent profile ────────────────────────────────────────────────
   useEffect(() => {
@@ -231,6 +232,23 @@ export default function RacingGamePage() {
     }
   }, [callAccepted, callEnded])
 
+  // ─── Play opponent voice in-page (WebRTC MediaStream → <audio>) ─────────────
+  useEffect(() => {
+    const el = remoteAudioRef.current
+    if (!el) return
+    if (remoteStream) {
+      el.srcObject = remoteStream
+      el.volume = 1
+      const p = el.play?.()
+      if (p && typeof p.catch === 'function') p.catch(() => {})
+    } else {
+      el.srcObject = null
+    }
+    return () => {
+      if (el) el.srcObject = null
+    }
+  }, [remoteStream])
+
   // ─── Keyboard controls ──────────────────────────────────────────────────────
   useEffect(() => {
     const down = (e) => {
@@ -337,12 +355,15 @@ export default function RacingGamePage() {
     setupLighting(scene)
 
     // ── Camera ─────────────────────────────────────────────────────────────
-    const camera = new THREE.PerspectiveCamera(45, W/H, 0.1, 2000)
+    const camera = new THREE.PerspectiveCamera(45, W/H, 0.5, 20000)
     camera.position.set(0, 10, 20)
     cameraRef.current = camera
 
     // ── Renderer ───────────────────────────────────────────────────────────
-    const renderer = new THREE.WebGLRenderer({ antialias: window.devicePixelRatio <= 1 })
+    const renderer = new THREE.WebGLRenderer({
+      antialias: window.devicePixelRatio <= 1,
+      logarithmicDepthBuffer: true,
+    })
     // Cap at 2x DPR — going higher gives diminishing visual returns but costs GPU hard
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
     renderer.setSize(W, H)
@@ -757,10 +778,14 @@ export default function RacingGamePage() {
     }
   }
   const handleMute = () => {
-    if (stream) {
-      stream.getAudioTracks().forEach(t => t.enabled = muted)
-      setMuted(m => !m)
-    }
+    if (!stream) return
+    setMuted((prev) => {
+      const nextMuted = !prev
+      stream.getAudioTracks().forEach((t) => {
+        t.enabled = !nextMuted
+      })
+      return nextMuted
+    })
   }
 
   // ─── Navigate back / leave race ────────────────────────────────────────────
@@ -784,6 +809,14 @@ export default function RacingGamePage() {
   // ─── Render ─────────────────────────────────────────────────────────────────
   return (
     <div style={{ width:'100vw', height:'100vh', position:'relative', overflow:'hidden', background:'#000' }}>
+
+      {/* In-page remote audio (no separate call page needed during race) */}
+      <audio
+        ref={remoteAudioRef}
+        autoPlay
+        playsInline
+        style={{ position:'fixed', width:0, height:0, opacity:0, pointerEvents:'none' }}
+      />
 
       {/* Three.js container */}
       <div ref={containerRef} style={{ width:'100%', height:'100%' }} />
@@ -964,37 +997,52 @@ export default function RacingGamePage() {
         </div>
       )}
 
-      {/* Voice call button + mute — bottom left */}
+      {/* Voice call — compact in-game bar (audio stays on this screen via <audio> above) */}
       {!loading && (
         <div style={{
-          position:'fixed', bottom:'20px', left:'20px', zIndex:500,
-          display:'flex', flexDirection:'column', gap:'10px',
+          position:'fixed', bottom:'20px', left:'20px', right:'220px', zIndex:500,
+          display:'flex', flexDirection:'column', gap:'10px', maxWidth:420,
         }}>
-          <button onClick={handleCallOpp} title={callActive ? 'End call' : 'Voice call opponent'} style={{
-            width:48, height:48, borderRadius:'50%', border:'none', cursor:'pointer',
-            background: callActive ? '#ef4444' : '#22c55e',
-            color:'#fff', fontSize:'20px', display:'flex', alignItems:'center', justifyContent:'center',
-            boxShadow:'0 4px 0 rgba(0,0,0,0.4)', fontFamily:'sans-serif',
-          }}>
-            {callActive ? '📵' : '📞'}
-          </button>
           {callActive && (
-            <button onClick={handleMute} title={muted ? 'Unmute' : 'Mute'} style={{
-              width:48, height:48, borderRadius:'50%', border:'none', cursor:'pointer',
-              background: muted ? '#6b7280' : '#3b82f6',
-              color:'#fff', fontSize:'18px', display:'flex', alignItems:'center', justifyContent:'center',
-              boxShadow:'0 4px 0 rgba(0,0,0,0.4)',
+            <div style={{
+              display:'flex', alignItems:'center', gap:'10px',
+              background:'rgba(15,23,42,0.92)', border:'1px solid rgba(255,255,255,0.12)',
+              borderRadius:'14px', padding:'10px 14px', color:'#e2e8f0', fontFamily:'Poppins,sans-serif',
+              fontSize:'13px', boxShadow:'0 8px 24px rgba(0,0,0,0.45)',
             }}>
-              {muted ? '🔇' : '🎙️'}
-            </button>
+              <span style={{ fontSize:'18px' }}>🎧</span>
+              <span style={{ flex:1, opacity:0.95 }}>
+                {remoteStream ? 'Voice connected — you can keep racing' : 'Connecting voice…'}
+              </span>
+            </div>
           )}
+          <div style={{ display:'flex', gap:'10px', alignItems:'center' }}>
+            <button onClick={handleCallOpp} title={callActive ? 'End call' : 'Voice call opponent'} style={{
+              width:52, height:52, borderRadius:'50%', border:'none', cursor:'pointer',
+              background: callActive ? '#ef4444' : '#22c55e',
+              color:'#fff', fontSize:'22px', display:'flex', alignItems:'center', justifyContent:'center',
+              boxShadow:'0 4px 0 rgba(0,0,0,0.4)', fontFamily:'sans-serif',
+            }}>
+              {callActive ? '📵' : '📞'}
+            </button>
+            {callActive && (
+              <button onClick={handleMute} title={muted ? 'Unmute mic' : 'Mute mic'} style={{
+                width:52, height:52, borderRadius:'50%', border:'none', cursor:'pointer',
+                background: muted ? '#6b7280' : '#3b82f6',
+                color:'#fff', fontSize:'20px', display:'flex', alignItems:'center', justifyContent:'center',
+                boxShadow:'0 4px 0 rgba(0,0,0,0.4)',
+              }}>
+                {muted ? '🔇' : '🎙️'}
+              </button>
+            )}
+          </div>
         </div>
       )}
 
-      {/* Leave button */}
+      {/* Leave button (offset so it does not overlap call + mute) */}
       {!loading && (
         <button onClick={handleLeave} title="Leave race" style={{
-          position:'fixed', bottom:'20px', left:'80px', zIndex:500,
+          position:'fixed', bottom:'20px', left:'200px', zIndex:500,
           width:44, height:44, borderRadius:'50%',
           background:'#ff0080', border:'2px solid #b30059',
           boxShadow:'0 3px 0 #b30059', color:'#fff', fontSize:'18px',
