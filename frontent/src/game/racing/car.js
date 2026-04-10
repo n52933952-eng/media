@@ -18,6 +18,25 @@ const SUSPENSION_COMPRESSION = 4.0;
 const ROLL_INFLUENCE = 0.1;
 const WHEEL_FRICTION = 12;
 
+/**
+ * Bullet raycast wheels use `WHEEL_RADIUS` (m). GLB wheels are scaled with the body;
+ * an extra scale after detaching can make tires huge vs physics → they look “drowned” in the road.
+ * Uniformly scale each wheel mesh so its bounding extent matches the physics radius.
+ */
+function fitWheelMeshToPhysicsRadius(wheelMesh, targetRadius = WHEEL_RADIUS) {
+  if (!wheelMesh) return;
+  wheelMesh.updateMatrixWorld(true);
+  const box = new THREE.Box3().setFromObject(wheelMesh);
+  if (box.isEmpty()) return;
+  const size = new THREE.Vector3();
+  box.getSize(size);
+  const approxR = Math.max(size.x, size.y, size.z) / 2;
+  if (approxR > 1e-6 && Number.isFinite(approxR)) {
+    const s = targetRadius / approxR;
+    wheelMesh.scale.multiplyScalar(s);
+  }
+}
+
 // Reused for start-line / respawn lateral offset (host vs guest lanes)
 const _laneRight = new THREE.Vector3();
 const _laneForward = new THREE.Vector3();
@@ -247,8 +266,8 @@ function loadCarModel(ammo, scene, carComponents, wheelPositions, onModelLoaded)
           // Add directly to scene so we can control it separately
           scene.add(wheelModelMeshes[i]);
           
-          // Apply the same scale as the car model
-          wheelModelMeshes[i].scale.set(4, 4, 4);
+          // Match visual tire size to Bullet wheel radius (do not stack another ×4 on top of body scale)
+          fitWheelMeshToPhysicsRadius(wheelModelMeshes[i]);
           
           // Save reference
           carComponents.wheelMeshes[i] = wheelModelMeshes[i];
@@ -267,9 +286,7 @@ function loadCarModel(ammo, scene, carComponents, wheelPositions, onModelLoaded)
           const wheelMesh = new THREE.Mesh(wheelGeometry, wheelMaterial);
           wheelMesh.castShadow = true;
           scene.add(wheelMesh);
-          
-          // Scale the default wheel to match too
-          wheelMesh.scale.set(4, 4, 4);
+          // Geometry radius is already WHEEL_RADIUS — no extra ×4 (that made tires 1.6m vs physics 0.4m)
           
           // Use this default wheel
           carComponents.wheelMeshes[i] = wheelMesh;
@@ -331,7 +348,7 @@ function loadFallbackCarModel(ammo, scene, carComponents, wheelPositions, onMode
           wheelModelMeshes[i].updateMatrixWorld(true);
           carModel.remove(wheelModelMeshes[i]);
           scene.add(wheelModelMeshes[i]);
-          wheelModelMeshes[i].scale.set(4, 4, 4);
+          fitWheelMeshToPhysicsRadius(wheelModelMeshes[i]);
           carComponents.wheelMeshes[i] = wheelModelMeshes[i];
         } else {
           // Create default wheel
@@ -344,8 +361,6 @@ function loadFallbackCarModel(ammo, scene, carComponents, wheelPositions, onMode
           const wheelMesh = new THREE.Mesh(wheelGeometry, wheelMaterial);
           wheelMesh.castShadow = true;
           scene.add(wheelMesh);
-          
-          wheelMesh.scale.set(4, 4, 4);
           carComponents.wheelMeshes[i] = wheelMesh;
         }
       }
