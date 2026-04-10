@@ -2333,6 +2333,9 @@ export const initializeSocket = async (app) => {
                 if (s) s.join(roomId)
                 io.to(accepterSock.socketId).emit('acceptRaceChallenge', { roomId, opponentId: toId })
             }
+            // Tell all clients these two users are now in a race (for busy-status UI)
+            io.emit('userBusyRace', { userId: toId })
+            io.emit('userBusyRace', { userId: fromId })
             console.log(`🏎️ Race room ${roomId} created for ${toId} vs ${fromId}`)
         })
 
@@ -2394,6 +2397,8 @@ export const initializeSocket = async (app) => {
             setTimeout(async () => {
                 const st = await getRaceGameState(roomId).catch(() => null)
                 if (st) {
+                    io.emit('userAvailableRace', { userId: st.player1 })
+                    io.emit('userAvailableRace', { userId: st.player2 })
                     await deleteActiveRaceGame(st.player1).catch(() => {})
                     await deleteActiveRaceGame(st.player2).catch(() => {})
                     await deleteRaceGameState(roomId).catch(() => {})
@@ -2432,7 +2437,11 @@ export const initializeSocket = async (app) => {
                 }
             }
 
-            // 3. Cleanup Redis
+            // 3. Mark both players available again
+            if (p1) io.emit('userAvailableRace', { userId: p1 })
+            if (p2) io.emit('userAvailableRace', { userId: p2 })
+
+            // 4. Cleanup Redis
             await deleteActiveRaceGame(p1).catch(() => {})
             await deleteActiveRaceGame(p2).catch(() => {})
             await deleteRaceGameState(roomId).catch(() => {})
@@ -3173,8 +3182,10 @@ export const initializeSocket = async (app) => {
                         if (otherData?.socketId) {
                             io.to(otherData.socketId).emit('raceOpponentLeft')
                         }
+                        io.emit('userAvailableRace', { userId: otherPlayerId })
                         await deleteActiveRaceGame(otherPlayerId).catch(() => {})
                     }
+                    io.emit('userAvailableRace', { userId: disconnectedUserId })
                     await deleteActiveRaceGame(disconnectedUserId).catch(() => {})
                     await deleteRaceGameState(raceRoomId).catch(() => {})
                 }, 10000)

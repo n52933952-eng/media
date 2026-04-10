@@ -111,15 +111,31 @@ const RaceChallenge = ({ compact = false }) => {
                 navigate(`/race/${data.opponentId}`)
             }
         }
+        const onDeclined = () => {
+            // Opponent declined — clear pending so a new challenge works correctly
+            sentToRef.current = null
+            localStorage.removeItem('racePendingTo')
+            showToast('Challenge Declined', 'Your opponent is not available right now.', 'warning')
+        }
+        const onBlocked = ({ game }) => {
+            if (game !== 'race') return
+            sentToRef.current = null
+            localStorage.removeItem('racePendingTo')
+            showToast('Cannot Challenge', 'That player is currently busy in a game or call.', 'warning')
+        }
 
-        socket.on('userBusyRace',      onBusy)
-        socket.on('userAvailableRace', onAvailable)
+        socket.on('userBusyRace',        onBusy)
+        socket.on('userAvailableRace',   onAvailable)
         socket.on('acceptRaceChallenge', onAccepted)
+        socket.on('raceDeclined',        onDeclined)
+        socket.on('gameChallengeBlocked', onBlocked)
 
         return () => {
-            socket.off('userBusyRace',       onBusy)
-            socket.off('userAvailableRace',  onAvailable)
+            socket.off('userBusyRace',        onBusy)
+            socket.off('userAvailableRace',   onAvailable)
             socket.off('acceptRaceChallenge', onAccepted)
+            socket.off('raceDeclined',        onDeclined)
+            socket.off('gameChallengeBlocked', onBlocked)
         }
     }, [socket, navigate, showToast, user])
 
@@ -127,6 +143,7 @@ const RaceChallenge = ({ compact = false }) => {
 
     const handleChallenge = (opponent) => {
         if (!socket) { showToast('Error', 'Connection lost. Please refresh.', 'error'); return }
+        // Clear any stale pending from a previous challenge before sending a new one
         sentToRef.current = opponent._id?.toString()
         localStorage.setItem('racePendingTo', opponent._id?.toString())
         socket.emit('raceChallenge', {

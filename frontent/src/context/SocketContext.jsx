@@ -1253,7 +1253,11 @@ export const SocketContextProvider = ({ children }) => {
       });
     };
 
-    const handleRaceDeclined = () => setRaceChallenge(null);
+    const handleRaceDeclined = () => {
+      setRaceChallenge(null);
+      // Clear stale pending so App.jsx navigation guard works for the next challenge
+      localStorage.removeItem('racePendingTo');
+    };
 
     const handleAcceptRaceChallenge = ({ roomId, opponentId }) => {
       localStorage.setItem('raceRoomId', roomId);
