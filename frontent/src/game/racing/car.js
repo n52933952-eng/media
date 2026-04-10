@@ -16,7 +16,7 @@ const SUSPENSION_STIFFNESS = 50;
 const SUSPENSION_DAMPING = 10;
 const SUSPENSION_COMPRESSION = 4.0;
 const ROLL_INFLUENCE = 0.1;
-const WHEEL_FRICTION = 10;
+const WHEEL_FRICTION = 12;
 
 // Steering parameters
 const MAX_STEERING_ANGLE = 0.15;
@@ -62,8 +62,17 @@ export function createVehicle(ammo, scene, physicsWorld, debugObjects, onCarLoad
   );
   
   carComponents.carBody = new ammo.btRigidBody(chassisRbInfo);
-  carComponents.carBody.setActivationState(4); 
+  carComponents.carBody.setActivationState(4);
   carComponents.carBody.setFriction(0.1);
+  carComponents.carBody.setRestitution(0.05);
+  // Stronger angular damping reduces violent rolls / tumbles on curbs and barriers
+  carComponents.carBody.setDamping(0.48, 0.72);
+  if (typeof carComponents.carBody.setCcdMotionThreshold === 'function') {
+    carComponents.carBody.setCcdMotionThreshold(0.25);
+  }
+  if (typeof carComponents.carBody.setCcdSweptSphereRadius === 'function') {
+    carComponents.carBody.setCcdSweptSphereRadius(0.55);
+  }
   physicsWorld.addRigidBody(carComponents.carBody);
   
   // Create vehicle raycaster

@@ -69,6 +69,7 @@ const AppContent = () => {
 
   const isHomePage = location.pathname === "/home"
   const isMessagesPage = location.pathname === "/messages"
+  const isRacePage = location.pathname.startsWith("/race/")
   // Check if current path is a user page (e.g., /username, but not /username/post/123 or other routes)
   const pathParts = location.pathname.split('/').filter(Boolean)
   const isUserPage = pathParts.length === 1 && 
@@ -120,7 +121,7 @@ const AppContent = () => {
       {/* Logout button - always visible, fixed position */}
       {user && <LogOutButton/>}
       
-      {/* Content container - full width for messages, centered at 620px for other pages */}
+      {/* Content: full-bleed messages / race; centered column for the rest */}
       {isMessagesPage ? (
         <>
           <Box 
@@ -138,6 +139,25 @@ const AppContent = () => {
             </Routes>
           </Box>
         </>
+      ) : isRacePage ? (
+        <Box
+          position="fixed"
+          top="72px"
+          left="0"
+          right="0"
+          bottom="0"
+          w="100%"
+          zIndex={1}
+          overflow="hidden"
+          bg="#000"
+          display="flex"
+          flexDirection="column"
+          sx={{ '& > *': { flex: 1, minH: 0, minW: 0, display: 'flex', flexDirection: 'column' } }}
+        >
+          <Routes>
+            <Route path="/race/:opponentId" element={user ? <RacingGamePage /> : <Navigate to="/" />} />
+          </Routes>
+        </Box>
       ) : (
         <>
           {/* HomePage needs wider container for 3-column layout (Football | Feed | Suggested Users) */}
@@ -160,7 +180,6 @@ const AppContent = () => {
                 <Route path="/notifications" element={user ? <NotificationsPage /> : <Navigate to="/" />} />
                 <Route path="/chess/:opponentId" element={user ? <ChessGamePage /> : <Navigate to="/" />} />
                 <Route path="/card/:opponentId" element={user ? <CardGamePage /> : <Navigate to="/" />} />
-                <Route path="/race/:opponentId" element={user ? <RacingGamePage /> : <Navigate to="/" />} />
                 <Route path="/:username/post/:id" element={<PostPage/>}/>
               </Routes>
               {user && isOwnUserPage && <CreatePost/>}

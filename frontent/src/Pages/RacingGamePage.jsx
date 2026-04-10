@@ -18,6 +18,14 @@ const CAMERA_LOOK_AHEAD = 2
 const MAX_SPEED_KPH    = 200
 const DEFAULT_MAP      = 'map1'
 
+/** Match SocketContext / backend: ids may be ObjectId or string */
+function userIdToStr(id) {
+  if (id == null || id === '') return ''
+  if (typeof id === 'string') return id.trim()
+  if (typeof id === 'object' && id != null && typeof id.toString === 'function') return String(id.toString()).trim()
+  return String(id).trim()
+}
+
 export default function RacingGamePage() {
   const { opponentId } = useParams()
   const navigate       = useNavigate()
@@ -75,6 +83,8 @@ export default function RacingGamePage() {
   const prevPathRef    = useRef(location.pathname)
   const minimapRef     = useRef(null)  // { canvas, ctx, trackData }
   const carFlipRef     = useRef({ isFlipped:false, time:0, prevUpDot:1 })
+  const oppTargetPosRef  = useRef(new THREE.Vector3(0, 100, 0))
+  const oppTargetQuatRef = useRef(new THREE.Quaternion(0, 0, 0, 1))
   // Pre-allocated Vector3 objects to avoid per-frame GC pressure
   const _camDir        = useRef(new THREE.Vector3())
   const _camOffset     = useRef(new THREE.Vector3())
@@ -188,8 +198,9 @@ export default function RacingGamePage() {
     }
 
     const onRaceResult = ({ winnerId }) => {
-      const myId = user?._id?.toString()
-      setWinner(winnerId?.toString() === myId ? 'you' : 'opponent')
+      const myId = userIdToStr(user?._id)
+      const winId = userIdToStr(winnerId)
+      setWinner(winId && winId === myId ? 'you' : 'opponent')
       setRaceFinished(true)
       raceStateRef.current.raceFinished = true
       if (timerRef.current) clearInterval(timerRef.current)
@@ -456,14 +467,10 @@ export default function RacingGamePage() {
         if (n.isMesh) {
           n.material = n.material.clone()
           n.material.transparent = true
-          n.material.opacity = 0.85
+          n.material.opacity = 0.92
         }
       })
-      // Name label
-      const label = makeTextSprite(opponent?.name || opponent?.username || 'Opponent')
-      label.position.set(0, 0.4, 0)
-      label.scale.set(6, 1.5, 1)
-      model.add(label)
+      // Name is shown in the HUD leaderboard only — 3D sprites scaled poorly and clipped the view
       scene.add(model)
       oppModelRef.current = model
     })
@@ -472,11 +479,23 @@ export default function RacingGamePage() {
   // ─── Update opponent car position from socket data ─────────────────────────
   const updateOpponentCarPosition = (data) => {
     const model = oppModelRef.current
-    if (!model || !data.position) return
+    if (!model || !data) return
+    // Web format: { position, quaternion } — mobile (legacy) could send flat x/y/z at top level
+    const pos =
+      data.position ||
+      (data.x !== undefined && data.y !== undefined && data.z !== undefined
+        ? { x: +data.x, y: +data.y, z: +data.z }
+        : null)
+    if (!pos) return
     model.visible = true
-    model.position.set(data.position.x, data.position.y, data.position.z)
-    if (data.quaternion) {
-      model.quaternion.set(data.quaternion.x, data.quaternion.y, data.quaternion.z, data.quaternion.w)
+    oppTargetPosRef.current.set(+pos.x, +pos.y, +pos.z)
+    const q =
+      data.quaternion ||
+      (data.qx !== undefined
+        ? { x: +data.qx, y: +data.qy, z: +data.qz, w: +(data.qw ?? 1) }
+        : null)
+    if (q) {
+      oppTargetQuatRef.current.set(+q.x, +q.y, +q.z, +(q.w ?? 1))
     }
   }
 
@@ -577,10 +596,10 @@ export default function RacingGamePage() {
     _flipUp.current.copy(_flipAxis.current).applyQuaternion(car.quaternion)
     const dot = _flipUp.current.dot(_flipAxis.current)
     const f = carFlipRef.current
-    if (dot < 0.5 && Math.abs(dot - f.prevUpDot) < 0.01) {
+    if (dot < 0.45 && Math.abs(dot - f.prevUpDot) < 0.015) {
       f.isFlipped = true
       f.time += dt
-      if (f.time > 1.5) { f.isFlipped = false; f.time = 0; resetCar() }
+      if (f.time > 0.85) { f.isFlipped = false; f.time = 0; resetCar() }
     } else {
       f.isFlipped = false; f.time = 0
     }
@@ -714,6 +733,13 @@ export default function RacingGamePage() {
       accumRef.current -= FIXED_PHYSICS_STEP
     }
 
+    // Smooth remote car (reduces jitter / perceived clipping vs local car)
+    const opp = oppModelRef.current
+    if (opp && opp.visible) {
+      opp.position.lerp(oppTargetPosRef.current, 0.22)
+      opp.quaternion.slerp(oppTargetQuatRef.current, 0.22)
+    }
+
     drawMinimap()
     rendererRef.current?.render(sceneRef.current, cameraRef.current)
   }, [socket, user])
@@ -754,18 +780,6 @@ export default function RacingGamePage() {
     // End any active voice call when leaving the race
     leaveCall?.()
   }, [leaveCall])
-
-  // ─── Text sprite helper ────────────────────────────────────────────────────
-  const makeTextSprite = (text) => {
-    const cv = document.createElement('canvas'); cv.width=256; cv.height=64
-    const ctx = cv.getContext('2d')
-    ctx.font = 'bold 32px Poppins,sans-serif'
-    ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
-    ctx.strokeStyle = '#000'; ctx.lineWidth = 4; ctx.strokeText(text, 128, 32)
-    ctx.fillStyle = '#fff'; ctx.fillText(text, 128, 32)
-    const mat = new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(cv), transparent:true })
-    return new THREE.Sprite(mat)
-  }
 
   // ─── Voice call ────────────────────────────────────────────────────────────
   const handleCallOpp = () => {
@@ -808,18 +822,28 @@ export default function RacingGamePage() {
 
   // ─── Render ─────────────────────────────────────────────────────────────────
   return (
-    <div style={{ width:'100vw', height:'100vh', position:'relative', overflow:'hidden', background:'#000' }}>
+    <div style={{
+      flex: 1,
+      minHeight: 0,
+      width: '100%',
+      position: 'relative',
+      overflow: 'hidden',
+      background: '#000',
+      display: 'flex',
+      flexDirection: 'column',
+    }}>
 
       {/* In-page remote audio (no separate call page needed during race) */}
       <audio
         ref={remoteAudioRef}
         autoPlay
         playsInline
+        muted={false}
         style={{ position:'fixed', width:0, height:0, opacity:0, pointerEvents:'none' }}
       />
 
-      {/* Three.js container */}
-      <div ref={containerRef} style={{ width:'100%', height:'100%' }} />
+      {/* Three.js container — flex child fills width/height so the canvas is never letterboxed */}
+      <div ref={containerRef} style={{ flex: 1, minHeight: 0, width: '100%', position: 'relative' }} />
 
       {/* Loading screen */}
       {loading && (
@@ -1003,6 +1027,12 @@ export default function RacingGamePage() {
           position:'fixed', bottom:'20px', left:'20px', right:'220px', zIndex:500,
           display:'flex', flexDirection:'column', gap:'10px', maxWidth:420,
         }}>
+          <div style={{
+            fontFamily:'Poppins,sans-serif', fontSize:'11px', color:'rgba(255,255,255,0.45)',
+            letterSpacing:'0.04em', textTransform:'uppercase',
+          }}>
+            Voice chat — same as live games (tap phone, allow mic)
+          </div>
           {callActive && (
             <div style={{
               display:'flex', alignItems:'center', gap:'10px',
@@ -1012,7 +1042,7 @@ export default function RacingGamePage() {
             }}>
               <span style={{ fontSize:'18px' }}>🎧</span>
               <span style={{ flex:1, opacity:0.95 }}>
-                {remoteStream ? 'Voice connected — you can keep racing' : 'Connecting voice…'}
+                {remoteStream ? 'Connected — opponent audio is live' : 'Connecting… accept mic if the browser asks'}
               </span>
             </div>
           )}
@@ -1084,11 +1114,13 @@ export default function RacingGamePage() {
             }}>
               {winner === 'you' ? 'YOU WIN!'
                 : winner === 'opponent_left' ? 'OPPONENT LEFT'
+                : winner === 'opponent' ? 'OPPONENT FINISHED FIRST'
                 : 'RACE FINISHED'}
             </div>
             <div style={{ fontSize:'18px', opacity:.7, marginBottom:'32px' }}>
               {winner === 'you' ? `Time: ${raceTime}`
                 : winner === 'opponent_left' ? 'Your opponent quit the race'
+                : winner === 'opponent' ? 'They crossed the finish line before you. Great race!'
                 : `Better luck next time`}
             </div>
             <button onClick={handleGoHome} style={{
