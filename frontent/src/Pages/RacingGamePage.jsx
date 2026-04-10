@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState, useContext, useCallback } from 'react'
 import * as THREE from 'three'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
+import { clone as cloneSkeleton } from 'three/examples/jsm/utils/SkeletonUtils.js'
 import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import { UserContext } from '../context/UserContext'
 import { SocketContext } from '../context/SocketContext'
@@ -99,6 +100,9 @@ export default function RacingGamePage() {
   const carFlipRef     = useRef({ isFlipped:false, time:0, prevUpDot:1 })
   const oppTargetPosRef  = useRef(new THREE.Vector3(0, 100, 0))
   const oppTargetQuatRef = useRef(new THREE.Quaternion(0, 0, 0, 1))
+  const oppSlerpTempRef  = useRef(new THREE.Quaternion())
+  /** Last displayed speed — avoid setState 60×/s (causes layout jitter / “page jumping”) */
+  const lastSpeedDispRef = useRef(-1)
   // Pre-allocated Vector3 objects to avoid per-frame GC pressure
   const _camDir        = useRef(new THREE.Vector3())
   const _camOffset     = useRef(new THREE.Vector3())
@@ -153,6 +157,18 @@ export default function RacingGamePage() {
   useEffect(() => {
     exitRaceAndGoHomeRef.current = exitRaceAndGoHome
   }, [exitRaceAndGoHome])
+
+  // ─── Lock page scroll while racing (mobile + desktop) — reduces viewport jump ─
+  useEffect(() => {
+    const prevHtml = document.documentElement.style.overflow
+    const prevBody = document.body.style.overflow
+    document.documentElement.style.overflow = 'hidden'
+    document.body.style.overflow = 'hidden'
+    return () => {
+      document.documentElement.style.overflow = prevHtml
+      document.body.style.overflow = prevBody
+    }
+  }, [])
 
   // ─── Load Ammo.js dynamically, then boot the game ─────────────────────────
   useEffect(() => {
@@ -605,19 +621,31 @@ export default function RacingGamePage() {
   const loadOpponentCar = (scene) => {
     const loader = new GLTFLoader()
     loader.load(`/models/car_${oppColorRef.current}.glb`, (gltf) => {
-      const model = gltf.scene.clone()
+      // cloneSkeleton() deep-clones skinned / rigged GLTFs; plain .clone() can break
+      // wheels/body hierarchy and leave parts at wrong scale (tiny detached wheels).
+      const model = cloneSkeleton(gltf.scene)
       model.scale.set(4, 4, 4)
-      model.position.set(0, 100, 0) // hide until first update
-      model.traverse(n => {
-        if (n.isMesh) {
-          n.material = n.material.clone()
-          n.material.transparent = true
-          n.material.opacity = 0.92
+      model.position.set(0, 0, 0)
+      model.updateMatrixWorld(true)
+      // Slight tint only — do not clone materials on SkinnedMesh (breaks skinning)
+      model.traverse((n) => {
+        if (n.isMesh && n.material && !n.isSkinnedMesh) {
+          const mats = Array.isArray(n.material) ? n.material : [n.material]
+          const cloned = mats.map((m) => {
+            const c = m.clone()
+            c.transparent = true
+            c.opacity = 0.95
+            return c
+          })
+          n.material = cloned.length === 1 ? cloned[0] : cloned
         }
       })
-      // Name is shown in the HUD leaderboard only — 3D sprites scaled poorly and clipped the view
-      scene.add(model)
-      oppModelRef.current = model
+      const root = new THREE.Group()
+      root.name = 'opponentCarRoot'
+      root.position.set(0, 100, 0) // hide until first network update
+      root.add(model)
+      scene.add(root)
+      oppModelRef.current = root
     })
   }
 
@@ -632,15 +660,26 @@ export default function RacingGamePage() {
         ? { x: +data.x, y: +data.y, z: +data.z }
         : null)
     if (!pos) return
+    const px = +pos.x
+    const py = +pos.y
+    const pz = +pos.z
+    if (!Number.isFinite(px) || !Number.isFinite(py) || !Number.isFinite(pz)) return
     model.visible = true
-    oppTargetPosRef.current.set(+pos.x, +pos.y, +pos.z)
+    oppTargetPosRef.current.set(px, py, pz)
     const q =
       data.quaternion ||
       (data.qx !== undefined
         ? { x: +data.qx, y: +data.qy, z: +data.qz, w: +(data.qw ?? 1) }
         : null)
     if (q) {
-      oppTargetQuatRef.current.set(+q.x, +q.y, +q.z, +(q.w ?? 1))
+      const qx = +q.x
+      const qy = +q.y
+      const qz = +q.z
+      const qw = +(q.w ?? 1)
+      if (Number.isFinite(qx) && Number.isFinite(qy) && Number.isFinite(qz) && Number.isFinite(qw)) {
+        oppTargetQuatRef.current.set(qx, qy, qz, qw)
+        oppTargetQuatRef.current.normalize()
+      }
     }
   }
 
@@ -760,29 +799,35 @@ export default function RacingGamePage() {
   const updateSpeedDisplay = (kph) => {
     const pct = Math.min(kph / MAX_SPEED_KPH, 1)
     const rot = pct * 180
+    const disp = Math.round(Math.max(kph - 1, 0))
     const e = speedoElemsRef.current
     if (!e.fill)   e.fill   = document.querySelector('.race-gauge-fill')
     if (!e.needle) e.needle = document.querySelector('.race-gauge-needle')
     if (!e.val)    e.val    = document.querySelector('.race-speed-value')
     if (e.fill)   e.fill.style.transform   = `rotate(${rot}deg)`
     if (e.needle) e.needle.style.transform = `rotate(${rot - 90}deg)`
-    if (e.val)    e.val.textContent = Math.round(Math.max(kph - 1, 0))
-    setSpeed(Math.round(Math.max(kph - 1, 0)))
+    if (e.val)    e.val.textContent = String(disp)
+    if (lastSpeedDispRef.current !== disp) {
+      lastSpeedDispRef.current = disp
+      setSpeed(disp)
+    }
   }
 
   // ─── Minimap (simple 2D canvas) ────────────────────────────────────────────
   const initMinimap = () => {
+    const host = containerRef.current
+    if (!host) return
     const canvas = document.createElement('canvas')
     canvas.id = 'race-minimap'
     canvas.width  = 160; canvas.height = 160
     Object.assign(canvas.style, {
-      position: 'fixed', bottom: '240px', right: '20px',
+      position: 'absolute', bottom: '240px', right: '20px',
       width: '160px', height: '160px',
       background: 'rgba(0,0,0,0.5)', borderRadius: '50%',
       boxShadow: '0 0 10px rgba(0,0,0,0.7)', zIndex: '1000',
       pointerEvents: 'none',
     })
-    document.body.appendChild(canvas)
+    host.appendChild(canvas)
     minimapRef.current = { canvas, ctx: canvas.getContext('2d') }
   }
 
@@ -887,7 +932,12 @@ export default function RacingGamePage() {
       const opp = oppModelRef.current
       if (opp && opp.visible) {
         opp.position.lerp(oppTargetPosRef.current, 0.22)
-        opp.quaternion.slerp(oppTargetQuatRef.current, 0.22)
+        const tgt = oppTargetQuatRef.current
+        const t = oppSlerpTempRef.current.copy(tgt)
+        if (opp.quaternion.dot(tgt) < 0) t.set(-tgt.x, -tgt.y, -tgt.z, -tgt.w)
+        opp.quaternion.slerp(t, 0.22)
+        opp.quaternion.normalize()
+        opp.updateMatrixWorld(true)
       }
 
       drawMinimap()
@@ -988,6 +1038,8 @@ export default function RacingGamePage() {
       background: '#000',
       display: 'flex',
       flexDirection: 'column',
+      touchAction: 'none',
+      overscrollBehavior: 'none',
     }}>
 
       {/* In-page remote audio (no separate call page needed during race) */}

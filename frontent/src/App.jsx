@@ -155,7 +155,11 @@ const AppContent = () => {
           bg="#000"
           display="flex"
           flexDirection="column"
-          sx={{ '& > *': { flex: 1, minH: 0, minW: 0, display: 'flex', flexDirection: 'column' } }}
+          overscrollBehavior="none"
+          sx={{
+            touchAction: 'none',
+            '& > *': { flex: 1, minH: 0, minW: 0, display: 'flex', flexDirection: 'column' },
+          }}
         >
           <Routes>
             <Route path="/race/:opponentId" element={user ? <RacingGamePage /> : <Navigate to="/" />} />
