@@ -1336,6 +1336,7 @@ export const initializeSocket = async (app) => {
             if (await isUserBusy(uid)) return true
             if (await getActiveChessGame(uid)) return true
             if (await getActiveCardGame(uid)) return true
+            if (await hasActiveRaceGame(uid)) return true
             return false
         }
 

@@ -1293,8 +1293,11 @@ export const SocketContextProvider = ({ children }) => {
       } else {
         socket.emit('raceGameEnd', { roomId });
       }
-      localStorage.removeItem('raceRoomId');
     }
+    // Always clean up localStorage regardless of socket state
+    localStorage.removeItem('raceRoomId');
+    localStorage.removeItem('raceIsHost');
+    localStorage.removeItem('myPlayerId');
   };
 
   // Function to update which conversation is currently open (for notification sound control)

@@ -81,6 +81,7 @@ export default function RacingGamePage() {
   const _camTarget     = useRef(new THREE.Vector3())
   const _flipUp        = useRef(new THREE.Vector3())
   const _flipAxis      = useRef(new THREE.Vector3(0, 1, 0))
+  const resizeCleanupRef = useRef(null)
 
   // ─── Fetch opponent profile ────────────────────────────────────────────────
   useEffect(() => {
@@ -194,10 +195,12 @@ export default function RacingGamePage() {
     }
 
     const onOpponentLeft = () => {
-      // Opponent quit — stop loading, stop timer, show result regardless of state
+      // Opponent quit — stop loading, stop timer, end call, show result
       setLoading(false)
       setLoadingPhase('assets')
       if (timerRef.current) clearInterval(timerRef.current)
+      leaveCall?.()
+      setCallActive(false)
       raceStateRef.current.raceFinished = true
       setWinner('opponent_left')
       setRaceFinished(true)
@@ -217,6 +220,16 @@ export default function RacingGamePage() {
       socket.off('raceOpponentLeft',  onOpponentLeft)
     }
   }, [socket, user])
+
+  // ─── Sync callActive with real WebRTC state ─────────────────────────────────
+  // If the call gets rejected, dropped, or ended by the opponent, reflect it here
+  useEffect(() => {
+    if (callAccepted && !callEnded) {
+      setCallActive(true)
+    } else {
+      setCallActive(false)
+    }
+  }, [callAccepted, callEnded])
 
   // ─── Keyboard controls ──────────────────────────────────────────────────────
   useEffect(() => {
@@ -338,13 +351,16 @@ export default function RacingGamePage() {
     container.appendChild(renderer.domElement)
     rendererRef.current = renderer
 
-    window.addEventListener('resize', () => {
+    const onResize = () => {
       if (!cameraRef.current || !rendererRef.current) return
       const w = container.clientWidth, h = container.clientHeight
       cameraRef.current.aspect = w/h
       cameraRef.current.updateProjectionMatrix()
       rendererRef.current.setSize(w, h)
-    })
+    }
+    window.addEventListener('resize', onResize)
+    // Store cleanup fn so it can be called on unmount
+    resizeCleanupRef.current = () => window.removeEventListener('resize', onResize)
 
     // ── Physics ────────────────────────────────────────────────────────────
     const physics = initPhysics(window.Ammo)
@@ -683,16 +699,40 @@ export default function RacingGamePage() {
 
   // ─── Cleanup ────────────────────────────────────────────────────────────────
   const cleanup = useCallback(() => {
+    // Stop animation loop + timers
     if (afRef.current)    cancelAnimationFrame(afRef.current)
     if (timerRef.current) clearInterval(timerRef.current)
+
+    // Remove resize listener
+    resizeCleanupRef.current?.()
+    resizeCleanupRef.current = null
+
+    // Dispose Three.js renderer
     const renderer = rendererRef.current
     if (renderer) { renderer.dispose(); renderer.domElement?.remove() }
+
+    // Remove minimap canvas
     const mm = minimapRef.current?.canvas
     if (mm) mm.remove()
-    // Remove any showFinishMessage DOM elements
+
+    // Remove injected DOM overlays from game modules
     document.getElementById('finish-ui')?.remove()
     document.getElementById('final-leaderboard')?.remove()
-  }, [])
+
+    // Clean up global window properties set by game modules to prevent leaks
+    delete window.raceState
+    delete window.gateData
+    delete window.playerFinishTimes
+    delete window.startCountdown
+    delete window.updateLeaderboard
+    delete window.loadingManager
+
+    // Clean up sessionStorage game config
+    sessionStorage.removeItem('gameConfig')
+
+    // End any active voice call when leaving the race
+    leaveCall?.()
+  }, [leaveCall])
 
   // ─── Text sprite helper ────────────────────────────────────────────────────
   const makeTextSprite = (text) => {
@@ -726,9 +766,19 @@ export default function RacingGamePage() {
   // ─── Navigate back / leave race ────────────────────────────────────────────
   const handleLeave = () => {
     if (window.confirm('Leave the race?')) {
+      leaveCall?.()        // end voice call if active
+      setCallActive(false)
       if (endRaceGameOnNavigate) endRaceGameOnNavigate()
       navigate('/')
     }
+  }
+
+  // ─── Central "go home" — used by HOME button and result screen ─────────────
+  const handleGoHome = () => {
+    leaveCall?.()
+    setCallActive(false)
+    if (endRaceGameOnNavigate) endRaceGameOnNavigate()
+    navigate('/')
   }
 
   // ─── Render ─────────────────────────────────────────────────────────────────
@@ -993,7 +1043,7 @@ export default function RacingGamePage() {
                 : winner === 'opponent_left' ? 'Your opponent quit the race'
                 : `Better luck next time`}
             </div>
-            <button onClick={() => { if (endRaceGameOnNavigate) endRaceGameOnNavigate(); navigate('/') }} style={{
+            <button onClick={handleGoHome} style={{
               padding:'14px 40px', borderRadius:'8px', border:'2px solid #b30059',
               background:'#ff0080', color:'#fff', fontSize:'16px', fontWeight:700,
               cursor:'pointer', fontFamily:'Poppins,sans-serif',
