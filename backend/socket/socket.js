@@ -2386,29 +2386,32 @@ export const initializeSocket = async (app) => {
             // Also notify both players directly by userId (fallback if one hasn't joined the room yet)
             const state = await getRaceGameState(roomId).catch(() => null)
             if (state) {
+                const id1 = normalizeUserId(state.player1) || state.player1
+                const id2 = normalizeUserId(state.player2) || state.player2
                 const [p1Data, p2Data] = await Promise.all([
-                    getUserSocket(normalizeUserId(state.player1) || state.player1).catch(() => null),
-                    getUserSocket(normalizeUserId(state.player2) || state.player2).catch(() => null),
+                    getUserSocket(id1).catch(() => null),
+                    getUserSocket(id2).catch(() => null),
                 ])
                 if (p1Data?.socketId) io.to(p1Data.socketId).emit('raceResult', { winnerId, time })
                 if (p2Data?.socketId) io.to(p2Data.socketId).emit('raceResult', { winnerId, time })
+                // Clear Redis immediately so new challenges work (15s delay left users "busy" for no reason)
+                io.emit('userAvailableRace', { userId: id1 })
+                io.emit('userAvailableRace', { userId: id2 })
+                await deleteActiveRaceGame(id1).catch(() => {})
+                await deleteActiveRaceGame(id2).catch(() => {})
+                await deleteRaceGameState(roomId).catch(() => {})
             }
-            // Cleanup after a delay to let both clients receive the result
-            setTimeout(async () => {
-                const st = await getRaceGameState(roomId).catch(() => null)
-                if (st) {
-                    io.emit('userAvailableRace', { userId: st.player1 })
-                    io.emit('userAvailableRace', { userId: st.player2 })
-                    await deleteActiveRaceGame(st.player1).catch(() => {})
-                    await deleteActiveRaceGame(st.player2).catch(() => {})
-                    await deleteRaceGameState(roomId).catch(() => {})
-                }
-            }, 15000)
         })
 
         socket.on('raceGameEnd', async ({ roomId, player1, player2 }) => {
-            const p1 = normalizeUserId(player1) || player1
-            const p2 = normalizeUserId(player2) || player2
+            const st = await getRaceGameState(roomId).catch(() => null)
+            // Client may send only { roomId } (e.g. beforeunload regex mismatch) — always resolve players from Redis
+            let p1 = normalizeUserId(player1) || player1
+            let p2 = normalizeUserId(player2) || player2
+            if (st) {
+                if (!p1) p1 = normalizeUserId(st.player1) || st.player1
+                if (!p2) p2 = normalizeUserId(st.player2) || st.player2
+            }
             console.log(`🏎️ Race ended (navigation/quit): room ${roomId}`)
 
             // 1. Broadcast to anyone already in the socket room
@@ -2421,14 +2424,10 @@ export const initializeSocket = async (app) => {
             if (p1 && p2) {
                 otherPlayerId = senderNorm === p1 ? p2 : p1
             }
-            if (!otherPlayerId) {
-                // fallback: read from Redis state
-                const st = await getRaceGameState(roomId).catch(() => null)
-                if (st) {
-                    const sp1 = normalizeUserId(st.player1)
-                    const sp2 = normalizeUserId(st.player2)
-                    otherPlayerId = senderNorm === sp1 ? sp2 : sp1
-                }
+            if (!otherPlayerId && st) {
+                const sp1 = normalizeUserId(st.player1) || st.player1
+                const sp2 = normalizeUserId(st.player2) || st.player2
+                otherPlayerId = senderNorm === sp1 ? sp2 : sp1
             }
             if (otherPlayerId) {
                 const otherData = await getUserSocket(otherPlayerId).catch(() => null)
@@ -2437,13 +2436,13 @@ export const initializeSocket = async (app) => {
                 }
             }
 
-            // 3. Mark both players available again
+            // 3. Mark both players available again (must run even when payload omitted player ids)
             if (p1) io.emit('userAvailableRace', { userId: p1 })
             if (p2) io.emit('userAvailableRace', { userId: p2 })
 
-            // 4. Cleanup Redis
-            await deleteActiveRaceGame(p1).catch(() => {})
-            await deleteActiveRaceGame(p2).catch(() => {})
+            // 4. Cleanup Redis (only delete when we have real ids — avoids activeRaceGame:undefined)
+            if (p1) await deleteActiveRaceGame(p1).catch(() => {})
+            if (p2) await deleteActiveRaceGame(p2).catch(() => {})
             await deleteRaceGameState(roomId).catch(() => {})
         })
 

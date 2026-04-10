@@ -1290,13 +1290,17 @@ export const SocketContextProvider = ({ children }) => {
 
   const endRaceGameOnNavigate = () => {
     const roomId = localStorage.getItem('raceRoomId');
-    if (roomId && socket) {
-      const match = roomId.match(/^race_(.+?)_(.+?)_(\d+)$/);
-      if (match) {
-        socket.emit('raceGameEnd', { roomId, player1: match[1], player2: match[2] });
-      } else {
-        socket.emit('raceGameEnd', { roomId });
+    try {
+      if (roomId && socket?.connected) {
+        const match = roomId.match(/^race_(.+?)_(.+?)_(\d+)$/);
+        if (match) {
+          socket.emit('raceGameEnd', { roomId, player1: match[1], player2: match[2] });
+        } else {
+          socket.emit('raceGameEnd', { roomId });
+        }
       }
+    } catch (_) {
+      /* ignore — socket may be torn down */
     }
     // Always clean up localStorage regardless of socket state
     localStorage.removeItem('raceRoomId');

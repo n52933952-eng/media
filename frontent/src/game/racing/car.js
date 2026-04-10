@@ -20,6 +20,37 @@ const WHEEL_FRICTION = 12;
 
 // Reused for start-line / respawn lateral offset (host vs guest lanes)
 const _laneRight = new THREE.Vector3();
+const _laneForward = new THREE.Vector3();
+const _worldUp = new THREE.Vector3(0, 1, 0);
+
+/** Horizontal unit vector perpendicular to the track direction (side-by-side), not gate-local +X (often along the road). */
+function setLaneLateralFromGateQuaternion(quat, out) {
+  // Car / gate forward in Three.js is typically −Z in local space
+  _laneForward.set(0, 0, -1).applyQuaternion(quat);
+  _laneForward.y = 0;
+  if (_laneForward.lengthSq() < 1e-10) {
+    // Gate aimed straight up/down — fallback: old gate-local +X projected flat
+    out.set(1, 0, 0).applyQuaternion(quat);
+    out.y = 0;
+    if (out.lengthSq() < 1e-10) {
+      out.set(1, 0, 0);
+    } else {
+      out.normalize();
+    }
+    return;
+  }
+  _laneForward.normalize();
+  out.crossVectors(_worldUp, _laneForward);
+  out.y = 0;
+  if (out.lengthSq() < 1e-10) {
+    out.set(1, 0, 0).applyQuaternion(quat);
+    out.y = 0;
+    if (out.lengthSq() < 1e-10) out.set(1, 0, 0);
+    else out.normalize();
+  } else {
+    out.normalize();
+  }
+}
 
 // Steering parameters
 const MAX_STEERING_ANGLE = 0.15;
@@ -394,7 +425,7 @@ function calculateMaxSteeringAngle(speedKPH) {
 }
 
 // Reset car position
-// laneOffsetMeters: shift along gate-local +X (car right) so two players can start side by side (e.g. host +, guest −)
+// laneOffsetMeters: shift sideways across the track (same distance along the road for both; host +, guest −)
 export function resetCarPosition(ammo, carBody, vehicle, currentSteeringAngle, currentGatePosition, currentGateQuaternion, laneOffsetMeters = 0) {
   // Cancel all movement
   const zero = new ammo.btVector3(0, 0, 0);
@@ -405,7 +436,7 @@ export function resetCarPosition(ammo, carBody, vehicle, currentSteeringAngle, c
   let oy = currentGatePosition.y + 2;
   let oz = currentGatePosition.z;
   if (laneOffsetMeters) {
-    _laneRight.set(1, 0, 0).applyQuaternion(currentGateQuaternion);
+    setLaneLateralFromGateQuaternion(currentGateQuaternion, _laneRight);
     _laneRight.multiplyScalar(laneOffsetMeters);
     ox += _laneRight.x;
     oy += _laneRight.y;

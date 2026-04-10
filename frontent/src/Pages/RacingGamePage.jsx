@@ -24,6 +24,12 @@ const START_LINE_LANE_OFFSET = 1.85
 /** Pixels from top of viewport — must clear fixed app header (~72px) + gap so HUD is not hidden under it */
 const RACE_TOP_OFFSET_PX = 88
 
+/** If socket drops, wait for reconnect this long before leaving the race (ms) */
+const RACE_DISCONNECT_GRACE_MS = 5000
+
+/** If the second player never joins the room, auto-exit (ms) */
+const RACE_WAIT_OPPONENT_MS = 120000
+
 /** Match SocketContext / backend: ids may be ObjectId or string */
 function userIdToStr(id) {
   if (id == null || id === '') return ''
@@ -101,6 +107,9 @@ export default function RacingGamePage() {
   const _flipAxis      = useRef(new THREE.Vector3(0, 1, 0))
   const resizeCleanupRef = useRef(null)
   const remoteAudioRef = useRef(null)
+  /** Prevents double teardown / navigate when disconnect + opponentLeft both fire */
+  const raceExitHandledRef = useRef(false)
+  const exitRaceAndGoHomeRef = useRef(() => {})
 
   // ─── Fetch opponent profile ────────────────────────────────────────────────
   useEffect(() => {
@@ -120,6 +129,30 @@ export default function RacingGamePage() {
     myColorRef.current  = isHost ? 'blue' : 'red'
     oppColorRef.current = isHost ? 'red'  : 'blue'
   }, [user])
+
+  /** End race locally, notify server, clear storage, go home — safe if socket is dead */
+  const exitRaceAndGoHome = useCallback(() => {
+    if (raceExitHandledRef.current) return
+    raceExitHandledRef.current = true
+    try {
+      if (timerRef.current) {
+        clearInterval(timerRef.current)
+        timerRef.current = null
+      }
+    } catch (_) { /* ignore */ }
+    try { leaveCall?.() } catch (_) { /* ignore */ }
+    try { setCallActive(false) } catch (_) { /* ignore */ }
+    try {
+      raceStateRef.current.raceFinished = true
+      raceStateRef.current.raceStarted = false
+    } catch (_) { /* ignore */ }
+    try { endRaceGameOnNavigate?.() } catch (_) { /* ignore */ }
+    try { navigate('/', { replace: true }) } catch (_) { /* ignore */ }
+  }, [navigate, leaveCall, endRaceGameOnNavigate])
+
+  useEffect(() => {
+    exitRaceAndGoHomeRef.current = exitRaceAndGoHome
+  }, [exitRaceAndGoHome])
 
   // ─── Load Ammo.js dynamically, then boot the game ─────────────────────────
   useEffect(() => {
@@ -178,7 +211,11 @@ export default function RacingGamePage() {
     if (!socket || !roomIdRef.current) return
 
     // Join the race room with a fresh socket room membership
-    socket.emit('joinRaceRoom', { roomId: roomIdRef.current })
+    try {
+      if (socket.connected) {
+        socket.emit('joinRaceRoom', { roomId: roomIdRef.current })
+      }
+    } catch (_) { /* ignore */ }
 
     const onPlayerJoined = ({ count }) => {
       if (count >= 2) {
@@ -215,15 +252,12 @@ export default function RacingGamePage() {
     }
 
     const onOpponentLeft = () => {
-      // Opponent quit — stop loading, stop timer, end call, show result
-      setLoading(false)
-      setLoadingPhase('assets')
-      if (timerRef.current) clearInterval(timerRef.current)
-      leaveCall?.()
-      setCallActive(false)
-      raceStateRef.current.raceFinished = true
-      setWinner('opponent_left')
-      setRaceFinished(true)
+      // Opponent quit or server ended the room — clear everything and go home (no stuck overlay)
+      try {
+        setLoading(false)
+        setLoadingPhase('assets')
+      } catch (_) { /* ignore */ }
+      exitRaceAndGoHome()
     }
 
     socket.on('racePlayerJoined',  onPlayerJoined)
@@ -239,7 +273,48 @@ export default function RacingGamePage() {
       socket.off('raceResult',        onRaceResult)
       socket.off('raceOpponentLeft',  onOpponentLeft)
     }
-  }, [socket, user])
+  }, [socket, user, exitRaceAndGoHome])
+
+  // ─── Connection lost: leave race after grace (reconnect clears the timer) ───
+  useEffect(() => {
+    if (!socket) return
+    let disconnectTimer = null
+    const onDisconnect = () => {
+      if (disconnectTimer) clearTimeout(disconnectTimer)
+      disconnectTimer = setTimeout(() => {
+        exitRaceAndGoHomeRef.current?.()
+      }, RACE_DISCONNECT_GRACE_MS)
+    }
+    const onConnect = () => {
+      if (disconnectTimer) {
+        clearTimeout(disconnectTimer)
+        disconnectTimer = null
+      }
+      try {
+        const rid = roomIdRef.current || localStorage.getItem('raceRoomId')
+        if (rid && socket.connected) {
+          socket.emit('joinRaceRoom', { roomId: rid })
+        }
+      } catch (_) { /* ignore */ }
+    }
+    socket.on('disconnect', onDisconnect)
+    socket.on('connect', onConnect)
+    return () => {
+      if (disconnectTimer) clearTimeout(disconnectTimer)
+      socket.off('disconnect', onDisconnect)
+      socket.off('connect', onConnect)
+    }
+  }, [socket])
+
+  // ─── Opponent never joins — avoid infinite "Waiting..." ─────────────────────
+  useEffect(() => {
+    if (loading || !waitingOpp || raceExitHandledRef.current) return
+    if (!localStorage.getItem('raceRoomId')) return
+    const t = setTimeout(() => {
+      exitRaceAndGoHomeRef.current?.()
+    }, RACE_WAIT_OPPONENT_MS)
+    return () => clearTimeout(t)
+  }, [loading, waitingOpp])
 
   // ─── Sync callActive with real WebRTC state ─────────────────────────────────
   // If the call gets rejected, dropped, or ended by the opponent, reflect it here
@@ -313,15 +388,19 @@ export default function RacingGamePage() {
       }
       const pos = carModelRef.current.position
       const quat = carModelRef.current.quaternion
-      socket.emit('racePosUpdate', {
-        roomId: roomIdRef.current,
-        position:   { x:+pos.x.toFixed(2),  y:+pos.y.toFixed(2),  z:+pos.z.toFixed(2)  },
-        quaternion: { x:+quat.x.toFixed(4), y:+quat.y.toFixed(4), z:+quat.z.toFixed(4), w:+quat.w.toFixed(4)||1 },
-        raceProgress: { currentGateIndex: gd?.currentGateIndex||0, distanceToNextGate: distToGate },
-        ...(raceStateRef.current.raceFinished && finishTimesRef.current[user?._id]
-          ? { finishTime: finishTimesRef.current[user._id] }
-          : {}),
-      })
+      try {
+        if (socket?.connected) {
+          socket.emit('racePosUpdate', {
+            roomId: roomIdRef.current,
+            position:   { x:+pos.x.toFixed(2),  y:+pos.y.toFixed(2),  z:+pos.z.toFixed(2)  },
+            quaternion: { x:+quat.x.toFixed(4), y:+quat.y.toFixed(4), z:+quat.z.toFixed(4), w:+quat.w.toFixed(4)||1 },
+            raceProgress: { currentGateIndex: gd?.currentGateIndex||0, distanceToNextGate: distToGate },
+            ...(raceStateRef.current.raceFinished && finishTimesRef.current[user?._id]
+              ? { finishTime: finishTimesRef.current[user._id] }
+              : {}),
+          })
+        }
+      } catch (_) { /* ignore — socket may be closing */ }
     }, 80)
     return () => clearInterval(id)
   }, [socket, user])
@@ -738,79 +817,89 @@ export default function RacingGamePage() {
   // ─── Main render loop ───────────────────────────────────────────────────────
   const animate = useCallback(() => {
     afRef.current = requestAnimationFrame(animate)
-    const dt = Math.min(clockRef.current.getDelta(), 0.1)
-    accumRef.current += dt
+    try {
+      const dt = Math.min(clockRef.current.getDelta(), 0.1)
+      accumRef.current += dt
 
-    const phys = physicsRef.current
-    if (!phys) return
+      const phys = physicsRef.current
+      if (!phys) return
 
-    // Clamp accumulated time — prevents "spiral of death" when a frame takes too long
-    accumRef.current = Math.min(accumRef.current, FIXED_PHYSICS_STEP * 4)
+      // Clamp accumulated time — prevents "spiral of death" when a frame takes too long
+      accumRef.current = Math.min(accumRef.current, FIXED_PHYSICS_STEP * 4)
 
-    while (accumRef.current >= FIXED_PHYSICS_STEP) {
-      const result = updatePhysics(
-        FIXED_PHYSICS_STEP, window.Ammo,
-        phys,
-        {
-          carBody: carBodyRef.current,
-          vehicle: vehicleRef.current,
-          carModel: carModelRef.current,
-          wheelMeshes: wheelMeshesRef.current,
-          keyState: keyStateRef.current,
-          currentSteeringAngle: steeringRef.current,
-          updateSteering,
-        },
-        [],
-        raceStateRef.current
-      )
-      if (result) {
-        updateSpeedDisplay(result.currentSpeed || 0)
-        steeringRef.current = result.currentSteeringAngle ?? steeringRef.current
-      }
-
-      updateCarPosition(window.Ammo, vehicleRef.current, carModelRef.current, wheelMeshesRef.current)
-
-      checkGroundCollision(window.Ammo, carBodyRef.current, () => resetCar())
-      checkFlipped(FIXED_PHYSICS_STEP)
-      updateCamera()
-
-      // Gate check
-      if (gateDataRef.current && carModelRef.current) {
-        const finished = checkGateProximity(carModelRef.current, gateDataRef.current)
-        window.gateData = gateDataRef.current
-        setMyGate(gateDataRef.current.currentGateIndex || 0)
-        if (finished && !raceStateRef.current.raceFinished) {
-          raceStateRef.current.raceFinished = true
-          const elapsed = Math.floor((Date.now() - startTimeRef.current) / 1000)
-          const m = String(Math.floor(elapsed/60)).padStart(2,'0')
-          const s = String(elapsed%60).padStart(2,'0')
-          finishTimesRef.current[user?._id] = `${m}:${s}`
-          showFinishMessage(gateDataRef.current.totalGates, null)
-          if (timerRef.current) clearInterval(timerRef.current)
-          // Notify server
-          if (socket && roomIdRef.current) {
-            socket.emit('raceFinished', {
-              roomId: roomIdRef.current,
-              winnerId: user?._id,
-              time: finishTimesRef.current[user?._id],
-            })
-          }
+      while (accumRef.current >= FIXED_PHYSICS_STEP) {
+        const result = updatePhysics(
+          FIXED_PHYSICS_STEP, window.Ammo,
+          phys,
+          {
+            carBody: carBodyRef.current,
+            vehicle: vehicleRef.current,
+            carModel: carModelRef.current,
+            wheelMeshes: wheelMeshesRef.current,
+            keyState: keyStateRef.current,
+            currentSteeringAngle: steeringRef.current,
+            updateSteering,
+          },
+          [],
+          raceStateRef.current
+        )
+        if (result) {
+          updateSpeedDisplay(result.currentSpeed || 0)
+          steeringRef.current = result.currentSteeringAngle ?? steeringRef.current
         }
-        updateGateFading(gateDataRef.current.fadingGates)
+
+        updateCarPosition(window.Ammo, vehicleRef.current, carModelRef.current, wheelMeshesRef.current)
+
+        checkGroundCollision(window.Ammo, carBodyRef.current, () => resetCar())
+        checkFlipped(FIXED_PHYSICS_STEP)
+        updateCamera()
+
+        // Gate check
+        if (gateDataRef.current && carModelRef.current) {
+          const finished = checkGateProximity(carModelRef.current, gateDataRef.current)
+          window.gateData = gateDataRef.current
+          setMyGate(gateDataRef.current.currentGateIndex || 0)
+          if (finished && !raceStateRef.current.raceFinished) {
+            raceStateRef.current.raceFinished = true
+            const elapsed = Math.floor((Date.now() - startTimeRef.current) / 1000)
+            const m = String(Math.floor(elapsed/60)).padStart(2,'0')
+            const s = String(elapsed%60).padStart(2,'0')
+            finishTimesRef.current[user?._id] = `${m}:${s}`
+            showFinishMessage(gateDataRef.current.totalGates, null)
+            if (timerRef.current) clearInterval(timerRef.current)
+            try {
+              if (socket?.connected && roomIdRef.current) {
+                socket.emit('raceFinished', {
+                  roomId: roomIdRef.current,
+                  winnerId: user?._id,
+                  time: finishTimesRef.current[user?._id],
+                })
+              }
+            } catch (_) { /* ignore */ }
+          }
+          updateGateFading(gateDataRef.current.fadingGates)
+        }
+
+        accumRef.current -= FIXED_PHYSICS_STEP
       }
 
-      accumRef.current -= FIXED_PHYSICS_STEP
-    }
+      // Smooth remote car (reduces jitter / perceived clipping vs local car)
+      const opp = oppModelRef.current
+      if (opp && opp.visible) {
+        opp.position.lerp(oppTargetPosRef.current, 0.22)
+        opp.quaternion.slerp(oppTargetQuatRef.current, 0.22)
+      }
 
-    // Smooth remote car (reduces jitter / perceived clipping vs local car)
-    const opp = oppModelRef.current
-    if (opp && opp.visible) {
-      opp.position.lerp(oppTargetPosRef.current, 0.22)
-      opp.quaternion.slerp(oppTargetQuatRef.current, 0.22)
+      drawMinimap()
+      rendererRef.current?.render(sceneRef.current, cameraRef.current)
+    } catch (e) {
+      console.error('[RacingGame] render loop error', e)
+      if (afRef.current) {
+        cancelAnimationFrame(afRef.current)
+        afRef.current = null
+      }
+      exitRaceAndGoHomeRef.current?.()
     }
-
-    drawMinimap()
-    rendererRef.current?.render(sceneRef.current, cameraRef.current)
   }, [socket, user])
 
   // ─── Cleanup ────────────────────────────────────────────────────────────────
@@ -848,7 +937,12 @@ export default function RacingGamePage() {
 
     // End any active voice call when leaving the race
     leaveCall?.()
-  }, [leaveCall])
+
+    // Notify server + clear raceRoomId so Redis "active race" and busy UI reset (tab close / hot reload)
+    if (endRaceGameOnNavigate && localStorage.getItem('raceRoomId')) {
+      endRaceGameOnNavigate()
+    }
+  }, [leaveCall, endRaceGameOnNavigate])
 
   // ─── Voice call ────────────────────────────────────────────────────────────
   const handleCallOpp = () => {
@@ -874,19 +968,13 @@ export default function RacingGamePage() {
   // ─── Navigate back / leave race ────────────────────────────────────────────
   const handleLeave = () => {
     if (window.confirm('Leave the race?')) {
-      leaveCall?.()        // end voice call if active
-      setCallActive(false)
-      if (endRaceGameOnNavigate) endRaceGameOnNavigate()
-      navigate('/')
+      exitRaceAndGoHome()
     }
   }
 
   // ─── Central "go home" — used by HOME button and result screen ─────────────
   const handleGoHome = () => {
-    leaveCall?.()
-    setCallActive(false)
-    if (endRaceGameOnNavigate) endRaceGameOnNavigate()
-    navigate('/')
+    exitRaceAndGoHome()
   }
 
   // ─── Render ─────────────────────────────────────────────────────────────────
