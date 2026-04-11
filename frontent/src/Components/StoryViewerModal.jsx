@@ -331,12 +331,34 @@ export default function StoryViewerModal({ isOpen, onClose, userId, userPreview 
       flexDirection="column"
       onClick={(e) => e.stopPropagation()}
     >
-      <Flex align="center" justify="space-between" px={3} py={3} flexShrink={0}>
-        <Flex align="center" gap={2} minW={0}>
-          <Avatar size="sm" src={displayUser.profilePic} name={name} />
-          <Text color="white" fontWeight="semibold" fontSize="sm" noOfLines={1}>
-            {name}
-          </Text>
+      <Flex align="flex-start" justify="space-between" gap={2} px={3} py={3} flexShrink={0} flexWrap="wrap">
+        <Flex align="flex-start" gap={2} minW={0} flex="1">
+          <Avatar size="sm" src={displayUser.profilePic} name={name} flexShrink={0} mt={0.5} />
+          <Box minW={0} flex="1">
+            <Text color="white" fontWeight="semibold" fontSize="sm" noOfLines={1}>
+              {name}
+            </Text>
+            {!loading && slide && (
+              <Text
+                as="span"
+                display="inline-block"
+                mt={1.5}
+                fontSize={{ base: 'xs', sm: 'sm' }}
+                fontWeight="medium"
+                color="white"
+                lineHeight="1.35"
+                px={2.5}
+                py={1.5}
+                bg="blackAlpha.700"
+                borderRadius="md"
+                borderWidth="1px"
+                borderColor="whiteAlpha.400"
+                sx={{ backdropFilter: 'blur(8px)' }}
+              >
+                Hold center or Space to pause · tap sides to skip
+              </Text>
+            )}
+          </Box>
         </Flex>
         <Flex align="center" gap={1} flexWrap="wrap" justify="flex-end">
           {isOwner && (
@@ -519,21 +541,36 @@ export default function StoryViewerModal({ isOpen, onClose, userId, userPreview 
             )}
 
             {!!slide.text && (
-              <Text
+              <Box
                 position="absolute"
-                bottom={6}
-                left={4}
-                right={4}
-                color="white"
-                textAlign="center"
-                fontSize="md"
-                fontWeight="medium"
-                textShadow="0 2px 8px rgba(0,0,0,0.8)"
-                px={2}
-                zIndex={2}
+                top="50%"
+                left="50%"
+                transform="translate(-50%, -50%)"
+                maxW="92%"
+                maxH="70%"
+                overflowY="auto"
+                zIndex={5}
+                pointerEvents="none"
+                px={{ base: 4, md: 6 }}
+                py={{ base: 3, md: 4 }}
+                bg="rgba(0,0,0,0.75)"
+                borderRadius="xl"
+                borderWidth="1px"
+                borderColor="whiteAlpha.300"
+                sx={{ backdropFilter: 'blur(10px)' }}
               >
-                {slide.text}
-              </Text>
+                <Text
+                  color="white"
+                  textAlign="center"
+                  fontSize={{ base: 'lg', sm: 'xl', md: '2xl' }}
+                  fontWeight="semibold"
+                  lineHeight="1.35"
+                  whiteSpace="pre-wrap"
+                  wordBreak="break-word"
+                >
+                  {slide.text}
+                </Text>
+              </Box>
             )}
           </>
         )}
@@ -544,12 +581,6 @@ export default function StoryViewerModal({ isOpen, onClose, userId, userPreview 
           </Text>
         )}
       </Box>
-
-      {!loading && slide && (
-        <Text color="whiteAlpha.500" fontSize="10px" textAlign="center" pb={2} px={2}>
-          Hold center (or Space) to pause · sides to skip
-        </Text>
-      )}
     </Box>
   ) : null
 
