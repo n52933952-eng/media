@@ -29,6 +29,7 @@ import CardChallengeNotification from './Components/CardChallengeNotification'
 import RacingChallengeNotification from './Components/RacingChallengeNotification'
 import PrivacyPolicy from './Pages/PrivacyPolicy'
 import TermsOfService from './Pages/TermsOfService'
+import WelcomePage from './Pages/WelcomePage'
 import CookieConsentBanner from './Components/CookieConsentBanner'
 import AdSenseLoader from './Components/AdSenseLoader'
 
@@ -76,8 +77,8 @@ const AppContent = () => {
   const isRacePage = location.pathname.startsWith("/race/")
   // Check if current path is a user page (e.g., /username, but not /username/post/123 or other routes)
   const pathParts = location.pathname.split('/').filter(Boolean)
-  const isUserPage = pathParts.length === 1 && 
-                     !['sign', 'update', 'football', 'weather', 'news', 'notifications', 'chess', 'card', 'race', 'home', 'messages'].includes(pathParts[0])
+  const isUserPage = pathParts.length === 1 &&
+                     !['sign', 'update', 'football', 'weather', 'news', 'notifications', 'chess', 'card', 'race', 'home', 'messages', 'welcome', 'privacy', 'terms'].includes(pathParts[0])
   // Check if it's the current user's own page
   const isOwnUserPage = isUserPage && user && pathParts[0] === user.username
 
@@ -183,6 +184,7 @@ const AppContent = () => {
           ) : (
             <Container maxW="620px" px={{ base: 4, md: 6 }}>
               <Routes>
+                <Route path="/welcome" element={<WelcomePage />} />
                 <Route path="/privacy" element={<PrivacyPolicy />} />
                 <Route path="/terms" element={<TermsOfService />} />
                 <Route path="/:username" element={user ?<UserPage/> : <Navigate to="/"/>}/>

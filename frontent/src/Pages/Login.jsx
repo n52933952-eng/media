@@ -142,7 +142,9 @@ export default function Login() {
         <Heading fontSize={{ base: '2xl', md: '3xl' }} textAlign="center" lineHeight="shorter">
           Sign in
         </Heading>
-                  
+        <Text align="center" fontSize="sm" color="gray.500">
+          <Link to="/welcome">About playsocial</Link>
+        </Text>
       </Stack>
       <Box
         rounded="lg"
