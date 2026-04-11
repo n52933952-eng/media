@@ -27,6 +27,10 @@ import CallNotification from './Components/CallNotification'
 import ChessChallengeNotification from './Components/ChessChallengeNotification'
 import CardChallengeNotification from './Components/CardChallengeNotification'
 import RacingChallengeNotification from './Components/RacingChallengeNotification'
+import PrivacyPolicy from './Pages/PrivacyPolicy'
+import TermsOfService from './Pages/TermsOfService'
+import CookieConsentBanner from './Components/CookieConsentBanner'
+import AdSenseLoader from './Components/AdSenseLoader'
 
 const AppContent = () => {
   const location = useLocation()
@@ -79,6 +83,8 @@ const AppContent = () => {
 
   return (
     <>
+      <AdSenseLoader />
+      <CookieConsentBanner />
       {/* Global Call Notification - shows on all pages */}
       {user && <CallNotification />}
       
@@ -177,6 +183,8 @@ const AppContent = () => {
           ) : (
             <Container maxW="620px" px={{ base: 4, md: 6 }}>
               <Routes>
+                <Route path="/privacy" element={<PrivacyPolicy />} />
+                <Route path="/terms" element={<TermsOfService />} />
                 <Route path="/:username" element={user ?<UserPage/> : <Navigate to="/"/>}/>
                 <Route path="/" element={!user ? <Login/>  : <Navigate to="/home" />}/>
                 <Route path="/sign" element={<SignUp/>}/>

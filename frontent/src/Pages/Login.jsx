@@ -140,7 +140,7 @@ export default function Login() {
     <Stack spacing={3} mx="auto" maxW="lg" w="full">
       <Stack align="center" spacing={1}>
         <Heading fontSize={{ base: '2xl', md: '3xl' }} textAlign="center" lineHeight="shorter">
-          الدخول
+          Sign in
         </Heading>
                   
       </Stack>
@@ -155,7 +155,7 @@ export default function Login() {
         <Stack spacing={3}>
           
                   <FormControl  isRequired>
-                <FormLabel>اسم المستخدم</FormLabel>
+                <FormLabel>Username</FormLabel>
                   
                  <Input value={inputs.username} type="text" onChange={(e) => setInputs({...inputs,username:e.target.value})}/>
            
@@ -163,7 +163,7 @@ export default function Login() {
                       
           
           <FormControl  isRequired>
-            <FormLabel>الباسورد</FormLabel>
+            <FormLabel>Password</FormLabel>
             <InputGroup>
               
               <Input value={inputs.password} type={showPassword ? "text" : "password"}
@@ -194,7 +194,7 @@ export default function Login() {
               onClick={handleLogin}
               isDisabled={googleLoading}
             >
-              الدخول
+              Sign in
             </Button>
             <Divider borderColor={dividerColor} />
             {/* Styled button visible to user; transparent Google button sits on top to handle the credential flow */}
@@ -238,19 +238,28 @@ export default function Login() {
             </Box>
           </Stack>
           <Text align="center" fontSize="sm" pt={1}>
-            ليس لديك حساب?{' '}
+            Don&apos;t have an account?{' '}
             <Link color="blue.400" to="/sign">
-              التسجيل
+              Sign up
             </Link>
+          </Text>
+          <Text align="center" fontSize="xs" color="gray.500" pt={2}>
+            <Link to="/privacy" style={{ marginRight: 8 }}>
+              Privacy
+            </Link>
+            <Link to="/terms">Terms</Link>
           </Text>
         </Stack>
       </Box>
       <Box pt={1}>
-        <Text align="center" fontWeight="bold" fontSize="sm">
+        <Text align="center" fontWeight="bold" fontSize="sm" dir="rtl">
           برمجه وتطوير المهندس مهند
         </Text>
         <Text align="center" fontSize="xs" color="gray.500">
           j4116507@gmail.com
+        </Text>
+        <Text align="center" fontSize="xs" color="gray.500" pt={1}>
+          Programming and development — Engineer Muhanad
         </Text>
       </Box>
     

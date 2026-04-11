@@ -13,6 +13,7 @@ import {
 	Text,
 	useColorModeValue,
 	Select,
+	Link as ChakraLink,
 } from "@chakra-ui/react";
 import { useState,useContext } from "react";
 
@@ -169,7 +170,7 @@ return (
 			<Stack spacing={8} mx={"auto"} maxW={"lg"} py={2} px={6}>
 				<Stack align={"center"}>
 					<Heading fontSize={"4xl"} textAlign={"center"}>
-						التسجيل
+						Sign up
 					</Heading>
                
 				</Stack>
@@ -178,13 +179,13 @@ return (
 						<HStack>
 							<Box>
 								<FormControl id="firstName" isRequired>
-									<FormLabel>الاسم الكامل</FormLabel>
+									<FormLabel>Full name</FormLabel>
 								  <Input value={inputs.name} type="text" onChange={(e) =>setInputs({...inputs,name:e.target.value})} />
 								</FormControl>
 							</Box>
 							<Box>
-								<FormControl id="email" isRequired>
-									<FormLabel>اسم المستخدم</FormLabel>
+								<FormControl id="username" isRequired>
+									<FormLabel>Username</FormLabel>
 								  <Input value={inputs.username} type="text" onChange={(e) => setInputs({...inputs,username:e.target.value})}/>
 								</FormControl>
 							</Box>
@@ -195,7 +196,7 @@ return (
                         <Box>
 								<FormControl id="email" isRequired>
 								
-                	<FormLabel>بريد إلكتروني</FormLabel>
+                	<FormLabel>Email</FormLabel>
 							    
                   <Input type="text" value={inputs.email} onChange={(e) => setInputs({...inputs,email:e.target.value})}/>
 							
@@ -204,9 +205,9 @@ return (
               </Box>
 						
 						<FormControl id="country" isRequired>
-							<FormLabel>البلد</FormLabel>
+							<FormLabel>Country</FormLabel>
 							<Select 
-								placeholder="اختر البلد"
+								placeholder="Select country"
 								value={inputs.country}
 								onChange={(e) => setInputs({...inputs,country:e.target.value})}
 							>
@@ -274,7 +275,7 @@ return (
 						</FormControl>
 						
 						<FormControl  isRequired>
-							<FormLabel>الباسورد</FormLabel>
+							<FormLabel>Password</FormLabel>
 							<InputGroup>
 								<Input value={inputs.password}  type={showPassword ? "text" : "password"} 
 							   onChange={(e)=>setInputs({...inputs,password:e.target.value})}
@@ -306,22 +307,40 @@ return (
 								
                 onClick={handleSignup}
 							>
-								التسجيل
+								Sign up
 							</Button>
 						</Stack>
 						<Stack pt={6}>
 							<Text align={"center"}>
-								لديك حساب?{" "}
-								
-								
+								Already have an account?{" "}
 								<Link color={"blue.400"} to={"/"}>
-									الدخول
+									Sign in
 								</Link>
-							
-							
+							</Text>
+							<Text align="center" fontSize="xs" color="gray.500" px={2}>
+								By creating an account you agree to our{' '}
+								<ChakraLink as={Link} to="/terms" color="blue.400">
+									Terms
+								</ChakraLink>{' '}
+								and{' '}
+								<ChakraLink as={Link} to="/privacy" color="blue.400">
+									Privacy Policy
+								</ChakraLink>
+								.
 							</Text>
 						</Stack>
 					</Stack>
+				</Box>
+				<Box pt={2}>
+					<Text align="center" fontWeight="bold" fontSize="sm" dir="rtl">
+						برمجه وتطوير المهندس مهند
+					</Text>
+					<Text align="center" fontSize="xs" color="gray.500">
+						j4116507@gmail.com
+					</Text>
+					<Text align="center" fontSize="xs" color="gray.500" pt={1}>
+						Programming and development — Engineer Muhanad
+					</Text>
 				</Box>
 			</Stack>
 		</Flex>

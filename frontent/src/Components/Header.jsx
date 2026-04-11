@@ -1,6 +1,6 @@
 import React,{useContext,useState,useEffect} from 'react'
 
-import{Image,useColorMode,Flex,Box,Badge,Avatar} from '@chakra-ui/react'
+import{Image,useColorMode,Flex,Box,Badge,Avatar,Text} from '@chakra-ui/react'
 import { TiHomeOutline } from "react-icons/ti";
 import { FaRegMessage } from "react-icons/fa6";
 import { IoNotificationsOutline } from "react-icons/io5";
@@ -77,6 +77,17 @@ const Header = () => {
 
       {user && (
         <Flex gap={4} alignItems="center">
+          <Flex display={{ base: 'none', sm: 'flex' }} alignItems="center" gap={2} fontSize="10px" color="gray.500">
+            <Text as={Link} to="/privacy" _hover={{ color: 'blue.400' }}>
+              Privacy
+            </Text>
+            <Text as="span" opacity={0.5}>
+              ·
+            </Text>
+            <Text as={Link} to="/terms" _hover={{ color: 'blue.400' }}>
+              Terms
+            </Text>
+          </Flex>
           <Box position="relative" display="flex" alignItems="center">
             <Box
               as="button"

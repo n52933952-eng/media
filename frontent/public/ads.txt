@@ -1,0 +1,5 @@
+# Google AdSense — after approval, replace this file with ONE uncommented line from
+# AdSense → Sites → ads.txt (exact format). Example (do not use fake IDs):
+# google.com, pub-xxxxxxxxxxxxxxxx, DIRECT, f08c47fec0942fa0
+#
+# Until then, you can leave only comments here or delete this file.
