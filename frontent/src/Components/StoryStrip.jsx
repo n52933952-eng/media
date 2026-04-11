@@ -1,6 +1,19 @@
 import React, { useCallback, useContext, useEffect, useMemo, useState } from 'react'
+import { keyframes } from '@emotion/react'
 import { Box, Flex, Text, Avatar, Spinner, useColorModeValue, useDisclosure } from '@chakra-ui/react'
 import { AddIcon } from '@chakra-ui/icons'
+
+/** Unread ring pulse — matches “live / new” feel on mobile without changing layout. */
+const storyRingGlowLight = keyframes`
+  0%, 100% { box-shadow: 0 0 0 0 rgba(220, 38, 120, 0.5); }
+  55% { box-shadow: 0 0 0 10px rgba(220, 38, 120, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(220, 38, 120, 0); }
+`
+const storyRingGlowDark = keyframes`
+  0%, 100% { box-shadow: 0 0 0 0 rgba(79, 172, 254, 0.55); }
+  55% { box-shadow: 0 0 0 10px rgba(79, 172, 254, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(79, 172, 254, 0); }
+`
 import { UserContext } from '../context/UserContext'
 import API_BASE_URL from '../config/api'
 import AddStoryModal from './AddStoryModal'
@@ -25,8 +38,15 @@ export default function StoryStrip() {
     'linear-gradient(45deg, #f09433, #e6683c, #dc2743, #cc2366, #bc1888)',
     'linear-gradient(45deg, #4facfe, #00f2fe, #43e97b, #38f9d7)'
   )
-  const ringSeen = useColorModeValue('gray.300', 'whiteAlpha.400')
+  /** Solid ring when watched — stronger than before so “seen” is obvious (same logic as mobile: !hasUnviewed). */
+  const ringSeen = useColorModeValue('gray.400', 'gray.600')
+  const unseenRingAnim = useColorModeValue(
+    `${storyRingGlowLight} 2.2s ease-in-out infinite`,
+    `${storyRingGlowDark} 2.2s ease-in-out infinite`
+  )
   const labelColor = useColorModeValue('gray.600', 'gray.400')
+  const seenLabelColor = useColorModeValue('gray.500', 'gray.500')
+  const newLabelColor = useColorModeValue('pink.500', 'cyan.300')
   const bgCard = useColorModeValue('gray.50', 'whiteAlpha.50')
   const stripBorder = useColorModeValue('gray.100', 'whiteAlpha.100')
   const addBadgeBorder = useColorModeValue('white', 'gray.900')
@@ -75,30 +95,41 @@ export default function StoryStrip() {
       })
   }, [strip, myId])
 
-  const openViewer = (uid, previewUser) => {
+  const openViewer = useCallback((uid, previewUser) => {
     if (!uid) return
     setViewerUserId(uid)
     setViewerPreview(previewUser || null)
     setViewerOpen(true)
-  }
+  }, [])
 
-  const closeViewer = () => {
+  /** Must be stable: StoryViewerModal’s fetch effect depends on onClose; unstable fn caused infinite refetch + loading loop. */
+  const closeViewer = useCallback(() => {
     setViewerOpen(false)
     setViewerUserId(null)
     setViewerPreview(null)
     fetchStrip()
-  }
+  }, [fetchStrip])
 
   if (!user?._id) return null
 
   const AvatarRing = ({ unseen, children, ...boxProps }) => (
     <Box
-      p="2px"
+      p="3px"
       borderRadius="full"
       bg={unseen ? ringUnseen : ringSeen}
+      animation={unseen ? unseenRingAnim : undefined}
       {...boxProps}
     >
-      {children}
+      <Box
+        borderRadius="full"
+        overflow="hidden"
+        lineHeight={0}
+        sx={{
+          filter: unseen ? 'none' : 'grayscale(0.4) brightness(0.9)',
+        }}
+      >
+        {children}
+      </Box>
     </Box>
   )
 
@@ -184,6 +215,11 @@ export default function StoryStrip() {
               <Text fontSize="xs" color={labelColor} textAlign="center" noOfLines={2} w="100%">
                 Your story
               </Text>
+              {myEntry && (
+                <Text fontSize="10px" color={myEntry.hasUnviewed ? newLabelColor : seenLabelColor} textAlign="center" fontWeight="semibold">
+                  {myEntry.hasUnviewed ? 'New' : 'Viewed'}
+                </Text>
+              )}
             </Flex>
           )}
 
@@ -204,6 +240,9 @@ export default function StoryStrip() {
                   </AvatarRing>
                   <Text fontSize="xs" color={labelColor} textAlign="center" noOfLines={2} w="100%">
                     {u.username || u.name || 'User'}
+                  </Text>
+                  <Text fontSize="10px" color={s.hasUnviewed ? newLabelColor : seenLabelColor} textAlign="center" fontWeight="semibold">
+                    {s.hasUnviewed ? 'New' : 'Seen'}
                   </Text>
                 </Flex>
               )

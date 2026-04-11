@@ -1,6 +1,25 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react'
 import { createPortal } from 'react-dom'
-import { Box, Flex, Text, IconButton, Avatar, Spinner, Button } from '@chakra-ui/react'
+import { formatDistanceToNow } from 'date-fns'
+import {
+  Box,
+  Flex,
+  Text,
+  IconButton,
+  Avatar,
+  Spinner,
+  Button,
+  Drawer,
+  DrawerBody,
+  DrawerHeader,
+  DrawerOverlay,
+  DrawerContent,
+  DrawerCloseButton,
+  Divider,
+  VStack,
+  useColorModeValue,
+  useDisclosure,
+} from '@chakra-ui/react'
 import { CloseIcon } from '@chakra-ui/icons'
 import API_BASE_URL from '../config/api'
 import useShowToast from '../hooks/useShowToast.js'
@@ -14,6 +33,18 @@ function uid(x) {
 
 export default function StoryViewerModal({ isOpen, onClose, userId, userPreview }) {
   const showToast = useShowToast()
+  const {
+    isOpen: viewerListOpen,
+    onOpen: onViewerListOpen,
+    onClose: onViewerListClose,
+  } = useDisclosure()
+  const drawerBg = useColorModeValue('white', 'gray.900')
+  const drawerBorder = useColorModeValue('gray.100', 'whiteAlpha.200')
+  const drawerMuted = useColorModeValue('gray.600', 'whiteAlpha.600')
+  const drawerText = useColorModeValue('gray.800', 'white')
+  const drawerSub = useColorModeValue('gray.500', 'whiteAlpha.500')
+  const onCloseRef = useRef(onClose)
+  const showToastRef = useRef(showToast)
   const [loading, setLoading] = useState(true)
   const [story, setStory] = useState(null)
   const [isOwner, setIsOwner] = useState(false)
@@ -22,6 +53,14 @@ export default function StoryViewerModal({ isOpen, onClose, userId, userPreview 
   const timerRef = useRef(null)
   const videoRef = useRef(null)
 
+  useEffect(() => {
+    onCloseRef.current = onClose
+  }, [onClose])
+
+  useEffect(() => {
+    showToastRef.current = showToast
+  }, [showToast])
+
   const clearTimer = () => {
     if (timerRef.current) {
       clearTimeout(timerRef.current)
@@ -29,6 +68,7 @@ export default function StoryViewerModal({ isOpen, onClose, userId, userPreview 
     }
   }
 
+  /** Depends only on userId so parent re-renders (e.g. story strip refetch) do not retrigger fetch. */
   const fetchStory = useCallback(async () => {
     if (!userId) return
     setLoading(true)
@@ -40,20 +80,20 @@ export default function StoryViewerModal({ isOpen, onClose, userId, userPreview 
       const res = await fetch(`${API_BASE_URL}/api/story/user/${userId}`, { credentials: 'include' })
       const data = await res.json()
       if (!res.ok) {
-        showToast('Story', data.error || 'Could not open story', 'error')
-        onClose()
+        showToastRef.current('Story', data.error || 'Could not open story', 'error')
+        onCloseRef.current()
         return
       }
       setStory(data.story)
       setIsOwner(!!data.isOwner)
       setViewers(Array.isArray(data.viewers) ? data.viewers : [])
     } catch {
-      showToast('Story', 'Network error', 'error')
-      onClose()
+      showToastRef.current('Story', 'Network error', 'error')
+      onCloseRef.current()
     } finally {
       setLoading(false)
     }
-  }, [userId, onClose, showToast])
+  }, [userId])
 
   useEffect(() => {
     if (isOpen && userId) fetchStory()
@@ -65,8 +105,9 @@ export default function StoryViewerModal({ isOpen, onClose, userId, userPreview 
       setStory(null)
       setIdx(0)
       setLoading(false)
+      onViewerListClose()
     }
-  }, [isOpen])
+  }, [isOpen, onViewerListClose])
 
   const slides = story?.slides || []
   const slide = slides[idx]
@@ -76,12 +117,12 @@ export default function StoryViewerModal({ isOpen, onClose, userId, userPreview 
     clearTimer()
     setIdx((i) => {
       if (i >= slideCount - 1) {
-        queueMicrotask(() => onClose())
+        queueMicrotask(() => onCloseRef.current())
         return i
       }
       return i + 1
     })
-  }, [slideCount, onClose])
+  }, [slideCount])
 
   useEffect(() => {
     if (!isOpen || !slide || slide.type === 'video') return
@@ -95,7 +136,7 @@ export default function StoryViewerModal({ isOpen, onClose, userId, userPreview 
   useEffect(() => {
     if (!isOpen) return
     const onKey = (e) => {
-      if (e.key === 'Escape') onClose()
+      if (e.key === 'Escape') onCloseRef.current()
       if (e.key === 'ArrowRight') finishOrAdvance()
       if (e.key === 'ArrowLeft') {
         clearTimer()
@@ -104,7 +145,7 @@ export default function StoryViewerModal({ isOpen, onClose, userId, userPreview 
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [isOpen, onClose, finishOrAdvance])
+  }, [isOpen, finishOrAdvance])
 
   const deleteMine = async () => {
     if (!window.confirm('Delete your entire story? This cannot be undone.')) return
@@ -117,18 +158,16 @@ export default function StoryViewerModal({ isOpen, onClose, userId, userPreview 
       }
       showToast('Deleted', 'Your story was removed.', 'success')
       window.dispatchEvent(new CustomEvent('storyStripChanged'))
-      onClose()
+      onCloseRef.current()
     } catch {
       showToast('Error', 'Network error', 'error')
     }
   }
 
-  if (!isOpen) return null
-
-  const displayUser = story?.user || userPreview || {}
+  const displayUser = isOpen ? story?.user || userPreview || {} : {}
   const name = displayUser.name || displayUser.username || 'Story'
 
-  const node = (
+  const storyPortal = isOpen ? (
     <Box
       position="fixed"
       inset={0}
@@ -146,6 +185,18 @@ export default function StoryViewerModal({ isOpen, onClose, userId, userPreview 
           </Text>
         </Flex>
         <Flex align="center" gap={1}>
+          {isOwner && (
+            <Button
+              size="xs"
+              variant="outline"
+              borderColor="whiteAlpha.500"
+              color="white"
+              _hover={{ bg: 'whiteAlpha.200' }}
+              onClick={onViewerListOpen}
+            >
+              Viewers{viewers.length > 0 ? ` (${viewers.length})` : ''}
+            </Button>
+          )}
           {isOwner && (
             <Button size="xs" variant="outline" colorScheme="red" color="red.200" borderColor="red.400" onClick={deleteMine}>
               Delete
@@ -264,27 +315,60 @@ export default function StoryViewerModal({ isOpen, onClose, userId, userPreview 
         )}
       </Box>
 
-      {isOwner && viewers.length > 0 && (
-        <Flex px={4} pb={4} flexWrap="wrap" gap={2} align="center" flexShrink={0}>
-          <Text color="whiteAlpha.700" fontSize="xs">
-            Seen by {viewers.length}
-          </Text>
-          {viewers.slice(0, 8).map((v) => {
-            const u = v.user
-            const id = uid(u?._id || u)
-            return (
-              <Avatar key={id} size="xs" src={u?.profilePic} name={u?.name || u?.username} />
-            )
-          })}
-          {viewers.length > 8 && (
-            <Text color="whiteAlpha.600" fontSize="xs">
-              +{viewers.length - 8}
-            </Text>
-          )}
-        </Flex>
-      )}
     </Box>
-  )
+  ) : null
 
-  return createPortal(node, document.body)
+  return (
+    <>
+      {storyPortal && createPortal(storyPortal, document.body)}
+      <Drawer
+        isOpen={Boolean(isOpen && viewerListOpen && isOwner)}
+        placement="bottom"
+        onClose={onViewerListClose}
+        size="md"
+      >
+        <DrawerOverlay bg="blackAlpha.700" />
+        <DrawerContent bg={drawerBg} borderTopRadius="2xl" maxH="72vh">
+          <DrawerCloseButton />
+          <DrawerHeader borderBottomWidth="1px" borderColor={drawerBorder} color={drawerText}>
+            Viewers{viewers.length > 0 ? ` (${viewers.length})` : ''}
+          </DrawerHeader>
+          <DrawerBody pb={8}>
+            {isOwner && !viewers.length && (
+              <Text color={drawerMuted} fontSize="sm">
+                No views yet. When someone opens your story, they appear here with the time they watched.
+              </Text>
+            )}
+            {isOwner && viewers.length > 0 && (
+              <VStack align="stretch" spacing={0} divider={<Divider borderColor={drawerBorder} />}>
+                {viewers.map((v) => {
+                  const u = v.user
+                  const id = uid(u?._id || u)
+                  const when =
+                    v.viewedAt != null
+                      ? formatDistanceToNow(new Date(v.viewedAt), { addSuffix: true })
+                      : ''
+                  return (
+                    <Flex key={id} py={3} align="center" gap={3}>
+                      <Avatar src={u?.profilePic} name={u?.name || u?.username} size="sm" />
+                      <Box flex={1} minW={0}>
+                        <Text color={drawerText} fontWeight="medium" noOfLines={1}>
+                          {u?.name || u?.username || 'User'}
+                        </Text>
+                        {!!when && (
+                          <Text fontSize="xs" color={drawerSub}>
+                            {when}
+                          </Text>
+                        )}
+                      </Box>
+                    </Flex>
+                  )
+                })}
+              </VStack>
+            )}
+          </DrawerBody>
+        </DrawerContent>
+      </Drawer>
+    </>
+  )
 }
