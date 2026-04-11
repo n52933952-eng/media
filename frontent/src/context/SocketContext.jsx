@@ -375,8 +375,12 @@ export const SocketContextProvider = ({ children }) => {
     // Listen for football match updates
     newSocket?.on('footballMatchUpdate', (data) => {
       console.log('⚽ Football match update received:', data);
-      // Emit custom event that Post component can listen to
       window.dispatchEvent(new CustomEvent('footballMatchUpdate', { detail: data }));
+    });
+
+    newSocket?.on('footballPageUpdate', (data) => {
+      console.log('⚽ Football page update received:', data);
+      window.dispatchEvent(new CustomEvent('footballPageUpdate', { detail: data }));
     });
 
     return () => {
@@ -385,6 +389,7 @@ export const SocketContextProvider = ({ children }) => {
       newSocket?.off('newNotification');
       newSocket?.off('notificationDeleted');
       newSocket?.off('footballMatchUpdate');
+      newSocket?.off('footballPageUpdate');
       newSocket.close();
     };
   }, [user]);

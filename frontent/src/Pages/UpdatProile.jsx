@@ -1,5 +1,5 @@
 import React,{useState,useRef,useEffect,useContext} from 'react'
-
+import { useNavigate } from 'react-router-dom'
 
 import {
 	Button,
@@ -12,12 +12,18 @@ import {
 	useColorModeValue,
 	Avatar,
 	Center,
-    useToast,
-	Select
-  
+	Select,
+	Modal,
+	ModalOverlay,
+	ModalContent,
+	ModalHeader,
+	ModalBody,
+	ModalFooter,
+	Text,
 } from "@chakra-ui/react";
 import{UserContext} from '../context/UserContext'
 import{PostContext} from '../context/PostContext'
+import { SocketContext } from '../context/SocketContext'
 import useShowToast from '../hooks/useShowToast.js'
 
 
@@ -29,7 +35,12 @@ const UpdateProfile = () => {
 
 const{user,setUser}=useContext(UserContext)
 const{followPost,setFollowPost}=useContext(PostContext)
+const { endChessGameOnNavigate } = useContext(SocketContext) || {}
+const navigate = useNavigate()
 const[updating,setUpdating]=useState(false)
+const [deleteOpen, setDeleteOpen] = useState(false)
+const [deleteConfirmText, setDeleteConfirmText] = useState('')
+const [deletingAccount, setDeletingAccount] = useState(false)
 
 const showToast = useShowToast()
 
@@ -268,17 +279,60 @@ const handleImageChange = async (event) => {
 
 }
 
+  const apiBase = () => (import.meta.env.PROD ? window.location.origin : 'http://localhost:5000')
 
- 
+  const clearSessionLikeLogout = () => {
+    localStorage.removeItem('chessOrientation')
+    localStorage.removeItem('gameLive')
+    localStorage.removeItem('chessRoomId')
+    localStorage.removeItem('chessFEN')
+    localStorage.removeItem('capturedWhite')
+    localStorage.removeItem('capturedBlack')
+    localStorage.removeItem('userInfo')
+    setUser(null)
+  }
 
+  const handleOpenDelete = () => {
+    setDeleteConfirmText('')
+    setDeleteOpen(true)
+  }
 
+  const handleCloseDelete = () => {
+    if (deletingAccount) return
+    setDeleteOpen(false)
+  }
 
-return (
-   
-   
-   
-   
-   
+  const handleConfirmDelete = async () => {
+    if (deletingAccount) return
+    const typed = deleteConfirmText.trim().toUpperCase()
+    if (typed !== 'DELETE') return
+    setDeletingAccount(true)
+    try {
+      if (endChessGameOnNavigate) endChessGameOnNavigate()
+      const res = await fetch(`${apiBase()}/api/user/delete`, {
+        method: 'DELETE',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirm: 'DELETE' }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        showToast('Error', data.error || 'Failed to delete account', 'error')
+        return
+      }
+      showToast('Success', 'Account deleted', 'success')
+      setDeleteOpen(false)
+      clearSessionLikeLogout()
+      navigate('/')
+    } catch (e) {
+      showToast('Error', e?.message || 'Failed to delete account', 'error')
+    } finally {
+      setDeletingAccount(false)
+    }
+  }
+
+  return (
+    <>
         <form onSubmit={handleSubmit} >
         <Flex align={"center"} justify={"center"} my={2}  p={{base:20, xs:4}} mt={-30}>
             <Stack
@@ -495,9 +549,54 @@ return (
                     </Button>
                
                 </Stack>
+
+                <Button
+                  variant="outline"
+                  colorScheme="red"
+                  w="full"
+                  mt={2}
+                  onClick={handleOpenDelete}
+                >
+                  Delete account
+                </Button>
             </Stack>
         </Flex>
     </form>
+
+    <Modal isOpen={deleteOpen} onClose={handleCloseDelete} isCentered>
+      <ModalOverlay />
+      <ModalContent mx={4}>
+        <ModalHeader>Delete your account?</ModalHeader>
+        <ModalBody>
+          <Text fontSize="sm" color="gray.500" mb={4}>
+            This permanently deletes your account and your data (posts, stories, messages, and collaborations). This cannot be undone.
+          </Text>
+          <Text fontSize="sm" fontWeight="medium" mb={1}>
+            Type DELETE to confirm
+          </Text>
+          <Input
+            value={deleteConfirmText}
+            onChange={(e) => setDeleteConfirmText(e.target.value)}
+            placeholder="DELETE"
+            autoCapitalize="off"
+          />
+        </ModalBody>
+        <ModalFooter gap={2}>
+          <Button variant="ghost" onClick={handleCloseDelete} isDisabled={deletingAccount}>
+            Cancel
+          </Button>
+          <Button
+            colorScheme="red"
+            onClick={handleConfirmDelete}
+            isLoading={deletingAccount}
+            isDisabled={deleteConfirmText.trim().toUpperCase() !== 'DELETE'}
+          >
+            Confirm delete
+          </Button>
+        </ModalFooter>
+      </ModalContent>
+    </Modal>
+    </>
   )
 }
 

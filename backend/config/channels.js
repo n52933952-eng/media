@@ -1,5 +1,5 @@
 // Live Channels Configuration
-// All YouTube live stream channels available in the app
+// YouTube live streams exposed in the app (verified working; others removed for playback / policy issues)
 
 export const LIVE_CHANNELS = [
     {
@@ -27,52 +27,18 @@ export const LIVE_CHANNELS = [
         ]
     },
     {
-        id: 'nbc-news',
-        name: 'NBC News NOW',
-        username: 'NBCNews',
+        id: 'fox11',
+        name: 'Fox 11',
+        username: 'Fox11',
         category: 'news',
-        logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/d/d2/NBC_News_logo.svg/200px-NBC_News_logo.svg.png',
-        bio: '🔴 Live breaking news coverage',
+        logo: 'https://upload.wikimedia.org/wikipedia/en/thumb/6/6a/KTTV_2020.svg/200px-KTTV_2020.svg.png',
+        bio: '🔴 Live news from Los Angeles',
         streams: [
             {
                 language: 'english',
                 name: 'Watch Live',
-                youtubeId: 'OwGEPRfRWu0',
-                text: '🔴 NBC News NOW - Live Stream\n\nBreaking news and live coverage',
-                buttonColor: 'blue'
-            }
-        ]
-    },
-    {
-        id: 'bein-sports-news',
-        name: 'beIN SPORTS الإخبارية',
-        username: 'BeinSportsNews',
-        category: 'sports',
-        logo: 'https://ui-avatars.com/api/?name=beIN+SPORTS&background=random&color=fff&size=128',
-        bio: '🔴 Live sports news and updates',
-        streams: [
-            {
-                language: 'arabic',
-                name: 'Watch Live',
-                youtubeId: '2lJZPT6OljI',
-                text: '🔴 beIN SPORTS الإخبارية - البث المباشر\n\nأخبار الرياضة المباشرة والتحديثات الحية',
-                buttonColor: 'red'
-            }
-        ]
-    },
-    {
-        id: 'sky-news',
-        name: 'Sky News',
-        username: 'SkyNews',
-        category: 'news',
-        logo: 'https://upload.wikimedia.org/wikipedia/en/thumb/5/5a/Sky_News_logo.svg/200px-Sky_News_logo.svg.png',
-        bio: '🔴 Live news from the UK',
-        streams: [
-            {
-                language: 'english',
-                name: 'Watch Live',
-                youtubeId: 'YDvsBbKfLPA',
-                text: '🔴 Sky News - Live Stream\n\nBreaking news and live coverage from the UK',
+                youtubeId: '8u8pQ_uLGjo',
+                text: '🔴 Fox 11 - Live Stream\n\nBreaking news and live coverage from Los Angeles',
                 buttonColor: 'blue'
             }
         ]
@@ -95,120 +61,18 @@ export const LIVE_CHANNELS = [
         ]
     },
     {
-        id: 'natgeo-kids',
-        name: 'Nat Geo Kids',
-        username: 'NatGeoKids',
-        category: 'kids',
-        logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/2/2e/National_Geographic_Kids_logo.svg/200px-National_Geographic_Kids_logo.svg.png',
-        bio: '🔴 Educational content for kids',
-        streams: [
-            {
-                language: 'english',
-                name: 'Watch Live',
-                youtubeId: '42QyI_w6bEg',
-                text: '🔴 Nat Geo Kids - Live Stream\n\nEducational and fun content for kids',
-                buttonColor: 'green'
-            }
-        ]
-    },
-    {
-        id: 'scishow-kids',
-        name: 'SciShow Kids',
-        username: 'SciShowKids',
-        category: 'kids',
-        logo: 'https://via.placeholder.com/200x200/3498DB/FFFFFF?text=SciShow',
-        bio: '🔴 Science education for kids',
-        streams: [
-            {
-                language: 'english',
-                name: 'Watch Live',
-                youtubeId: '0D--OVPUr1I',
-                text: '🔴 SciShow Kids - Live Stream\n\nScience education and experiments for kids',
-                buttonColor: 'blue'
-            }
-        ]
-    },
-    {
-        id: 'jj-animal-time',
-        name: "JJ's Animal Time LIVE!",
-        username: 'JJAnimalTime',
-        category: 'kids',
-        logo: 'https://via.placeholder.com/200x200/FFA500/FFFFFF?text=JJ+Animals',
-        bio: '🔴 Live animal content for kids',
-        streams: [
-            {
-                language: 'english',
-                name: 'Watch Live',
-                youtubeId: 'dwbgawuNhCU',
-                text: "🔴 JJ's Animal Time LIVE! - Live Stream\n\nFun animal content for kids",
-                buttonColor: 'orange'
-            }
-        ]
-    },
-    {
-        id: 'kids-arabic',
-        name: 'Kids Arabic',
-        username: 'KidsArabic',
-        category: 'kids',
-        logo: 'https://via.placeholder.com/200x200/16A085/FFFFFF?text=Kids+Arabic',
-        bio: '🔴 Arabic content for kids',
-        streams: [
-            {
-                language: 'arabic',
-                name: 'Watch Live',
-                youtubeId: 'Jqy2q5HTwnI',
-                text: '🔴 Kids Arabic - Live Stream\n\nمحتوى عربي للأطفال',
-                buttonColor: 'teal'
-            }
-        ]
-    },
-    {
-        id: 'natgeo-animals',
-        name: 'Nat Geo Animals',
-        username: 'NatGeoAnimals',
-        category: 'kids',
-        logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/2/2e/National_Geographic_Kids_logo.svg/200px-National_Geographic_Kids_logo.svg.png',
-        bio: '🔴 Animal documentaries and content',
-        streams: [
-            {
-                language: 'english',
-                name: 'Watch Live',
-                youtubeId: 'THooYCltViI',
-                text: '🔴 Nat Geo Animals - Live Stream\n\nAmazing animal documentaries and content',
-                buttonColor: 'green'
-            }
-        ]
-    },
-    {
-        id: 'mbc-drama',
-        name: 'MBC Drama',
-        username: 'MBCDrama',
-        category: 'entertainment',
-        logo: 'https://upload.wikimedia.org/wikipedia/commons/4/4a/MBC_Drama_Logo.svg',
-        bio: '🔴 Arabic drama series 24/7',
-        streams: [
-            {
-                language: 'arabic',
-                name: 'Watch Live',
-                youtubeId: 'eZx9oQcQAT4',
-                text: '🔴 MBC Drama - Live Stream\n\nمسلسلات درامية عربية على مدار الساعة',
-                buttonColor: 'purple'
-            }
-        ]
-    },
-    {
-        id: 'fox11',
-        name: 'Fox 11',
-        username: 'Fox11',
+        id: 'sky-news',
+        name: 'Sky News',
+        username: 'SkyNews',
         category: 'news',
-        logo: 'https://upload.wikimedia.org/wikipedia/en/thumb/6/6a/KTTV_2020.svg/200px-KTTV_2020.svg.png',
-        bio: '🔴 Live news from Los Angeles',
+        logo: 'https://upload.wikimedia.org/wikipedia/en/thumb/5/5a/Sky_News_logo.svg/200px-Sky_News_logo.svg.png',
+        bio: '🔴 Live news from the UK',
         streams: [
             {
                 language: 'english',
                 name: 'Watch Live',
-                youtubeId: '8u8pQ_uLGjo',
-                text: '🔴 Fox 11 - Live Stream\n\nBreaking news and live coverage from Los Angeles',
+                youtubeId: 'YDvsBbKfLPA',
+                text: '🔴 Sky News - Live Stream\n\nBreaking news and live coverage from the UK',
                 buttonColor: 'blue'
             }
         ]
@@ -229,5 +93,3 @@ export const getChannelByUsername = (username) => {
 export const getChannelsByCategory = (category) => {
     return LIVE_CHANNELS.filter(channel => channel.category === category)
 }
-
-

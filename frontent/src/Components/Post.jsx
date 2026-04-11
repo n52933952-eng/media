@@ -1,6 +1,6 @@
-import React,{useEffect,useState,useContext, memo} from 'react'
+import React,{useEffect,useState,useContext, useCallback, useMemo, memo} from 'react'
 import{Link} from 'react-router-dom'
-import{Flex,Avatar,Box,Text,Image,Button, VStack, HStack, Grid, GridItem, SimpleGrid, useColorModeValue, useDisclosure, Menu, MenuButton, MenuList, MenuItem, IconButton, Tooltip} from '@chakra-ui/react'
+import{Flex,Avatar,Box,Text,Image,Button, VStack, HStack, Grid, GridItem, SimpleGrid, Spinner, useColorModeValue, useDisclosure, Menu, MenuButton, MenuList, MenuItem, IconButton, Tooltip} from '@chakra-ui/react'
 import { HiOutlineDotsHorizontal } from "react-icons/hi";
 import { MdOutlineDeleteOutline, MdPersonRemove } from "react-icons/md";
 import { BsThreeDotsVertical } from "react-icons/bs";
@@ -15,7 +15,45 @@ import ManageContributorsModal from './ManageContributorsModal'
 import EditPost from './EditPost'
 import FootballIcon from './FootballIcon'
 
+const apiBaseUrl = () => (import.meta.env.PROD ? window.location.origin : 'http://localhost:5000')
 
+/** DB Match doc → same shape as `footballData` JSON entries (feed rendering). */
+function normalizeDbMatchForFootballFeed(m) {
+  if (!m || typeof m !== 'object') return null
+  if (m.homeTeam?.name && (m.score !== undefined || m.status?.short)) return m
+  return {
+    _id: m._id,
+    fixtureId: m.fixtureId,
+    homeTeam: { name: m.teams?.home?.name, logo: m.teams?.home?.logo },
+    awayTeam: { name: m.teams?.away?.name, logo: m.teams?.away?.logo },
+    score: { home: m.goals?.home ?? null, away: m.goals?.away ?? null },
+    status: {
+      short: m.fixture?.status?.short,
+      long: m.fixture?.status?.long,
+      elapsed: m.fixture?.status?.elapsed,
+    },
+    league: m.league,
+    events: Array.isArray(m.events) ? m.events : [],
+    time: m.fixture?.date
+      ? new Date(m.fixture.date).toLocaleTimeString('en-US', {
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: true,
+        })
+      : undefined,
+  }
+}
+
+function isFootballMatchLive(m) {
+  if (!m) return false
+  const u = String(m.status?.short || m.fixture?.status?.short || '').trim().toUpperCase()
+  if (!u && m.fixture?.status?.elapsed != null) return true
+  if (['FT', 'AET', 'PEN', 'CANC', 'ABD', 'AWD', 'WO'].includes(u)) return false
+  if (['LIVE', 'IN_PLAY', 'PAUSED', '1H', '2H', 'HT', 'ET', 'BT', 'P'].includes(u)) return true
+  const elapsed = m.fixture?.status?.elapsed ?? m.status?.elapsed
+  if (elapsed != null && Number(elapsed) >= 0 && u !== 'NS' && u !== 'TBD') return true
+  return false
+}
 
 const Post = ({post: initialPost, postedBy, onDelete}) => {
     
@@ -86,9 +124,13 @@ const showToast = useShowToast()
   const borderColor = useColorModeValue('#e1e4ea', '#2d3548')
   const textColor = useColorModeValue('gray.800', 'white')
   const secondaryTextColor = useColorModeValue('gray.600', 'gray.400')
+  // Each live match is its own raised card (visually separate from the post body, like mobile units)
+  const footballMatchCardBg = useColorModeValue('white', '#1e2433')
+  const footballMatchCardBorder = useColorModeValue('gray.200', 'gray.600')
+  const footballMatchCardHoverBorder = useColorModeValue('blue.200', 'blue.500')
   
-  // Check if this is a Football post with match data
-  const isFootballPost = postedBy?.username === 'Football' && post?.footballData
+  // Football feed card (same idea as mobile: live list from API, post.footballData as fallback)
+  const isFootballPost = postedBy?.username === 'Football'
   
   // Check if this is a Weather post
   const isWeatherPost = postedBy?.username === 'Weather' && post?.weatherData
@@ -187,6 +229,8 @@ const showToast = useShowToast()
   }
   
   const [matchesData, setMatchesData] = useState([])
+  const [footballApiMatches, setFootballApiMatches] = useState([])
+  const [footballLoading, setFootballLoading] = useState(false)
   const [weatherDataArray, setWeatherDataArray] = useState([])
   const [weatherLoading, setWeatherLoading] = useState(false)
   const [showFullText, setShowFullText] = useState(false)
@@ -198,7 +242,7 @@ const showToast = useShowToast()
     if (isFootballPost && post?.footballData) {
       try {
         const parsed = JSON.parse(post.footballData)
-        setMatchesData(parsed)
+        setMatchesData(Array.isArray(parsed) ? parsed : parsed ? [parsed] : [])
       } catch (e) {
         console.error('Failed to parse football data:', e)
         setMatchesData([])
@@ -207,7 +251,46 @@ const showToast = useShowToast()
       setMatchesData([])
     }
   }, [post?.footballData, isFootballPost])
-  
+
+  const fetchFootballLiveMatches = useCallback(async (silent = false) => {
+    if (!isFootballPost) return
+    try {
+      if (!silent) setFootballLoading(true)
+      const today = new Date().toISOString().split('T')[0]
+      const res = await fetch(
+        `${apiBaseUrl()}/api/football/matches?status=live&date=${today}`,
+        { credentials: 'include' }
+      )
+      const data = await res.json().catch(() => ({}))
+      const raw = Array.isArray(data.matches) ? data.matches : []
+      setFootballApiMatches(raw)
+    } catch (e) {
+      console.error('⚽ [Post] Failed to fetch live matches:', e)
+    } finally {
+      if (!silent) setFootballLoading(false)
+    }
+  }, [isFootballPost])
+
+  useEffect(() => {
+    if (!isFootballPost) {
+      setFootballApiMatches([])
+      setFootballLoading(false)
+      return
+    }
+    fetchFootballLiveMatches(false)
+  }, [isFootballPost, post?._id, fetchFootballLiveMatches])
+
+  const footballDisplayMatches = useMemo(() => {
+    if (!isFootballPost) return []
+    if (footballApiMatches.length > 0) {
+      return footballApiMatches
+        .map(normalizeDbMatchForFootballFeed)
+        .filter(Boolean)
+        .filter(isFootballMatchLive)
+    }
+    return (matchesData || []).filter(isFootballMatchLive)
+  }, [isFootballPost, footballApiMatches, matchesData])
+
   // Parse weather data and fetch user's personalized cities
   useEffect(() => {
     if (!isWeatherPost || !post?.weatherData) {
@@ -569,72 +652,19 @@ const showToast = useShowToast()
     }
   }, [post?.weatherData, isWeatherPost, user?._id])
   
-  // Listen for real-time football match updates
+  // Same as mobile Post: refresh live list from API on socket (feed + cards stay in sync)
   useEffect(() => {
-    if (!isFootballPost || !post?._id) return
-    
-    const handleMatchUpdate = (event) => {
-      const { postId, matchData, updatedAt } = event.detail
-      
-      // Only update if this is the correct post
-      if (postId === post._id.toString()) {
-        console.log('⚽ Updating match data for post:', postId)
-        
-        // Check if score changed (to determine if we should move post to top)
-        let scoreChanged = false
-        const updatedMatchData = matchData.map((newMatch, index) => {
-          // Try to find existing match to preserve date and check score
-          const existingMatch = matchesData.find(m => 
-            (m.homeTeam?.name || m.homeTeam) === (newMatch.homeTeam?.name || newMatch.homeTeam) &&
-            (m.awayTeam?.name || m.awayTeam) === (newMatch.awayTeam?.name || newMatch.awayTeam)
-          )
-          
-          // Check if score changed
-          if (existingMatch) {
-            const oldHomeScore = existingMatch.score?.home ?? 0
-            const oldAwayScore = existingMatch.score?.away ?? 0
-            const newHomeScore = newMatch.score?.home ?? 0
-            const newAwayScore = newMatch.score?.away ?? 0
-            
-            if (oldHomeScore !== newHomeScore || oldAwayScore !== newAwayScore) {
-              scoreChanged = true
-              console.log(`  ⚽ Score changed: ${oldHomeScore}-${oldAwayScore} → ${newHomeScore}-${newAwayScore}`)
-            }
-            
-            // Preserve date if it exists in existing match
-            if (existingMatch.date) {
-              return {
-                ...newMatch,
-                date: existingMatch.date,
-                startTime: existingMatch.startTime || existingMatch.date
-              }
-            }
-          }
-          
-          return newMatch
-        })
-        
-        setMatchesData(updatedMatchData)
-        
-        // Move post to top of feed ONLY if score changed
-        if (scoreChanged && setFollowPost) {
-          console.log('  📌 Moving post to top (score changed)')
-          setFollowPost(prev => {
-            const filtered = prev.filter(p => p._id !== post._id)
-            // Get updated post and move to top
-            const updatedPost = { ...post, footballData: JSON.stringify(updatedMatchData) }
-            return [updatedPost, ...filtered]
-          })
-        }
-      }
+    if (!isFootballPost) return
+    const refresh = () => {
+      fetchFootballLiveMatches(true)
     }
-    
-    window.addEventListener('footballMatchUpdate', handleMatchUpdate)
-    
+    window.addEventListener('footballMatchUpdate', refresh)
+    window.addEventListener('footballPageUpdate', refresh)
     return () => {
-      window.removeEventListener('footballMatchUpdate', handleMatchUpdate)
+      window.removeEventListener('footballMatchUpdate', refresh)
+      window.removeEventListener('footballPageUpdate', refresh)
     }
-  }, [isFootballPost, post?._id, post, setFollowPost])
+  }, [isFootballPost, fetchFootballLiveMatches])
   
   let chessGameData = null
   if (isChessPost) {
@@ -1052,24 +1082,55 @@ const showToast = useShowToast()
        )}
      </Box>
   
-  {/* Football Match Cards - Visual Table */}
-  {isFootballPost && matchesData.length > 0 && (
-    <VStack spacing={3} mt={3} mb={2} align="stretch">
-      {matchesData.map((match, index) => {
-        const isLive = ['1H', '2H', 'HT', 'BT', 'ET', 'P', 'LIVE'].includes(match.status?.short)
-        const isFinished = ['FT', 'AET', 'PEN'].includes(match.status?.short)
-        const hasScore = match.score?.home !== null && match.score?.home !== undefined
+  {/* Football: live list from API (like mobile); post.footballData only if API empty */}
+  {isFootballPost && footballLoading && footballDisplayMatches.length === 0 && (
+    <Flex justify="center" align="center" py={6} direction="column" gap={2}>
+      <Spinner size="sm" color="blue.500" />
+      <Text fontSize="sm" color={secondaryTextColor}>
+        Loading matches…
+      </Text>
+    </Flex>
+  )}
+
+  {isFootballPost && !footballLoading && footballDisplayMatches.length === 0 && (
+    <Box mt={4} mb={2} p={4} borderRadius="xl" borderWidth="1px" borderColor={footballMatchCardBorder} bg={footballMatchCardBg} textAlign="center">
+      <Text fontWeight="bold" color={textColor}>⚽ No live matches right now</Text>
+      <Text fontSize="sm" color={secondaryTextColor} mt={1}>
+        Check back during match hours — or open the Football page for more.
+      </Text>
+    </Box>
+  )}
+
+  {isFootballPost && footballDisplayMatches.length > 0 && (
+    <VStack spacing={4} mt={4} mb={2} align="stretch" w="full">
+      {footballDisplayMatches.map((match, index) => {
+        const statusShort = match.status?.short || match.fixture?.status?.short || ''
+        const isLive = ['1H', '2H', 'HT', 'BT', 'ET', 'P', 'LIVE', 'IN_PLAY', 'PAUSED'].includes(statusShort)
+        const isFinished = ['FT', 'AET', 'PEN'].includes(statusShort)
+        const homeGoals = match.score?.home ?? match.goals?.home
+        const awayGoals = match.score?.away ?? match.goals?.away
+        const hasScore = homeGoals !== null && homeGoals !== undefined && awayGoals !== null && awayGoals !== undefined
         const goalEvents = (match.events || []).filter(e => e.type === 'Goal')
-        
+        const matchKey =
+          match.fixtureId != null
+            ? String(match.fixtureId)
+            : match._id != null
+              ? String(match._id)
+              : match.fixture?.id != null
+                ? String(match.fixture.id)
+                : `idx-${index}`
+
         return (
         <Box
-          key={index}
-          bg={cardBg}
-          borderRadius="lg"
+          key={matchKey}
+          bg={footballMatchCardBg}
+          borderRadius="xl"
           border="1px solid"
-          borderColor={borderColor}
-          p={3}
-          _hover={{ shadow: 'md' }}
+          borderColor={footballMatchCardBorder}
+          boxShadow="md"
+          p={4}
+          w="full"
+          _hover={{ shadow: 'lg', borderColor: footballMatchCardHoverBorder }}
           transition="all 0.2s"
           cursor="pointer"
           onClick={() => {
@@ -1079,7 +1140,7 @@ const showToast = useShowToast()
           }}
         >
           {/* League Header */}
-            <Flex align="center" mb={3} pb={2} borderBottom="1px solid" borderColor={borderColor}>
+            <Flex align="center" mb={3} pb={2} borderBottom="1px solid" borderColor={footballMatchCardBorder}>
             {match.league?.logo && (
               <Image src={match.league.logo} boxSize="16px" mr={2} alt={match.league.name} />
             )}
@@ -1092,7 +1153,7 @@ const showToast = useShowToast()
                 <Flex ml="auto" align="center" bg="red.500" px={2} py={0.5} borderRadius="md">
                   <Box w="6px" h="6px" bg="white" borderRadius="full" mr={1} />
                   <Text fontSize="xs" fontWeight="bold" color="white">
-                    {match.status?.short === 'HT' ? 'HALF TIME' : `LIVE ${match.status?.elapsed || ''}'`}
+                    {statusShort === 'HT' ? 'HALF TIME' : `LIVE ${match.status?.elapsed ?? match.fixture?.status?.elapsed ?? ''}'`}
                   </Text>
                 </Flex>
               )}
@@ -1108,11 +1169,11 @@ const showToast = useShowToast()
             <Flex align="center" justify="space-between" mb={2}>
             {/* Home Team */}
             <Flex align="center" flex={1} mr={2}>
-              {match.homeTeam?.logo && (
-                  <Image src={match.homeTeam.logo} boxSize="28px" mr={2} alt={match.homeTeam.name} />
+              {(match.homeTeam?.logo || match.teams?.home?.logo) && (
+                  <Image src={match.homeTeam?.logo || match.teams?.home?.logo} boxSize="28px" mr={2} alt={match.homeTeam?.name || match.teams?.home?.name} />
               )}
                 <Text fontSize="sm" fontWeight="bold" color={textColor} noOfLines={1}>
-                {match.homeTeam?.name || 'Home'}
+                {match.homeTeam?.name || match.teams?.home?.name || 'Home'}
               </Text>
             </Flex>
             
@@ -1121,13 +1182,13 @@ const showToast = useShowToast()
                 {hasScore ? (
                   <Flex align="center" gap={2}>
                     <Text fontSize="xl" fontWeight="bold" color={textColor}>
-                      {match.score.home ?? 0}
+                      {homeGoals ?? 0}
                     </Text>
                     <Text fontSize="lg" fontWeight="bold" color={secondaryTextColor}>
                       -
                     </Text>
                     <Text fontSize="xl" fontWeight="bold" color={textColor}>
-                      {match.score.away ?? 0}
+                      {awayGoals ?? 0}
                     </Text>
                   </Flex>
                 ) : (
@@ -1140,22 +1201,22 @@ const showToast = useShowToast()
             {/* Away Team */}
             <Flex align="center" flex={1} ml={2} justify="flex-end">
                 <Text fontSize="sm" fontWeight="bold" color={textColor} noOfLines={1} textAlign="right">
-                {match.awayTeam?.name || 'Away'}
+                {match.awayTeam?.name || match.teams?.away?.name || 'Away'}
               </Text>
-              {match.awayTeam?.logo && (
-                  <Image src={match.awayTeam.logo} boxSize="28px" ml={2} alt={match.awayTeam.name} />
+              {(match.awayTeam?.logo || match.teams?.away?.logo) && (
+                  <Image src={match.awayTeam?.logo || match.teams?.away?.logo} boxSize="28px" ml={2} alt={match.awayTeam?.name || match.teams?.away?.name} />
               )}
             </Flex>
           </Flex>
             
             {/* Goal Events - Grouped by Team */}
             {goalEvents.length > 0 && (
-              <Box mt={3} pt={3} borderTop="1px solid" borderColor={borderColor}>
+              <Box mt={3} pt={3} borderTop="1px solid" borderColor={footballMatchCardBorder}>
                 <Grid templateColumns="1fr auto 1fr" gap={2} fontSize="xs">
                   {/* Home Team Goals */}
                   <GridItem textAlign="right">
                     {goalEvents
-                      .filter(e => e.team === match.homeTeam?.name)
+                      .filter(e => e.team === (match.homeTeam?.name || match.teams?.home?.name))
                       .map((event, idx) => (
                         <Text key={idx} color={textColor} mb={1}>
                           {event.player} {event.time !== '?' && event.time ? `${event.time}'` : ''}{event.detail?.includes('Penalty') || event.detail?.includes('PENALTY') ? ' (P)' : ''}
@@ -1171,7 +1232,7 @@ const showToast = useShowToast()
                   {/* Away Team Goals */}
                   <GridItem textAlign="left">
                     {goalEvents
-                      .filter(e => e.team === match.awayTeam?.name)
+                      .filter(e => e.team === (match.awayTeam?.name || match.teams?.away?.name))
                       .map((event, idx) => (
                         <Text key={idx} color={textColor} mb={1}>
                           {event.player} {event.time !== '?' && event.time ? `${event.time}'` : ''}{event.detail?.includes('Penalty') || event.detail?.includes('PENALTY') ? ' (P)' : ''}

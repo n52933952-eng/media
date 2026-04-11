@@ -1,4 +1,5 @@
 import React,{useEffect,useState,useContext,useRef,useCallback} from 'react'
+import { useLocation } from 'react-router-dom'
 import useShowToast from '../hooks/useShowToast.js'
 import{Spinner,Flex,Box,Text,useColorModeValue} from '@chakra-ui/react'
 import Post from '../Components/Post'
@@ -12,6 +13,7 @@ import ActivityFeed from '../Components/ActivityFeed'
 
 
 const HomePage = () => {
+  const location = useLocation()
   const{followPost,setFollowPost}=useContext(PostContext)
   const {socket} = useContext(SocketContext) || {}
   const {user} = useContext(UserContext) || {}
@@ -118,14 +120,15 @@ const HomePage = () => {
     }
   }, [setFollowPost])
 
-  const getFeedPost = useCallback(async(loadMore = false) => {
+  const getFeedPost = useCallback(async(loadMore = false, options = {}) => {
+    const silent = options.silent === true
     // Prevent duplicate requests
     if (isLoadingRef.current) return
     isLoadingRef.current = true
     
     if (loadMore) {
       setLoadingMore(true)
-    } else {
+    } else if (!silent) {
       setLoading(true)
       setError(null)
     }
@@ -145,7 +148,7 @@ const HomePage = () => {
 
       if(data.error){
         setError(data.error)
-        showToast("Error",data.error,"error")
+        if (!silent) showToast("Error",data.error,"error")
       }
 
       if(res.ok){
@@ -197,13 +200,25 @@ const HomePage = () => {
     catch(error){
       const errorMsg = error?.message || "Failed to fetch posts. Make sure backend server is running."
       setError(errorMsg)
-      showToast("Error",errorMsg,"error")
+      if (!silent) showToast("Error",errorMsg,"error")
     }finally{
       setLoading(false)
       setLoadingMore(false)
       isLoadingRef.current = false
     }
   }, [showToast, setFollowPost]) // Removed followPost.length to prevent unnecessary re-renders
+
+  // Same as mobile FeedScreen: when user returns to the tab, refresh feed for latest Football/Weather posts
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState !== 'visible') return
+      if (location.pathname !== '/home') return
+      if (isLoadingRef.current) return
+      getFeedPost(false, { silent: true })
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => document.removeEventListener('visibilitychange', onVisible)
+  }, [location.pathname, getFeedPost])
   
   // Initial load - use ref to track if already loaded
   useEffect(() => {
@@ -393,57 +408,32 @@ const HomePage = () => {
       })
     }
 
-    // Handle real-time football match updates
-    const handleFootballMatchUpdate = (data) => {
-      const { postId, matchData, updatedAt } = data
-      console.log('⚽ Real-time match update received:', postId)
-      
-      setFollowPost(prev => {
-        // Find the post that was updated
-        const postIndex = prev.findIndex(p => p._id?.toString() === postId?.toString())
-        
-        if (postIndex !== -1) {
-          // Update the post with new match data
-          const updated = {
-            ...prev[postIndex],
-            footballData: JSON.stringify(matchData),
-            updatedAt: updatedAt ? new Date(updatedAt) : new Date(), // Use server timestamp or current time
-            createdAt: prev[postIndex].createdAt // Keep original createdAt for chronological sorting
-          }
-          
-          // Remove the old post
-          const filtered = prev.filter((p, idx) => idx !== postIndex)
-          
-          // Add updated post, then sort all posts by updatedAt (or createdAt) - newest first
-          // This ensures Football post moves to top when scores update
-          const combined = [updated, ...filtered]
-          combined.sort((a, b) => {
-            const dateA = new Date(a.updatedAt || a.createdAt).getTime()
-            const dateB = new Date(b.updatedAt || b.createdAt).getTime()
-            return dateB - dateA // Newest first
-          })
-          
-          return combined
-        }
-        
-        // If post not found, just return previous state (don't add as new post)
-        console.log('⚠️ [HomePage] Football post not found in feed, skipping update')
-        return prev
-      })
+    // Same as mobile FeedScreen: full feed refetch on Football/Weather socket events (live matches + cron page updates)
+    const handleFootballFeedSync = () => {
+      console.log('⚽ [HomePage] Football socket — silent feed refresh (matches mobile)')
+      getFeedPost(false, { silent: true })
+    }
+    const handleWeatherFeedSync = () => {
+      console.log('🌤️ [HomePage] Weather socket — silent feed refresh (matches mobile)')
+      getFeedPost(false, { silent: true })
     }
 
     socket.on('newPost', handleNewPost)
     socket.on('postDeleted', handlePostDeleted)
     socket.on('postUpdated', handlePostUpdated)
-    socket.on('footballMatchUpdate', handleFootballMatchUpdate)
+    socket.on('footballPageUpdate', handleFootballFeedSync)
+    socket.on('footballMatchUpdate', handleFootballFeedSync)
+    socket.on('weatherUpdate', handleWeatherFeedSync)
 
     return () => {
       socket.off('newPost', handleNewPost)
       socket.off('postDeleted', handlePostDeleted)
       socket.off('postUpdated', handlePostUpdated)
-      socket.off('footballMatchUpdate', handleFootballMatchUpdate)
+      socket.off('footballPageUpdate', handleFootballFeedSync)
+      socket.off('footballMatchUpdate', handleFootballFeedSync)
+      socket.off('weatherUpdate', handleWeatherFeedSync)
     }
-  }, [socket, setFollowPost])
+  }, [socket, setFollowPost, getFeedPost, user])
  
  
 

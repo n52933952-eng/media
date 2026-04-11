@@ -790,11 +790,15 @@ export const searchUsers = async(req, res) => {
             return res.status(200).json([])  // Return empty array if no search term
         }
 
-        // List of system accounts/channels to exclude from search
+        // System + live channel accounts + legacy removed channels (still in DB) — hide from @ search
+        const LEGACY_LIVE_CHANNEL_USERNAMES = [
+            'NBCNews', 'BeinSportsNews', 'NatGeoKids', 'SciShowKids', 'JJAnimalTime',
+            'KidsArabic', 'NatGeoAnimals', 'MBCDrama'
+        ]
         const systemAccounts = [
-            'Football', 'Weather', 'AlJazeera', 'NBCNews', 'BeinSportsNews', 
-            'SkyNews', 'Cartoonito', 'NatGeoKids', 'SciShowKids', 'JJAnimalTime',
-            'KidsArabic', 'NatGeoAnimals', 'MBCDrama', 'Fox11'
+            'Football', 'Weather',
+            ...LIVE_CHANNELS.map((c) => c.username),
+            ...LEGACY_LIVE_CHANNEL_USERNAMES
         ]
 
         // Enhanced search: matches username OR name (case-insensitive, partial match)
