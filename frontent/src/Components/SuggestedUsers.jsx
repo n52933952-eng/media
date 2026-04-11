@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useContext, useCallback } from 'react'
-import { Box, Flex, Text, Input, InputGroup, InputLeftElement, Spinner, useColorModeValue } from '@chakra-ui/react'
-import { SearchIcon } from '@chakra-ui/icons'
+import { Box, Flex, Text, Input, InputGroup, InputLeftElement, Spinner, IconButton, Tooltip, useColorModeValue } from '@chakra-ui/react'
+import { SearchIcon, RepeatIcon } from '@chakra-ui/icons'
 import SuggestedUser from './SuggestedUser'
 import { UserContext } from '../context/UserContext'
 
@@ -12,6 +12,7 @@ const SuggestedUsers = ({ onUserFollowed }) => {
   const [searchQuery, setSearchQuery] = useState('')
   const [searchResults, setSearchResults] = useState([])
   const [searchLoading, setSearchLoading] = useState(false)
+  const [suggestedRefreshing, setSuggestedRefreshing] = useState(false)
 
   const bgColor = useColorModeValue('white', '#1a1a1a')
   const borderColor = useColorModeValue('gray.200', '#2d2d2d')
@@ -37,13 +38,20 @@ const SuggestedUsers = ({ onUserFollowed }) => {
   }, [])
 
   // Fetch suggested users - memoized to prevent infinite loops
-  const fetchSuggestedUsers = useCallback(async () => {
+  // opts.soft: true = refresh from header icon (keep list visible, spinner on button only)
+  const fetchSuggestedUsers = useCallback(async (opts = {}) => {
+    const soft = opts.soft === true
     if (!user?._id) {
       setLoading(false)
+      setSuggestedRefreshing(false)
       return
     }
-    
-    setLoading(true)
+
+    if (soft) {
+      setSuggestedRefreshing(true)
+    } else {
+      setLoading(true)
+    }
     try {
       const res = await fetch(
         `${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/user/suggested`,
@@ -64,7 +72,11 @@ const SuggestedUsers = ({ onUserFollowed }) => {
       console.error('Error fetching suggested users:', error)
       setSuggestedUsers([])
     } finally {
-      setLoading(false)
+      if (soft) {
+        setSuggestedRefreshing(false)
+      } else {
+        setLoading(false)
+      }
     }
   }, [user?._id])
 
@@ -227,9 +239,27 @@ const SuggestedUsers = ({ onUserFollowed }) => {
       {/* Suggested Users (only show when not searching) */}
       {searchQuery.trim().length === 0 && (
         <Box>
-          <Text fontSize="sm" fontWeight="bold" mb={3} color={textColor}>
-            Suggested for you
-          </Text>
+          <Flex align="center" justify="space-between" gap={2} mb={3}>
+            <Text fontSize="sm" fontWeight="bold" color={textColor}>
+              Suggested for you
+            </Text>
+            <Tooltip label="Refresh suggestions" placement="top" hasArrow>
+              <IconButton
+                aria-label="Refresh suggested users"
+                icon={<RepeatIcon />}
+                size="xs"
+                variant="ghost"
+                colorScheme="blue"
+                isLoading={suggestedRefreshing}
+                isDisabled={!user?._id || loading}
+                onClick={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  fetchSuggestedUsers({ soft: true })
+                }}
+              />
+            </Tooltip>
+          </Flex>
 
           {loading ? (
             <Box minH="300px" display="flex" alignItems="center" justifyContent="center">
