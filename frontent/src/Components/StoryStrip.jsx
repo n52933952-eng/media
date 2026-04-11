@@ -2,6 +2,10 @@ import React, { useCallback, useContext, useEffect, useMemo, useState } from 're
 import { keyframes } from '@emotion/react'
 import { Box, Flex, Text, Avatar, Spinner, useColorModeValue, useDisclosure } from '@chakra-ui/react'
 import { AddIcon } from '@chakra-ui/icons'
+import { UserContext } from '../context/UserContext'
+import API_BASE_URL from '../config/api'
+import AddStoryModal from './AddStoryModal'
+import StoryViewerModal from './StoryViewerModal'
 
 /** Unread ring pulse — matches “live / new” feel on mobile without changing layout. */
 const storyRingGlowLight = keyframes`
@@ -14,10 +18,6 @@ const storyRingGlowDark = keyframes`
   55% { box-shadow: 0 0 0 10px rgba(79, 172, 254, 0); }
   100% { box-shadow: 0 0 0 0 rgba(79, 172, 254, 0); }
 `
-import { UserContext } from '../context/UserContext'
-import API_BASE_URL from '../config/api'
-import AddStoryModal from './AddStoryModal'
-import StoryViewerModal from './StoryViewerModal'
 
 function userIdOf(entry) {
   const u = entry?.user
@@ -50,14 +50,19 @@ export default function StoryStrip() {
   const bgCard = useColorModeValue('gray.50', 'whiteAlpha.50')
   const stripBorder = useColorModeValue('gray.100', 'whiteAlpha.100')
   const addBadgeBorder = useColorModeValue('white', 'gray.900')
+  /** After first load, keep the strip mounted so silent refetches don’t collapse the row (ref alone wouldn’t re-render). */
+  const [initialFetchDone, setInitialFetchDone] = useState(false)
 
-  const fetchStrip = useCallback(async () => {
+  /** `silent`: update data without swapping the row for a spinner (avoids shrink/jump when avatar refetches). */
+  const fetchStrip = useCallback(async (opts) => {
+    const silent = Boolean(opts?.silent)
     if (!user?._id) {
       setStrip([])
       setLoading(false)
+      setInitialFetchDone(false)
       return
     }
-    setLoading(true)
+    if (!silent) setLoading(true)
     try {
       const res = await fetch(`${API_BASE_URL}/api/story/feed-strip`, { credentials: 'include' })
       const data = await res.json()
@@ -66,7 +71,8 @@ export default function StoryStrip() {
     } catch {
       setStrip([])
     } finally {
-      setLoading(false)
+      if (!silent) setLoading(false)
+      setInitialFetchDone(true)
     }
   }, [user?._id])
 
@@ -75,7 +81,7 @@ export default function StoryStrip() {
   }, [fetchStrip])
 
   useEffect(() => {
-    const onRefresh = () => fetchStrip()
+    const onRefresh = () => fetchStrip({ silent: true })
     window.addEventListener('storyStripChanged', onRefresh)
     return () => window.removeEventListener('storyStripChanged', onRefresh)
   }, [fetchStrip])
@@ -107,7 +113,7 @@ export default function StoryStrip() {
     setViewerOpen(false)
     setViewerUserId(null)
     setViewerPreview(null)
-    fetchStrip()
+    fetchStrip({ silent: true })
   }, [fetchStrip])
 
   if (!user?._id) return null
@@ -143,15 +149,24 @@ export default function StoryStrip() {
         bg={bgCard}
         borderWidth="1px"
         borderColor={stripBorder}
+        minH="128px"
+        position="relative"
       >
-        <Flex align="flex-start" gap={4} overflowX="auto" pb={1} sx={{ scrollbarGutter: 'stable' }}>
-          {loading && (
-            <Flex align="center" justify="center" minW="56px" minH="72px">
-              <Spinner size="sm" />
+        <Flex
+          align="flex-start"
+          gap={4}
+          overflowX="auto"
+          pb={1}
+          minH="104px"
+          sx={{ scrollbarGutter: 'stable' }}
+        >
+          {loading && !initialFetchDone && (
+            <Flex align="center" justify="center" minW="100%" minH="88px">
+              <Spinner size="sm" thickness="3px" speed="0.65s" color="gray.400" />
             </Flex>
           )}
 
-          {!loading && (
+          {initialFetchDone && (
             <Flex direction="column" align="center" gap={1} flexShrink={0} w="72px">
               <Box position="relative">
                 {myEntry ? (
@@ -223,7 +238,7 @@ export default function StoryStrip() {
             </Flex>
           )}
 
-          {!loading &&
+          {initialFetchDone &&
             others.map((s) => {
               const u = s.user || {}
               const id = userIdOf(s)
@@ -248,9 +263,14 @@ export default function StoryStrip() {
               )
             })}
         </Flex>
+        {loading && initialFetchDone && (
+          <Box position="absolute" top={2} right={2} pointerEvents="none">
+            <Spinner size="xs" thickness="2px" speed="0.65s" color="gray.500" />
+          </Box>
+        )}
       </Box>
 
-      <AddStoryModal isOpen={addOpen} onClose={onAddClose} onPosted={fetchStrip} />
+      <AddStoryModal isOpen={addOpen} onClose={onAddClose} onPosted={() => fetchStrip({ silent: true })} />
       <StoryViewerModal
         isOpen={viewerOpen}
         onClose={closeViewer}
