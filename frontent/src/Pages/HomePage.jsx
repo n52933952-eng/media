@@ -9,6 +9,7 @@ import {UserContext} from '../context/UserContext'
 import SuggestedUsers from '../Components/SuggestedUsers'
 import SuggestedChannels from '../Components/SuggestedChannels'
 import ActivityFeed from '../Components/ActivityFeed'
+import StoryStrip from '../Components/StoryStrip'
 
 
 
@@ -460,6 +461,8 @@ const HomePage = () => {
         flex={{ base: 1, lg: '0 0 50%' }} 
         maxW={{ base: '100%', lg: '50%' }}
       >
+        <StoryStrip />
+
         {/* Error state */}
         {error && !loading && (
           <Box textAlign="center" p={8} bg={bgColor} borderRadius="md" mb={4}>

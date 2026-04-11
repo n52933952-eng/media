@@ -383,6 +383,10 @@ export const SocketContextProvider = ({ children }) => {
       window.dispatchEvent(new CustomEvent('footballPageUpdate', { detail: data }));
     });
 
+    newSocket?.on('storyStripChanged', (data) => {
+      window.dispatchEvent(new CustomEvent('storyStripChanged', { detail: data }));
+    });
+
     return () => {
       newSocket?.off('unreadCountUpdate');
       newSocket?.off('newMessage');
@@ -390,6 +394,7 @@ export const SocketContextProvider = ({ children }) => {
       newSocket?.off('notificationDeleted');
       newSocket?.off('footballMatchUpdate');
       newSocket?.off('footballPageUpdate');
+      newSocket?.off('storyStripChanged');
       newSocket.close();
     };
   }, [user]);
