@@ -14,46 +14,10 @@ import AddContributorModal from './AddContributorModal'
 import ManageContributorsModal from './ManageContributorsModal'
 import EditPost from './EditPost'
 import FootballIcon from './FootballIcon'
+import FootballMatchCards from './FootballMatchCards'
+import { normalizeDbMatchForFootballFeed, isFootballMatchLive } from '../utils/footballFeed'
 
 const apiBaseUrl = () => (import.meta.env.PROD ? window.location.origin : 'http://localhost:5000')
-
-/** DB Match doc → same shape as `footballData` JSON entries (feed rendering). */
-function normalizeDbMatchForFootballFeed(m) {
-  if (!m || typeof m !== 'object') return null
-  if (m.homeTeam?.name && (m.score !== undefined || m.status?.short)) return m
-  return {
-    _id: m._id,
-    fixtureId: m.fixtureId,
-    homeTeam: { name: m.teams?.home?.name, logo: m.teams?.home?.logo },
-    awayTeam: { name: m.teams?.away?.name, logo: m.teams?.away?.logo },
-    score: { home: m.goals?.home ?? null, away: m.goals?.away ?? null },
-    status: {
-      short: m.fixture?.status?.short,
-      long: m.fixture?.status?.long,
-      elapsed: m.fixture?.status?.elapsed,
-    },
-    league: m.league,
-    events: Array.isArray(m.events) ? m.events : [],
-    time: m.fixture?.date
-      ? new Date(m.fixture.date).toLocaleTimeString('en-US', {
-          hour: '2-digit',
-          minute: '2-digit',
-          hour12: true,
-        })
-      : undefined,
-  }
-}
-
-function isFootballMatchLive(m) {
-  if (!m) return false
-  const u = String(m.status?.short || m.fixture?.status?.short || '').trim().toUpperCase()
-  if (!u && m.fixture?.status?.elapsed != null) return true
-  if (['FT', 'AET', 'PEN', 'CANC', 'ABD', 'AWD', 'WO'].includes(u)) return false
-  if (['LIVE', 'IN_PLAY', 'PAUSED', '1H', '2H', 'HT', 'ET', 'BT', 'P'].includes(u)) return true
-  const elapsed = m.fixture?.status?.elapsed ?? m.status?.elapsed
-  if (elapsed != null && Number(elapsed) >= 0 && u !== 'NS' && u !== 'TBD') return true
-  return false
-}
 
 const Post = ({post: initialPost, postedBy, onDelete}) => {
     
@@ -119,7 +83,6 @@ const showToast = useShowToast()
   const { isOpen: isEditPostOpen, onOpen: onEditPostOpen, onClose: onEditPostClose } = useDisclosure()
   
   // Color modes
-  const bgColor = useColorModeValue('#f7f9fc', '#1a1d2e')
   const cardBg = useColorModeValue('white', '#252b3b')
   const borderColor = useColorModeValue('#e1e4ea', '#2d3548')
   const textColor = useColorModeValue('gray.800', 'white')
@@ -127,7 +90,6 @@ const showToast = useShowToast()
   // Each live match is its own raised card (visually separate from the post body, like mobile units)
   const footballMatchCardBg = useColorModeValue('white', '#1e2433')
   const footballMatchCardBorder = useColorModeValue('gray.200', 'gray.600')
-  const footballMatchCardHoverBorder = useColorModeValue('blue.200', 'blue.500')
   
   // Football feed card (same idea as mobile: live list from API, post.footballData as fallback)
   const isFootballPost = postedBy?.username === 'Football'
@@ -1040,30 +1002,34 @@ const showToast = useShowToast()
       </Flex>
     )}
     
-     {/* Post Text with truncation */}
+     {/* Post text — hide for Football: copy is often stale (“no live matches”) while live cards come from API */}
      <Box>
-       <Text
-         ref={textRef}
-         noOfLines={shouldTruncate && !showFullText ? 4 : undefined}
-         style={{
-           wordBreak: 'break-word',
-           whiteSpace: 'pre-wrap'
-         }}
-       >
-         {post.text}
-       </Text>
-       {shouldTruncate && (
-         <Button
-           size="xs"
-           variant="link"
-           colorScheme="blue"
-           mt={1}
-           onClick={() => setShowFullText(!showFullText)}
-         >
-           {showFullText ? 'Show less' : 'Show more...'}
-         </Button>
+       {!isFootballPost && (
+         <>
+           <Text
+             ref={textRef}
+             noOfLines={shouldTruncate && !showFullText ? 4 : undefined}
+             style={{
+               wordBreak: 'break-word',
+               whiteSpace: 'pre-wrap'
+             }}
+           >
+             {post.text}
+           </Text>
+           {shouldTruncate && (
+             <Button
+               size="xs"
+               variant="link"
+               colorScheme="blue"
+               mt={1}
+               onClick={() => setShowFullText(!showFullText)}
+             >
+               {showFullText ? 'Show less' : 'Show more...'}
+             </Button>
+           )}
+         </>
        )}
-       
+
        {/* Weather Onboarding Button */}
        {isWeatherOnboarding && (
          <Button
@@ -1102,155 +1068,12 @@ const showToast = useShowToast()
   )}
 
   {isFootballPost && footballDisplayMatches.length > 0 && (
-    <VStack spacing={4} mt={4} mb={2} align="stretch" w="full">
-      {footballDisplayMatches.map((match, index) => {
-        const statusShort = match.status?.short || match.fixture?.status?.short || ''
-        const isLive = ['1H', '2H', 'HT', 'BT', 'ET', 'P', 'LIVE', 'IN_PLAY', 'PAUSED'].includes(statusShort)
-        const isFinished = ['FT', 'AET', 'PEN'].includes(statusShort)
-        const homeGoals = match.score?.home ?? match.goals?.home
-        const awayGoals = match.score?.away ?? match.goals?.away
-        const hasScore = homeGoals !== null && homeGoals !== undefined && awayGoals !== null && awayGoals !== undefined
-        const goalEvents = (match.events || []).filter(e => e.type === 'Goal')
-        const matchKey =
-          match.fixtureId != null
-            ? String(match.fixtureId)
-            : match._id != null
-              ? String(match._id)
-              : match.fixture?.id != null
-                ? String(match.fixture.id)
-                : `idx-${index}`
-
-        return (
-        <Box
-          key={matchKey}
-          bg={footballMatchCardBg}
-          borderRadius="xl"
-          border="1px solid"
-          borderColor={footballMatchCardBorder}
-          boxShadow="md"
-          p={4}
-          w="full"
-          _hover={{ shadow: 'lg', borderColor: footballMatchCardHoverBorder }}
-          transition="all 0.2s"
-          cursor="pointer"
-          onClick={() => {
-            if (post?._id && postedBy?.username) {
-              navigate(`/${postedBy.username}/post/${post._id}`)
-            }
-          }}
-        >
-          {/* League Header */}
-            <Flex align="center" mb={3} pb={2} borderBottom="1px solid" borderColor={footballMatchCardBorder}>
-            {match.league?.logo && (
-              <Image src={match.league.logo} boxSize="16px" mr={2} alt={match.league.name} />
-            )}
-            <Text fontSize="xs" fontWeight="semibold" color={secondaryTextColor}>
-              {match.league?.name || 'Premier League'}
-            </Text>
-              
-              {/* Live/Status Badge */}
-              {isLive && (
-                <Flex ml="auto" align="center" bg="red.500" px={2} py={0.5} borderRadius="md">
-                  <Box w="6px" h="6px" bg="white" borderRadius="full" mr={1} />
-                  <Text fontSize="xs" fontWeight="bold" color="white">
-                    {statusShort === 'HT' ? 'HALF TIME' : `LIVE ${match.status?.elapsed ?? match.fixture?.status?.elapsed ?? ''}'`}
-                  </Text>
-                </Flex>
-              )}
-              
-              {isFinished && (
-                <Text ml="auto" fontSize="xs" fontWeight="bold" color="gray.500">
-                  FT
-                </Text>
-              )}
-          </Flex>
-          
-          {/* Match Details */}
-            <Flex align="center" justify="space-between" mb={2}>
-            {/* Home Team */}
-            <Flex align="center" flex={1} mr={2}>
-              {(match.homeTeam?.logo || match.teams?.home?.logo) && (
-                  <Image src={match.homeTeam?.logo || match.teams?.home?.logo} boxSize="28px" mr={2} alt={match.homeTeam?.name || match.teams?.home?.name} />
-              )}
-                <Text fontSize="sm" fontWeight="bold" color={textColor} noOfLines={1}>
-                {match.homeTeam?.name || match.teams?.home?.name || 'Home'}
-              </Text>
-            </Flex>
-            
-              {/* Score or Time */}
-              <Flex align="center" justify="center" minW="80px" direction="column">
-                {hasScore ? (
-                  <Flex align="center" gap={2}>
-                    <Text fontSize="xl" fontWeight="bold" color={textColor}>
-                      {homeGoals ?? 0}
-                    </Text>
-                    <Text fontSize="lg" fontWeight="bold" color={secondaryTextColor}>
-                      -
-                    </Text>
-                    <Text fontSize="xl" fontWeight="bold" color={textColor}>
-                      {awayGoals ?? 0}
-                    </Text>
-                  </Flex>
-                ) : (
-              <Text fontSize="xs" fontWeight="bold" color={secondaryTextColor}>
-                ⏰ {match.time}
-              </Text>
-                )}
-            </Flex>
-            
-            {/* Away Team */}
-            <Flex align="center" flex={1} ml={2} justify="flex-end">
-                <Text fontSize="sm" fontWeight="bold" color={textColor} noOfLines={1} textAlign="right">
-                {match.awayTeam?.name || match.teams?.away?.name || 'Away'}
-              </Text>
-              {(match.awayTeam?.logo || match.teams?.away?.logo) && (
-                  <Image src={match.awayTeam?.logo || match.teams?.away?.logo} boxSize="28px" ml={2} alt={match.awayTeam?.name || match.teams?.away?.name} />
-              )}
-            </Flex>
-          </Flex>
-            
-            {/* Goal Events - Grouped by Team */}
-            {goalEvents.length > 0 && (
-              <Box mt={3} pt={3} borderTop="1px solid" borderColor={footballMatchCardBorder}>
-                <Grid templateColumns="1fr auto 1fr" gap={2} fontSize="xs">
-                  {/* Home Team Goals */}
-                  <GridItem textAlign="right">
-                    {goalEvents
-                      .filter(e => e.team === (match.homeTeam?.name || match.teams?.home?.name))
-                      .map((event, idx) => (
-                        <Text key={idx} color={textColor} mb={1}>
-                          {event.player} {event.time !== '?' && event.time ? `${event.time}'` : ''}{event.detail?.includes('Penalty') || event.detail?.includes('PENALTY') ? ' (P)' : ''}
-                        </Text>
-                      ))}
-                  </GridItem>
-                  
-                  {/* Goal Icon Center */}
-                  <GridItem display="flex" alignItems="flex-start" justifyContent="center">
-                    <Text color="white" filter="drop-shadow(0 0 1px rgba(0,0,0,0.5))">⚽</Text>
-                  </GridItem>
-                  
-                  {/* Away Team Goals */}
-                  <GridItem textAlign="left">
-                    {goalEvents
-                      .filter(e => e.team === (match.awayTeam?.name || match.teams?.away?.name))
-                      .map((event, idx) => (
-                        <Text key={idx} color={textColor} mb={1}>
-                          {event.player} {event.time !== '?' && event.time ? `${event.time}'` : ''}{event.detail?.includes('Penalty') || event.detail?.includes('PENALTY') ? ' (P)' : ''}
-                        </Text>
-                      ))}
-                  </GridItem>
-                </Grid>
-              </Box>
-            )}
-        </Box>
-        )
-      })}
-      
-      {/* Footer Link */}
-      <Text fontSize="xs" color={secondaryTextColor} textAlign="center" mt={1}>
-        🔗 Check Football page for live updates!
-      </Text>
-    </VStack>
+    <FootballMatchCards
+      matches={footballDisplayMatches}
+      enableNavigate
+      postId={post?._id}
+      postedByUsername={postedBy?.username}
+    />
   )}
   
   {/* Chess Game Card Display */}

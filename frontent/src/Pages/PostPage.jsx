@@ -1,11 +1,11 @@
-import React,{useEffect,useState,useContext} from 'react'
+import React,{useEffect,useState,useContext,useCallback,useMemo} from 'react'
 import{Avatar,Flex,Text,Image,Box,Divider,Button,Spinner,VStack,HStack,Grid,GridItem,SimpleGrid,useColorModeValue,useDisclosure} from '@chakra-ui/react'
 import { HiDotsHorizontal } from "react-icons/hi";
 import Actions from '../Components/Actions'
 import Comment from '../Components/Comment'
 import EditPost from '../Components/EditPost'
 import GetUserProfile from '../hooks/GetUserProfile.js'
-import{useParams} from 'react-router-dom'
+import{useParams, useSearchParams} from 'react-router-dom'
 import{PostContext} from '../context/PostContext'
 import{UserContext} from '../context/UserContext'
 import{SocketContext} from '../context/SocketContext'
@@ -13,7 +13,14 @@ import { MdOutlineDeleteOutline } from "react-icons/md";
 import{formatDistanceToNow} from 'date-fns'
 import useShowToast from '../hooks/useShowToast.js'
 import{useNavigate} from 'react-router-dom'
+import FootballMatchCards from '../Components/FootballMatchCards'
+import {
+  normalizeDbMatchForFootballFeed,
+  isFootballMatchLive,
+  footballMatchKey,
+} from '../utils/footballFeed'
 
+const apiBaseUrl = () => (import.meta.env.PROD ? window.location.origin : 'http://localhost:5000')
 
 const PostPage = () => {
   
@@ -21,6 +28,8 @@ const PostPage = () => {
   const{userpro,loading}=GetUserProfile()
   
   const{id}=useParams()
+  const [searchParams] = useSearchParams()
+  const fixtureIdParam = searchParams.get('fixture')
   
 
    const{user}=useContext(UserContext)
@@ -43,8 +52,8 @@ const PostPage = () => {
     const textColor = useColorModeValue('gray.800', 'white')
     const secondaryTextColor = useColorModeValue('gray.600', 'gray.400')
     
-    // Check if this is a Football post with match data
-    const isFootballPost = userpro?.username === 'Football' && post?.footballData
+    // Football channel posts: live cards come from API (same as feed); footballData is only a fallback
+    const isFootballPost = userpro?.username === 'Football'
     
     // Check if this is a Weather post
     const isWeatherPost = userpro?.username === 'Weather' && post?.weatherData
@@ -55,7 +64,7 @@ const PostPage = () => {
       if (isFootballPost && post?.footballData) {
         try {
           const parsed = JSON.parse(post.footballData)
-          setMatchesData(parsed)
+          setMatchesData(Array.isArray(parsed) ? parsed : parsed ? [parsed] : [])
         } catch (e) {
           console.error('Failed to parse football data:', e)
           setMatchesData([])
@@ -64,6 +73,58 @@ const PostPage = () => {
         setMatchesData([])
       }
     }, [post?.footballData, isFootballPost])
+
+    const [footballApiMatches, setFootballApiMatches] = useState([])
+    const [footballLoading, setFootballLoading] = useState(false)
+
+    const fetchFootballLiveMatches = useCallback(async (silent = false) => {
+      if (!isFootballPost) return
+      try {
+        if (!silent) setFootballLoading(true)
+        const today = new Date().toISOString().split('T')[0]
+        const res = await fetch(
+          `${apiBaseUrl()}/api/football/matches?status=live&date=${today}`,
+          { credentials: 'include' }
+        )
+        const data = await res.json().catch(() => ({}))
+        const raw = Array.isArray(data.matches) ? data.matches : []
+        setFootballApiMatches(raw)
+      } catch (e) {
+        console.error('⚽ [PostPage] Failed to fetch live matches:', e)
+      } finally {
+        if (!silent) setFootballLoading(false)
+      }
+    }, [isFootballPost])
+
+    useEffect(() => {
+      if (!isFootballPost) {
+        setFootballApiMatches([])
+        setFootballLoading(false)
+        return
+      }
+      fetchFootballLiveMatches(false)
+    }, [isFootballPost, post?._id, fetchFootballLiveMatches])
+
+    const footballDisplayMatches = useMemo(() => {
+      if (!isFootballPost) return []
+      if (footballApiMatches.length > 0) {
+        return footballApiMatches
+          .map(normalizeDbMatchForFootballFeed)
+          .filter(Boolean)
+          .filter(isFootballMatchLive)
+      }
+      const arr = Array.isArray(matchesData) ? matchesData : []
+      return arr.filter(isFootballMatchLive)
+    }, [isFootballPost, footballApiMatches, matchesData])
+
+    /** From feed: `?fixture=<id>` shows only that card; if it dropped off live list, show all live again */
+    const footballMatchesForView = useMemo(() => {
+      if (!fixtureIdParam) return footballDisplayMatches
+      const filtered = footballDisplayMatches.filter(
+        (m, i) => footballMatchKey(m, i) === fixtureIdParam
+      )
+      return filtered.length ? filtered : footballDisplayMatches
+    }, [fixtureIdParam, footballDisplayMatches])
     
     // Parse weather data and fetch user's personalized cities
     const [weatherDataArray, setWeatherDataArray] = useState([])
@@ -487,140 +548,30 @@ if(!post) {
 
       </Flex>
 
-    <Text my={3}>{post?.text}</Text>
+    {userpro?.username !== 'Football' && <Text my={3}>{post?.text}</Text>}
 
-    {/* Football Match Cards - Visual Table */}
-    {isFootballPost && matchesData.length > 0 && (
-      <VStack spacing={3} mt={3} mb={2} align="stretch">
-        {matchesData.map((match, index) => {
-          const isLive = ['1H', '2H', 'HT', 'BT', 'ET', 'P', 'LIVE'].includes(match.status?.short)
-          const isFinished = ['FT', 'AET', 'PEN'].includes(match.status?.short)
-          const hasScore = match.score?.home !== null && match.score?.home !== undefined
-          const goalEvents = (match.events || []).filter(e => e.type === 'Goal')
-          
-          return (
-          <Box
-            key={index}
-            bg={cardBg}
-            borderRadius="lg"
-            border="1px solid"
-            borderColor={borderColor}
-            p={3}
-            _hover={{ shadow: 'md' }}
-            transition="all 0.2s"
-          >
-            {/* League Header */}
-              <Flex align="center" mb={3} pb={2} borderBottom="1px solid" borderColor={borderColor}>
-              {match.league?.logo && (
-                <Image src={match.league.logo} boxSize="16px" mr={2} alt={match.league.name} />
-              )}
-              <Text fontSize="xs" fontWeight="semibold" color={secondaryTextColor}>
-                {match.league?.name || 'Premier League'}
-              </Text>
-                
-                {/* Live/Status Badge */}
-                {isLive && (
-                  <Flex ml="auto" align="center" bg="red.500" px={2} py={0.5} borderRadius="md">
-                    <Box w="6px" h="6px" bg="white" borderRadius="full" mr={1} />
-                    <Text fontSize="xs" fontWeight="bold" color="white">
-                      {match.status?.short === 'HT' ? 'HALF TIME' : `LIVE ${match.status?.elapsed || ''}'`}
-                    </Text>
-                  </Flex>
-                )}
-                
-                {isFinished && (
-                  <Text ml="auto" fontSize="xs" fontWeight="bold" color="gray.500">
-                    FT
-                  </Text>
-                )}
-            </Flex>
-            
-            {/* Match Details */}
-              <Flex align="center" justify="space-between" mb={2}>
-              {/* Home Team */}
-              <Flex align="center" flex={1} mr={2}>
-                {match.homeTeam?.logo && (
-                    <Image src={match.homeTeam.logo} boxSize="28px" mr={2} alt={match.homeTeam.name} />
-                )}
-                  <Text fontSize="sm" fontWeight="bold" color={textColor} noOfLines={1}>
-                  {match.homeTeam?.name || 'Home'}
-                </Text>
-              </Flex>
-              
-                {/* Score or Time */}
-                <Flex align="center" justify="center" minW="80px" direction="column">
-                  {hasScore ? (
-                    <Flex align="center" gap={2}>
-                      <Text fontSize="xl" fontWeight="bold" color={textColor}>
-                        {match.score.home ?? 0}
-                      </Text>
-                      <Text fontSize="lg" fontWeight="bold" color={secondaryTextColor}>
-                        -
-                      </Text>
-                      <Text fontSize="xl" fontWeight="bold" color={textColor}>
-                        {match.score.away ?? 0}
-                      </Text>
-                    </Flex>
-                  ) : (
-                <Text fontSize="xs" fontWeight="bold" color={secondaryTextColor}>
-                  ⏰ {match.time}
-                </Text>
-                  )}
-              </Flex>
-              
-              {/* Away Team */}
-              <Flex align="center" flex={1} ml={2} justify="flex-end">
-                  <Text fontSize="sm" fontWeight="bold" color={textColor} noOfLines={1} textAlign="right">
-                  {match.awayTeam?.name || 'Away'}
-                </Text>
-                {match.awayTeam?.logo && (
-                    <Image src={match.awayTeam.logo} boxSize="28px" ml={2} alt={match.awayTeam.name} />
-                )}
-              </Flex>
-            </Flex>
-              
-              {/* Goal Events - Grouped by Team */}
-              {goalEvents.length > 0 && (
-                <Box mt={3} pt={3} borderTop="1px solid" borderColor={borderColor}>
-                  <Grid templateColumns="1fr auto 1fr" gap={2} fontSize="xs">
-                    {/* Home Team Goals */}
-                    <GridItem textAlign="right">
-                      {goalEvents
-                        .filter(e => e.team === match.homeTeam?.name)
-                        .map((event, idx) => (
-                          <Text key={idx} color={textColor} mb={1}>
-                            {event.player} {event.time !== '?' && event.time ? `${event.time}'` : ''}{event.detail?.includes('Penalty') || event.detail?.includes('PENALTY') ? ' (P)' : ''}
-                          </Text>
-                        ))}
-                    </GridItem>
-                    
-                    {/* Goal Icon Center */}
-                    <GridItem display="flex" alignItems="flex-start" justifyContent="center">
-                      <Text color={secondaryTextColor}>⚽</Text>
-                    </GridItem>
-                    
-                    {/* Away Team Goals */}
-                    <GridItem textAlign="left">
-                      {goalEvents
-                        .filter(e => e.team === match.awayTeam?.name)
-                        .map((event, idx) => (
-                          <Text key={idx} color={textColor} mb={1}>
-                            {event.player} {event.time !== '?' && event.time ? `${event.time}'` : ''}{event.detail?.includes('Penalty') || event.detail?.includes('PENALTY') ? ' (P)' : ''}
-                          </Text>
-                        ))}
-                    </GridItem>
-                  </Grid>
-                </Box>
-              )}
-          </Box>
-          )
-        })}
-        
-        {/* Footer Link */}
-        <Text fontSize="xs" color={secondaryTextColor} textAlign="center" mt={1}>
-          🔗 Check Football page for live updates!
+    {isFootballPost && footballLoading && footballDisplayMatches.length === 0 && (
+      <Flex justify="center" align="center" py={8} direction="column" gap={2}>
+        <Spinner size="sm" color="blue.500" />
+        <Text fontSize="sm" color={secondaryTextColor}>
+          Loading matches…
         </Text>
-      </VStack>
+      </Flex>
+    )}
+
+    {isFootballPost && !footballLoading && footballDisplayMatches.length === 0 && (
+      <Box mt={3} mb={2} p={4} borderRadius="xl" borderWidth="1px" borderColor={borderColor} bg={cardBg} textAlign="center">
+        <Text fontWeight="bold" color={textColor}>
+          ⚽ No live matches right now
+        </Text>
+        <Text fontSize="sm" color={secondaryTextColor} mt={1}>
+          Check back during match hours — or open the Football page for more.
+        </Text>
+      </Box>
+    )}
+
+    {isFootballPost && footballMatchesForView.length > 0 && (
+      <FootballMatchCards matches={footballMatchesForView} enableNavigate={false} />
     )}
 
     {/* Weather Cards */}
