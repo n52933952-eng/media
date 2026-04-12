@@ -374,19 +374,22 @@ function StoryStrip() {
             <Flex direction="column" align="center" gap={1} flexShrink={0} w="72px">
               <Box position="relative">
                 {myEntry ? (
-                  <Box position="relative">
-                    <AvatarRing unseen={!!myEntry.hasUnviewed}>
-                      <StripAvatarFace
-                        src={user.profilePic}
-                        label={selfFaceLabel}
-                        onClick={handleSelfStripClick}
-                        ariaLabel="Your story"
-                      />
-                    </AvatarRing>
+                  <Box position="relative" zIndex={0}>
+                    <Box position="relative" zIndex={1}>
+                      <AvatarRing unseen={!!myEntry.hasUnviewed}>
+                        <StripAvatarFace
+                          src={user.profilePic}
+                          label={selfFaceLabel}
+                          onClick={handleSelfStripClick}
+                          ariaLabel="Your story"
+                        />
+                      </AvatarRing>
+                    </Box>
                     <Flex
                       position="absolute"
                       bottom={0}
                       right={0}
+                      zIndex={3}
                       w={6}
                       h={6}
                       borderRadius="full"
@@ -405,17 +408,20 @@ function StoryStrip() {
                     </Flex>
                   </Box>
                 ) : (
-                  <Box position="relative">
-                    <StripAvatarFace
-                      src={user.profilePic}
-                      label={selfFaceLabel}
-                      onClick={handleSelfStripClick}
-                      ariaLabel="Add to your story"
-                    />
+                  <Box position="relative" zIndex={0}>
+                    <Box position="relative" zIndex={1}>
+                      <StripAvatarFace
+                        src={user.profilePic}
+                        label={selfFaceLabel}
+                        onClick={handleSelfStripClick}
+                        ariaLabel="Add to your story"
+                      />
+                    </Box>
                     <Flex
                       position="absolute"
                       bottom={0}
                       right={0}
+                      zIndex={3}
                       w={6}
                       h={6}
                       borderRadius="full"
