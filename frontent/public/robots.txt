@@ -1,5 +1,4 @@
 User-agent: *
 Allow: /
 
-# After you have a sitemap URL, uncomment and set your real domain:
-# Sitemap: https://your-domain.com/sitemap.xml
+Sitemap: https://playsocial.social/sitemap.xml
