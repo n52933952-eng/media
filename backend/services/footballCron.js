@@ -433,7 +433,9 @@ const fetchAndUpdateLiveMatches = async () => {
                 // Try to use database matches as fallback
                 const dbMatches = await Match.find({
                     'fixture.date': { $gte: todayStart, $lte: todayEnd },
-                    'fixture.status.short': { $in: ['1H', '2H', 'HT', 'ET', 'P', 'BT'] }
+                    'fixture.status.short': {
+                        $in: ['1H', '2H', 'HT', 'ET', 'P', 'BT', 'LIVE', 'IN_PLAY', 'PAUSED'],
+                    },
                 }).limit(10)
                 
                 if (dbMatches.length > 0) {
@@ -474,47 +476,70 @@ const fetchAndUpdateLiveMatches = async () => {
             console.log(`📊 Found ${filteredMatches.length} live matches`)
         }
         
+        // Normalize fixture IDs so API (number) and DB (number|string) always match in the Set
+        const toFixtureIdNum = (raw) => {
+            if (raw == null || raw === '') return NaN
+            const n = typeof raw === 'string' ? parseInt(raw, 10) : Number(raw)
+            return Number.isFinite(n) ? n : NaN
+        }
+
         // Get all fixture IDs from live matches to detect finished ones
         const liveFixtureIds = new Set()
         for (const matchData of filteredMatches) {
-            const fixtureId = matchData.id || matchData.fixtureId
-            if (fixtureId) {
-                liveFixtureIds.add(fixtureId)
-            }
+            const fid = toFixtureIdNum(matchData.id ?? matchData.fixtureId)
+            if (!Number.isNaN(fid)) liveFixtureIds.add(fid)
         }
-        
-        // Detect finished matches: If match was in database as live but NOT in live API response, it finished
-        // This is MUCH more efficient than checking each match individually with API calls!
+
+        /**
+         * IMPORTANT: Do NOT infer "finished" when the live list is empty.
+         * If the API returns [], rate-limit empty, cache miss, or every match is filtered out by league,
+         * liveFixtureIds is empty — marking all DB live rows as FT wipes real live games (they "come back"
+         * on the next good poll). The Mongo prune job only deletes *old finished* rows, not this path.
+         */
+        const rawLiveCount = Array.isArray(result.data) ? result.data.length : 0
+        /** Non-empty set means this tick had at least one supported-league live id — safe to diff against DB */
+        const canInferFinishedFromOmission = liveFixtureIds.size > 0
+
         const previouslyLiveMatches = await Match.find({
             'fixture.date': { $gte: todayStart, $lte: todayEnd },
-            'fixture.status.short': { $in: ['1H', '2H', 'HT', 'ET', 'P', 'BT', 'LIVE', 'IN_PLAY', 'PAUSED'] }
+            'fixture.status.short': { $in: ['1H', '2H', 'HT', 'ET', 'P', 'BT', 'LIVE', 'IN_PLAY', 'PAUSED'] },
         })
-        
-        for (const dbMatch of previouslyLiveMatches) {
-            // If match was live but not in current live response, it finished
-            // Ensure fixtureId is a number for comparison
-            const dbFixtureId = typeof dbMatch.fixtureId === 'string' 
-                ? parseInt(dbMatch.fixtureId, 10) 
-                : Number(dbMatch.fixtureId)
-            
-            if (isNaN(dbFixtureId)) {
-                console.warn(`⚠️ [fetchAndUpdateLiveMatches] Invalid dbMatch.fixtureId: ${dbMatch.fixtureId}, skipping`)
-                continue
-            }
-            
-            if (!liveFixtureIds.has(dbFixtureId)) {
-                console.log(`  🏁 Match finished (not in live response): ${dbMatch.teams?.home?.name} vs ${dbMatch.teams?.away?.name}`)
-                
-                // Update database status to FT
+
+        // Only trust "not in LIVE list ⇒ FT" when we have a non-empty authoritative live set from this tick
+        const MIN_MS_AFTER_KICKOFF_BEFORE_OMISSION_FT = 45 * 60 * 1000 // avoid kickoff/API lag false positives
+
+        if (canInferFinishedFromOmission) {
+            for (const dbMatch of previouslyLiveMatches) {
+                const dbFixtureId = toFixtureIdNum(dbMatch.fixtureId)
+                if (Number.isNaN(dbFixtureId)) {
+                    console.warn(`⚠️ [fetchAndUpdateLiveMatches] Invalid dbMatch.fixtureId: ${dbMatch.fixtureId}, skipping`)
+                    continue
+                }
+
+                if (liveFixtureIds.has(dbFixtureId)) continue
+
+                const kickoff = dbMatch.fixture?.date ? new Date(dbMatch.fixture.date).getTime() : NaN
+                const kickoffOk =
+                    Number.isFinite(kickoff) && Date.now() - kickoff >= MIN_MS_AFTER_KICKOFF_BEFORE_OMISSION_FT
+                if (!kickoffOk) continue
+
+                console.log(
+                    `  🏁 Match finished (not in live response): ${dbMatch.teams?.home?.name} vs ${dbMatch.teams?.away?.name}`
+                )
+
                 await Match.findOneAndUpdate(
                     { fixtureId: dbFixtureId },
-                    { 
+                    {
                         'fixture.status.short': 'FT',
                         'fixture.status.long': 'Full Time',
-                        'fixture.status.elapsed': 90
+                        'fixture.status.elapsed': 90,
                     }
                 )
             }
+        } else if (previouslyLiveMatches.length > 0 && isDev) {
+            console.warn(
+                `⚽ [fetchAndUpdateLiveMatches] Skipping "omit from LIVE list ⇒ FT" (${previouslyLiveMatches.length} DB live rows): liveFixtureIds=${liveFixtureIds.size}, filtered=${filteredMatches.length}, rawLive=${rawLiveCount}`
+            )
         }
         
         // Process live matches and update database/feed post
