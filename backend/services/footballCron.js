@@ -869,6 +869,57 @@ const fetchTodayFixtures = async () => {
     }
 }
 
+/**
+ * Remove old Match rows so MongoDB does not grow forever.
+ * Finished games are kept for FOOTBALL_MATCH_RETENTION_DAYS (default 45), then deleted.
+ * Very old NS/SCHEDULED kickoffs (14+ days past) are removed as stale schedule noise.
+ */
+const cleanupOldFootballMatches = async () => {
+    try {
+        const retentionDays = Math.max(
+            7,
+            parseInt(process.env.FOOTBALL_MATCH_RETENTION_DAYS || '45', 10) || 45
+        )
+        const cutoff = new Date()
+        cutoff.setUTCDate(cutoff.getUTCDate() - retentionDays)
+        cutoff.setUTCHours(0, 0, 0, 0)
+
+        const finishedStatuses = [
+            'FT',
+            'FINISHED',
+            'AET',
+            'PEN',
+            'CANC',
+            'POSTP',
+            'SUSP',
+            'AWD',
+            'WO',
+        ]
+
+        const finishedRes = await Match.deleteMany({
+            'fixture.status.short': { $in: finishedStatuses },
+            'fixture.date': { $exists: true, $lt: cutoff },
+        })
+
+        const staleScheduledCutoff = new Date()
+        staleScheduledCutoff.setUTCDate(staleScheduledCutoff.getUTCDate() - 14)
+        staleScheduledCutoff.setUTCHours(0, 0, 0, 0)
+
+        const staleNsRes = await Match.deleteMany({
+            'fixture.status.short': { $in: ['NS', 'SCHEDULED'] },
+            'fixture.date': { $exists: true, $lt: staleScheduledCutoff },
+        })
+
+        if (finishedRes.deletedCount > 0 || staleNsRes.deletedCount > 0) {
+            console.log(
+                `🧹 [cleanupOldFootballMatches] Deleted ${finishedRes.deletedCount} finished (kickoff before ${cutoff.toISOString().slice(0, 10)}, retention ${retentionDays}d) and ${staleNsRes.deletedCount} stale scheduled`
+            )
+        }
+    } catch (error) {
+        console.error('❌ [cleanupOldFootballMatches]', error)
+    }
+}
+
 // 3. Initialize cron jobs
 export const initializeFootballCron = () => {
     console.log('⚽ Initializing Football Cron Jobs...')
@@ -939,6 +990,12 @@ export const initializeFootballCron = () => {
         console.log('🔄 [CRON] Refreshing Football post with latest live matches (from database)...')
         await autoPostTodayMatches()
     })
+
+    // Job 7: Prune old Match documents (finished + stale NS) — daily, low traffic
+    cron.schedule('30 3 * * *', async () => {
+        console.log('🧹 [CRON] Pruning old football matches from MongoDB...')
+        await cleanupOldFootballMatches()
+    })
     
     // Job 3: Create football account if not exists (runs once on startup)
     setTimeout(async () => {
@@ -953,6 +1010,9 @@ export const initializeFootballCron = () => {
         // Also create post on startup if it doesn't exist for today
         console.log('⚽ [STARTUP] Checking if post exists for today...')
         await autoPostTodayMatches()
+
+        console.log('🧹 [STARTUP] One-time prune of old football matches...')
+        await cleanupOldFootballMatches()
     }, 5000)
     
     console.log('✅ Football Cron Jobs initialized (football-data.org)')
@@ -966,5 +1026,6 @@ export const initializeFootballCron = () => {
     console.log('   - Post refresh: Every 30 minutes (from database, no API calls)')
     console.log('   - Leagues: Premier League (PL), La Liga (PD), Serie A (SA), Bundesliga (BL1), Ligue 1 (FL1), Champions League (CL)')
     console.log('   - Total: ~330 calls/day (well under 14,400/day free tier limit)')
+    console.log('   - DB prune: 3:30 AM UTC daily (FOOTBALL_MATCH_RETENTION_DAYS, default 45)')
 }
 
