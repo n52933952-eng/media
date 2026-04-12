@@ -4,6 +4,7 @@ import { Link as RouterLink, useNavigate } from 'react-router-dom'
 import { UserContext } from '../context/UserContext'
 import { PostContext } from '../context/PostContext'
 import useShowToast from '../hooks/useShowToast'
+import API_BASE_URL from '../config/api'
 import FootballIcon from './FootballIcon'
 import ChessChallenge from './ChessChallenge'
 import CardChallenge from './CardChallenge'
@@ -26,18 +27,63 @@ const SuggestedChannels = ({ onUserFollowed }) => {
     
     const showToast = useShowToast()
 
+    const apiBase = API_BASE_URL || (import.meta.env.PROD ? window.location.origin : 'http://localhost:5000')
+
     const followingIdSet = useMemo(() => {
         const list = user?.following
         if (!Array.isArray(list)) return new Set()
         return new Set(list.map((id) => String(id)))
     }, [user?.following])
 
-    const isFollowingFootball = Boolean(
-        footballAccount?._id && followingIdSet.has(String(footballAccount._id))
+    /**
+     * Session `user.following` (from /me or follow API) is primary when the id is missing.
+     * If the id is still in the list but getUserPro says isFollowedByMe === false (refetched after mobile unfollow), trust the API.
+     */
+    const channelIsFollowing = (account) => {
+        if (!account?._id) return false
+        const id = String(account._id)
+        const inList = followingIdSet.has(id)
+        if (!inList) return false
+        if (account.isFollowedByMe === false) return false
+        return true
+    }
+
+    const isFollowingFootball = channelIsFollowing(footballAccount)
+    const isFollowingWeather = channelIsFollowing(weatherAccount)
+
+    const followingSig = useMemo(
+        () => JSON.stringify((user?.following || []).map((x) => String(x)).sort()),
+        [user?.following]
     )
-    const isFollowingWeather = Boolean(
-        weatherAccount?._id && followingIdSet.has(String(weatherAccount._id))
-    )
+
+    // Refresh Football/Weather cards when session following changes (after /me refetch) so isFollowedByMe + follower counts match server
+    useEffect(() => {
+        if (!user?._id) return
+        let cancelled = false
+        const run = async () => {
+            try {
+                const [fRes, wRes] = await Promise.all([
+                    fetch(`${apiBase}/api/user/getUserPro/Football`, { credentials: 'include' }),
+                    fetch(`${apiBase}/api/user/getUserPro/Weather`, { credentials: 'include' }),
+                ])
+                if (cancelled) return
+                if (fRes.ok) {
+                    const d = await fRes.json()
+                    if (!d.error) setFootballAccount(d)
+                }
+                if (wRes.ok) {
+                    const d = await wRes.json()
+                    if (!d.error) setWeatherAccount(d)
+                }
+            } catch (e) {
+                console.error('[SuggestedChannels] refresh channel profiles:', e)
+            }
+        }
+        run()
+        return () => {
+            cancelled = true
+        }
+    }, [followingSig, user?._id, apiBase])
     
     const bgColor = useColorModeValue('white', '#1a1a1a')
     const cardBg = useColorModeValue('white', '#252b3b')
@@ -563,7 +609,10 @@ const SuggestedChannels = ({ onUserFollowed }) => {
                                         Football
                                     </Text>
                                     <Text fontSize="2xs" color={secondaryTextColor} textAlign="center" noOfLines={1}>
-                                        {footballAccount.followers?.length || 0} followers
+                                        {(typeof footballAccount.followersCount === 'number'
+                                            ? footballAccount.followersCount
+                                            : footballAccount.followers?.length) || 0}{' '}
+                                        followers
                                     </Text>
                                     {isFollowingFootball && (
                                         <Box
@@ -638,7 +687,11 @@ const SuggestedChannels = ({ onUserFollowed }) => {
                                         Weather
                                     </Text>
                                     <Text fontSize="2xs" color={secondaryTextColor} textAlign="center" noOfLines={1}>
-                                        {weatherAccount ? `${weatherAccount.followers?.length || 0} followers` : 'Coming soon'}
+                                        {weatherAccount
+                                            ? `${(typeof weatherAccount.followersCount === 'number'
+                                                  ? weatherAccount.followersCount
+                                                  : weatherAccount.followers?.length) || 0} followers`
+                                            : 'Coming soon'}
                                     </Text>
                                     {isFollowingWeather && weatherAccount && (
                                         <Box

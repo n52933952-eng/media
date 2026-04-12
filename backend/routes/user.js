@@ -1,7 +1,7 @@
 import express from 'express'
 
 const router = express.Router()
-import{SignUp,LoginUser,GoogleLogin,LogOut,FollowAndUnfollow,getUserProfile,UpdateUser,searchUsers,getSuggestedUsers,getBusyChessUsers,getBusyCardUsers,getBusyGameUsers,getFollowingUsers,getFollowersUsers,removeFollower,DeleteMyAccount} from '../controller/user.js'
+import{SignUp,LoginUser,GoogleLogin,LogOut,FollowAndUnfollow,getMe,getUserProfile,UpdateUser,searchUsers,getSuggestedUsers,getBusyChessUsers,getBusyCardUsers,getBusyGameUsers,getFollowingUsers,getFollowersUsers,removeFollower,DeleteMyAccount} from '../controller/user.js'
 import protectRoute  from '../middlware/protectRoute.js'
 import upload from '../middlware/upload.js'
 import User from '../models/user.js'
@@ -11,6 +11,9 @@ router.post("/login",LoginUser)
 router.post("/google-login", GoogleLogin)
 router.post("/logout",protectRoute,LogOut)
 router.post("/follow/:id",protectRoute,FollowAndUnfollow)
+
+// Session user (following/followers) — for refetch when another device changes follow state
+router.get("/me", protectRoute, getMe)
 
 // IMPORTANT: More specific routes should come before less specific ones
 // Put getUserPro before other routes that might conflict
