@@ -268,7 +268,12 @@ const CardChallenge = ({ compact = false }) => {
                 <ModalContent bg={bgColor}>
                     <ModalHeader color={textColor}>🟢 Online Friends — Choose Opponent</ModalHeader>
                     <ModalCloseButton />
-                    <ModalBody pb={6}>
+                    <ModalBody
+                        pb={6}
+                        maxH="min(420px, 65vh)"
+                        overflowY="auto"
+                        sx={{ scrollbarGutter: 'stable' }}
+                    >
                         {loading ? (
                             <Flex justify="center" py={10}><Spinner size="lg" /></Flex>
                         ) : availableUsers.length === 0 ? (

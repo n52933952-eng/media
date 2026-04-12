@@ -1,4 +1,4 @@
-import React, { useCallback, useContext, useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { keyframes } from '@emotion/react'
 import { Box, Flex, Text, Avatar, Spinner, useColorModeValue, useDisclosure } from '@chakra-ui/react'
 import { AddIcon } from '@chakra-ui/icons'
@@ -31,6 +31,13 @@ function avatarDisplayName(picUrl, fallbackName) {
   return ok ? undefined : fallbackName
 }
 
+/** Strip avatars for *others*: always pass `name` so the loading fallback is initials, not Chakra’s default person icon. */
+function stripOtherAvatarName(u) {
+  const n = (u?.name || '').trim()
+  const un = (u?.username || '').trim()
+  return n || un || 'User'
+}
+
 export default function StoryStrip() {
   const { user } = useContext(UserContext) || {}
   const [strip, setStrip] = useState([])
@@ -58,6 +65,8 @@ export default function StoryStrip() {
   const addBadgeBorder = useColorModeValue('white', 'gray.900')
   /** After first load, keep the strip mounted so silent refetches don’t collapse the row (ref alone wouldn’t re-render). */
   const [initialFetchDone, setInitialFetchDone] = useState(false)
+  /** Keeps last known `profilePic` per user so silent refetches don’t briefly clear `src` (person-icon flash). */
+  const stripPicByUserRef = useRef(new Map())
 
   /** `silent`: update data without swapping the row for a spinner (avoids shrink/jump when avatar refetches). */
   const fetchStrip = useCallback(async (opts) => {
@@ -66,14 +75,37 @@ export default function StoryStrip() {
       setStrip([])
       setLoading(false)
       setInitialFetchDone(false)
+      stripPicByUserRef.current.clear()
       return
     }
     if (!silent) setLoading(true)
     try {
       const res = await fetch(`${API_BASE_URL}/api/story/feed-strip`, { credentials: 'include' })
       const data = await res.json()
-      if (res.ok) setStrip(Array.isArray(data.stories) ? data.stories : [])
-      else setStrip([])
+      if (res.ok) {
+        const list = Array.isArray(data.stories) ? data.stories : []
+        const cache = stripPicByUserRef.current
+        const merged = list.map((entry) => {
+          const uid = userIdOf(entry)
+          const u = entry.user
+          if (!u || !uid) return entry
+          const raw = u.profilePic
+          if (typeof raw === 'string' && raw.trim()) {
+            cache.set(uid, raw.trim())
+            return entry
+          }
+          if (raw === '' || raw === null) {
+            cache.delete(uid)
+            return entry
+          }
+          const cached = cache.get(uid)
+          if (cached) {
+            return { ...entry, user: { ...u, profilePic: cached } }
+          }
+          return entry
+        })
+        setStrip(merged)
+      } else setStrip([])
     } catch {
       setStrip([])
     } finally {
@@ -260,7 +292,7 @@ export default function StoryStrip() {
                     <Avatar
                       size="lg"
                       src={u.profilePic}
-                      name={avatarDisplayName(u.profilePic, u.name || u.username)}
+                      name={stripOtherAvatarName(u)}
                       cursor="pointer"
                       onClick={() => openViewer(id, u)}
                     />

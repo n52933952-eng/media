@@ -276,7 +276,12 @@ const RaceChallenge = ({ compact = false }) => {
                 <ModalContent bg={bgColor} borderRadius="2xl" border="1px solid" borderColor={borderColor}>
                     <ModalHeader color={textColor}>🟢 Choose Your Opponent</ModalHeader>
                     <ModalCloseButton color={textColor} />
-                    <ModalBody pb={6}>
+                    <ModalBody
+                        pb={6}
+                        maxH="min(420px, 65vh)"
+                        overflowY="auto"
+                        sx={{ scrollbarGutter: 'stable' }}
+                    >
                         {loading ? (
                             <Flex justify="center" py={10}><Spinner size="lg" color="red.400" /></Flex>
                         ) : availableUsers.length === 0 ? (

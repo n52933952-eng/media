@@ -19,6 +19,10 @@ import { GOOGLE_WEB_CLIENT_ID } from './config/googleWebClient'
 
 const styles = {
 	global: (props) => ({
+		html: {
+			// Reserve scrollbar gutter so opening a modal (body scroll lock) does not shift layout sideways.
+			scrollbarGutter: "stable",
+		},
 		body: {
 			color: mode("gray.800", "whiteAlpha.900")(props),
 			bg: mode("gray.100", "#101010")(props),
@@ -29,7 +33,27 @@ const styles = {
 			maxWidth: "100%",
 		},
 	}),
-}; 
+};
+
+// Chakra Modal/Drawer: if `preserveScrollBarGap` is omitted, RemoveScroll treats it as falsy and strips
+// the scrollbar without padding compensation — slight horizontal jump. Defaults must be explicit.
+const components = {
+	Modal: {
+		defaultProps: {
+			preserveScrollBarGap: true,
+		},
+	},
+	Drawer: {
+		defaultProps: {
+			preserveScrollBarGap: true,
+		},
+	},
+	AlertDialog: {
+		defaultProps: {
+			preserveScrollBarGap: true,
+		},
+	},
+};
 
 const config = {
 	initialColorMode: "dark",
@@ -43,7 +67,7 @@ const colors = {
 	},
 };
 
-const theme = extendTheme({ config, styles, colors });
+const theme = extendTheme({ config, styles, colors, components });
 
 
 
