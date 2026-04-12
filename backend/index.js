@@ -19,6 +19,7 @@ import { initializeFootballCron } from './services/footballCron.js'
 import { initializeWeatherCron } from './services/weatherCron.js'
 import { initializeChessPostCleanup } from './services/chessPostCleanup.js'
 import { initializeActivityCleanup } from './services/activityCleanup.js'
+import { initializeStoryCleanup } from './services/storyCleanup.js'
 import { initRedis, isRedisAvailable } from './services/redis.js'
 import { initializeFCM, getFCMStatus } from './services/fcmNotifications.js'
 import path from 'path'
@@ -234,6 +235,9 @@ initializeSocket(app).then((result) => {
         
         // Initialize Activity Cleanup Cron Job
         initializeActivityCleanup()
+
+        // Expired stories: MongoDB + Cloudinary
+        initializeStoryCleanup()
     })
 }).catch((error) => {
     console.error('❌ Failed to initialize Socket.IO:', error)

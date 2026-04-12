@@ -419,3 +419,51 @@ export const getStoryViewers = async (req, res) => {
     return res.status(500).json({ error: e.message || 'Failed to load viewers' })
   }
 }
+
+/**
+ * Remove expired stories from MongoDB and delete slide assets on Cloudinary.
+ * Safe to run on a schedule; API already hides expired docs via expiresAt > now.
+ */
+export async function cleanupExpiredStories() {
+  const now = new Date()
+  const batchSize = 40
+  let totalDeleted = 0
+
+  for (;;) {
+    const batch = await Story.find({ expiresAt: { $lte: now } })
+      .limit(batchSize)
+      .select('_id user slides')
+      .lean()
+
+    if (!batch.length) break
+
+    const authorIds = new Set()
+    for (const doc of batch) {
+      const uid = doc.user?.toString?.() ?? String(doc.user)
+      if (uid) authorIds.add(uid)
+      for (const s of doc.slides || []) {
+        if (s?.publicId) {
+          try {
+            await cloudinary.uploader.destroy(String(s.publicId), {
+              resource_type: s.type === 'video' ? 'video' : 'image',
+            })
+          } catch (_) {}
+        }
+      }
+    }
+
+    const ids = batch.map((d) => d._id)
+    const r = await Story.deleteMany({ _id: { $in: ids } })
+    totalDeleted += r.deletedCount || 0
+
+    for (const aid of authorIds) {
+      void emitStoryStripChanged(aid)
+    }
+
+    if (batch.length < batchSize) break
+  }
+
+  if (totalDeleted > 0) {
+    console.log(`🧹 [story] cleanupExpiredStories: removed ${totalDeleted} expired stor(y/ies) from DB + Cloudinary`)
+  }
+}

@@ -25,6 +25,12 @@ function userIdOf(entry) {
   return (u._id ?? u)?.toString?.() ?? String(u)
 }
 
+/** Chakra Avatar shows `name` initials while `src` is loading — causes a flash. Only pass name when there is no photo URL. */
+function avatarDisplayName(picUrl, fallbackName) {
+  const ok = typeof picUrl === 'string' && picUrl.trim().length > 0
+  return ok ? undefined : fallbackName
+}
+
 export default function StoryStrip() {
   const { user } = useContext(UserContext) || {}
   const [strip, setStrip] = useState([])
@@ -175,7 +181,7 @@ export default function StoryStrip() {
                       <Avatar
                         size="lg"
                         src={user.profilePic}
-                        name={user.name || user.username}
+                        name={avatarDisplayName(user.profilePic, user.name || user.username)}
                         cursor="pointer"
                         onClick={() => openViewer(myId, user)}
                       />
@@ -203,7 +209,13 @@ export default function StoryStrip() {
                   </Box>
                 ) : (
                   <Box position="relative">
-                    <Avatar size="lg" src={user.profilePic} name={user.name || user.username} cursor="pointer" onClick={onAddOpen} />
+                    <Avatar
+                      size="lg"
+                      src={user.profilePic}
+                      name={avatarDisplayName(user.profilePic, user.name || user.username)}
+                      cursor="pointer"
+                      onClick={onAddOpen}
+                    />
                     <Flex
                       position="absolute"
                       bottom={0}
@@ -248,7 +260,7 @@ export default function StoryStrip() {
                     <Avatar
                       size="lg"
                       src={u.profilePic}
-                      name={u.name || u.username}
+                      name={avatarDisplayName(u.profilePic, u.name || u.username)}
                       cursor="pointer"
                       onClick={() => openViewer(id, u)}
                     />
