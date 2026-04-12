@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useContext, useRef, useCallback } from 'react'
+import React, { useState, useEffect, useContext, useRef, useCallback, useMemo } from 'react'
 import { Box, Flex, Text, Avatar, Button, VStack, Spinner, useColorModeValue, Grid, GridItem, SimpleGrid } from '@chakra-ui/react'
 import { Link as RouterLink, useNavigate } from 'react-router-dom'
 import { UserContext } from '../context/UserContext'
@@ -20,13 +20,24 @@ const SuggestedChannels = ({ onUserFollowed }) => {
     const [loading, setLoading] = useState(true)
     const [followLoading, setFollowLoading] = useState(false)
     const [weatherFollowLoading, setWeatherFollowLoading] = useState(false)
-    const [isFollowing, setIsFollowing] = useState(false)
-    const [isFollowingWeather, setIsFollowingWeather] = useState(false)
     const [streamLoading, setStreamLoading] = useState({})
     const [expandedChannel, setExpandedChannel] = useState(null) // Track which channel is expanded
     const expandedChannelRef = useRef(null) // Ref for scrolling to expanded channel details
     
     const showToast = useShowToast()
+
+    const followingIdSet = useMemo(() => {
+        const list = user?.following
+        if (!Array.isArray(list)) return new Set()
+        return new Set(list.map((id) => String(id)))
+    }, [user?.following])
+
+    const isFollowingFootball = Boolean(
+        footballAccount?._id && followingIdSet.has(String(footballAccount._id))
+    )
+    const isFollowingWeather = Boolean(
+        weatherAccount?._id && followingIdSet.has(String(weatherAccount._id))
+    )
     
     const bgColor = useColorModeValue('white', '#1a1a1a')
     const cardBg = useColorModeValue('white', '#252b3b')
@@ -154,16 +165,6 @@ const SuggestedChannels = ({ onUserFollowed }) => {
         fetchData(true) // Start with cache check
     }, []) // Only run on mount, not when user changes
     
-    // Update isFollowing state when user.following changes (without refetching everything)
-    useEffect(() => {
-        if (footballAccount && user?.following) {
-            setIsFollowing(user.following.includes(footballAccount._id))
-        }
-        if (weatherAccount && user?.following) {
-            setIsFollowingWeather(user.following.includes(weatherAccount._id))
-        }
-    }, [user?.following, footballAccount?._id, weatherAccount?._id]) // Only update follow status, don't refetch channels
-    
     // Handle channel click - navigate to channel post page
     const handleChannelClick = async (channel) => {
         try {
@@ -272,12 +273,8 @@ const SuggestedChannels = ({ onUserFollowed }) => {
             const data = await res.json()
             
             if (res.ok) {
-                const wasFollowing = isFollowing
-                
-                // Update local state
-                setIsFollowing(!isFollowing)
-                
-                // Update user context with new following list
+                const wasFollowing = isFollowingFootball
+
                 if (data.current) {
                     setUser(data.current)
                     localStorage.setItem('userInfo', JSON.stringify(data.current))
@@ -399,7 +396,7 @@ const SuggestedChannels = ({ onUserFollowed }) => {
                 
                 showToast(
                     'Success',
-                    isFollowing 
+                    wasFollowing
                         ? 'Unfollowed Football channel' 
                         : '⚽ Following Football! You\'ll now see live match updates in your feed',
                     'success'
@@ -413,7 +410,7 @@ const SuggestedChannels = ({ onUserFollowed }) => {
         } finally {
             setFollowLoading(false)
         }
-    }, [footballAccount, isFollowing, setUser, setFollowPost, showToast, onUserFollowed])
+    }, [footballAccount, isFollowingFootball, setUser, setFollowPost, showToast, onUserFollowed])
     
     // Handle weather follow/unfollow
     const handleWeatherFollowToggle = useCallback(async () => {
@@ -435,11 +432,7 @@ const SuggestedChannels = ({ onUserFollowed }) => {
             
             if (res.ok) {
                 const wasFollowing = isFollowingWeather
-                
-                // Update local state
-                setIsFollowingWeather(!isFollowingWeather)
-                
-                // Update user context with new following list
+
                 if (data.current) {
                     setUser(data.current)
                     localStorage.setItem('userInfo', JSON.stringify(data.current))
@@ -507,7 +500,7 @@ const SuggestedChannels = ({ onUserFollowed }) => {
                 
                 showToast(
                     'Success',
-                    isFollowingWeather 
+                    wasFollowing
                         ? 'Unfollowed Weather channel' 
                         : '🌤️ Following Weather! You\'ll now see weather updates in your feed',
                     'success'
@@ -572,7 +565,7 @@ const SuggestedChannels = ({ onUserFollowed }) => {
                                     <Text fontSize="2xs" color={secondaryTextColor} textAlign="center" noOfLines={1}>
                                         {footballAccount.followers?.length || 0} followers
                                     </Text>
-                                    {isFollowing && (
+                                    {isFollowingFootball && (
                                         <Box
                                             position="absolute"
                                             top={1}
@@ -589,7 +582,7 @@ const SuggestedChannels = ({ onUserFollowed }) => {
                             </Box>
                             
                             {/* Football Follow Button */}
-                            {isFollowing ? (
+                            {isFollowingFootball ? (
                                 <Button
                                     onClick={(e) => {
                                         e.stopPropagation()

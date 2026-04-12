@@ -87,6 +87,13 @@ const normalizeUserId = (id) => {
     return trimmed
 }
 
+/** Same account, multiple tabs: used e.g. Football unfollow → postDeleted to all of this user’s sockets. */
+const USER_SELF_ROOM_PREFIX = 'userSelf:'
+export const getUserSelfRoomId = (userId) => {
+    const uid = normalizeUserId(userId)
+    return uid ? `${USER_SELF_ROOM_PREFIX}${uid}` : null
+}
+
 const uniqueUserIds = (ids) => {
     const out = []
     const seen = new Set()
@@ -1051,6 +1058,10 @@ export const initializeSocket = async (app) => {
             await setUserSocket(userId, socketData)
             // Reverse mapping for O(1) disconnect handling
             await setSocketUser(socket.id, userId)
+            const selfRoom = getUserSelfRoomId(userId)
+            if (selfRoom) {
+                socket.join(selfRoom)
+            }
             console.log(`✅ [socket] User ${userId} added to socket map (socket: ${socket.id})`)
 
             // Reconnect cancels delayed call teardown scheduled on disconnect (avoids false "call ended" FCM).

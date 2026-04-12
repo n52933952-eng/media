@@ -16,6 +16,7 @@ import { v2 as cloudinary } from 'cloudinary'
 import { Readable } from 'stream'
 import { LIVE_CHANNELS } from '../config/channels.js'
 import * as redisService from '../services/redis.js'
+import { getIO, getUserSelfRoomId } from '../socket/socket.js'
 
 function extractCloudinaryPublicId(url) {
   try {
@@ -273,26 +274,18 @@ export const FollowAndUnfollow = async(req,res) => {
            if (userToModify.username === 'Football') {
                try {
                    const Post = (await import('../models/post.js')).default
-                   const { getIO, getUserSocketMap } = await import('../socket/socket.js')
-                   
-                   // Get ALL Football posts (including "no matches" posts)
                    const footballPosts = await Post.find({
                        postedBy: id
                    }).select('_id')
                    
                    if (footballPosts.length > 0) {
                        const io = getIO()
-                       if (io) {
-                           const userSocketMap = getUserSocketMap()
-                           const userSocketData = userSocketMap[req.user._id.toString()]
-                           
-                           if (userSocketData && userSocketData.socketId) {
-                               // Emit postDeleted for each Football post
-                               footballPosts.forEach(post => {
-                                   io.to(userSocketData.socketId).emit('postDeleted', { postId: post._id.toString() })
-                               })
-                               console.log(`🗑️ [FollowAndUnfollow] Emitted postDeleted for ${footballPosts.length} Football post(s) to user ${req.user.username}`)
-                           }
+                       const selfRoom = getUserSelfRoomId(req.user._id)
+                       if (io && selfRoom) {
+                           footballPosts.forEach(post => {
+                               io.to(selfRoom).emit('postDeleted', { postId: post._id.toString() })
+                           })
+                           console.log(`🗑️ [FollowAndUnfollow] Emitted postDeleted for ${footballPosts.length} Football post(s) to all sessions for ${req.user.username}`)
                        }
                    }
                } catch (error) {
