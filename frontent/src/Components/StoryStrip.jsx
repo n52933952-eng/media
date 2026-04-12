@@ -1,6 +1,6 @@
-import React, { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
+import React, { useCallback, useContext, useEffect, useMemo, useRef, useState, memo } from 'react'
 import { keyframes } from '@emotion/react'
-import { Box, Flex, Text, Avatar, Spinner, useColorModeValue, useDisclosure } from '@chakra-ui/react'
+import { Box, Flex, Text, Avatar, Image, Spinner, useColorModeValue, useDisclosure } from '@chakra-ui/react'
 import { AddIcon } from '@chakra-ui/icons'
 import { UserContext } from '../context/UserContext'
 import API_BASE_URL from '../config/api'
@@ -38,6 +38,106 @@ function stripOtherAvatarName(u) {
   return n || un || 'User'
 }
 
+/** Compact signature so silent refetches that return the same strip do not re-render (stops avatar “flutter”). */
+function stripListSignature(entries) {
+  return entries
+    .map((e) => {
+      const id = userIdOf(e)
+      const pic = String(e.user?.profilePic || '').trim()
+      return `${id}\t${pic}\t${e.hasUnviewed ? 1 : 0}\t${String(e.storyId || '')}`
+    })
+    .sort()
+    .join('\n')
+}
+
+const STRIP_REFRESH_DEBOUNCE_MS = 380
+
+function sameStripPreviewUser(a, b) {
+  if (a === b) return true
+  if (!a || !b) return false
+  const idA = (a._id ?? a)?.toString?.() ?? String(a._id ?? '')
+  const idB = (b._id ?? b)?.toString?.() ?? String(b._id ?? '')
+  return idA === idB && String(a.profilePic || '').trim() === String(b.profilePic || '').trim()
+}
+
+/**
+ * Story strip face for *other* users: initials stay put; photo fades in when loaded.
+ * Avoids Chakra Avatar’s loading / fallback swapping (person ↔ initials ↔ photo).
+ * `openRef` stays stable so `memo` can skip re-renders when only the parent re-renders.
+ */
+const StableOtherStripFace = memo(
+  function StableOtherStripFace({ src, label, storyUserId, previewUser, openRef }) {
+    const initial = useMemo(() => {
+      const s = (label || '?').trim()
+      return s ? s.charAt(0).toUpperCase() : '?'
+    }, [label])
+    const url = typeof src === 'string' && src.trim() ? src.trim() : ''
+    const [imgShown, setImgShown] = useState(false)
+    const underBg = useColorModeValue('gray.200', 'gray.600')
+    const underFg = useColorModeValue('gray.700', 'white')
+
+    useEffect(() => {
+      setImgShown(false)
+    }, [url])
+
+    const fireOpen = useCallback(() => {
+      openRef.current?.(storyUserId, previewUser)
+    }, [openRef, storyUserId, previewUser])
+
+    return (
+      <Box
+        role="button"
+        tabIndex={0}
+        aria-label={label ? `Open story ${label}` : 'Open story'}
+        onClick={fireOpen}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault()
+            fireOpen()
+          }
+        }}
+        boxSize="16"
+        borderRadius="full"
+        bg={underBg}
+        position="relative"
+        cursor="pointer"
+        overflow="hidden"
+        flexShrink={0}
+      >
+        <Flex align="center" justify="center" position="absolute" inset={0} zIndex={1}>
+          <Text fontWeight="bold" color={underFg} fontSize="xl" userSelect="none" lineHeight={1}>
+            {initial}
+          </Text>
+        </Flex>
+        {url ? (
+          <Image
+            src={url}
+            alt=""
+            position="absolute"
+            inset={0}
+            w="100%"
+            h="100%"
+            objectFit="cover"
+            zIndex={2}
+            opacity={imgShown ? 1 : 0}
+            transition="opacity 0.18s ease-out"
+            onLoad={() => setImgShown(true)}
+            onError={() => setImgShown(false)}
+            loading="eager"
+            draggable={false}
+          />
+        ) : null}
+      </Box>
+    )
+  },
+  (prev, next) =>
+    prev.src === next.src &&
+    prev.label === next.label &&
+    prev.storyUserId === next.storyUserId &&
+    prev.openRef === next.openRef &&
+    sameStripPreviewUser(prev.previewUser, next.previewUser)
+)
+
 export default function StoryStrip() {
   const { user } = useContext(UserContext) || {}
   const [strip, setStrip] = useState([])
@@ -67,6 +167,9 @@ export default function StoryStrip() {
   const [initialFetchDone, setInitialFetchDone] = useState(false)
   /** Keeps last known `profilePic` per user so silent refetches don’t briefly clear `src` (person-icon flash). */
   const stripPicByUserRef = useRef(new Map())
+  /** Skip `setStrip` when silent refetch returns the same visible strip (avoids pointless re-renders). */
+  const lastStripSigRef = useRef('')
+  const stripRefreshDebounceRef = useRef(null)
 
   /** `silent`: update data without swapping the row for a spinner (avoids shrink/jump when avatar refetches). */
   const fetchStrip = useCallback(async (opts) => {
@@ -76,6 +179,7 @@ export default function StoryStrip() {
       setLoading(false)
       setInitialFetchDone(false)
       stripPicByUserRef.current.clear()
+      lastStripSigRef.current = ''
       return
     }
     if (!silent) setLoading(true)
@@ -104,9 +208,19 @@ export default function StoryStrip() {
           }
           return entry
         })
-        setStrip(merged)
-      } else setStrip([])
+        const sig = stripListSignature(merged)
+        if (silent && sig === lastStripSigRef.current) {
+          // no-op: same strip as last silent load
+        } else {
+          lastStripSigRef.current = sig
+          setStrip(merged)
+        }
+      } else {
+        lastStripSigRef.current = ''
+        setStrip([])
+      }
     } catch {
+      lastStripSigRef.current = ''
       setStrip([])
     } finally {
       if (!silent) setLoading(false)
@@ -119,9 +233,18 @@ export default function StoryStrip() {
   }, [fetchStrip])
 
   useEffect(() => {
-    const onRefresh = () => fetchStrip({ silent: true })
+    const onRefresh = () => {
+      if (stripRefreshDebounceRef.current) clearTimeout(stripRefreshDebounceRef.current)
+      stripRefreshDebounceRef.current = setTimeout(() => {
+        stripRefreshDebounceRef.current = null
+        fetchStrip({ silent: true })
+      }, STRIP_REFRESH_DEBOUNCE_MS)
+    }
     window.addEventListener('storyStripChanged', onRefresh)
-    return () => window.removeEventListener('storyStripChanged', onRefresh)
+    return () => {
+      window.removeEventListener('storyStripChanged', onRefresh)
+      if (stripRefreshDebounceRef.current) clearTimeout(stripRefreshDebounceRef.current)
+    }
   }, [fetchStrip])
 
   const myId = user?._id?.toString?.() ?? String(user?._id ?? '')
@@ -145,6 +268,11 @@ export default function StoryStrip() {
     setViewerPreview(previewUser || null)
     setViewerOpen(true)
   }, [])
+
+  const openViewerRef = useRef(openViewer)
+  useEffect(() => {
+    openViewerRef.current = openViewer
+  }, [openViewer])
 
   /** Must be stable: StoryViewerModal’s fetch effect depends on onClose; unstable fn caused infinite refetch + loading loop. */
   const closeViewer = useCallback(() => {
@@ -289,12 +417,12 @@ export default function StoryStrip() {
               return (
                 <Flex key={id || s.storyId} direction="column" align="center" gap={1} flexShrink={0} w="72px">
                   <AvatarRing unseen={!!s.hasUnviewed}>
-                    <Avatar
-                      size="lg"
+                    <StableOtherStripFace
                       src={u.profilePic}
-                      name={stripOtherAvatarName(u)}
-                      cursor="pointer"
-                      onClick={() => openViewer(id, u)}
+                      label={stripOtherAvatarName(u)}
+                      storyUserId={id}
+                      previewUser={u}
+                      openRef={openViewerRef}
                     />
                   </AvatarRing>
                   <Text fontSize="xs" color={labelColor} textAlign="center" noOfLines={2} w="100%">

@@ -33,6 +33,7 @@ export default function AddStoryModal({ isOpen, onClose, onPosted }) {
   const [loading, setLoading] = useState(false)
   const [progress, setProgress] = useState(0)
   const border = useColorModeValue('gray.200', 'whiteAlpha.200')
+  const modalBg = useColorModeValue('white', 'gray.900')
 
   const reset = () => {
     setPreviews((prev) => {
@@ -171,12 +172,19 @@ export default function AddStoryModal({ isOpen, onClose, onPosted }) {
   }
 
   return (
-    <Modal isOpen={isOpen} onClose={handleClose} size="lg" isCentered>
+    <Modal
+      isOpen={isOpen}
+      onClose={handleClose}
+      size="lg"
+      isCentered
+      scrollBehavior="inside"
+      preserveScrollBarGap
+    >
       <ModalOverlay />
-      <ModalContent bg={useColorModeValue('white', 'gray.900')}>
+      <ModalContent bg={modalBg} maxH="85vh">
         <ModalHeader>Add to your story</ModalHeader>
         <ModalCloseButton isDisabled={loading} />
-        <ModalBody>
+        <ModalBody overflowY="auto">
           <Text fontSize="sm" color="gray.500" mb={3}>
             Photos or short videos (max 20s each on the server). Up to {MAX_FILES} items.
           </Text>
