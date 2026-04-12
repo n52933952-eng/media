@@ -1,4 +1,4 @@
-import React, { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
+import React, { useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, memo } from 'react'
 import { keyframes } from '@emotion/react'
 import { Box, Flex, Text, Image, Spinner, useColorModeValue, useDisclosure } from '@chakra-ui/react'
 import { AddIcon } from '@chakra-ui/icons'
@@ -62,7 +62,7 @@ function stripListSignature(entries) {
 
 const STRIP_REFRESH_DEBOUNCE_MS = 520
 
-/** In-ring avatar: initials + photo fade-in; reset fade only when the photo identity changes (not query-string churn). */
+/** In-ring avatar: initials under photo; photo fades in. Cached images often skip `onLoad` — detect `img.complete` too. */
 function StripAvatarFace({ src, label, onClick, ariaLabel }) {
   const initial = useMemo(() => {
     const s = (label || '?').trim()
@@ -71,12 +71,21 @@ function StripAvatarFace({ src, label, onClick, ariaLabel }) {
   const url = typeof src === 'string' && src.trim() ? src.trim() : ''
   const picId = useMemo(() => profilePicIdentity(url), [url])
   const [imgShown, setImgShown] = useState(false)
+  const imgRef = useRef(null)
   const underBg = useColorModeValue('gray.200', 'gray.600')
   const underFg = useColorModeValue('gray.700', 'white')
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     setImgShown(false)
-  }, [picId])
+    const el = imgRef.current
+    if (!el || !url) return
+    const showIfDecoded = () => {
+      if (el.complete && el.naturalWidth > 0) setImgShown(true)
+    }
+    showIfDecoded()
+    const t = window.setTimeout(showIfDecoded, 0)
+    return () => window.clearTimeout(t)
+  }, [url, picId])
 
   const labelText = ariaLabel || (label ? `Open story ${label}` : 'Open story')
 
@@ -107,6 +116,8 @@ function StripAvatarFace({ src, label, onClick, ariaLabel }) {
       </Flex>
       {url ? (
         <Image
+          key={url}
+          ref={imgRef}
           src={url}
           alt=""
           position="absolute"
@@ -121,6 +132,7 @@ function StripAvatarFace({ src, label, onClick, ariaLabel }) {
           onError={() => setImgShown(false)}
           loading="eager"
           draggable={false}
+          decoding="async"
         />
       ) : null}
     </Box>
@@ -143,7 +155,7 @@ function OtherStripFace({ src, label, storyUserId, previewUser, openRef }) {
   )
 }
 
-export default function StoryStrip() {
+function StoryStrip() {
   const { user } = useContext(UserContext) || {}
   const [strip, setStrip] = useState([])
   const [loading, setLoading] = useState(true)
@@ -300,9 +312,15 @@ export default function StoryStrip() {
     fetchStrip({ silent: true })
   }, [fetchStrip])
 
-  if (!user?._id) return null
+  const selfFaceLabel = (user?.name || user?.username || 'You').trim() || 'You'
 
-  const selfFaceLabel = (user.name || user.username || 'You').trim() || 'You'
+  /** One handler for the self avatar — avoids new inline fns every parent render (feed scroll). */
+  const handleSelfStripClick = useCallback(() => {
+    if (myEntry) openViewer(myId, user)
+    else onAddOpen()
+  }, [myEntry, myId, user, openViewer, onAddOpen])
+
+  if (!user?._id) return null
 
   const AvatarRing = ({ unseen, children, ...boxProps }) => (
     <Box
@@ -361,7 +379,7 @@ export default function StoryStrip() {
                       <StripAvatarFace
                         src={user.profilePic}
                         label={selfFaceLabel}
-                        onClick={() => openViewer(myId, user)}
+                        onClick={handleSelfStripClick}
                         ariaLabel="Your story"
                       />
                     </AvatarRing>
@@ -391,7 +409,7 @@ export default function StoryStrip() {
                     <StripAvatarFace
                       src={user.profilePic}
                       label={selfFaceLabel}
-                      onClick={onAddOpen}
+                      onClick={handleSelfStripClick}
                       ariaLabel="Add to your story"
                     />
                     <Flex
@@ -470,3 +488,6 @@ export default function StoryStrip() {
     </>
   )
 }
+
+/** Home feed re-renders often (infinite scroll). Story strip has no props — skip those parent updates. */
+export default memo(StoryStrip)

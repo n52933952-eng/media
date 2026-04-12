@@ -168,8 +168,16 @@ const Header = () => {
             lineHeight="0"
           >
             <Avatar
-              src={user?.profilePic}
-              name={user?.name || user?.username}
+              src={
+                typeof user?.profilePic === 'string' && user.profilePic.trim()
+                  ? user.profilePic.trim()
+                  : undefined
+              }
+              name={
+                typeof user?.profilePic === 'string' && user.profilePic.trim()
+                  ? undefined
+                  : user?.name || user?.username
+              }
               style={{ width: '26px', height: '26px', minWidth: '26px', display: 'block' }}
             />
           </Box>
