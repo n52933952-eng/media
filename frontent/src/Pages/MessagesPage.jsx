@@ -1490,7 +1490,12 @@ const MessagesPage = () => {
     try {
       const baseUrl = import.meta.env.PROD ? window.location.origin : 'http://localhost:5000'
       const res = await fetch(`${baseUrl}/api/message/group/${convId}/members/${memberId}`, { method: 'DELETE', credentials: 'include' })
-      if (!res.ok) { const d = await res.json(); showToast('Error', d.error || 'Failed to remove member', 'error') }
+      if (!res.ok) { const d = await res.json(); showToast('Error', d.error || 'Failed to remove member', 'error'); return }
+      // Update state immediately — don't wait for socket event
+      setSelectedConversation(prev => prev ? { ...prev, participants: (prev.participants || []).filter(p => idStr(p._id || p) !== idStr(memberId)) } : prev)
+      setConversations(prev => prev.map(c =>
+        c._id === convId ? { ...c, participants: (c.participants || []).filter(p => idStr(p._id || p) !== idStr(memberId)) } : c
+      ))
     } catch (e) { showToast('Error', 'Failed to remove member', 'error') }
   }
 
@@ -1528,8 +1533,24 @@ const MessagesPage = () => {
       })
       const d = await res.json()
       if (!res.ok) { showToast('Error', d.error || 'Failed to add member', 'error'); return }
+      // Update state immediately from the API response (don't wait for socket event)
+      const updatedParticipants = d.participants || d.conversation?.participants
+      if (updatedParticipants) {
+        setSelectedConversation(prev => prev ? { ...prev, participants: updatedParticipants } : prev)
+        setConversations(prev => prev.map(c =>
+          c._id === selectedConversation._id ? { ...c, participants: updatedParticipants } : c
+        ))
+      } else {
+        // Fallback: find the newly added user in followedUsers and append manually
+        const newUser = followedUsers.find(u => idStr(u._id) === idStr(userId))
+        if (newUser) {
+          setSelectedConversation(prev => prev ? { ...prev, participants: [...(prev.participants || []), newUser] } : prev)
+          setConversations(prev => prev.map(c =>
+            c._id === selectedConversation._id ? { ...c, participants: [...(c.participants || []), newUser] } : c
+          ))
+        }
+      }
       showToast('Success', 'Member added', 'success')
-      // Socket event groupMemberAdded will update state reactively
     } catch (e) { showToast('Error', 'Failed to add member', 'error') }
     finally { setAddingMemberId(null) }
   }
