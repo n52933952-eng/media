@@ -217,9 +217,10 @@ async function sendMissedCallNotification(userId, callerName, callType = 'video'
  */
 async function sendGroupMessageNotification(recipientUserIds, senderName, groupName, conversationId, messageId) {
   if (!Array.isArray(recipientUserIds) || recipientUserIds.length === 0) return
-  const promises = recipientUserIds.map(uid =>
-    sendNotificationToUser(
-      uid,
+  try {
+    const { sendGroupMessageMulticast } = await import('./fcmNotifications.js')
+    await sendGroupMessageMulticast(
+      recipientUserIds,
       groupName || 'Group',
       `${senderName}: sent a message`,
       {
@@ -230,9 +231,10 @@ async function sendGroupMessageNotification(recipientUserIds, senderName, groupN
         groupName: String(groupName || ''),
         isGroup: 'true',
       }
-    ).catch(() => {})
-  )
-  await Promise.allSettled(promises)
+    )
+  } catch (err) {
+    console.error('❌ [Push/FCM] sendGroupMessageNotification:', err.message)
+  }
 }
 
 /**

@@ -407,6 +407,81 @@ export async function sendGeneralPushNotificationToUser(userId, title, body, dat
 }
 
 /**
+ * Batch push for group messages — one DB query for all tokens, one FCM multicast per 500 recipients.
+ * Handles stale token cleanup automatically.
+ * @param {string[]} userIds - array of MongoDB user ID strings (not the admin/sender)
+ * @param {string}   title
+ * @param {string}   body
+ * @param {object}   data  - extra string key/value pairs
+ */
+export async function sendGroupMessageMulticast(userIds, title, body, data = {}) {
+  if (!initializationAttempted || !isInitialized || !admin.apps.length) return { successCount: 0, failureCount: 0 }
+  if (!Array.isArray(userIds) || userIds.length === 0) return { successCount: 0, failureCount: 0 }
+
+  const User = (await import('../models/user.js')).default
+  // Single query to fetch all FCM tokens for the recipients
+  const users = await User.find({ _id: { $in: userIds }, fcmToken: { $exists: true, $ne: '' } })
+    .select('_id fcmToken')
+    .lean()
+
+  if (users.length === 0) return { successCount: 0, failureCount: 0 }
+
+  const titleStr = String(title || 'PlaySocial').slice(0, 200)
+  const bodyStr  = String(body  || '').slice(0, 500)
+  const dataPayload = Object.fromEntries(
+    Object.entries({ ...data, title: titleStr, body: bodyStr }).map(([k, v]) => [k, v == null ? '' : String(v)])
+  )
+
+  const BATCH = 500
+  let successCount = 0
+  let failureCount = 0
+  const staleUserIds = []
+
+  for (let i = 0; i < users.length; i += BATCH) {
+    const slice = users.slice(i, i + BATCH)
+    const tokens = slice.map(u => u.fcmToken)
+    try {
+      const result = await admin.messaging().sendEachForMulticast({
+        tokens,
+        notification: { title: titleStr, body: bodyStr },
+        data: dataPayload,
+        android: {
+          priority: 'high',
+          ttl: 60 * 60 * 1000,
+          notification: {
+            channelId: PLAYSOC_GENERAL_CHANNEL,
+            sound: 'default',
+            defaultSound: true,
+            defaultVibrateTimings: true,
+          },
+        },
+        apns: {
+          headers: { 'apns-priority': '10' },
+          payload: { aps: { alert: { title: titleStr, body: bodyStr }, sound: 'default' } },
+        },
+      })
+      successCount += result.successCount
+      failureCount += result.failureCount
+      result.responses.forEach((resp, idx) => {
+        const code = resp.error?.code
+        if (!resp.success && (code === 'messaging/registration-token-not-registered' || code === 'messaging/invalid-registration-token')) {
+          staleUserIds.push(String(slice[idx]._id))
+        }
+      })
+    } catch (err) {
+      failureCount += tokens.length
+    }
+  }
+
+  // Clear stale tokens in one bulk write
+  if (staleUserIds.length > 0) {
+    await User.updateMany({ _id: { $in: staleUserIds } }, { $set: { fcmToken: '' } }).catch(() => {})
+  }
+
+  return { successCount, failureCount }
+}
+
+/**
  * Message push without top-level `notification` so Android delivers as a data message.
  * `onMessageReceived` runs in background/killed (WhatsApp-style delivery ack from native).
  * iOS still gets a visible alert via `apns` payload.

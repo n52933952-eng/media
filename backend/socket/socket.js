@@ -1808,21 +1808,17 @@ export const initializeSocket = async (app) => {
                     const currentUserSocketId = currentUserData?.socketId
                     if (currentUserSocketId) {
                         io.to(currentUserSocketId).emit("conversationMarkedRead", { conversationId })
-                        
-                        // Update unread count for the user who marked messages as seen
+
+                        // 2 queries instead of N+1:
+                        //   1. distinct() on conversations index → array of IDs
+                        //   2. single countDocuments() using compound index { conversationId, seen, sender }
                         try {
-                            const userConversations = await Conversation.find({ participants: currentUserId })
-                            const totalUnread = await Promise.all(
-                                userConversations.map(async (conv) => {
-                                    const unreadCount = await Message.countDocuments({
-                                        conversationId: conv._id,
-                                        seen: false,
-                                        sender: { $ne: currentUserId }
-                                    })
-                                    return unreadCount || 0
-                                })
-                            )
-                            const totalUnreadCount = totalUnread.reduce((sum, count) => sum + count, 0)
+                            const convIds = await Conversation.distinct('_id', { participants: currentUserId })
+                            const totalUnreadCount = await Message.countDocuments({
+                                conversationId: { $in: convIds },
+                                seen: false,
+                                sender: { $ne: currentUserId },
+                            })
                             io.to(currentUserSocketId).emit("unreadCountUpdate", { totalUnread: totalUnreadCount })
                         } catch (error) {
                             console.log('Error calculating unread count:', error)
