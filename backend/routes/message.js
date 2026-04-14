@@ -14,6 +14,7 @@ import {
   addGroupMember,
   removeGroupMember,
   leaveGroup,
+  deleteGroup,
 } from '../controller/message.js'
 
 import protectRoute from '../middlware/protectRoute.js'
@@ -34,6 +35,7 @@ router.get('/unread/count', protectRoute, getTotalUnreadCount)
 // ── Group management ───────────────────────────────────────────────────────
 router.post('/group', protectRoute, createGroup)
 router.put('/group/:id', protectRoute, updateGroupInfo)
+router.delete('/group/:id', protectRoute, deleteGroup)
 router.post('/group/:id/members', protectRoute, addGroupMember)
 router.delete('/group/:id/members/:userId', protectRoute, removeGroupMember)
 router.post('/group/:id/leave', protectRoute, leaveGroup)

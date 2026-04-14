@@ -844,6 +844,32 @@ export const removeGroupMember = async (req, res) => {
   }
 }
 
+/** DELETE /api/message/group/:id  — admin deletes the entire group */
+export const deleteGroup = async (req, res) => {
+  try {
+    const adminId = req.user._id
+    const conversation = await Conversation.findById(req.params.id)
+    if (!conversation || !conversation.isGroup) return res.status(404).json({ error: 'Group not found' })
+    if (idStr(conversation.admin) !== idStr(adminId)) return res.status(403).json({ error: 'Only admin can delete the group' })
+
+    const conversationId = idStr(conversation._id)
+
+    // Notify all members before deleting
+    const io = getIO()
+    if (io) {
+      io.to(conversationId).emit('groupDeleted', { conversationId })
+    }
+
+    // Clean up database
+    await Message.deleteMany({ conversationId: conversation._id })
+    await Conversation.findByIdAndDelete(conversation._id)
+
+    res.status(200).json({ ok: true })
+  } catch (error) {
+    res.status(500).json({ error: error.message })
+  }
+}
+
 /** POST /api/message/group/:id/leave  — any member leaves the group */
 export const leaveGroup = async (req, res) => {
   try {

@@ -1374,12 +1374,20 @@ const MessagesPage = () => {
       setConversations(prev => prev.filter(c => c._id !== conversationId))
       if (selectedConversation?._id === conversationId) setSelectedConversation(null)
     }
+    const handleGroupDeleted = ({ conversationId }) => {
+      setConversations(prev => prev.filter(c => c._id !== conversationId))
+      if (selectedConversation?._id === conversationId) {
+        setSelectedConversation(null)
+        setMessages([])
+      }
+    }
     socket.on('groupCreated', handleGroupCreated)
     socket.on('groupInfoUpdated', handleGroupInfoUpdated)
     socket.on('groupMemberAdded', handleGroupMemberAdded)
     socket.on('groupMemberRemoved', handleGroupMemberRemoved)
     socket.on('groupMemberLeft', handleGroupMemberLeft)
     socket.on('removedFromGroup', handleRemovedFromGroup)
+    socket.on('groupDeleted', handleGroupDeleted)
 
     return () => {
       socket.off("messageReactionUpdated", handleReactionUpdate)
@@ -1390,6 +1398,7 @@ const MessagesPage = () => {
       socket.off('groupMemberRemoved', handleGroupMemberRemoved)
       socket.off('groupMemberLeft', handleGroupMemberLeft)
       socket.off('removedFromGroup', handleRemovedFromGroup)
+      socket.off('groupDeleted', handleGroupDeleted)
     }
   }, [socket, selectedConversation?._id])
 
@@ -1484,6 +1493,21 @@ const MessagesPage = () => {
       setSelectedConversation(null)
       closeGroupInfo()
     } catch (e) { showToast('Error', 'Failed to leave group', 'error') }
+  }
+
+  const handleDeleteGroup = async (convId) => {
+    if (!window.confirm('Delete this group for everyone? All messages will be permanently deleted.')) return
+    try {
+      const baseUrl = import.meta.env.PROD ? window.location.origin : 'http://localhost:5000'
+      const res = await fetch(`${baseUrl}/api/message/group/${convId}`, { method: 'DELETE', credentials: 'include' })
+      if (!res.ok) { const d = await res.json(); showToast('Error', d.error || 'Failed to delete group', 'error'); return }
+      // Clean up local state immediately (socket groupDeleted handles other members)
+      setConversations(prev => prev.filter(c => c._id !== convId))
+      setSelectedConversation(null)
+      setMessages([])
+      closeGroupInfo()
+      showToast('Success', 'Group deleted', 'success')
+    } catch (e) { showToast('Error', 'Failed to delete group', 'error') }
   }
 
   const handleRemoveGroupMember = async (convId, memberId) => {
@@ -4047,14 +4071,29 @@ const MessagesPage = () => {
               )}
 
               <Divider mb={4} />
-              <Button
-                colorScheme="red"
-                variant="outline"
-                w="100%"
-                onClick={() => handleLeaveGroup(selectedConversation._id)}
-              >
-                Leave Group
-              </Button>
+              {!iAmAdmin && (
+                <Button
+                  colorScheme="red"
+                  variant="outline"
+                  w="100%"
+                  mb={2}
+                  onClick={() => handleLeaveGroup(selectedConversation._id)}
+                >
+                  Leave Group
+                </Button>
+              )}
+              {iAmAdmin && (
+                <Button
+                  colorScheme="red"
+                  bg="red.600"
+                  color="white"
+                  _hover={{ bg: 'red.700' }}
+                  w="100%"
+                  onClick={() => handleDeleteGroup(selectedConversation._id)}
+                >
+                  Delete Group
+                </Button>
+              )}
             </DrawerBody>
           </DrawerContent>
         </Drawer>
