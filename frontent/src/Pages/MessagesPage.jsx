@@ -99,6 +99,12 @@ const MessagesPage = () => {
   const [groupNameInput, setGroupNameInput] = useState('')
   const [selectedGroupMembers, setSelectedGroupMembers] = useState([])
   const [creatingGroup, setCreatingGroup] = useState(false)
+  // Admin edit state
+  const [editGroupNameVisible, setEditGroupNameVisible] = useState(false)
+  const [editGroupNameValue, setEditGroupNameValue] = useState('')
+  const [savingGroupName, setSavingGroupName] = useState(false)
+  const [addMembersVisible, setAddMembersVisible] = useState(false)
+  const [addingMemberId, setAddingMemberId] = useState(null)
 
   // Refs
   const messagesEndRef = useRef(null)
@@ -145,9 +151,7 @@ const MessagesPage = () => {
         
         if (!loadMore) {
           // Initial load - log what database returned
-          console.log('📥 Fetched conversations from database. Top 3:')
           fetchedConversations.slice(0, 3).forEach((c, i) => {
-            console.log(`  ${i+1}. ${c.participants[0]?.username || 'Unknown'} - "${c.lastMessage?.text?.substring(0, 15) || 'No message'}" - ${new Date(c.updatedAt).toLocaleTimeString()}`)
           })
         }
         
@@ -199,20 +203,9 @@ const MessagesPage = () => {
     
     const participantId = selectedConversation?.participants[0]?._id
     
-    console.log('🔍 Checking conversation state:', {
-      hasSelectedConversation: !!selectedConversation,
-      isNull: selectedConversation === null,
-      isUndefined: selectedConversation === undefined,
-      participantId: participantId || 'none'
-    })
-    
     if (participantId) {
-      // User opened a conversation - set it for notification control
-      console.log('✅ Conversation opened - setting selected ID:', participantId)
       setSelectedConversationId(participantId)
     } else if (selectedConversation === null) {
-      // User explicitly closed conversation (back button or deleted) - clear it
-      console.log('✅ Conversation closed - clearing selected ID')
       setSelectedConversationId(null)
     }
     // Note: If selectedConversation is undefined (initial load), don't do anything
@@ -225,7 +218,6 @@ const MessagesPage = () => {
       // Only clear if we're actually leaving the page (component unmounting for real)
       // This ensures notification sounds work correctly when navigating away from Messages
       if (setSelectedConversationId) {
-        console.log('✅ MessagesPage unmounting - clearing selected conversation ID')
         setSelectedConversationId(null)
       }
     }
@@ -234,22 +226,18 @@ const MessagesPage = () => {
   // Force video elements to update when mounting MessagesPage with active call
   useEffect(() => {
     if (callAccepted && !callEnded) {
-      console.log('MessagesPage mounted with active call - forcing video update')
       // Force a small delay then check video elements
       const timer = setTimeout(() => {
         if (myVideo?.current && stream && !myVideo.current.srcObject) {
-          console.log('Attaching local stream to myVideo on mount')
           myVideo.current.srcObject = stream
           myVideo.current.muted = true
         }
         if (userVideo?.current) {
           if (userVideo.current.srcObject) {
-            console.log('Forcing remote video play on mount')
             userVideo.current.volume = 1.0
             userVideo.current.muted = false
             userVideo.current.play().catch(e => console.log('Play error:', e))
           } else if (remoteStream) {
-            console.log('Attaching remote stream on mount')
             userVideo.current.srcObject = remoteStream
             userVideo.current.volume = 1.0
             userVideo.current.muted = false
@@ -266,19 +254,11 @@ const MessagesPage = () => {
     // Small delay to ensure video elements are rendered
     const timer = setTimeout(() => {
       if (callAccepted && !callEnded && selectedConversation) {
-        console.log('Reconnecting video streams during navigation...', {
-          hasMyVideo: !!myVideo?.current,
-          hasUserVideo: !!userVideo?.current,
-          hasStream: !!stream,
-          userVideoHasStream: !!userVideo?.current?.srcObject
-        })
-        
         // Ensure my video (local) has the stream attached
         if (myVideo?.current && stream) {
           myVideo.current.srcObject = stream
           myVideo.current.muted = true // Always mute own video to prevent echo
           myVideo.current.play().catch(err => {
-            console.log('My video play error:', err)
           })
         }
         
@@ -286,42 +266,32 @@ const MessagesPage = () => {
         if (userVideo?.current) {
           // Check if userVideo already has a stream (from peer connection)
           if (userVideo.current.srcObject) {
-            console.log('User video already has stream, playing...')
             userVideo.current.volume = 1.0
             userVideo.current.muted = false
             userVideo.current.play().catch(err => {
-              console.log('User video play error:', err)
             })
           } else if (remoteStream) {
             // Attach remoteStream from context if userVideo doesn't have it yet
-            console.log('Attaching remote stream from context...')
             userVideo.current.srcObject = remoteStream
             userVideo.current.volume = 1.0
             userVideo.current.muted = false
             userVideo.current.play().catch(err => {
-              console.log('Remote stream play error:', err)
             })
           } else {
-            console.log('User video missing stream - waiting for peer connection...')
             // Wait a bit longer for peer connection to attach stream
             setTimeout(() => {
               if (userVideo?.current?.srcObject) {
-                console.log('Stream now available, playing user video')
                 userVideo.current.volume = 1.0
                 userVideo.current.muted = false
                 userVideo.current.play().catch(err => {
-                  console.log('Delayed user video play error:', err)
                 })
               } else if (remoteStream && userVideo?.current) {
-                console.log('Attaching remote stream after delay...')
                 userVideo.current.srcObject = remoteStream
                 userVideo.current.volume = 1.0
                 userVideo.current.muted = false
                 userVideo.current.play().catch(err => {
-                  console.log('Delayed remote stream play error:', err)
                 })
               } else {
-                console.log('Still no stream on user video after delay')
               }
             }, 500)
           }
@@ -348,7 +318,6 @@ const MessagesPage = () => {
         const list = Array.isArray(data) ? data : (Array.isArray(data.users) ? data.users : [])
         setFollowedUsers(list.filter(u => u && u._id))
       } catch (error) {
-        console.log('Error fetching followed users:', error)
       }
     }
 
@@ -473,9 +442,11 @@ const MessagesPage = () => {
     const fetchMessages = async (loadMore = false, beforeId = null) => {
       if (!selectedConversation) return
 
-      const otherUser = selectedConversation.participants[0]
-      if (!otherUser?._id) return
-      
+      const isGroupConv = !!selectedConversation.isGroup
+      const otherUser = isGroupConv ? null : selectedConversation.participants.find(p => idStr(p._id) !== idStr(user?._id)) || selectedConversation.participants[0]
+      if (!isGroupConv && !otherUser?._id) return
+      if (isGroupConv && !selectedConversation._id) return
+
       // Store current conversation ID to detect if it changes during fetch
       const currentConversationId = selectedConversation._id
 
@@ -485,7 +456,10 @@ const MessagesPage = () => {
 
       try {
         // Build URL with pagination parameters
-        let url = `${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/message/${otherUser._id}?limit=12`
+        const base = import.meta.env.PROD ? window.location.origin : 'http://localhost:5000'
+        let url = isGroupConv
+          ? `${base}/api/message/${selectedConversation._id}?limit=12&conversationId=${selectedConversation._id}`
+          : `${base}/api/message/${otherUser._id}?limit=12`
         if (beforeId) {
           url += `&beforeId=${beforeId}`
         }
@@ -497,7 +471,6 @@ const MessagesPage = () => {
         
         // Check if conversation changed while fetching - if so, discard these messages
         if (selectedConversation?._id !== currentConversationId) {
-          console.log('Conversation changed during fetch, discarding old messages')
           return
         }
         
@@ -544,12 +517,16 @@ const MessagesPage = () => {
             shouldScrollToBottomRef.current = true
 
             // Mark messages as seen when opening conversation
-            const otherUser = selectedConversation.participants[0]
-            if (otherUser?._id && socket) {
-              socket.emit("markmessageasSeen", {
-                conversationId: selectedConversation._id,
-                userId: otherUser._id
-              })
+            if (socket && selectedConversation._id) {
+              const seenOtherUser = isGroupConv
+                ? null
+                : selectedConversation.participants.find(p => idStr(p._id) !== idStr(user?._id)) || selectedConversation.participants[0]
+              if (isGroupConv || seenOtherUser?._id) {
+                socket.emit("markmessageasSeen", {
+                  conversationId: selectedConversation._id,
+                  userId: seenOtherUser?._id || null,
+                })
+              }
             }
           }
           
@@ -660,12 +637,17 @@ const MessagesPage = () => {
     const previousScrollTop = container.scrollTop
 
     try {
-      const otherUser = selectedConversation?.participants[0]
-      if (!otherUser?._id) return
+      const isGroupConv = !!selectedConversation?.isGroup
+      const otherUser = isGroupConv ? null : selectedConversation?.participants.find(p => idStr(p._id) !== idStr(user?._id)) || selectedConversation?.participants[0]
+      if (!isGroupConv && !otherUser?._id) return
+      if (isGroupConv && !selectedConversation?._id) return
 
-      setLoadingMoreMessages(true) 
+      setLoadingMoreMessages(true)
 
-      const url = `${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/message/${otherUser._id}?limit=12&beforeId=${oldestMessage._id}`
+      const base = import.meta.env.PROD ? window.location.origin : 'http://localhost:5000'
+      const url = isGroupConv
+        ? `${base}/api/message/${selectedConversation._id}?limit=12&conversationId=${selectedConversation._id}&beforeId=${oldestMessage._id}`
+        : `${base}/api/message/${otherUser._id}?limit=12&beforeId=${oldestMessage._id}`
       const res = await fetch(url, {
         credentials: 'include',
       })
@@ -888,23 +870,20 @@ const MessagesPage = () => {
     selectedConversationIdRef.current = selectedConversation?._id || null
   }, [selectedConversation?._id])
 
+  // Join the Socket.IO room for group conversations so real-time messages arrive
+  // even when the user was online when the group was created or they were added later.
+  useEffect(() => {
+    if (!socket || !selectedConversation?._id || !selectedConversation?.isGroup) return
+    socket.emit('joinConversationRoom', { conversationId: selectedConversation._id })
+  }, [socket, selectedConversation?._id, selectedConversation?.isGroup])
+
   // Listen for new messages via Socket.io - OPTIMIZED
   useEffect(() => {
     if (!socket || !user?._id) return
     
-    console.log('✅ Setting up newMessage socket listener (will persist after refresh)')
 
     const handleNewMessage = (message) => {
-      console.log('📨 Socket received newMessage:', {
-        messageId: message?._id,
-        conversationId: message?.conversationId,
-        sender: message?.sender?.username || message?.sender?._id,
-        text: message?.text?.substring(0, 30)
-      })
-      
-      // Always process new messages - even if conversation was deleted
       if (!message || !message.conversationId) {
-        console.log('⚠️ Invalid message - missing data')
         return
       }
       
@@ -926,7 +905,6 @@ const MessagesPage = () => {
       const isFromCurrentUser = messageSenderId !== '' && currentUserId !== '' && messageSenderId === currentUserId
       
       if (isFromCurrentUser) {
-        console.log('⚠️ Ignoring own message in socket listener (already handled by handleMessageSent)')
         return // Don't process own messages via socket
       }
 
@@ -934,13 +912,6 @@ const MessagesPage = () => {
         socket.emit('ackMessageDelivered', { messageId: String(message._id) })
       }
 
-      console.log('✅ Processing message from other user in handleNewMessage')
-      console.log('⏰ Message timestamp info:', {
-        messageCreatedAt: message.createdAt,
-        conversationUpdatedAt: message.conversationUpdatedAt,
-        willUse: message.conversationUpdatedAt || message.createdAt
-      })
-      
       // Check if this message is for the currently selected conversation
       // Use REF to get latest value without recreating listener (performance optimization)
       const currentSelectedId = selectedConversationIdRef.current
@@ -974,7 +945,6 @@ const MessagesPage = () => {
       // ALWAYS update conversation list (we know message is from another user)
       // This ensures conversations are sorted and updated in real-time
       setConversations(prev => {
-        console.log('📋 Updating conversation list. Previous count:', prev.length)
         let updated = prev.map(conv => {
             if (conv._id && message.conversationId && conv._id.toString() === message.conversationId.toString()) {
               // Update lastMessage with full sender info (we know it's from another user)
@@ -1039,12 +1009,9 @@ const MessagesPage = () => {
             return bTime - aTime // Most recent first
           })
           
-          console.log('✅ Socket newMessage - Updated & sorted. Top 3:')
           sorted.slice(0, 3).forEach((c, i) => {
-            console.log(`  ${i+1}. ${c.participants[0]?.username || 'Unknown'} - "${c.lastMessage?.text?.substring(0, 15) || 'No message'}" - ${new Date(c.updatedAt).toLocaleTimeString()}`)
           })
           
-          console.log('📋 Returning sorted conversations, count:', sorted.length)
           return sorted
         })
       }
@@ -1078,11 +1045,14 @@ const MessagesPage = () => {
 
     // If last message is from the other user, mark messages as seen
     if (lastMessageSenderId !== '' && currentUserId !== '' && lastMessageSenderId !== currentUserId) {
-      const otherUser = selectedConversation.participants[0]
-      if (otherUser?._id) {
+      const isGroupConv = !!selectedConversation.isGroup
+      const otherUser = isGroupConv
+        ? null
+        : selectedConversation.participants.find(p => idStr(p._id) !== idStr(user?._id)) || selectedConversation.participants[0]
+      if (isGroupConv || otherUser?._id) {
         socket.emit("markmessageasSeen", {
           conversationId: selectedConversation._id,
-          userId: otherUser._id
+          userId: otherUser?._id || null,
         })
       }
     }
@@ -1311,7 +1281,6 @@ const MessagesPage = () => {
           }))
         }
       } catch (error) {
-        console.log('Error refreshing participant data:', error)
       }
     }
     
@@ -1323,7 +1292,8 @@ const MessagesPage = () => {
     if (!socket || !selectedConversation?._id) return
 
     const handleUserTyping = ({ userId, conversationId, isTyping: typingStatus }) => {
-      // Check if this is for the current conversation
+      // Ignore own typing events (relevant in groups where the room broadcast includes the sender)
+      if (userId && user?._id && idStr(userId) === idStr(user._id)) return
       if (selectedConversation?._id && conversationId === selectedConversation._id.toString()) {
         setIsTyping(typingStatus)
       }
@@ -1341,23 +1311,23 @@ const MessagesPage = () => {
     if (!socket || !selectedConversation?._id) return
 
     const handleReactionUpdate = async ({ conversationId, messageId }) => {
-      // Check if this is for the current conversation
       if (selectedConversation?._id && conversationId === selectedConversation._id.toString()) {
-        // Refetch messages to get updated reactions
         try {
-          const otherUser = selectedConversation.participants[0]
-          if (otherUser?._id) {
-            const res = await fetch(`${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/message/${otherUser._id}?limit=12`, {
-              credentials: 'include',
-            })
-            const data = await res.json()
-            if (res.ok) {
-              setMessages(data.messages || [])
-              setHasMoreMessages(data.hasMore || false)
-            }
+          const base = import.meta.env.PROD ? window.location.origin : 'http://localhost:5000'
+          const isGroupConv = !!selectedConversation.isGroup
+          const otherUser = isGroupConv ? null : selectedConversation.participants.find(p => idStr(p._id) !== idStr(user?._id)) || selectedConversation.participants[0]
+          const url = isGroupConv
+            ? `${base}/api/message/${selectedConversation._id}?limit=12&conversationId=${selectedConversation._id}`
+            : `${base}/api/message/${otherUser._id}?limit=12`
+          if (!isGroupConv && !otherUser?._id) return
+          const res = await fetch(url, { credentials: 'include' })
+          const data = await res.json()
+          if (res.ok) {
+            setMessages(data.messages || [])
+            setHasMoreMessages(data.hasMore || false)
           }
         } catch (error) {
-          console.log('Error fetching updated messages:', error)
+          console.error('Error fetching updated messages:', error)
         }
       }
     }
@@ -1427,28 +1397,45 @@ const MessagesPage = () => {
   const handleTyping = () => {
     if (!socket || !selectedConversation?._id || !user?._id) return
 
-    const recipientId = selectedConversation.participants[0]?._id
-    if (!recipientId) return
+    const isGroupConv = !!selectedConversation.isGroup
 
-    // Emit typing start
-    socket.emit("typingStart", {
-      from: user._id,
-      to: recipientId,
-      conversationId: selectedConversation._id
-    })
+    if (isGroupConv) {
+      socket.emit('typingStart', {
+        from: user._id,
+        conversationId: selectedConversation._id,
+        isGroup: true,
+      })
+    } else {
+      const recipientId = selectedConversation.participants.find(p => idStr(p._id) !== idStr(user?._id))?._id || selectedConversation.participants[0]?._id
+      if (!recipientId) return
+      socket.emit('typingStart', {
+        from: user._id,
+        to: recipientId,
+        conversationId: selectedConversation._id,
+      })
+    }
 
-    // Clear existing timeout
     if (typingTimeoutRef.current) {
       clearTimeout(typingTimeoutRef.current)
     }
 
-    // Set timeout to emit typing stop after 2 seconds of no typing
     typingTimeoutRef.current = setTimeout(() => {
-      socket.emit("typingStop", {
-        from: user._id,
-        to: recipientId,
-        conversationId: selectedConversation._id
-      })
+      if (isGroupConv) {
+        socket.emit('typingStop', {
+          from: user._id,
+          conversationId: selectedConversation._id,
+          isGroup: true,
+        })
+      } else {
+        const recipientId = selectedConversation.participants.find(p => idStr(p._id) !== idStr(user?._id))?._id || selectedConversation.participants[0]?._id
+        if (recipientId) {
+          socket.emit('typingStop', {
+            from: user._id,
+            to: recipientId,
+            conversationId: selectedConversation._id,
+          })
+        }
+      }
     }, 2000)
   }
 
@@ -1505,6 +1492,46 @@ const MessagesPage = () => {
       const res = await fetch(`${baseUrl}/api/message/group/${convId}/members/${memberId}`, { method: 'DELETE', credentials: 'include' })
       if (!res.ok) { const d = await res.json(); showToast('Error', d.error || 'Failed to remove member', 'error') }
     } catch (e) { showToast('Error', 'Failed to remove member', 'error') }
+  }
+
+  const handleSaveGroupName = async () => {
+    if (!editGroupNameValue.trim() || !selectedConversation?._id) return
+    setSavingGroupName(true)
+    try {
+      const baseUrl = import.meta.env.PROD ? window.location.origin : 'http://localhost:5000'
+      const res = await fetch(`${baseUrl}/api/message/group/${selectedConversation._id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ groupName: editGroupNameValue.trim() }),
+      })
+      if (!res.ok) { const d = await res.json(); showToast('Error', d.error || 'Failed to update group name', 'error'); return }
+      // Socket event groupInfoUpdated will update state reactively; also update locally
+      setSelectedConversation(prev => prev ? { ...prev, groupName: editGroupNameValue.trim() } : prev)
+      setConversations(prev => prev.map(c => c._id === selectedConversation._id ? { ...c, groupName: editGroupNameValue.trim() } : c))
+      setEditGroupNameVisible(false)
+      showToast('Success', 'Group name updated', 'success')
+    } catch (e) { showToast('Error', 'Failed to update group name', 'error') }
+    finally { setSavingGroupName(false) }
+  }
+
+  const handleAddGroupMember = async (userId) => {
+    if (!selectedConversation?._id || !userId) return
+    setAddingMemberId(userId)
+    try {
+      const baseUrl = import.meta.env.PROD ? window.location.origin : 'http://localhost:5000'
+      const res = await fetch(`${baseUrl}/api/message/group/${selectedConversation._id}/members`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ userId }),
+      })
+      const d = await res.json()
+      if (!res.ok) { showToast('Error', d.error || 'Failed to add member', 'error'); return }
+      showToast('Success', 'Member added', 'success')
+      // Socket event groupMemberAdded will update state reactively
+    } catch (e) { showToast('Error', 'Failed to add member', 'error') }
+    finally { setAddingMemberId(null) }
   }
 
   // Start conversation with a user
@@ -1588,7 +1615,6 @@ const MessagesPage = () => {
         )
       }
     } catch (error) {
-      console.log('Error toggling reaction:', error)
     }
   }
 
@@ -1642,7 +1668,6 @@ const MessagesPage = () => {
       }
     } catch (error) {
       showToast('Error', 'Failed to delete message', 'error')
-      console.log('Error deleting message:', error)
     }
   }
 
@@ -1672,7 +1697,6 @@ const MessagesPage = () => {
       }
     } catch (error) {
       showToast('Error', 'Failed to delete conversation', 'error')
-      console.log('Error deleting conversation:', error)
     }
   }
 
@@ -1769,7 +1793,6 @@ const MessagesPage = () => {
         try {
           showToast("Compressing video", "Please wait while we compress your video for optimal upload...", "info", 5000)
           
-          console.log('Starting compression for file:', file.name, 'Size:', fileSizeMB.toFixed(2), 'MB')
           
           // Add compression timeout (2 minutes)
           const compressionTimeout = setTimeout(() => {
@@ -1785,7 +1808,6 @@ const MessagesPage = () => {
                 // Compression progress: 10-80% of total (80% for compression, 20% for upload)
                 const calculatedProgress = 10 + (progress * 0.7)
                 setUploadProgress(calculatedProgress)
-                console.log('Compression progress:', calculatedProgress.toFixed(1) + '%')
               }
             }),
             new Promise((_, reject) => 
@@ -1796,7 +1818,6 @@ const MessagesPage = () => {
           clearTimeout(compressionTimeout)
           
           const compressedSizeMB = compressedFile.size / (1024 * 1024)
-          console.log(`Video compressed: ${fileSizeMB.toFixed(2)}MB → ${compressedSizeMB.toFixed(2)}MB`)
           
           // Update with compressed file
           setImage(compressedFile)
@@ -1907,16 +1928,16 @@ const MessagesPage = () => {
     }
 
     const isGroup = !!selectedConversation.isGroup
-    const recipientId = isGroup ? null : selectedConversation.participants[0]?._id
+    const recipientId = isGroup ? null : (selectedConversation.participants.find(p => idStr(p._id) !== idStr(user?._id))?._id || selectedConversation.participants[0]?._id)
     if (!isGroup && !recipientId) return false
 
     // Stop typing indicator when sending message
-    if (socket && selectedConversation?._id && user?._id && !isGroup) {
-      socket.emit("typingStop", {
-        from: user._id,
-        to: recipientId,
-        conversationId: selectedConversation._id
-      })
+    if (socket && selectedConversation?._id && user?._id) {
+      if (isGroup) {
+        socket.emit('typingStop', { from: user._id, conversationId: selectedConversation._id, isGroup: true })
+      } else {
+        socket.emit('typingStop', { from: user._id, to: recipientId, conversationId: selectedConversation._id })
+      }
     }
     if (typingTimeoutRef.current) {
       clearTimeout(typingTimeoutRef.current)
@@ -2088,7 +2109,6 @@ const MessagesPage = () => {
       setConversations(prev => {
         // Use server timestamp for accurate sorting (same as socket messages)
         const serverTimestamp = data.conversationUpdatedAt || data.createdAt || new Date().toISOString()
-        console.log('📤 Received response from send - timestamp:', serverTimestamp)
         
         const updated = prev.map(conv => {
           if (conv._id && data.conversationId && conv._id.toString() === data.conversationId.toString()) {
@@ -2146,9 +2166,7 @@ const MessagesPage = () => {
           return bTime - aTime
         })
         
-        console.log('📤 handleMessageSent - Updated & sorted. Top 3:')
         sorted.slice(0, 3).forEach((c, i) => {
-          console.log(`  ${i+1}. ${c.participants[0]?.username || 'Unknown'} - "${c.lastMessage?.text?.substring(0, 15) || 'No message'}" - ${new Date(c.updatedAt).toLocaleTimeString()}`)
         })
         
         return sorted
@@ -3891,27 +3909,59 @@ const MessagesPage = () => {
       </Modal>
 
       {/* ── Group Info Drawer ───────────────────────────────────────────── */}
-      {selectedConversation?.isGroup && (
-        <Drawer isOpen={isGroupInfoOpen} onClose={closeGroupInfo} placement="right" size="sm">
+      {selectedConversation?.isGroup && (() => {
+        const iAmAdmin = idStr(selectedConversation.admin) === idStr(user?._id) || idStr(selectedConversation.admin?._id) === idStr(user?._id)
+        const currentMembers = (selectedConversation.participants || []).map(p => idStr(p._id || p))
+        const addableUsers = followedUsers.filter(u => !currentMembers.includes(idStr(u._id)))
+        return (
+        <Drawer isOpen={isGroupInfoOpen} onClose={() => { closeGroupInfo(); setEditGroupNameVisible(false); setAddMembersVisible(false) }} placement="right" size="sm">
           <DrawerOverlay />
           <DrawerContent bg={bgColor}>
             <DrawerCloseButton />
             <DrawerHeader color={useColorModeValue('black','white')}>
               <Flex alignItems="center" gap={2}>
                 <MdGroup size={22} />
-                {selectedConversation.groupName || 'Group'}
+                <Box flex={1} minW={0}>
+                  {editGroupNameVisible && iAmAdmin ? (
+                    <Flex gap={2} alignItems="center">
+                      <Input
+                        size="sm"
+                        value={editGroupNameValue}
+                        onChange={e => setEditGroupNameValue(e.target.value)}
+                        onKeyDown={e => { if (e.key === 'Enter') handleSaveGroupName() }}
+                        bg={inputBg}
+                        borderRadius="md"
+                        autoFocus
+                      />
+                      <Button size="xs" colorScheme="blue" isLoading={savingGroupName} onClick={handleSaveGroupName}>Save</Button>
+                      <Button size="xs" variant="ghost" onClick={() => setEditGroupNameVisible(false)}>✕</Button>
+                    </Flex>
+                  ) : (
+                    <Flex alignItems="center" gap={2}>
+                      <Text noOfLines={1}>{selectedConversation.groupName || 'Group'}</Text>
+                      {iAmAdmin && (
+                        <IconButton
+                          icon={<Box as="span" fontSize="12px">✏️</Box>}
+                          size="xs"
+                          variant="ghost"
+                          aria-label="Edit group name"
+                          onClick={() => { setEditGroupNameValue(selectedConversation.groupName || ''); setEditGroupNameVisible(true) }}
+                        />
+                      )}
+                    </Flex>
+                  )}
+                </Box>
               </Flex>
             </DrawerHeader>
             <DrawerBody>
               <Text fontSize="sm" fontWeight="semibold" color="gray.500" mb={2}>
                 {selectedConversation.participants?.length || 0} Members
               </Text>
-              <VStack align="stretch" spacing={1} mb={6}>
+              <VStack align="stretch" spacing={1} mb={4}>
                 {(selectedConversation.participants || []).map(p => {
                   const pId = p._id || p
                   const isAdmin = idStr(selectedConversation.admin) === idStr(pId) || idStr(selectedConversation.admin?._id) === idStr(pId)
                   const isMe = idStr(pId) === idStr(user?._id)
-                  const iAmAdmin = idStr(selectedConversation.admin) === idStr(user?._id) || idStr(selectedConversation.admin?._id) === idStr(user?._id)
                   return (
                     <Flex key={idStr(pId)} alignItems="center" gap={3} p={2} borderRadius="md">
                       <Avatar size="sm" src={p.profilePic} name={p.name || p.username} />
@@ -3936,6 +3986,45 @@ const MessagesPage = () => {
                   )
                 })}
               </VStack>
+
+              {/* Add Members section (admin only) */}
+              {iAmAdmin && (
+                <Box mb={4}>
+                  <Button
+                    size="sm"
+                    leftIcon={<AddIcon boxSize={3} />}
+                    variant="outline"
+                    colorScheme="blue"
+                    w="100%"
+                    onClick={() => setAddMembersVisible(v => !v)}
+                    mb={addMembersVisible ? 2 : 0}
+                  >
+                    {addMembersVisible ? 'Hide' : 'Add Members'}
+                  </Button>
+                  {addMembersVisible && (
+                    <VStack align="stretch" spacing={1} maxH="200px" overflowY="auto" borderRadius="md" border="1px solid" borderColor={borderColor} p={1}>
+                      {addableUsers.length === 0 && (
+                        <Text fontSize="sm" color="gray.500" textAlign="center" py={3}>No more people to add</Text>
+                      )}
+                      {addableUsers.map(u => (
+                        <Flex key={u._id} alignItems="center" gap={2} p={1.5} borderRadius="md" _hover={{ bg: hoverBg }}>
+                          <Avatar size="xs" src={u.profilePic} name={u.name || u.username} />
+                          <Text fontSize="sm" flex={1} noOfLines={1} color={useColorModeValue('black','white')}>{u.name || u.username}</Text>
+                          <Button
+                            size="xs"
+                            colorScheme="blue"
+                            isLoading={addingMemberId === u._id}
+                            onClick={() => handleAddGroupMember(u._id)}
+                          >
+                            Add
+                          </Button>
+                        </Flex>
+                      ))}
+                    </VStack>
+                  )}
+                </Box>
+              )}
+
               <Divider mb={4} />
               <Button
                 colorScheme="red"
@@ -3948,7 +4037,8 @@ const MessagesPage = () => {
             </DrawerBody>
           </DrawerContent>
         </Drawer>
-      )}
+        )
+      })()}
     </Flex>
   )
 }

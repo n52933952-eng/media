@@ -385,14 +385,21 @@ export const mycon = async(req,res) => {
           ],
         },
       },
-      // Remove current user from participants (keep the other user(s))
+      // For 1-on-1 conversations remove current user so participants[0] is the other person.
+      // For group conversations keep everyone so the group info shows all members.
       {
         $addFields: {
           participants: {
-            $filter: {
-              input: '$participants',
-              as: 'p',
-              cond: { $ne: ['$$p._id', new mongoose.Types.ObjectId(userId)] },
+            $cond: {
+              if: { $eq: ['$isGroup', true] },
+              then: '$participants',
+              else: {
+                $filter: {
+                  input: '$participants',
+                  as: 'p',
+                  cond: { $ne: ['$$p._id', new mongoose.Types.ObjectId(userId)] },
+                },
+              },
             },
           },
         },
