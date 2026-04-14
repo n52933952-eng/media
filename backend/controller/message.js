@@ -472,28 +472,30 @@ export const mycon = async(req,res) => {
 }
 
 
-// Get total unread message count - OPTIMIZED endpoint
+// Get total unread message count — single aggregation (no N+1 queries)
 export const getTotalUnreadCount = async (req, res) => {
   try {
     const userId = req.user._id
-    
-    // Get all conversations for this user
-    const conversations = await Conversation.find({ participants: userId })
-    
-    // Count unread messages across all conversations
-    let totalUnread = 0
-    for (const conversation of conversations) {
-      const unreadCount = await Message.countDocuments({
-        conversationId: conversation._id,
-        seen: false,
-        sender: { $ne: userId }
-      })
-      totalUnread += unreadCount
-    }
-    
-    res.status(200).json({ totalUnread })
+    const result = await Message.aggregate([
+      {
+        $lookup: {
+          from: 'conversations',
+          localField: 'conversationId',
+          foreignField: '_id',
+          as: 'conv',
+        },
+      },
+      {
+        $match: {
+          seen: false,
+          sender: { $ne: new mongoose.Types.ObjectId(String(userId)) },
+          'conv.participants': new mongoose.Types.ObjectId(String(userId)),
+        },
+      },
+      { $count: 'totalUnread' },
+    ])
+    res.status(200).json({ totalUnread: result[0]?.totalUnread ?? 0 })
   } catch (error) {
-    console.log('Error getting total unread count:', error)
     res.status(500).json({ error: error.message })
   }
 }
@@ -598,16 +600,13 @@ export const deleteMessage = async (req, res) => {
     // Delete the message
     await Message.findByIdAndDelete(messageId)
 
-    // Emit socket event to notify other participants (conversation already fetched above)
+    // Emit only to participants in this conversation (not a global broadcast)
     if (conversation) {
       const io = getIO()
       if (io) {
-        // Emit to all participants in the conversation
-        conversation.participants.forEach(participantId => {
-          io.emit("messageDeleted", { 
-            conversationId: message.conversationId.toString(),
-            messageId: messageId
-          })
+        io.to(message.conversationId.toString()).emit("messageDeleted", {
+          conversationId: message.conversationId.toString(),
+          messageId: messageId,
         })
       }
     }
@@ -655,19 +654,14 @@ export const toggleReaction = async (req, res) => {
     // Populate userId in reactions for response
     await message.populate('reactions.userId', 'username name profilePic')
 
-    // Emit socket event to notify all participants in the conversation
+    // Emit only to participants in this conversation (not a global broadcast)
     const conversation = await Conversation.findById(message.conversationId)
     if (conversation) {
       const io = getIO()
       if (io) {
-        // Emit to all participants
-        conversation.participants.forEach(participantId => {
-          // Find socket ID for this participant
-          // We'll emit to all connected sockets since we need to notify all participants
-          io.emit("messageReactionUpdated", { 
-            conversationId: message.conversationId.toString(),
-            messageId: message._id.toString()
-          })
+        io.to(message.conversationId.toString()).emit("messageReactionUpdated", {
+          conversationId: message.conversationId.toString(),
+          messageId: message._id.toString(),
         })
       }
     }
@@ -711,7 +705,19 @@ export const createGroup = async (req, res) => {
     await conversation.populate('participants', 'username profilePic name')
 
     const io = getIO()
+    const roomId = idStr(conversation._id)
     if (io) {
+      // Join ALL online participants (including admin) to the new room immediately.
+      // Without this, users added to a group while already connected never receive
+      // real-time messages because the "join all rooms on connect" only ran at connect time.
+      const allUids = [idStr(adminId), ...participantIds.map(idStr)]
+      for (const uid of allUids) {
+        const recipSocket = await getUserSocket(uid).catch(() => null)
+        if (recipSocket?.socketId) {
+          const liveSock = io.sockets.sockets.get(recipSocket.socketId)
+          if (liveSock) liveSock.join(roomId)
+        }
+      }
       io.to(`userSelf:${idStr(adminId)}`).emit('groupCreated', conversation.toObject())
       for (const uid of participantIds) {
         const recipSocket = await getUserSocket(idStr(uid)).catch(() => null)
@@ -781,7 +787,12 @@ export const addGroupMember = async (req, res) => {
     if (io) {
       io.to(idStr(conversation._id)).emit('groupMemberAdded', { conversationId: idStr(conversation._id), participant: conversation.participants.find(p => idStr(p._id) === idStr(newUserId)) })
       const recipSocket = await getUserSocket(idStr(newUserId)).catch(() => null)
-      if (recipSocket?.socketId) io.to(recipSocket.socketId).emit('groupCreated', conversation.toObject())
+      if (recipSocket?.socketId) {
+        // Join the new member's live socket to the room so they receive future messages immediately
+        const liveSock = io.sockets.sockets.get(recipSocket.socketId)
+        if (liveSock) liveSock.join(idStr(conversation._id))
+        io.to(recipSocket.socketId).emit('groupCreated', conversation.toObject())
+      }
     }
 
     try {

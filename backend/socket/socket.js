@@ -1895,8 +1895,31 @@ export const initializeSocket = async (app) => {
             }
         })
 
+        // Allow clients to (re-)join a conversation room.
+        // Needed when a user is added to a new group while already connected — the initial
+        // "join all rooms on connect" only covers rooms that existed at connection time.
+        socket.on('joinConversationRoom', async ({ conversationId }) => {
+            try {
+                const convIdStr = String(conversationId || '').trim()
+                if (!convIdStr || !mongoose.isValidObjectId(convIdStr)) return
+                const uid = normalizeUserId(userId)
+                if (!uid) return
+                const { default: Conversation } = await import('../models/conversation.js')
+                const conv = await Conversation.findById(convIdStr).select('participants').lean()
+                if (!conv?.participants?.some(p => p.toString() === uid)) return
+                socket.join(convIdStr)
+            } catch (e) {
+                console.error('❌ [socket] joinConversationRoom error:', e.message)
+            }
+        })
+
         // Typing indicator - user started typing
-        socket.on("typingStart", async ({ from, to, conversationId }) => {
+        socket.on("typingStart", async ({ from, to, conversationId, isGroup }) => {
+            if (isGroup && conversationId) {
+                // Group: broadcast to room (socket.to excludes the sender)
+                socket.to(String(conversationId)).emit("userTyping", { userId: from, conversationId, isTyping: true })
+                return
+            }
             const recipientData = await getUserSocket(to)
             const recipientSocketId = recipientData?.socketId
             if (recipientSocketId) {
@@ -1905,7 +1928,11 @@ export const initializeSocket = async (app) => {
         })
 
         // Typing indicator - user stopped typing
-        socket.on("typingStop", async ({ from, to, conversationId }) => {
+        socket.on("typingStop", async ({ from, to, conversationId, isGroup }) => {
+            if (isGroup && conversationId) {
+                socket.to(String(conversationId)).emit("userTyping", { userId: from, conversationId, isTyping: false })
+                return
+            }
             const recipientData = await getUserSocket(to)
             const recipientSocketId = recipientData?.socketId
             if (recipientSocketId) {
