@@ -5,6 +5,7 @@ import {
   Input,
   Button,
   Avatar,
+  AvatarGroup,
   Text,
   VStack,
   HStack,
@@ -22,14 +23,23 @@ import {
   ModalContent,
   ModalHeader,
   ModalBody,
+  ModalFooter,
   ModalCloseButton,
   useDisclosure,
   Menu,
   MenuButton,
   MenuList,
   MenuItem,
+  Checkbox,
+  Drawer,
+  DrawerOverlay,
+  DrawerContent,
+  DrawerHeader,
+  DrawerBody,
+  DrawerCloseButton,
 } from '@chakra-ui/react'
-import { SearchIcon, ArrowBackIcon } from '@chakra-ui/icons'
+import { SearchIcon, ArrowBackIcon, AddIcon } from '@chakra-ui/icons'
+import { MdGroup } from 'react-icons/md'
 import { UserContext } from '../context/UserContext'
 import { SocketContext } from '../context/SocketContext'
 import useShowToast from '../hooks/useShowToast'
@@ -82,6 +92,13 @@ const MessagesPage = () => {
   const [isProcessing, setIsProcessing] = useState(false) // Track if server is processing (after 100% upload)
   const [hasMoreMessages, setHasMoreMessages] = useState(false) // Track if there are more messages to load
   const [loadingMoreMessages, setLoadingMoreMessages] = useState(false) // Track if loading older messages
+
+  // ── Group state ──────────────────────────────────────────────────────────
+  const { isOpen: isGroupModalOpen, onOpen: openGroupModal, onClose: closeGroupModal } = useDisclosure()
+  const { isOpen: isGroupInfoOpen, onOpen: openGroupInfo, onClose: closeGroupInfo } = useDisclosure()
+  const [groupNameInput, setGroupNameInput] = useState('')
+  const [selectedGroupMembers, setSelectedGroupMembers] = useState([])
+  const [creatingGroup, setCreatingGroup] = useState(false)
 
   // Refs
   const messagesEndRef = useRef(null)
@@ -1355,9 +1372,54 @@ const MessagesPage = () => {
     }
     socket.on("messageDeleted", handleMessageDeleted)
 
+    // ── Group socket events ──────────────────────────────────────────────
+    const handleGroupCreated = (conv) => {
+      setConversations(prev => {
+        if (prev.some(c => c._id === conv._id)) return prev
+        return [conv, ...prev]
+      })
+    }
+    const handleGroupInfoUpdated = ({ conversationId, groupName, groupAvatar }) => {
+      setConversations(prev => prev.map(c => c._id === conversationId ? { ...c, groupName, groupAvatar } : c))
+      if (selectedConversation?._id === conversationId) setSelectedConversation(prev => prev ? { ...prev, groupName, groupAvatar } : prev)
+    }
+    const handleGroupMemberAdded = ({ conversationId, participant }) => {
+      setConversations(prev => prev.map(c => c._id === conversationId ? { ...c, participants: [...(c.participants || []), participant] } : c))
+      if (selectedConversation?._id === conversationId) setSelectedConversation(prev => prev ? { ...prev, participants: [...(prev.participants || []), participant] } : prev)
+    }
+    const handleGroupMemberRemoved = ({ conversationId, userId: removedId }) => {
+      setConversations(prev => prev.map(c => c._id === conversationId ? { ...c, participants: (c.participants || []).filter(p => idStr(p._id || p) !== idStr(removedId)) } : c))
+      if (selectedConversation?._id === conversationId) setSelectedConversation(prev => prev ? { ...prev, participants: (prev.participants || []).filter(p => idStr(p._id || p) !== idStr(removedId)) } : prev)
+    }
+    const handleGroupMemberLeft = ({ conversationId, userId: leftId, newAdmin }) => {
+      if (idStr(leftId) === idStr(user?._id)) {
+        setConversations(prev => prev.filter(c => c._id !== conversationId))
+        if (selectedConversation?._id === conversationId) setSelectedConversation(null)
+      } else {
+        handleGroupMemberRemoved({ conversationId, userId: leftId })
+        if (newAdmin && selectedConversation?._id === conversationId) setSelectedConversation(prev => prev ? { ...prev, admin: newAdmin } : prev)
+      }
+    }
+    const handleRemovedFromGroup = ({ conversationId }) => {
+      setConversations(prev => prev.filter(c => c._id !== conversationId))
+      if (selectedConversation?._id === conversationId) setSelectedConversation(null)
+    }
+    socket.on('groupCreated', handleGroupCreated)
+    socket.on('groupInfoUpdated', handleGroupInfoUpdated)
+    socket.on('groupMemberAdded', handleGroupMemberAdded)
+    socket.on('groupMemberRemoved', handleGroupMemberRemoved)
+    socket.on('groupMemberLeft', handleGroupMemberLeft)
+    socket.on('removedFromGroup', handleRemovedFromGroup)
+
     return () => {
       socket.off("messageReactionUpdated", handleReactionUpdate)
       socket.off("messageDeleted", handleMessageDeleted)
+      socket.off('groupCreated', handleGroupCreated)
+      socket.off('groupInfoUpdated', handleGroupInfoUpdated)
+      socket.off('groupMemberAdded', handleGroupMemberAdded)
+      socket.off('groupMemberRemoved', handleGroupMemberRemoved)
+      socket.off('groupMemberLeft', handleGroupMemberLeft)
+      socket.off('removedFromGroup', handleRemovedFromGroup)
     }
   }, [socket, selectedConversation?._id])
 
@@ -1398,6 +1460,52 @@ const MessagesPage = () => {
       }
     }
   }, [])
+
+  // Create a group conversation
+  const handleCreateGroup = async () => {
+    if (!groupNameInput.trim() || selectedGroupMembers.length === 0) return
+    setCreatingGroup(true)
+    try {
+      const baseUrl = import.meta.env.PROD ? window.location.origin : 'http://localhost:5000'
+      const res = await fetch(`${baseUrl}/api/message/group`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ groupName: groupNameInput.trim(), participantIds: selectedGroupMembers }),
+      })
+      const data = await res.json()
+      if (!res.ok) { showToast('Error', data.error || 'Failed to create group', 'error'); return }
+      setConversations(prev => [data, ...prev])
+      setSelectedConversation(data)
+      setMessages([])
+      setGroupNameInput('')
+      setSelectedGroupMembers([])
+      closeGroupModal()
+    } catch (e) {
+      showToast('Error', 'Failed to create group', 'error')
+    } finally {
+      setCreatingGroup(false)
+    }
+  }
+
+  const handleLeaveGroup = async (convId) => {
+    try {
+      const baseUrl = import.meta.env.PROD ? window.location.origin : 'http://localhost:5000'
+      const res = await fetch(`${baseUrl}/api/message/group/${convId}/leave`, { method: 'POST', credentials: 'include' })
+      if (!res.ok) { const d = await res.json(); showToast('Error', d.error || 'Failed to leave group', 'error'); return }
+      setConversations(prev => prev.filter(c => c._id !== convId))
+      setSelectedConversation(null)
+      closeGroupInfo()
+    } catch (e) { showToast('Error', 'Failed to leave group', 'error') }
+  }
+
+  const handleRemoveGroupMember = async (convId, memberId) => {
+    try {
+      const baseUrl = import.meta.env.PROD ? window.location.origin : 'http://localhost:5000'
+      const res = await fetch(`${baseUrl}/api/message/group/${convId}/members/${memberId}`, { method: 'DELETE', credentials: 'include' })
+      if (!res.ok) { const d = await res.json(); showToast('Error', d.error || 'Failed to remove member', 'error') }
+    } catch (e) { showToast('Error', 'Failed to remove member', 'error') }
+  }
 
   // Start conversation with a user
   const startConversation = async (recipientId) => {
@@ -1798,11 +1906,12 @@ const MessagesPage = () => {
       return false
     }
 
-    const recipientId = selectedConversation.participants[0]?._id
-    if (!recipientId) return false
+    const isGroup = !!selectedConversation.isGroup
+    const recipientId = isGroup ? null : selectedConversation.participants[0]?._id
+    if (!isGroup && !recipientId) return false
 
     // Stop typing indicator when sending message
-    if (socket && selectedConversation?._id && user?._id) {
+    if (socket && selectedConversation?._id && user?._id && !isGroup) {
       socket.emit("typingStop", {
         from: user._id,
         to: recipientId,
@@ -1827,7 +1936,8 @@ const MessagesPage = () => {
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
-            recipientId,
+            recipientId: isGroup ? undefined : recipientId,
+            conversationId: isGroup ? selectedConversation._id : undefined,
             message: newMessage || '',
             replyTo: replyingTo?._id || null
           }),
@@ -1865,7 +1975,11 @@ const MessagesPage = () => {
       
       // Upload file via Multer to Cloudinary (backend handles upload)
       const formData = new FormData()
-      formData.append('recipientId', recipientId)
+      if (isGroup) {
+        formData.append('conversationId', selectedConversation._id)
+      } else {
+        formData.append('recipientId', recipientId)
+      }
       formData.append('message', newMessage || '')
       formData.append('file', image)
       
@@ -2081,9 +2195,20 @@ const MessagesPage = () => {
         zIndex={{ base: 10, md: 'auto' }}
       >
         <Box p={4} borderBottom="1px solid" borderColor={borderColor}>
-          <Text fontSize="xl" fontWeight="bold" mb={4} color={useColorModeValue('black', 'white')}>
-            Messages
-          </Text>
+          <Flex alignItems="center" justifyContent="space-between" mb={4}>
+            <Text fontSize="xl" fontWeight="bold" color={useColorModeValue('black', 'white')}>
+              Messages
+            </Text>
+            <IconButton
+              icon={<MdGroup size={20} />}
+              aria-label="New Group"
+              size="sm"
+              variant="ghost"
+              colorScheme="blue"
+              onClick={openGroupModal}
+              title="New Group"
+            />
+          </Flex>
           <Text fontSize="sm" mb={3} color="gray.500">
             Search for friends
           </Text>
@@ -2183,33 +2308,27 @@ const MessagesPage = () => {
               ) : (
                 <>
                   {conversations.map((conv) => {
-                  const otherUser = conv.participants[0]
+                  const isGroupConv = !!conv.isGroup
+                  const otherUser = isGroupConv ? null : conv.participants[0]
                   const isSelected =
                     selectedConversation?._id === conv._id ||
-                    (selectedConversation?.participants[0]?._id === otherUser?._id &&
+                    (!isGroupConv && selectedConversation?.participants[0]?._id === otherUser?._id &&
                       !selectedConversation?._id)
 
                   return (
                     <Flex
-                      key={conv._id || otherUser._id}
+                      key={conv._id || (otherUser && otherUser._id)}
                       p={4}
                       cursor="pointer"
                       bg={isSelected ? hoverBg : 'transparent'}
                       _hover={{ bg: hoverBg }}
                       onClick={() => {
                         setSelectedConversation(conv)
-                        // Mark messages as seen when conversation is clicked
-                        if (conv._id && socket && user?._id && otherUser?._id && conv.unreadCount > 0) {
-                          socket.emit("markmessageasSeen", {
-                            conversationId: conv._id,
-                            userId: otherUser._id
-                          })
+                        if (!isGroupConv && conv._id && socket && user?._id && otherUser?._id && conv.unreadCount > 0) {
+                          socket.emit("markmessageasSeen", { conversationId: conv._id, userId: otherUser._id })
                         }
-                        // Clear unread count for this conversation in UI
                         if (conv.unreadCount > 0) {
-                          setConversations(prev => prev.map(c => 
-                            c._id === conv._id ? { ...c, unreadCount: 0 } : c
-                          ))
+                          setConversations(prev => prev.map(c => c._id === conv._id ? { ...c, unreadCount: 0 } : c))
                         }
                       }}
                       borderBottom="1px solid"
@@ -2219,13 +2338,19 @@ const MessagesPage = () => {
                       position="relative"
                     >
                       <Box position="relative">
-                        <Avatar
-                          size="md"
-                          src={otherUser?.profilePic}
-                          name={otherUser?.name || otherUser?.username || 'User'}
-                          bg={useColorModeValue('blue.500', 'blue.600')}
-                        />
-                        {isUserInOnlineList(onlineUser, otherUser?._id) && (
+                        {isGroupConv ? (
+                          <Flex w="40px" h="40px" borderRadius="full" bg={useColorModeValue('blue.100','blue.800')} alignItems="center" justifyContent="center">
+                            <MdGroup size={22} color={useColorModeValue('#2b6cb0','#90cdf4')} />
+                          </Flex>
+                        ) : (
+                          <Avatar
+                            size="md"
+                            src={otherUser?.profilePic}
+                            name={otherUser?.name || otherUser?.username || 'User'}
+                            bg={useColorModeValue('blue.500', 'blue.600')}
+                          />
+                        )}
+                        {!isGroupConv && isUserInOnlineList(onlineUser, otherUser?._id) && (
                           <Box
                             position="absolute"
                             bottom={0}
@@ -2242,8 +2367,11 @@ const MessagesPage = () => {
                       <Box flex={1} minW={0} position="relative">
                         <Flex alignItems="center" gap={2}>
                           <Text fontWeight="semibold" noOfLines={1} color={useColorModeValue('black', 'white')}>
-                            {otherUser?.name || otherUser?.username || 'Unknown User'}
+                            {isGroupConv ? (conv.groupName || 'Group') : (otherUser?.name || otherUser?.username || 'Unknown User')}
                           </Text>
+                          {isGroupConv && (
+                            <Badge colorScheme="blue" fontSize="9px" borderRadius="full" px={1.5}>Group</Badge>
+                          )}
                           {conv.unreadCount > 0 && (
                             <Badge
                               borderRadius="full"
@@ -2261,9 +2389,14 @@ const MessagesPage = () => {
                             </Badge>
                           )}
                         </Flex>
-                        {otherUser?.username && otherUser?.name !== otherUser?.username && (
+                        {!isGroupConv && otherUser?.username && otherUser?.name !== otherUser?.username && (
                           <Text fontSize="xs" color="gray.500" noOfLines={1} mt={0.5}>
                             @{otherUser.username}
+                          </Text>
+                        )}
+                        {isGroupConv && (
+                          <Text fontSize="xs" color="gray.500" noOfLines={1} mt={0.5}>
+                            {conv.participants?.length || 0} members
                           </Text>
                         )}
                         {/* Last message with seen indicator */}
@@ -2371,44 +2504,53 @@ const MessagesPage = () => {
                 size="sm"
                 mr={-2}
               />
-              <Avatar
-                size={{ base: "sm", md: "sm" }}
-                src={selectedConversation.participants[0]?.profilePic}
-                name={selectedConversation.participants[0]?.name || selectedConversation.participants[0]?.username || 'User'}
-                bg={useColorModeValue('blue.500', 'blue.600')}
-              />
-              <Flex flex={1} minW={0} alignItems="center" gap={2} flexWrap="wrap">
+              {selectedConversation.isGroup ? (
+                <Flex w="32px" h="32px" borderRadius="full" bg={useColorModeValue('blue.100','blue.800')} alignItems="center" justifyContent="center" flexShrink={0}>
+                  <MdGroup size={18} color={useColorModeValue('#2b6cb0','#90cdf4')} />
+                </Flex>
+              ) : (
+                <Avatar
+                  size={{ base: "sm", md: "sm" }}
+                  src={selectedConversation.participants[0]?.profilePic}
+                  name={selectedConversation.participants[0]?.name || selectedConversation.participants[0]?.username || 'User'}
+                  bg={useColorModeValue('blue.500', 'blue.600')}
+                />
+              )}
+              <Flex
+                flex={1} minW={0} alignItems="center" gap={2} flexWrap="wrap"
+                cursor={selectedConversation.isGroup ? 'pointer' : 'default'}
+                onClick={selectedConversation.isGroup ? openGroupInfo : undefined}
+              >
                 <Text 
                   fontWeight="semibold"
                   fontSize={{ base: "sm", md: "md" }}
                   noOfLines={1}
                   color={useColorModeValue('black', 'white')}
                 >
-                  {selectedConversation.participants[0]?.name || selectedConversation.participants[0]?.username || 'Unknown User'}
+                  {selectedConversation.isGroup
+                    ? (selectedConversation.groupName || 'Group')
+                    : (selectedConversation.participants[0]?.name || selectedConversation.participants[0]?.username || 'Unknown User')}
                 </Text>
-                {isUserInOnlineList(onlineUser, selectedConversation.participants[0]?._id) && (
+                {selectedConversation.isGroup && (
+                  <Text fontSize={{ base: "2xs", md: "xs" }} color="gray.500">
+                    {selectedConversation.participants?.length || 0} members
+                  </Text>
+                )}
+                {!selectedConversation.isGroup && isUserInOnlineList(onlineUser, selectedConversation.participants[0]?._id) && (
                   <>
-                    <Text fontSize={{ base: "2xs", md: "xs" }} color="gray.500">
-                      •
-                    </Text>
-                    <Text fontSize={{ base: "2xs", md: "xs" }} color="green.500">
-                      Online
-                    </Text>
+                    <Text fontSize={{ base: "2xs", md: "xs" }} color="gray.500">•</Text>
+                    <Text fontSize={{ base: "2xs", md: "xs" }} color="green.500">Online</Text>
                   </>
                 )}
-                {/* Show busy status if user is in a call - check both socket AND database */}
-                {(busyUsers?.has(selectedConversation.participants[0]?._id) || selectedConversation.participants[0]?.inCall) && (
+                {!selectedConversation.isGroup && (busyUsers?.has(selectedConversation.participants[0]?._id) || selectedConversation.participants[0]?.inCall) && (
                   <>
-                    <Text fontSize={{ base: "2xs", md: "xs" }} color="gray.500">
-                      •
-                    </Text>
-                    <Badge colorScheme="red" fontSize={{ base: "2xs", md: "xs" }} px={2} py={0.5} borderRadius="full">
-                      In a call
-                    </Badge>
+                    <Text fontSize={{ base: "2xs", md: "xs" }} color="gray.500">•</Text>
+                    <Badge colorScheme="red" fontSize={{ base: "2xs", md: "xs" }} px={2} py={0.5} borderRadius="full">In a call</Badge>
                   </>
                 )}
               </Flex>
-              {/* Delete conversation button */}
+              {/* Delete conversation button (1-to-1 only) */}
+              {!selectedConversation.isGroup && (
               <IconButton
                 aria-label="Delete conversation"
                 icon={<MdDelete size={18} />}
@@ -2418,6 +2560,7 @@ const MessagesPage = () => {
                 _hover={{ bg: useColorModeValue('red.100', 'red.900') }}
                 onClick={() => handleDeleteConversation(selectedConversation._id)}
               />
+              )}
             </Flex>
 
             {/* Call - Inline in chat - Mobile optimized */}
@@ -2655,6 +2798,12 @@ const MessagesPage = () => {
                         ml={isOwn ? 'auto' : 0}
                         mr={isOwn ? 0 : 'auto'}
                       >
+                        {/* Group sender name label */}
+                        {selectedConversation?.isGroup && !isOwn && (
+                          <Text fontSize="xs" color="blue.400" fontWeight="semibold" mb={0.5} ml={1}>
+                            {senderUser?.name || senderUser?.username || 'Unknown'}
+                          </Text>
+                        )}
                         <Flex
                           direction="column"
                           w="100%"
@@ -3683,6 +3832,123 @@ const MessagesPage = () => {
           }
         `}
       </style>
+
+      {/* ── New Group Modal ─────────────────────────────────────────────── */}
+      <Modal isOpen={isGroupModalOpen} onClose={closeGroupModal} isCentered size="md">
+        <ModalOverlay />
+        <ModalContent bg={bgColor}>
+          <ModalHeader color={useColorModeValue('black','white')}>New Group</ModalHeader>
+          <ModalCloseButton />
+          <ModalBody pb={2}>
+            <Input
+              placeholder="Group name"
+              value={groupNameInput}
+              onChange={e => setGroupNameInput(e.target.value)}
+              bg={inputBg}
+              mb={4}
+            />
+            <Text fontSize="sm" fontWeight="semibold" mb={2} color="gray.500">Select members</Text>
+            <VStack align="stretch" maxH="280px" overflowY="auto" spacing={1}>
+              {followedUsers.map(u => (
+                <Flex
+                  key={u._id}
+                  alignItems="center"
+                  gap={3}
+                  p={2}
+                  borderRadius="md"
+                  cursor="pointer"
+                  _hover={{ bg: hoverBg }}
+                  onClick={() => setSelectedGroupMembers(prev =>
+                    prev.includes(u._id) ? prev.filter(id => id !== u._id) : [...prev, u._id]
+                  )}
+                >
+                  <Checkbox isChecked={selectedGroupMembers.includes(u._id)} pointerEvents="none" />
+                  <Avatar size="sm" src={u.profilePic} name={u.name || u.username} />
+                  <Box flex={1} minW={0}>
+                    <Text fontSize="sm" noOfLines={1} color={useColorModeValue('black','white')}>{u.name || u.username}</Text>
+                  </Box>
+                </Flex>
+              ))}
+              {followedUsers.length === 0 && (
+                <Text fontSize="sm" color="gray.500" textAlign="center" py={4}>
+                  Follow people to add them to a group
+                </Text>
+              )}
+            </VStack>
+          </ModalBody>
+          <ModalFooter gap={2}>
+            <Button variant="ghost" onClick={closeGroupModal}>Cancel</Button>
+            <Button
+              colorScheme="blue"
+              isLoading={creatingGroup}
+              isDisabled={!groupNameInput.trim() || selectedGroupMembers.length === 0}
+              onClick={handleCreateGroup}
+            >
+              Create
+            </Button>
+          </ModalFooter>
+        </ModalContent>
+      </Modal>
+
+      {/* ── Group Info Drawer ───────────────────────────────────────────── */}
+      {selectedConversation?.isGroup && (
+        <Drawer isOpen={isGroupInfoOpen} onClose={closeGroupInfo} placement="right" size="sm">
+          <DrawerOverlay />
+          <DrawerContent bg={bgColor}>
+            <DrawerCloseButton />
+            <DrawerHeader color={useColorModeValue('black','white')}>
+              <Flex alignItems="center" gap={2}>
+                <MdGroup size={22} />
+                {selectedConversation.groupName || 'Group'}
+              </Flex>
+            </DrawerHeader>
+            <DrawerBody>
+              <Text fontSize="sm" fontWeight="semibold" color="gray.500" mb={2}>
+                {selectedConversation.participants?.length || 0} Members
+              </Text>
+              <VStack align="stretch" spacing={1} mb={6}>
+                {(selectedConversation.participants || []).map(p => {
+                  const pId = p._id || p
+                  const isAdmin = idStr(selectedConversation.admin) === idStr(pId) || idStr(selectedConversation.admin?._id) === idStr(pId)
+                  const isMe = idStr(pId) === idStr(user?._id)
+                  const iAmAdmin = idStr(selectedConversation.admin) === idStr(user?._id) || idStr(selectedConversation.admin?._id) === idStr(user?._id)
+                  return (
+                    <Flex key={idStr(pId)} alignItems="center" gap={3} p={2} borderRadius="md">
+                      <Avatar size="sm" src={p.profilePic} name={p.name || p.username} />
+                      <Box flex={1} minW={0}>
+                        <Flex alignItems="center" gap={1.5}>
+                          <Text fontSize="sm" noOfLines={1} color={useColorModeValue('black','white')}>{p.name || p.username || 'User'}</Text>
+                          {isAdmin && <Badge colorScheme="yellow" fontSize="9px" borderRadius="full" px={1.5}>Admin</Badge>}
+                          {isMe && <Badge colorScheme="gray" fontSize="9px" borderRadius="full" px={1.5}>You</Badge>}
+                        </Flex>
+                      </Box>
+                      {iAmAdmin && !isMe && (
+                        <IconButton
+                          icon={<MdDelete size={14} />}
+                          size="xs"
+                          colorScheme="red"
+                          variant="ghost"
+                          aria-label="Remove member"
+                          onClick={() => handleRemoveGroupMember(selectedConversation._id, idStr(pId))}
+                        />
+                      )}
+                    </Flex>
+                  )
+                })}
+              </VStack>
+              <Divider mb={4} />
+              <Button
+                colorScheme="red"
+                variant="outline"
+                w="100%"
+                onClick={() => handleLeaveGroup(selectedConversation._id)}
+              >
+                Leave Group
+              </Button>
+            </DrawerBody>
+          </DrawerContent>
+        </Drawer>
+      )}
     </Flex>
   )
 }

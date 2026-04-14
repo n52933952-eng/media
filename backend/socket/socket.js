@@ -1064,6 +1064,18 @@ export const initializeSocket = async (app) => {
             }
             console.log(`✅ [socket] User ${userId} added to socket map (socket: ${socket.id})`)
 
+            // Join all conversation rooms so group (and 1-to-1) messages are received via room broadcast.
+            try {
+                const { default: Conversation } = await import('../models/conversation.js')
+                const convs = await Conversation.find({ participants: userId }).select('_id').lean()
+                for (const c of convs) {
+                    socket.join(c._id.toString())
+                }
+                if (convs.length) console.log(`📬 [socket] ${userId} joined ${convs.length} conversation room(s)`)
+            } catch (e) {
+                console.error('❌ [socket] Failed to join conversation rooms:', e.message)
+            }
+
             // Reconnect cancels delayed call teardown scheduled on disconnect (avoids false "call ended" FCM).
             try {
                 const normConn = normalizeUserId(userId)

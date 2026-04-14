@@ -207,6 +207,58 @@ async function sendMissedCallNotification(userId, callerName, callType = 'video'
   );
 }
 
+/**
+ * Send push to all offline group members when a group message arrives.
+ * @param {string[]} recipientUserIds - list of userId strings (exclude sender)
+ * @param {string}   senderName       - display name of sender
+ * @param {string}   groupName        - group display name
+ * @param {string}   conversationId
+ * @param {string}   messageId
+ */
+async function sendGroupMessageNotification(recipientUserIds, senderName, groupName, conversationId, messageId) {
+  if (!Array.isArray(recipientUserIds) || recipientUserIds.length === 0) return
+  const promises = recipientUserIds.map(uid =>
+    sendNotificationToUser(
+      uid,
+      groupName || 'Group',
+      `${senderName}: sent a message`,
+      {
+        type: 'group_message',
+        conversationId: String(conversationId || ''),
+        messageId: String(messageId || ''),
+        senderName: String(senderName || ''),
+        groupName: String(groupName || ''),
+        isGroup: 'true',
+      }
+    ).catch(() => {})
+  )
+  await Promise.allSettled(promises)
+}
+
+/**
+ * Notify a user they were added to a group.
+ */
+async function sendGroupAddedNotification(userId, adderName, groupName, conversationId) {
+  return sendNotificationToUser(
+    userId,
+    groupName || 'Group Chat',
+    `${adderName} added you to the group`,
+    { type: 'group_added', conversationId: String(conversationId || ''), groupName: String(groupName || '') }
+  )
+}
+
+/**
+ * Notify a user they were removed from a group.
+ */
+async function sendGroupRemovedNotification(userId, groupName, conversationId) {
+  return sendNotificationToUser(
+    userId,
+    groupName || 'Group Chat',
+    `You were removed from the group`,
+    { type: 'group_removed', conversationId: String(conversationId || ''), groupName: String(groupName || '') }
+  )
+}
+
 export {
   sendNotificationToUser,
   sendLikeNotification,
@@ -214,6 +266,9 @@ export {
   sendFollowNotification,
   sendMentionNotification,
   sendMessageNotification,
+  sendGroupMessageNotification,
+  sendGroupAddedNotification,
+  sendGroupRemovedNotification,
   sendChessChallengeNotification,
   sendChessMoveNotification,
   sendContributorAddedNotification,

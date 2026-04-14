@@ -5,6 +5,46 @@ import { v2 as cloudinary } from 'cloudinary'
 import { Readable } from 'stream'
 import mongoose from 'mongoose'
 
+// ── helpers ────────────────────────────────────────────────────────────────
+const idStr = (id) => (id != null ? id.toString() : '')
+
+/**
+ * Broadcast to a Socket.IO conversation room (all online members) and send
+ * FCM push to participants who are NOT currently in the room (offline).
+ */
+async function broadcastToConversation(conversationId, event, payload, excludeSenderId, participantIds, senderPopulated, groupName) {
+  const io = getIO()
+  const roomId = idStr(conversationId)
+  if (io) {
+    io.to(roomId).emit(event, payload)
+  }
+
+  // Push to offline members (those not in the socket room)
+  try {
+    const room = io?.sockets?.adapter?.rooms?.get(roomId)
+    const onlineSids = room ? [...room] : []
+    const { sendGroupMessageNotification, sendMessageNotification } = await import('../services/pushNotifications.js')
+
+    for (const pid of participantIds) {
+      const pidStr = idStr(pid)
+      if (pidStr === idStr(excludeSenderId)) continue
+      // Check if this participant has a socket in the room
+      const recipSocket = await getUserSocket(pidStr)
+      const inRoom = recipSocket?.socketId && onlineSids.includes(recipSocket.socketId)
+      if (!inRoom) {
+        if (groupName) {
+          const sName = senderPopulated?.name || senderPopulated?.username || 'Someone'
+          sendGroupMessageNotification([pidStr], sName, groupName, roomId, payload._id || '').catch(() => {})
+        } else {
+          sendMessageNotification(pidStr, senderPopulated, roomId, payload._id || '').catch(() => {})
+        }
+      }
+    }
+  } catch (e) {
+    console.error('broadcastToConversation push error:', e?.message)
+  }
+}
+
 /**
  * Fan-out to recipient: socket only if connected **and** presence is not `offline` (foreground).
  * If the app is backgrounded it emits `clientPresence: offline` while the WebSocket can stay open
@@ -136,251 +176,169 @@ export async function ackMessageDeliveredHttp(req, res) {
   }
 }
 
-export const sendMessaeg = async(req,res) => {
-
-  try{
-  
- const{recipientId,message,replyTo}= req.body
- const senderId = req.user._id
- let img = ''
-  
-       // Handle file upload via Multer to Cloudinary
-       if(req.file) {
-         return new Promise((resolve, reject) => {
-           // Create a readable stream from the buffer
-           const stream = cloudinary.uploader.upload_stream(
-             {
-               resource_type: req.file.mimetype.startsWith('video/') ? 'video' : 'image',
-               folder: 'messages',
-               timeout: 1200000, // 20 minutes timeout for large videos
-               chunk_size: 6000000, // 6MB chunks
-             },
-             async (error, result) => {
-               if (error) {
-                 console.error('Cloudinary upload error:', error)
-                 if (!res.headersSent) {
-                   res.status(500).json({ 
-                     error: 'Failed to upload file to Cloudinary',
-                     details: error.message 
-                   })
-                 }
-                 reject(error)
-                 return
-               }
-               
-               img = result.secure_url
-               
-               try {
-                 // Create message after upload completes
-                 let conversation = await Conversation.findOne({ participants:{$all:[senderId,recipientId]}})
-
-                 if(!conversation){
-                    conversation = new Conversation({participants:[senderId,recipientId],
-                        lastMessage:{text:message,
-                            sender:senderId
-                        }
-                    })
-                    await conversation.save()
-                 }
-
-                const newMessage = new Message({
-                  conversationId:conversation._id,
-                  sender:senderId,
-                  text:message,
-                  img,
-                  replyTo: replyTo || null
-                })
-
-                // Update conversation lastMessage and timestamp
-                conversation.lastMessage = {
-                  text: message,
-                  sender: senderId
-                }
-                conversation.updatedAt = new Date() // Explicitly set for immediate access
-                
-                await Promise.all([
-                  newMessage.save(),
-                  conversation.save() // Save with updated timestamp
-                ])
-                  
-                // Populate sender data and replyTo message before sending
-                await newMessage.populate("sender", "username profilePic name")
-                if (newMessage.replyTo) {
-                  await newMessage.populate({
-                    path: "replyTo",
-                    select: "text sender",
-                    populate: {
-                      path: "sender",
-                      select: "username name profilePic"
-                    }
-                  })
-                }
-                  
-                const delivered = await deliverOutboundMessage(newMessage, conversation, recipientId)
-
-                if (!res.headersSent) {
-                  const responseData = {
-                    ...newMessage.toObject(),
-                    conversationUpdatedAt: conversation.updatedAt,
-                    delivered,
-                  }
-                  console.log('📤 Sending message to sender with timestamp:', conversation.updatedAt)
-                  res.status(201).json(responseData)
-                }
-                resolve()
-               } catch (error) {
-                 console.error('Error creating message after upload:', error)
-                 if (!res.headersSent) {
-                   res.status(500).json({ 
-                     error: error.message || 'Failed to send message. Please try again.' 
-                   })
-                 }
-                 reject(error)
-               }
-             }
-           )
-           
-           // Convert buffer to stream and pipe to Cloudinary
-           const bufferStream = new Readable()
-           bufferStream.push(req.file.buffer)
-           bufferStream.push(null)
-           bufferStream.pipe(stream)
-         })
-       }
-       
-       // No file upload - proceed normally
- 
- let conversation = await Conversation.findOne({ participants:{$all:[senderId,recipientId]}})
-
- if(!conversation){
-    conversation = new Conversation({participants:[senderId,recipientId],
-        lastMessage:{text:message,
-            sender:senderId
-        }
-    })
-    await conversation.save()
- }
-
-const newMessage = new Message({
-  conversationId:conversation._id,
-  sender:senderId,
-  text:message,
-  img,
-  replyTo: replyTo || null
-})
-
-// Update conversation lastMessage and timestamp
-conversation.lastMessage = {
-  text: message,
-  sender: senderId
-}
-conversation.updatedAt = new Date() // Explicitly set for immediate access
-
-await Promise.all([
-  newMessage.save(),
-  conversation.save() // Save with updated timestamp
-])
-  
-// Populate sender data and replyTo message before sending
-await newMessage.populate("sender", "username profilePic name")
-if (newMessage.replyTo) {
-  await newMessage.populate({
-    path: "replyTo",
-    select: "text sender",
-    populate: {
-      path: "sender",
-      select: "username name profilePic"
-    }
+/** Core send logic shared between file-upload and plain-text paths */
+async function _persistAndBroadcastMessage({ conversation, senderId, message, img, replyTo }) {
+  const newMessage = new Message({
+    conversationId: conversation._id,
+    sender: senderId,
+    text: message,
+    img: img || '',
+    replyTo: replyTo || null,
   })
-}
-  
-const delivered = await deliverOutboundMessage(newMessage, conversation, recipientId)
 
-const responseData = {
-  ...newMessage.toObject(),
-  conversationUpdatedAt: conversation.updatedAt,
-  delivered,
-}
-console.log('📤 Sending message to sender with timestamp:', conversation.updatedAt)
-res.status(201).json(responseData)
+  conversation.lastMessage = { text: message, sender: senderId }
+  conversation.updatedAt = new Date()
+
+  await Promise.all([newMessage.save(), conversation.save()])
+
+  await newMessage.populate('sender', 'username profilePic name')
+  if (newMessage.replyTo) {
+    await newMessage.populate({
+      path: 'replyTo',
+      select: 'text sender',
+      populate: { path: 'sender', select: 'username name profilePic' },
+    })
   }
-  catch(error){
-    console.error('Error in sendMessaeg:', error)
-    // Make sure to always send a response
-    if (!res.headersSent) {
-      res.status(500).json({ 
-        error: error.message || 'Failed to send message. Please try again.' 
+
+  if (conversation.isGroup) {
+    // Group: broadcast to Socket.IO room + push to offline members
+    const msgObj = { ...newMessage.toObject(), conversationUpdatedAt: conversation.updatedAt, isGroup: true }
+    await broadcastToConversation(
+      conversation._id,
+      'newMessage',
+      msgObj,
+      senderId,
+      conversation.participants,
+      newMessage.sender,
+      conversation.groupName
+    )
+    return { responseData: { ...msgObj, delivered: false }, delivered: false }
+  } else {
+    // 1-to-1: existing delivery path
+    const recipientId = conversation.participants.find(p => idStr(p) !== idStr(senderId))
+    const delivered = await deliverOutboundMessage(newMessage, conversation, recipientId)
+    const responseData = { ...newMessage.toObject(), conversationUpdatedAt: conversation.updatedAt, delivered }
+    return { responseData, delivered }
+  }
+}
+
+export const sendMessaeg = async(req,res) => {
+  try {
+    const { recipientId, message, replyTo, conversationId: groupConvId } = req.body
+    const senderId = req.user._id
+    let img = ''
+
+    // ── Resolve conversation ───────────────────────────────────────────────
+    let conversation
+    if (groupConvId) {
+      // Group message — look up by ID and verify membership
+      conversation = await Conversation.findById(groupConvId)
+      if (!conversation) return res.status(404).json({ error: 'Conversation not found' })
+      const isMember = conversation.participants.some(p => idStr(p) === idStr(senderId))
+      if (!isMember) return res.status(403).json({ error: 'Not a member of this group' })
+    } else {
+      // 1-to-1 — find or create
+      conversation = await Conversation.findOne({ participants: { $all: [senderId, recipientId] }, isGroup: false })
+      if (!conversation) {
+        conversation = new Conversation({ participants: [senderId, recipientId], lastMessage: { text: message, sender: senderId } })
+        await conversation.save()
+      }
+    }
+
+    // ── File upload path ───────────────────────────────────────────────────
+    if (req.file) {
+      return new Promise((resolve, reject) => {
+        const stream = cloudinary.uploader.upload_stream(
+          {
+            resource_type: req.file.mimetype.startsWith('video/') ? 'video' : 'image',
+            folder: 'messages',
+            timeout: 1200000,
+            chunk_size: 6000000,
+          },
+          async (error, result) => {
+            if (error) {
+              console.error('Cloudinary upload error:', error)
+              if (!res.headersSent) res.status(500).json({ error: 'Failed to upload file', details: error.message })
+              return reject(error)
+            }
+            img = result.secure_url
+            try {
+              const { responseData } = await _persistAndBroadcastMessage({ conversation, senderId, message, img, replyTo })
+              if (!res.headersSent) res.status(201).json(responseData)
+              resolve()
+            } catch (e) {
+              if (!res.headersSent) res.status(500).json({ error: e.message || 'Failed to send message' })
+              reject(e)
+            }
+          }
+        )
+        const bufferStream = new Readable()
+        bufferStream.push(req.file.buffer)
+        bufferStream.push(null)
+        bufferStream.pipe(stream)
       })
     }
+
+    // ── Plain text/media path ──────────────────────────────────────────────
+    const { responseData } = await _persistAndBroadcastMessage({ conversation, senderId, message, img, replyTo })
+    res.status(201).json(responseData)
+
+  } catch (error) {
+    console.error('Error in sendMessaeg:', error)
+    if (!res.headersSent) res.status(500).json({ error: error.message || 'Failed to send message. Please try again.' })
   }
 }
 
 
 
 export const getMessage = async(req,res) => {
+     const { otherUserId } = req.params
+     const userId = req.user._id
+     const { conversationId: directConvId } = req.query
 
-     const{otherUserId} = req.params
-     const userId = req.user._id  // Fix: Use _id instead of id
-   
-     try{
-    
-    const conversation = await Conversation.findOne({participants:{$all:[userId,otherUserId]}})
-   
-    // Fix: Handle case when conversation doesn't exist
-    if(!conversation){
-        return res.status(200).json({ messages: [], hasMore: false }) // Return empty array if no conversation exists
+     try {
+    let conversation
+    if (directConvId) {
+      // Group or direct: look up by conversationId (passed as query param)
+      conversation = await Conversation.findById(directConvId)
+      if (!conversation) return res.status(200).json({ messages: [], hasMore: false })
+      const isMember = conversation.participants.some(p => idStr(p) === idStr(userId))
+      if (!isMember) return res.status(403).json({ error: 'Not a member' })
+    } else {
+      // 1-to-1 legacy path
+      conversation = await Conversation.findOne({ participants: { $all: [userId, otherUserId] } })
+      if (!conversation) return res.status(200).json({ messages: [], hasMore: false })
     }
-   
-    // Pagination parameters
-    const limit = parseInt(req.query.limit) || 12 // Default to 12 messages
-    const beforeId = req.query.beforeId // Message ID to fetch messages before (for pagination)
-    
-    // Build query
+
+    const limit = parseInt(req.query.limit) || 12
+    const beforeId = req.query.beforeId
+
     let query = { conversationId: conversation._id }
-    
-    // If beforeId is provided, fetch messages created before that message
     if (beforeId) {
       const beforeMessage = await Message.findById(beforeId)
-      if (beforeMessage) {
-        query.createdAt = { $lt: beforeMessage.createdAt }
-      }
+      if (beforeMessage) query.createdAt = { $lt: beforeMessage.createdAt }
     }
-    
-    // Fetch messages with pagination
+
     const messages = await Message.find(query)
-      .populate("sender", "username profilePic name")
-      .populate("reactions.userId", "username name profilePic")
+      .populate('sender', 'username profilePic name')
+      .populate('reactions.userId', 'username name profilePic')
       .populate({
-        path: "replyTo",
-        select: "text sender",
-        populate: {
-          path: "sender",
-          select: "username name profilePic"
-        }
+        path: 'replyTo',
+        select: 'text sender',
+        populate: { path: 'sender', select: 'username name profilePic' },
       })
-      .sort({createdAt: -1}) // Sort descending (newest first) for pagination
-      .limit(limit + 1) // Fetch one extra to check if there are more messages
-   
-    // Check if there are more messages
+      .sort({ createdAt: -1 })
+      .limit(limit + 1)
+
     const hasMore = messages.length > limit
     const messagesToReturn = hasMore ? messages.slice(0, limit) : messages
-    
-    // Reverse to get chronological order (oldest to newest)
     messagesToReturn.reverse()
-   
-    res.status(200).json({ 
-      messages: messagesToReturn,
-      hasMore: hasMore
-      // Removed totalCount - expensive query that's not needed for pagination
-      // Use hasMore flag instead
-    })
-   
 
-}
-    catch(error){
-        res.status(500).json(error)
-        console.log(error)
-    }
+    res.status(200).json({ messages: messagesToReturn, hasMore })
+  } catch(error) {
+    res.status(500).json(error)
+    console.log(error)
+  }
 }
 
 
@@ -717,6 +675,186 @@ export const toggleReaction = async (req, res) => {
     res.status(200).json(message)
   } catch (error) {
     res.status(500).json({ error: error.message })
-     console.log(error)
- }
+    console.log(error)
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  GROUP CONVERSATION HANDLERS
+// ══════════════════════════════════════════════════════════════════════════════
+
+/** POST /api/message/group  — create a new group conversation */
+export const createGroup = async (req, res) => {
+  try {
+    const adminId = req.user._id
+    const { groupName, participantIds } = req.body
+
+    if (!groupName || typeof groupName !== 'string' || !groupName.trim()) {
+      return res.status(400).json({ error: 'groupName is required' })
+    }
+    if (!Array.isArray(participantIds) || participantIds.length < 1) {
+      return res.status(400).json({ error: 'At least one other participant is required' })
+    }
+
+    const uniqueIds = [...new Set([idStr(adminId), ...participantIds.map(idStr)])]
+      .filter(id => mongoose.isValidObjectId(id))
+      .map(id => new mongoose.Types.ObjectId(id))
+
+    const conversation = await Conversation.create({
+      participants: uniqueIds,
+      isGroup: true,
+      groupName: groupName.trim(),
+      admin: adminId,
+      lastMessage: { text: '', sender: adminId },
+    })
+
+    await conversation.populate('participants', 'username profilePic name')
+
+    const io = getIO()
+    if (io) {
+      io.to(`userSelf:${idStr(adminId)}`).emit('groupCreated', conversation.toObject())
+      for (const uid of participantIds) {
+        const recipSocket = await getUserSocket(idStr(uid)).catch(() => null)
+        if (recipSocket?.socketId) io.to(recipSocket.socketId).emit('groupCreated', conversation.toObject())
+      }
+    }
+
+    // Push notification to other members
+    try {
+      const { sendGroupAddedNotification } = await import('../services/pushNotifications.js')
+      await Promise.allSettled(
+        participantIds.map(uid =>
+          sendGroupAddedNotification(idStr(uid), req.user.name || req.user.username, groupName.trim(), idStr(conversation._id))
+        )
+      )
+    } catch (_) {}
+
+    res.status(201).json(conversation)
+  } catch (error) {
+    console.error('createGroup error:', error)
+    res.status(500).json({ error: error.message })
+  }
+}
+
+/** PUT /api/message/group/:id  — rename group or update avatar (admin only) */
+export const updateGroupInfo = async (req, res) => {
+  try {
+    const userId = req.user._id
+    const conversation = await Conversation.findById(req.params.id)
+    if (!conversation || !conversation.isGroup) return res.status(404).json({ error: 'Group not found' })
+    if (idStr(conversation.admin) !== idStr(userId)) return res.status(403).json({ error: 'Only admin can update group info' })
+
+    const { groupName, groupAvatar } = req.body
+    if (groupName && typeof groupName === 'string') conversation.groupName = groupName.trim()
+    if (typeof groupAvatar === 'string') conversation.groupAvatar = groupAvatar
+
+    await conversation.save()
+    await conversation.populate('participants', 'username profilePic name')
+
+    const io = getIO()
+    if (io) io.to(idStr(conversation._id)).emit('groupInfoUpdated', { conversationId: idStr(conversation._id), groupName: conversation.groupName, groupAvatar: conversation.groupAvatar })
+
+    res.status(200).json(conversation)
+  } catch (error) {
+    res.status(500).json({ error: error.message })
+  }
+}
+
+/** POST /api/message/group/:id/members  — admin adds a member */
+export const addGroupMember = async (req, res) => {
+  try {
+    const adminId = req.user._id
+    const { userId: newUserId } = req.body
+    const conversation = await Conversation.findById(req.params.id)
+    if (!conversation || !conversation.isGroup) return res.status(404).json({ error: 'Group not found' })
+    if (idStr(conversation.admin) !== idStr(adminId)) return res.status(403).json({ error: 'Only admin can add members' })
+    if (!mongoose.isValidObjectId(newUserId)) return res.status(400).json({ error: 'Invalid userId' })
+
+    const alreadyMember = conversation.participants.some(p => idStr(p) === idStr(newUserId))
+    if (alreadyMember) return res.status(400).json({ error: 'User already a member' })
+
+    conversation.participants.push(new mongoose.Types.ObjectId(newUserId))
+    await conversation.save()
+    await conversation.populate('participants', 'username profilePic name')
+
+    const io = getIO()
+    if (io) {
+      io.to(idStr(conversation._id)).emit('groupMemberAdded', { conversationId: idStr(conversation._id), participant: conversation.participants.find(p => idStr(p._id) === idStr(newUserId)) })
+      const recipSocket = await getUserSocket(idStr(newUserId)).catch(() => null)
+      if (recipSocket?.socketId) io.to(recipSocket.socketId).emit('groupCreated', conversation.toObject())
+    }
+
+    try {
+      const { sendGroupAddedNotification } = await import('../services/pushNotifications.js')
+      await sendGroupAddedNotification(idStr(newUserId), req.user.name || req.user.username, conversation.groupName, idStr(conversation._id))
+    } catch (_) {}
+
+    res.status(200).json(conversation)
+  } catch (error) {
+    res.status(500).json({ error: error.message })
+  }
+}
+
+/** DELETE /api/message/group/:id/members/:userId  — admin removes a member */
+export const removeGroupMember = async (req, res) => {
+  try {
+    const adminId = req.user._id
+    const targetId = req.params.userId
+    const conversation = await Conversation.findById(req.params.id)
+    if (!conversation || !conversation.isGroup) return res.status(404).json({ error: 'Group not found' })
+    if (idStr(conversation.admin) !== idStr(adminId)) return res.status(403).json({ error: 'Only admin can remove members' })
+    if (idStr(targetId) === idStr(adminId)) return res.status(400).json({ error: 'Admin cannot remove themselves. Leave the group instead.' })
+
+    conversation.participants = conversation.participants.filter(p => idStr(p) !== idStr(targetId))
+    await conversation.save()
+
+    const io = getIO()
+    if (io) {
+      io.to(idStr(conversation._id)).emit('groupMemberRemoved', { conversationId: idStr(conversation._id), userId: idStr(targetId) })
+      const recipSocket = await getUserSocket(idStr(targetId)).catch(() => null)
+      if (recipSocket?.socketId) io.to(recipSocket.socketId).emit('removedFromGroup', { conversationId: idStr(conversation._id) })
+    }
+
+    try {
+      const { sendGroupRemovedNotification } = await import('../services/pushNotifications.js')
+      await sendGroupRemovedNotification(idStr(targetId), conversation.groupName, idStr(conversation._id))
+    } catch (_) {}
+
+    res.status(200).json({ ok: true })
+  } catch (error) {
+    res.status(500).json({ error: error.message })
+  }
+}
+
+/** POST /api/message/group/:id/leave  — any member leaves the group */
+export const leaveGroup = async (req, res) => {
+  try {
+    const userId = req.user._id
+    const conversation = await Conversation.findById(req.params.id)
+    if (!conversation || !conversation.isGroup) return res.status(404).json({ error: 'Group not found' })
+
+    const isMember = conversation.participants.some(p => idStr(p) === idStr(userId))
+    if (!isMember) return res.status(400).json({ error: 'Not a member of this group' })
+
+    conversation.participants = conversation.participants.filter(p => idStr(p) !== idStr(userId))
+
+    // If admin leaves, transfer admin to the first remaining member (if any)
+    if (idStr(conversation.admin) === idStr(userId) && conversation.participants.length > 0) {
+      conversation.admin = conversation.participants[0]
+    }
+
+    if (conversation.participants.length === 0) {
+      // Empty group: delete it
+      await Conversation.findByIdAndDelete(conversation._id)
+      await Message.deleteMany({ conversationId: conversation._id })
+    } else {
+      await conversation.save()
+      const io = getIO()
+      if (io) io.to(idStr(conversation._id)).emit('groupMemberLeft', { conversationId: idStr(conversation._id), userId: idStr(userId), newAdmin: idStr(conversation.admin) })
+    }
+
+    res.status(200).json({ ok: true })
+  } catch (error) {
+    res.status(500).json({ error: error.message })
+  }
 }
