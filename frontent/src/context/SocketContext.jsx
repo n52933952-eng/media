@@ -454,11 +454,6 @@ export const SocketContextProvider = ({ children }) => {
       setCallAccepted(false);
       setCallEnded(true);
       setIsCalling(false); // Stop ringing when call is canceled
-      
-      // Don't request new stream immediately - prevents unnecessary re-renders
-      setTimeout(() => {
-        setCallEnded(false); // Reset callEnded after a delay so UI can update
-      }, 500);
     };
 
     socket.on("CallCanceled", handleCallCanceled);
