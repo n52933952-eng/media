@@ -1366,12 +1366,19 @@ export const initializeSocket = async (app) => {
             }, 500) // Debounce: wait 500ms before emitting to prevent spam
         }
 
-        // Helper: user is busy iff Redis `inCall:<userId>` exists (see `setInCall` / `clearCallStateForPair`).
-        // Stale `activeCall:*` keys without a matching inCall must NOT block new calls (orphans TTL out in ~1h).
+        // Helper: user is busy if Redis `inCall:<userId>` exists (fast path),
+        // OR if MongoDB User.inCall is true (durable fallback — survives brief socket reconnects > grace period).
+        // `activeCall:*` rows alone do NOT make a user busy (they can be orphaned).
         const isUserBusy = async (userId) => {
             const uid = normalizeUserId(userId)
             if (!uid) return false
-            return isInCallFast(uid)
+            if (await isInCallFast(uid)) return true
+            try {
+                const u = await User.findById(uid).select('inCall').lean()
+                return !!u?.inCall
+            } catch {
+                return false
+            }
         }
 
         /** Block game invites while in a call or already in chess/card (server-side; app also filters). */
@@ -1406,29 +1413,56 @@ export const initializeSocket = async (app) => {
             let fromBusy = await isUserBusy(callerId)
             const receiverDataEarly = await getUserSocket(receiverId)
             const receiverOffline = !(await resolveLiveSocketIdForUser(receiverId))
-            // Self-heal: if receiver is offline but marked busy (stale from previous call), clear so callback works
-            if (userToCallBusy && receiverOffline) {
-                console.log('📞 [callUser] CALLBACK_SELFHEAL: Receiver is offline but was marked busy – clearing inCall so callback can go through')
+
+            // Helper: check if a user's inCall key references a call that involves BOTH callerId and receiverId.
+            // Only then is it safe to clear – avoids wiping a live call with a DIFFERENT third party.
+            const inCallInvolvesThisPair = async (userId) => {
+                const entry = await getInCall(userId)
+                if (!entry) return false
+                const cid = String(entry.callId || '')
+                return (
+                    cid === `${callerId}-${receiverId}` ||
+                    cid === `${receiverId}-${callerId}`
+                )
+            }
+
+            // Self-heal: receiver is offline AND their inCall references only this pair (stale from a previous call)
+            if (userToCallBusy && receiverOffline && (await inCallInvolvesThisPair(receiverId))) {
+                console.log('📞 [callUser] CALLBACK_SELFHEAL: Receiver offline + stale inCall for this pair – clearing so callback can proceed')
                 await clearInCall(receiverId).catch(() => {})
                 userToCallBusy = await isUserBusy(receiverId)
             }
-            // Self-heal: if CALLER is marked busy and receiver is offline (e.g. caller canceled, then tries to call back), clear caller so they can call
-            if (fromBusy && receiverOffline) {
-                console.log('📞 [callUser] CALLBACK_SELFHEAL: Caller was marked busy (e.g. after cancel) – clearing caller inCall so they can call back')
+            // Self-heal: caller is marked busy, receiver is offline, and the caller's inCall references only this pair
+            if (fromBusy && receiverOffline && (await inCallInvolvesThisPair(callerId))) {
+                console.log('📞 [callUser] CALLBACK_SELFHEAL: Caller stale inCall for this pair – clearing so they can call back')
                 await clearInCall(callerId).catch(() => {})
                 fromBusy = await isUserBusy(callerId)
             }
-            // Self-heal: if either is busy but there is NO active call between these two (e.g. cancel was lost or mobile didn't emit), full cleanup so callback/recall works
-            if ((userToCallBusy || fromBusy)) {
+            // Self-heal: either busy, no activeCall between THIS pair, AND inCall references only this pair
+            // (i.e. cancelCall was lost / mobile didn't emit – not a live call with someone else)
+            if (userToCallBusy || fromBusy) {
                 const callId1 = `${callerId}-${receiverId}`
                 const callId2 = `${receiverId}-${callerId}`
                 const active1 = await getActiveCall(callId1)
                 const active2 = await getActiveCall(callId2)
                 if (!active1 && !active2) {
-                    console.log('📞 [callUser] CALLBACK_SELFHEAL: No active call between this pair – full clear (inCall + activeCall + pendingCall) so callback can proceed', { from: callerId, userToCall: receiverId })
-                    await clearCallStateForPair(callerId, receiverId).catch(() => {})
-                    userToCallBusy = await isUserBusy(receiverId)
-                    fromBusy = await isUserBusy(callerId)
+                    // Only clear inCall for a user if their entry references THIS pair, not a live call with someone else.
+                    const receiverStale = userToCallBusy && (await inCallInvolvesThisPair(receiverId))
+                    const callerStale   = fromBusy      && (await inCallInvolvesThisPair(callerId))
+                    if (receiverStale || callerStale) {
+                        console.log('📞 [callUser] CALLBACK_SELFHEAL: No active call between this pair + stale inCall – clearing so callback can proceed', { from: callerId, userToCall: receiverId })
+                        if (receiverStale) await clearInCall(receiverId).catch(() => {})
+                        if (callerStale)   await clearInCall(callerId).catch(() => {})
+                        // Also clean up pendingCall / pendingAnswer for this pair
+                        await Promise.all([
+                            redisService.redisDel(`pendingCall:${receiverId}`).catch(() => {}),
+                            redisService.redisDel(`pendingCall:${callerId}`).catch(() => {}),
+                            redisService.redisDel(`${PENDING_ANSWER_PREFIX}${receiverId}`).catch(() => {}),
+                            redisService.redisDel(`${PENDING_ANSWER_PREFIX}${callerId}`).catch(() => {}),
+                        ])
+                        userToCallBusy = await isUserBusy(receiverId)
+                        fromBusy       = await isUserBusy(callerId)
+                    }
                 }
             }
             console.log('📞 [callUser] CALLBACK_CHECK: Busy status', {
