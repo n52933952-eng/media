@@ -2563,6 +2563,115 @@ const MessagesPage = () => {
         w={{ base: "100%", md: "auto" }}
         minW={0}
       >
+        {/* ── Active call UI ── shown regardless of which conversation is open ── */}
+        {callAccepted && !callEnded && stream && (() => {
+          const callPartnerId = call ? (idStr(call.from) === idStr(user?._id) ? idStr(call.userToCall) : idStr(call.from)) : null
+          const callPartnerUser = callPartnerId
+            ? (followedUsers?.find(u => idStr(u._id) === callPartnerId) ||
+               conversations?.flatMap(c => c.participants || []).find(p => idStr(p?._id) === callPartnerId))
+            : null
+          const callPartnerName = call?.name || callPartnerUser?.name || callPartnerUser?.username || 'User'
+          const callPartnerPic  = callPartnerUser?.profilePic || undefined
+          return (
+            <Box
+              borderBottom="1px solid"
+              borderColor={borderColor}
+              p={{ base: 2, md: 4 }}
+              bg={useColorModeValue('gray.50', 'gray.900')}
+            >
+              <Flex direction="column" gap={{ base: 2, md: 3 }}>
+                <Flex justifyContent="space-between" alignItems="center" flexWrap="wrap" gap={2}>
+                  <Text fontWeight="semibold" fontSize={{ base: "xs", md: "md" }} color={useColorModeValue('black', 'white')}>
+                    {callType === 'audio' ? 'Voice' : 'Video'} Call Active
+                  </Text>
+                  <Button
+                    colorScheme="red"
+                    size={{ base: "xs", md: "sm" }}
+                    leftIcon={<FaPhoneSlash />}
+                    onClick={() => leaveCall?.()}
+                    borderRadius="full"
+                  >
+                    <Text display={{ base: 'none', sm: 'block' }}>End</Text>
+                  </Button>
+                </Flex>
+                {callType === 'video' ? (
+                  <Flex 
+                    gap={{ base: 2, md: 3 }} 
+                    flexDirection={{ base: "column", md: "row" }}
+                    alignItems={{ base: "stretch", md: "flex-start" }}
+                  >
+                    <Box
+                      flex={{ base: 0, md: 1 }}
+                      w={{ base: "100%", md: "auto" }}
+                      minW={{ base: "100%", md: "300px" }}
+                      h={{ base: "250px", sm: "300px", md: "250px" }}
+                      borderRadius="md"
+                      overflow="hidden"
+                      bg="black"
+                      position="relative"
+                      order={{ base: 1, md: 1 }}
+                    >
+                      <video ref={userVideo} autoPlay playsInline style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                    </Box>
+                    <Box
+                      w={{ base: "120px", md: "150px" }}
+                      h={{ base: "90px", md: "112px" }}
+                      borderRadius="md"
+                      overflow="hidden"
+                      bg="gray.800"
+                      border="2px solid"
+                      borderColor={useColorModeValue('gray.200', 'white')}
+                      flexShrink={0}
+                      alignSelf={{ base: "flex-end", md: "flex-start" }}
+                      order={{ base: 2, md: 2 }}
+                    >
+                      <video ref={myVideo} autoPlay muted playsInline style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                    </Box>
+                  </Flex>
+                ) : (
+                  <Flex direction="column" alignItems="center" gap={4} py={4}>
+                    {/* Hidden audio elements off-screen */}
+                    <Box as="video" ref={userVideo} autoPlay playsInline controls={false}
+                      style={{ position: 'absolute', left: '-9999px', width: '1px', height: '1px', opacity: 0, pointerEvents: 'none' }} />
+                    <Box as="video" ref={myVideo} autoPlay muted playsInline controls={false}
+                      style={{ position: 'absolute', left: '-9999px', width: '1px', height: '1px', opacity: 0, pointerEvents: 'none' }} />
+                    <Avatar src={callPartnerPic} name={callPartnerName} size="xl" />
+                    <Text fontSize="lg" fontWeight="semibold" color={useColorModeValue('black', 'white')}>{callPartnerName}</Text>
+                    <Text fontSize="sm" color={useColorModeValue('gray.600', 'gray.400')}>Voice Call</Text>
+                  </Flex>
+                )}
+              </Flex>
+            </Box>
+          )
+        })()}
+
+        {/* ── Ringing / calling-out UI ── also independent of selected conversation ── */}
+        {isCalling && call?.isCalling && !callAccepted && (
+          <Box
+            borderBottom="1px solid"
+            borderColor={borderColor}
+            p={{ base: 3, md: 4 }}
+            bg={useColorModeValue('blue.600', 'blue.900')}
+          >
+            <Flex direction="column" gap={{ base: 2, md: 3 }} alignItems="center">
+              <Text fontWeight="bold" fontSize={{ base: "md", md: "lg" }} textAlign="center" color="white">
+                Ringing...
+              </Text>
+              <Text fontSize={{ base: "sm", md: "md" }} color="whiteAlpha.800" textAlign="center">
+                {call?.callType === 'audio' ? 'Voice ' : 'Video '}Calling {call?.recipientName || 'User'}...
+              </Text>
+              <Button
+                colorScheme="red"
+                leftIcon={<FaPhoneSlash />}
+                onClick={() => leaveCall?.()}
+                size={{ base: "sm", md: "md" }}
+              >
+                Cancel
+              </Button>
+            </Flex>
+          </Box>
+        )}
+
         {selectedConversation ? (
           <>
             {/* Chat Header - Responsive with back button */}
@@ -2641,170 +2750,6 @@ const MessagesPage = () => {
               />
               )}
             </Flex>
-
-            {/* Call - Inline in chat - Mobile optimized */}
-            {callAccepted && !callEnded && stream && (
-              <Box
-                borderBottom="1px solid"
-                borderColor={borderColor}
-                p={{ base: 2, md: 4 }}
-                bg={useColorModeValue('gray.50', 'gray.900')}
-              >
-                <Flex direction="column" gap={{ base: 2, md: 3 }}>
-                  <Flex justifyContent="space-between" alignItems="center" flexWrap="wrap" gap={2}>
-                    <Text fontWeight="semibold" fontSize={{ base: "xs", md: "md" }} color={useColorModeValue('black', 'white')}>
-                      {callType === 'audio' ? 'Voice' : 'Video'} Call Active
-                    </Text>
-                    <Button
-                      colorScheme="red"
-                      size={{ base: "xs", md: "sm" }}
-                      leftIcon={<FaPhoneSlash />}
-                      onClick={() => leaveCall?.()}
-                      borderRadius="full"
-                    >
-                      <Text display={{ base: 'none', sm: 'block' }}>End</Text>
-                    </Button>
-                  </Flex>
-                  {callType === 'video' ? (
-                    <Flex 
-                      gap={{ base: 2, md: 3 }} 
-                      flexDirection={{ base: "column", md: "row" }}
-                      alignItems={{ base: "stretch", md: "flex-start" }}
-                    >
-                      {/* Remote video - Full width on mobile */}
-                      <Box
-                        flex={{ base: 0, md: 1 }}
-                        w={{ base: "100%", md: "auto" }}
-                        minW={{ base: "100%", md: "300px" }}
-                        h={{ base: "250px", sm: "300px", md: "250px" }}
-                        borderRadius="md"
-                        overflow="hidden"
-                        bg="black"
-                        position="relative"
-                        order={{ base: 1, md: 1 }}
-                      >
-                        <video
-                          ref={userVideo}
-                          autoPlay
-                          playsInline
-                          style={{
-                            width: '100%',
-                            height: '100%',
-                            objectFit: 'cover'
-                          }}
-                        />
-                      </Box>
-                      {/* Local video - Smaller on mobile, positioned better */}
-                      <Box
-                        w={{ base: "120px", md: "150px" }}
-                        h={{ base: "90px", md: "112px" }}
-                        borderRadius="md"
-                        overflow="hidden"
-                        bg="gray.800"
-                        border="2px solid"
-                        borderColor={useColorModeValue('gray.200', 'white')}
-                        flexShrink={0}
-                        alignSelf={{ base: "flex-end", md: "flex-start" }}
-                        order={{ base: 2, md: 2 }}
-                      >
-                        <video
-                          ref={myVideo}
-                          autoPlay
-                          muted
-                          playsInline
-                          style={{
-                            width: '100%',
-                            height: '100%',
-                            objectFit: 'cover'
-                          }}
-                        />
-                      </Box>
-                    </Flex>
-                  ) : (
-                    /* Audio call UI - Show avatar and call info */
-                    <Flex 
-                      direction="column"
-                      alignItems="center"
-                      gap={4}
-                      py={4}
-                    >
-                      {/* Hidden video elements to handle audio stream - positioned off-screen for audio playback */}
-                      <Box
-                        as="video"
-                        ref={userVideo}
-                        autoPlay
-                        playsInline
-                        controls={false}
-                        style={{ 
-                          position: 'absolute',
-                          left: '-9999px',
-                          width: '1px',
-                          height: '1px',
-                          opacity: 0,
-                          pointerEvents: 'none'
-                        }}
-                      />
-                      <Box
-                        as="video"
-                        ref={myVideo}
-                        autoPlay
-                        muted
-                        playsInline
-                        controls={false}
-                        style={{ 
-                          position: 'absolute',
-                          left: '-9999px',
-                          width: '1px',
-                          height: '1px',
-                          opacity: 0,
-                          pointerEvents: 'none'
-                        }}
-                      />
-                      <Avatar
-                        src={selectedConversation?.participants[0]?.profilePic}
-                        name={selectedConversation?.participants[0]?.username}
-                        size="xl"
-                      />
-                      <Text fontSize="lg" fontWeight="semibold" color={useColorModeValue('black', 'white')}>
-                        {selectedConversation?.participants[0]?.name || selectedConversation?.participants[0]?.username}
-                      </Text>
-                      <Text fontSize="sm" color={useColorModeValue('gray.600', 'gray.400')}>
-                        Voice Call
-                      </Text>
-                    </Flex>
-                  )}
-                </Flex>
-              </Box>
-            )}
-
-            {/* Incoming call notification - Mobile optimized */}
-            {/* Ringing state - When you are calling someone */}
-            {isCalling && call?.isCalling && !callAccepted && (
-              <Box
-                borderBottom="1px solid"
-                borderColor={borderColor}
-                p={{ base: 3, md: 4 }}
-                bg={useColorModeValue('blue.600', 'blue.900')}
-              >
-                <Flex direction="column" gap={{ base: 2, md: 3 }} alignItems="center">
-                  <Text fontWeight="bold" fontSize={{ base: "md", md: "lg" }} textAlign="center" color="white">
-                    Ringing...
-                  </Text>
-                  <Text fontSize={{ base: "sm", md: "md" }} color="whiteAlpha.800" textAlign="center">
-                    {call?.callType === 'audio' ? 'Voice ' : 'Video '}Calling {call?.recipientName || selectedConversation?.participants[0]?.name || selectedConversation?.participants[0]?.username || 'User'}...
-                  </Text>
-                  <Button
-                    colorScheme="red"
-                    leftIcon={<FaPhoneSlash />}
-                    onClick={() => leaveCall?.()}
-                    size={{ base: "sm", md: "md" }}
-                  >
-                    Cancel
-                  </Button>
-                </Flex>
-              </Box>
-            )}
-
 
             {/* Messages - Mobile optimized */}
             <Box
