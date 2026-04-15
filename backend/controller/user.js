@@ -461,10 +461,17 @@ export const DeleteMyAccount = async (req, res) => {
       }
     }
 
-    const convs = await Conversation.find({ participants: userId }).select('_id').lean()
+    const convs = await Conversation.find({ participants: userId })
+      .select('_id isGroup participants admin')
+      .lean()
     const convIds = convs.map((c) => c?._id).filter(Boolean)
     if (convIds.length) {
-      const msgsWithMedia = await Message.find({ conversationId: { $in: convIds }, img: { $ne: '' } })
+      // Only remove media owned by the account being deleted.
+      const msgsWithMedia = await Message.find({
+        conversationId: { $in: convIds },
+        sender: userId,
+        img: { $ne: '' },
+      })
         .select('_id img')
         .lean()
       for (const m of msgsWithMedia) {
@@ -498,10 +505,87 @@ export const DeleteMyAccount = async (req, res) => {
     await Story.updateMany({ 'viewers.user': userId }, { $pull: { viewers: { user: userId } } })
     await Story.deleteMany({ user: userId })
 
-    // Messages & conversations where user participated (deletes for both users)
+    // Messages & conversations:
+    // - Delete only this user's messages.
+    // - Remove user from conversation participants.
+    // - Keep group chats for remaining members unless the deleted account was group admin.
+    // - Delete invalid conversations after removal (empty groups / direct chats with <2 members).
     if (convIds.length) {
-      await Message.deleteMany({ conversationId: { $in: convIds } })
-      await Conversation.deleteMany({ _id: { $in: convIds } })
+      await Message.deleteMany({ conversationId: { $in: convIds }, sender: userId })
+
+      const convIdsToDelete = []
+      for (const conv of convs) {
+        const convId = conv?._id
+        if (!convId) continue
+        const remainingParticipants = Array.isArray(conv?.participants)
+          ? conv.participants.filter((p) => String(p) !== userIdStr)
+          : []
+
+        if (conv?.isGroup) {
+          const adminWasDeleted = conv?.admin && String(conv.admin) === userIdStr
+          // If the deleting account is group admin, remove the whole group conversation.
+          if (adminWasDeleted) {
+            convIdsToDelete.push(convId)
+            continue
+          }
+
+          // Empty group after account deletion -> remove conversation.
+          if (remainingParticipants.length === 0) {
+            convIdsToDelete.push(convId)
+            continue
+          }
+
+          const nextUpdate = { participants: remainingParticipants }
+
+          const latestMsg = await Message.findOne({ conversationId: convId })
+            .sort({ createdAt: -1 })
+            .select('text sender')
+            .lean()
+
+          nextUpdate.lastMessage = latestMsg
+            ? { text: latestMsg.text || '', sender: latestMsg.sender || null }
+            : { text: '', sender: null, seen: false }
+
+          await Conversation.updateOne({ _id: convId }, { $set: nextUpdate })
+        } else {
+          // 1-to-1 conversation without both participants is not valid anymore.
+          if (remainingParticipants.length < 2) {
+            convIdsToDelete.push(convId)
+            continue
+          }
+
+          const latestMsg = await Message.findOne({ conversationId: convId })
+            .sort({ createdAt: -1 })
+            .select('text sender')
+            .lean()
+          await Conversation.updateOne(
+            { _id: convId },
+            {
+              $set: {
+                participants: remainingParticipants,
+                lastMessage: latestMsg
+                  ? { text: latestMsg.text || '', sender: latestMsg.sender || null }
+                  : { text: '', sender: null, seen: false },
+              },
+            }
+          )
+        }
+      }
+
+      if (convIdsToDelete.length) {
+        // These convs become invalid for remaining users, so fully remove them.
+        const toDeleteMedia = await Message.find({
+          conversationId: { $in: convIdsToDelete },
+          img: { $ne: '' },
+        })
+          .select('img')
+          .lean()
+        for (const m of toDeleteMedia) {
+          if (m?.img) await safeCloudinaryDestroyByUrl(String(m.img))
+        }
+        await Message.deleteMany({ conversationId: { $in: convIdsToDelete } })
+        await Conversation.deleteMany({ _id: { $in: convIdsToDelete } })
+      }
     }
 
     // Notifications & activities
