@@ -3173,6 +3173,7 @@ const MessagesPage = () => {
                               {/* Reply button */}
                               <Box
                                 as="button"
+                                type="button"
                                 fontSize={{ base: "lg", md: "xl" }}
                                 p={{ base: 1, md: 1.5 }}
                                 borderRadius="full"
@@ -3183,6 +3184,7 @@ const MessagesPage = () => {
                                 transition="all 0.15s ease"
                                 cursor="pointer"
                                 onClick={(e) => {
+                                  e.preventDefault()
                                   e.stopPropagation()
                                   handleReply(msg)
                                 }}
@@ -3196,6 +3198,7 @@ const MessagesPage = () => {
                               {/* Delete button - show for all messages (any participant can delete) */}
                               <Box
                                 as="button"
+                                type="button"
                                 fontSize={{ base: "lg", md: "xl" }}
                                 p={{ base: 1, md: 1.5 }}
                                 borderRadius="full"
@@ -3207,6 +3210,7 @@ const MessagesPage = () => {
                                 transition="all 0.15s ease"
                                 cursor="pointer"
                                 onClick={(e) => {
+                                  e.preventDefault()
                                   e.stopPropagation()
                                   handleDeleteMessage(msg._id)
                                   setEmojiPickerOpen(null)
@@ -3222,6 +3226,7 @@ const MessagesPage = () => {
                                 <Box
                                   key={emoji}
                                   as="button"
+                                  type="button"
                                   fontSize={{ base: "lg", md: "xl" }}
                                   p={{ base: 1, md: 1.5 }}
                                   borderRadius="full"
@@ -3232,6 +3237,7 @@ const MessagesPage = () => {
                                   transition="all 0.15s ease"
                                   cursor="pointer"
                                   onClick={(e) => {
+                                    e.preventDefault()
                                     e.stopPropagation()
                                     handleEmojiClick({ emoji }, msg._id)
                                   }}
