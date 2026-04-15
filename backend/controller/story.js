@@ -5,6 +5,8 @@ import User from '../models/user.js'
 import Follow from '../models/follow.js'
 import { getIO, getAllUserSockets } from '../socket/socket.js'
 
+const CLOUDINARY_UPLOAD_QUALITY = (process.env.CLOUDINARY_UPLOAD_QUALITY || 'auto:eco').trim()
+
 /** Tell followers + author (socket) to refetch `/api/story/feed-strip` so rings / red vs gray stay in sync. */
 async function emitStoryStripChanged(authorUserId) {
   try {
@@ -62,7 +64,7 @@ function uploadBufferToCloudinary(buffer, mimetype) {
                 {
                   width: 1080,
                   crop: 'limit',
-                  quality: 'auto:good',
+                  quality: CLOUDINARY_UPLOAD_QUALITY,
                   fetch_format: 'mp4',
                   video_codec: 'auto',
                   audio_codec: 'aac',
@@ -72,7 +74,7 @@ function uploadBufferToCloudinary(buffer, mimetype) {
           : {
               transformation: [
                 {
-                  quality: 'auto:good',
+                  quality: CLOUDINARY_UPLOAD_QUALITY,
                   fetch_format: 'auto',
                 },
               ],

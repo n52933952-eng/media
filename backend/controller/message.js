@@ -5,6 +5,8 @@ import { v2 as cloudinary } from 'cloudinary'
 import { Readable } from 'stream'
 import mongoose from 'mongoose'
 
+const CLOUDINARY_UPLOAD_QUALITY = (process.env.CLOUDINARY_UPLOAD_QUALITY || 'auto:eco').trim()
+
 // ── helpers ────────────────────────────────────────────────────────────────
 const idStr = (id) => (id != null ? id.toString() : '')
 
@@ -260,7 +262,7 @@ export const sendMessaeg = async(req,res) => {
                     {
                       width: 1080,
                       crop: 'limit',
-                      quality: 'auto:good',
+                      quality: CLOUDINARY_UPLOAD_QUALITY,
                       fetch_format: 'mp4',
                       video_codec: 'auto',
                       audio_codec: 'aac',
@@ -270,7 +272,7 @@ export const sendMessaeg = async(req,res) => {
               : {
                   transformation: [
                     {
-                      quality: 'auto:good',
+                      quality: CLOUDINARY_UPLOAD_QUALITY,
                       fetch_format: 'auto',
                     },
                   ],

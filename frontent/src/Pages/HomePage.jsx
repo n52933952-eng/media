@@ -493,7 +493,7 @@ const HomePage = () => {
         {!loading && followPost.length > 0 && (
           <>
             {followPost.map((post) => (
-              <Post key={post._id} post={post} postedBy={post.postedBy} />
+              <Post key={post._id} post={post} postedBy={post.postedBy} visibleVideoOnly />
             ))}
             
             {/* Infinite scroll trigger element */}

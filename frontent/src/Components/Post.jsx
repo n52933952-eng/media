@@ -18,6 +18,8 @@ import FootballMatchCards from './FootballMatchCards'
 import { normalizeDbMatchForFootballFeed, isFootballMatchLive } from '../utils/footballFeed'
 
 const apiBaseUrl = () => (import.meta.env.PROD ? window.location.origin : 'http://localhost:5000')
+const CLOUDINARY_DELIVERY_QUALITY = (import.meta.env.VITE_CLOUDINARY_DELIVERY_QUALITY || 'eco').trim()
+const ENABLE_CLOUDINARY_DPR_AUTO = (import.meta.env.VITE_CLOUDINARY_IMAGE_DPR_AUTO || 'true') !== 'false'
 
 const Post = ({post: initialPost, postedBy, onDelete, visibleVideoOnly = false}) => {
     
@@ -33,10 +35,13 @@ const Post = ({post: initialPost, postedBy, onDelete, visibleVideoOnly = false})
     if (!url.includes('res.cloudinary.com')) return url
     if (kind === 'video') {
       if (!url.includes('/video/upload/')) return url
-      return url.replace('/video/upload/', '/video/upload/f_auto,q_auto:good,vc_auto/')
+      return url.replace('/video/upload/', `/video/upload/f_auto,q_auto:${CLOUDINARY_DELIVERY_QUALITY},vc_auto/`)
     }
     if (!url.includes('/image/upload/')) return url
-    return url.replace('/image/upload/', '/image/upload/f_auto,q_auto:good/')
+    return url.replace(
+      '/image/upload/',
+      `/image/upload/f_auto,q_auto:${CLOUDINARY_DELIVERY_QUALITY}${ENABLE_CLOUDINARY_DPR_AUTO ? ',dpr_auto' : ''}/`
+    )
   }, [])
   const rawMediaUrl = String(post?.img || '')
   const optimizedImageUrl = optimizeCloudinaryMediaUrl(rawMediaUrl, 'image')
