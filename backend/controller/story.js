@@ -56,6 +56,27 @@ function uploadBufferToCloudinary(buffer, mimetype) {
         folder: 'stories',
         timeout: 1200000,
         chunk_size: 6000000,
+        ...(isVideo
+          ? {
+              transformation: [
+                {
+                  width: 1080,
+                  crop: 'limit',
+                  quality: 'auto:good',
+                  fetch_format: 'mp4',
+                  video_codec: 'auto',
+                  audio_codec: 'aac',
+                },
+              ],
+            }
+          : {
+              transformation: [
+                {
+                  quality: 'auto:good',
+                  fetch_format: 'auto',
+                },
+              ],
+            }),
       },
       (error, result) => {
         if (error) reject(error)

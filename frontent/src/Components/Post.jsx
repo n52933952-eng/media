@@ -1,4 +1,4 @@
-import React,{useEffect,useState,useContext, useCallback, useMemo, memo} from 'react'
+import React,{useEffect,useState,useContext, useCallback, useMemo, memo, useRef} from 'react'
 import{Link} from 'react-router-dom'
 import{Flex,Avatar,Box,Text,Image,Button, VStack, HStack, Grid, GridItem, SimpleGrid, Spinner, useColorModeValue, useDisclosure, Menu, MenuButton, MenuList, MenuItem, IconButton, Tooltip} from '@chakra-ui/react'
 import { HiOutlineDotsHorizontal } from "react-icons/hi";
@@ -19,19 +19,61 @@ import { normalizeDbMatchForFootballFeed, isFootballMatchLive } from '../utils/f
 
 const apiBaseUrl = () => (import.meta.env.PROD ? window.location.origin : 'http://localhost:5000')
 
-const Post = ({post: initialPost, postedBy, onDelete}) => {
+const Post = ({post: initialPost, postedBy, onDelete, visibleVideoOnly = false}) => {
     
   // Local state for this specific post (used when not in feed context)
   const [localPost, setLocalPost] = useState(initialPost)
   
   // Use local post or initial post
   const post = localPost || initialPost
+  const videoRef = useRef(null)
+  const [isVideoInView, setIsVideoInView] = useState(!visibleVideoOnly)
+  const optimizeCloudinaryMediaUrl = useCallback((rawUrl, kind) => {
+    const url = String(rawUrl || '')
+    if (!url.includes('res.cloudinary.com')) return url
+    if (kind === 'video') {
+      if (!url.includes('/video/upload/')) return url
+      return url.replace('/video/upload/', '/video/upload/f_auto,q_auto:good,vc_auto/')
+    }
+    if (!url.includes('/image/upload/')) return url
+    return url.replace('/image/upload/', '/image/upload/f_auto,q_auto:good/')
+  }, [])
+  const rawMediaUrl = String(post?.img || '')
+  const optimizedImageUrl = optimizeCloudinaryMediaUrl(rawMediaUrl, 'image')
+  const optimizedVideoUrl = optimizeCloudinaryMediaUrl(rawMediaUrl, 'video')
+  const isVideoMedia = rawMediaUrl.match(/\.(mp4|webm|ogg|mov)$/i) || rawMediaUrl.includes('/video/upload/')
   
   // Update local post when initialPost changes (e.g., from parent re-fetch)
   useEffect(() => {
     console.log('🔄 [Post] Initial post prop changed, updating local state')
     setLocalPost(initialPost)
   }, [initialPost])
+
+  useEffect(() => {
+    if (!visibleVideoOnly) {
+      setIsVideoInView(true)
+      return
+    }
+    if (!isVideoMedia || !videoRef.current) return
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        setIsVideoInView(!!entry?.isIntersecting && entry.intersectionRatio >= 0.6)
+      },
+      { threshold: [0, 0.25, 0.6, 0.9] }
+    )
+    observer.observe(videoRef.current)
+    return () => observer.disconnect()
+  }, [visibleVideoOnly, isVideoMedia, post?._id])
+
+  useEffect(() => {
+    if (!isVideoMedia || !videoRef.current) return
+    if (isVideoInView) {
+      videoRef.current.play?.().catch(() => {})
+    } else {
+      videoRef.current.pause?.()
+    }
+  }, [isVideoInView, isVideoMedia])
 
   const navigate = useNavigate()
 
@@ -1253,9 +1295,10 @@ const showToast = useShowToast()
       ) : post.img.match(/\.(mp4|webm|ogg|mov)$/i) || post.img.includes('/video/upload/') ? (
         <Box
           as="video"
-          src={post.img}
+          ref={videoRef}
+          src={optimizedVideoUrl}
           controls
-          autoPlay
+          autoPlay={visibleVideoOnly ? isVideoInView : true}
           muted
           playsInline
           loop
@@ -1263,6 +1306,7 @@ const showToast = useShowToast()
           maxH="400px"
           onLoadedData={(e) => {
             // Ensure video plays when loaded (some browsers need this)
+            if (visibleVideoOnly && !isVideoInView) return
             e.target.play().catch(err => {
               console.log('Video autoplay prevented:', err)
             })
@@ -1270,7 +1314,7 @@ const showToast = useShowToast()
         />
       ) : (
         <Image 
-          src={post?.img} 
+          src={optimizedImageUrl} 
           w="full" 
           objectFit="contain" 
           maxH="400px"

@@ -254,6 +254,27 @@ export const sendMessaeg = async(req,res) => {
             folder: 'messages',
             timeout: 1200000,
             chunk_size: 6000000,
+            ...(req.file.mimetype.startsWith('video/')
+              ? {
+                  transformation: [
+                    {
+                      width: 1080,
+                      crop: 'limit',
+                      quality: 'auto:good',
+                      fetch_format: 'mp4',
+                      video_codec: 'auto',
+                      audio_codec: 'aac',
+                    },
+                  ],
+                }
+              : {
+                  transformation: [
+                    {
+                      quality: 'auto:good',
+                      fetch_format: 'auto',
+                    },
+                  ],
+                }),
           },
           async (error, result) => {
             if (error) {

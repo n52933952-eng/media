@@ -360,6 +360,7 @@ if(!user && loading){
                       key={post._id} 
                       post={post} 
                       postedBy={post.postedBy}
+                      visibleVideoOnly
                       onDelete={(postId) => {
                         // Remove post from local state immediately
                         setPosts(prev => prev.filter(p => p._id !== postId))
