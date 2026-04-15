@@ -1001,6 +1001,17 @@ export const SocketContextProvider = ({ children }) => {
     const isReceiving = call.isReceivingCall;
     const from = call.from;
     const userToCall = call.userToCall;
+    const currentUserId = userIdToStr(user?._id || me);
+    const partnerFromRef = userIdToStr(callPartnerIdRef.current);
+    const fromId = userIdToStr(from);
+    const toId = userIdToStr(userToCall);
+    // Robust peer resolution:
+    // - Incoming answered calls may have isReceiving=false while from/userToCall still reference caller/self.
+    // - Prefer the tracked partner ref, then choose the id that is NOT the current user.
+    const peerId =
+      partnerFromRef ||
+      (fromId && fromId !== currentUserId ? fromId : '') ||
+      (toId && toId !== currentUserId ? toId : '');
     
     // Stop ringtone when leaving/declining call
     if (ringtoneAudio.current) {
@@ -1009,12 +1020,12 @@ export const SocketContextProvider = ({ children }) => {
     }
     
     // Emit cancelCall BEFORE clearing state
-    if (socket && (from || userToCall)) {
+    if (socket && peerId) {
       // If receiving call, we are declining - notify the caller
       // If making call, we are canceling - notify the receiver
       socket.emit('cancelCall', {
-        conversationId: userIdToStr(isReceiving ? from : userToCall),
-        sender: userIdToStr(user._id),
+        conversationId: peerId,
+        sender: currentUserId,
       });
     }
     
