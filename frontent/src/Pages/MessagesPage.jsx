@@ -2621,7 +2621,7 @@ const MessagesPage = () => {
                     <Text fontSize={{ base: "2xs", md: "xs" }} color="green.500">Online</Text>
                   </>
                 )}
-                {!selectedConversation.isGroup && (busyUsers?.has(selectedConversation.participants[0]?._id) || selectedConversation.participants[0]?.inCall) && (
+                {!selectedConversation.isGroup && busyUsers?.has(selectedConversation.participants[0]?._id) && (
                   <>
                     <Text fontSize={{ base: "2xs", md: "xs" }} color="gray.500">•</Text>
                     <Badge colorScheme="red" fontSize={{ base: "2xs", md: "xs" }} px={2} py={0.5} borderRadius="full">In a call</Badge>
@@ -3652,13 +3652,11 @@ const MessagesPage = () => {
                     callAccepted || 
                     !callUser ||
                     busyUsers?.has(selectedConversation?.participants[0]?._id) ||
-                    selectedConversation?.participants[0]?.inCall ||
-                    busyUsers?.has(user?._id) ||
-                    user?.inCall
+                    busyUsers?.has(user?._id)
                   }
                   flexShrink={0}
                   title={
-                    busyUsers?.has(selectedConversation?.participants[0]?._id) || selectedConversation?.participants[0]?.inCall || busyUsers?.has(user?._id) || user?.inCall
+                    busyUsers?.has(selectedConversation?.participants[0]?._id) || busyUsers?.has(user?._id)
                       ? "User is currently in a call"
                       : "Start call"
                   }
