@@ -1693,7 +1693,12 @@ const MessagesPage = () => {
   }
 
   // Delete message
-  const handleDeleteMessage = async (messageId) => {
+  const handleDeleteMessage = async (messageId, e) => {
+    if (e) {
+      e.preventDefault?.()
+      e.stopPropagation?.()
+      e.nativeEvent?.stopImmediatePropagation?.()
+    }
     if (!window.confirm('Are you sure you want to delete this message?')) return
 
     try {
@@ -1714,6 +1719,7 @@ const MessagesPage = () => {
     } catch (error) {
       showToast('Error', 'Failed to delete message', 'error')
     }
+    return false
   }
 
   // Delete conversation
@@ -3209,10 +3215,15 @@ const MessagesPage = () => {
                                 }}
                                 transition="all 0.15s ease"
                                 cursor="pointer"
+                                onMouseDown={(e) => {
+                                  e.preventDefault()
+                                  e.stopPropagation()
+                                }}
                                 onClick={(e) => {
                                   e.preventDefault()
                                   e.stopPropagation()
-                                  handleDeleteMessage(msg._id)
+                                  e.nativeEvent?.stopImmediatePropagation?.()
+                                  handleDeleteMessage(msg._id, e)
                                   setEmojiPickerOpen(null)
                                 }}
                                 _active={{
