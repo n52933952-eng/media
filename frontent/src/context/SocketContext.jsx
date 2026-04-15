@@ -153,14 +153,15 @@ export const SocketContextProvider = ({ children }) => {
 
   // Setup socket connection
   useEffect(() => {
-    if (!user?._id) return;
+    const currentUserId = userIdToStr(user?._id)
+    if (!currentUserId) return;
 
     const socketUrl = import.meta.env.PROD 
       ? window.location.origin 
       : "http://localhost:5000";
 
     const newSocket = io(socketUrl, {
-      query: { userId: userIdToStr(user._id), clientType: 'web' },
+      query: { userId: currentUserId, clientType: 'web' },
     });
 
     // WebRTC connectivity: use backend ICE servers (STUN/TURN) with safe fallback.
@@ -200,7 +201,7 @@ export const SocketContextProvider = ({ children }) => {
     });
 
     setSocket(newSocket);
-    setMe(userIdToStr(user._id));
+    setMe(currentUserId);
 
     newSocket?.on('getOnlineUser', (users) => setOnlineUser(users));
 
@@ -278,7 +279,7 @@ export const SocketContextProvider = ({ children }) => {
 
     // Listen for new messages globally - play sound for unread messages
     newSocket?.on('newMessage', (message) => {
-      if (!message || !message.sender || !user?._id) return;
+      if (!message || !message.sender || !currentUserId) return;
       
       // Check if message is from another user (not current user)
       let messageSenderId = '';
@@ -288,12 +289,7 @@ export const SocketContextProvider = ({ children }) => {
         messageSenderId = typeof message.sender === 'string' ? message.sender : String(message.sender);
       }
       
-      let currentUserId = '';
-      if (user?._id) {
-        currentUserId = typeof user._id === 'string' ? user._id : user._id.toString();
-      }
-      
-      const isFromCurrentUser = messageSenderId !== '' && currentUserId !== '' && messageSenderId === currentUserId;
+      const isFromCurrentUser = messageSenderId !== '' && messageSenderId === currentUserId;
       
       // Check if message belongs to the currently open conversation
       const messageConversationId =
@@ -333,7 +329,7 @@ export const SocketContextProvider = ({ children }) => {
 
     // Fetch initial unread count - OPTIMIZED endpoint
     const fetchInitialUnreadCount = async () => {
-      if (!user?._id) {
+      if (!currentUserId) {
         setTotalUnreadCount(0);
         return;
       }
@@ -358,7 +354,7 @@ export const SocketContextProvider = ({ children }) => {
 
     // Fetch initial notification count
     const fetchInitialNotificationCount = async () => {
-      if (!user?._id) {
+      if (!currentUserId) {
         setNotificationCount(0);
         return;
       }
@@ -405,7 +401,7 @@ export const SocketContextProvider = ({ children }) => {
       newSocket?.off('storyStripChanged');
       newSocket.close();
     };
-  }, [user]);
+  }, [user?._id]);
 
   // Keep Redis presence "online" while this tab is active so calls + presenceSubscribe match mobile.
   // Do not emit "offline" on tab blur — socket should still receive callUser when the tab is in the background.
