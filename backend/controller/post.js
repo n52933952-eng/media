@@ -80,10 +80,25 @@ export const createPost = async(req,res) => {
          return new Promise((resolve, reject) => {
            const stream = cloudinary.uploader.upload_stream(
              {
-               resource_type: req.file.mimetype.startsWith('video/') ? 'video' : 'image',
+              resource_type: req.file.mimetype.startsWith('video/') ? 'video' : 'image',
                folder: 'posts',
                timeout: 1200000,
                chunk_size: 6000000,
+              ...(req.file.mimetype.startsWith('video/')
+                ? {
+                    // Upload-side optimization so feed playback starts faster on mobile networks.
+                    transformation: [
+                      {
+                        width: 1080,
+                        crop: 'limit',
+                        quality: 'auto:good',
+                        fetch_format: 'mp4',
+                        video_codec: 'auto',
+                        audio_codec: 'aac',
+                      },
+                    ],
+                  }
+                : {}),
              },
              async (error, result) => {
                if (error) {
@@ -357,6 +372,21 @@ export const updatePost = async(req,res) => {
                         folder: 'posts',
                         timeout: 1200000,
                         chunk_size: 6000000,
+                        ...(req.file.mimetype.startsWith('video/')
+                            ? {
+                                // Keep the same optimization path on edit/replace media.
+                                transformation: [
+                                    {
+                                        width: 1080,
+                                        crop: 'limit',
+                                        quality: 'auto:good',
+                                        fetch_format: 'mp4',
+                                        video_codec: 'auto',
+                                        audio_codec: 'aac',
+                                    },
+                                ],
+                              }
+                            : {}),
                     },
                     async (error, result) => {
                         if (error) {
