@@ -119,6 +119,7 @@ const MessagesPage = () => {
   const imageInputRef = useRef(null) // Ref for image/video file input
   const firstMessageIdRef = useRef(null) // Track first message ID to detect pagination vs new messages
   const shouldScrollToBottomRef = useRef(false) // Track if we should scroll to bottom (only on initial load)
+  const fetchedConversationsForUserRef = useRef(null) // Prevent duplicate initial fetches for same user
 
   // Theme colors - white for light mode, dark for dark mode
   const bgColor = useColorModeValue('white', '#101010')  // White in light mode, dark in dark mode
@@ -190,11 +191,18 @@ const MessagesPage = () => {
 
   // Fetch conversations on component mount
   useEffect(() => {
-    if (user) {
-      fetchConversations()
+    const uid = user?._id?.toString?.() || null
+    if (!uid) {
+      fetchedConversationsForUserRef.current = null
+      return
     }
+
+    // Avoid re-fetching conversations when only user object metadata changes
+    if (fetchedConversationsForUserRef.current === uid) return
+    fetchedConversationsForUserRef.current = uid
+    fetchConversations()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user])
+  }, [user?._id])
 
   // Update SocketContext with currently open conversation
   // Runs when socket becomes ready OR when conversation changes
