@@ -2400,8 +2400,11 @@ const MessagesPage = () => {
                       _hover={{ bg: hoverBg }}
                       onClick={() => {
                         setSelectedConversation(conv)
-                        if (!isGroupConv && conv._id && socket && user?._id && otherUser?._id && conv.unreadCount > 0) {
-                          socket.emit("markmessageasSeen", { conversationId: conv._id, userId: otherUser._id })
+                        if (conv._id && socket && user?._id && conv.unreadCount > 0) {
+                          socket.emit("markmessageasSeen", {
+                            conversationId: conv._id,
+                            userId: isGroupConv ? null : otherUser?._id
+                          })
                         }
                         if (conv.unreadCount > 0) {
                           setConversations(prev => prev.map(c => c._id === conv._id ? { ...c, unreadCount: 0 } : c))

@@ -1776,28 +1776,49 @@ export const initializeSocket = async (app) => {
             try {
                 // Get the current user's ID from socket
                 const currentUserId = socket.handshake.query.userId
-                
-                // Update only messages sent by userId (the other user) to seen: true
-                // This marks messages from userId as "seen by currentUserId"
-                await Message.updateMany(
-                    { 
-                        conversationId: conversationId, 
-                        sender: userId,  // Only messages sent by userId
-                        seen: false 
-                    },
-                    { $set: { seen: true } }
-                )
+
+                // 1:1: `userId` is the other participant sender.
+                // Group: `userId` may be missing/null; mark all unseen messages not sent by current user.
+                const seenFilter = {
+                    conversationId: conversationId,
+                    seen: false,
+                }
+                if (userId) {
+                    seenFilter.sender = userId
+                } else if (currentUserId) {
+                    seenFilter.sender = { $ne: currentUserId }
+                }
+
+                await Message.updateMany(seenFilter, { $set: { seen: true } })
                 // Update conversation's lastMessage.seen to true
                 await Conversation.updateOne(
                     { _id: conversationId },
                     { $set: { "lastMessage.seen": true } }
                 )
                 
-                // Emit to the sender (the userId is the sender of the messages)
-                const senderData = await getUserSocket(userId)
-                const senderSocketId = senderData?.socketId
-                if (senderSocketId) {
-                    io.to(senderSocketId).emit("messagesSeen", { conversationId })
+                // Emit read receipts:
+                // - 1:1: notify the explicit sender (`userId`)
+                // - Group: notify other participants currently online
+                if (userId) {
+                    const senderData = await getUserSocket(userId)
+                    const senderSocketId = senderData?.socketId
+                    if (senderSocketId) {
+                        io.to(senderSocketId).emit("messagesSeen", { conversationId })
+                    }
+                } else {
+                    const conversation = await Conversation.findById(conversationId).select('participants')
+                    const participantIds = (conversation?.participants || [])
+                        .map((p) => p?.toString?.())
+                        .filter((pid) => pid && pid !== currentUserId)
+
+                    await Promise.all(
+                        participantIds.map(async (pid) => {
+                            const participantSocket = await getUserSocket(pid)
+                            if (participantSocket?.socketId) {
+                                io.to(participantSocket.socketId).emit("messagesSeen", { conversationId })
+                            }
+                        })
+                    )
                 }
                 
                 // Notify the reader (not the sender) so they can clear local unread — do NOT use `messagesSeen`
