@@ -120,6 +120,8 @@ const MessagesPage = () => {
   const firstMessageIdRef = useRef(null) // Track first message ID to detect pagination vs new messages
   const shouldScrollToBottomRef = useRef(false) // Track if we should scroll to bottom (only on initial load)
   const fetchedConversationsForUserRef = useRef(null) // Prevent duplicate initial fetches for same user
+  const isLoadingOlderMessagesRef = useRef(false) // Prevent duplicate top-scroll pagination triggers
+  const lastOlderBeforeIdRef = useRef(null) // Prevent requesting the same older-page cursor repeatedly
 
   // Theme colors - white for light mode, dark for dark mode
   const bgColor = useColorModeValue('white', '#101010')  // White in light mode, dark in dark mode
@@ -625,10 +627,11 @@ const MessagesPage = () => {
 
   // Function to load older messages (called when scrolling to top)
   const loadOlderMessages = async () => {
-    if (!hasMoreMessages || loadingMoreMessages || !messages.length) return
+    if (!hasMoreMessages || loadingMoreMessages || isLoadingOlderMessagesRef.current || !messages.length) return
 
     const oldestMessage = messages[0]
     if (!oldestMessage?._id) return
+    if (lastOlderBeforeIdRef.current === oldestMessage._id) return
 
     // Store current scroll position
     const container = messagesContainerRef.current
@@ -643,6 +646,8 @@ const MessagesPage = () => {
       if (!isGroupConv && !otherUser?._id) return
       if (isGroupConv && !selectedConversation?._id) return
 
+      isLoadingOlderMessagesRef.current = true
+      lastOlderBeforeIdRef.current = oldestMessage._id
       setLoadingMoreMessages(true)
 
       const base = import.meta.env.PROD ? window.location.origin : 'http://localhost:5000'
@@ -674,6 +679,7 @@ const MessagesPage = () => {
       console.error('Error loading older messages:', error)
       showToast('Error', 'Failed to load older messages', 'error')
     } finally {
+      isLoadingOlderMessagesRef.current = false
       setLoadingMoreMessages(false)
     }
   }
