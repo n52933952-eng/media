@@ -183,6 +183,49 @@ const isInCallFast = async (userId) => {
     }
 }
 
+/** Busy / "in a call" for UI + gating: same Redis keys as `setInCall` / `clearInCall` (`inCall:<userId>`).
+ *  Do NOT infer busy from `activeCall:*` alone — those rows can be orphaned if cleanup races; `inCall` is authoritative. */
+const getBusyUserIdsFromInCallKeys = async () => {
+    redisService.ensureRedis()
+    const busy = new Set()
+    try {
+        const client = redisService.getRedis()
+        let cursor = '0'
+        let scanCount = 0
+        const maxIterations = 200
+        const match = `${IN_CALL_PREFIX}*`
+        do {
+            scanCount++
+            if (scanCount > maxIterations) {
+                console.error('❌ [getBusyUserIdsFromInCallKeys] Max iterations reached')
+                break
+            }
+            const result = await client.scan(cursor, { MATCH: match, COUNT: 500 })
+            let nextCursor
+            let keys
+            if (Array.isArray(result)) {
+                nextCursor = result[0]
+                keys = result[1] || []
+            } else if (result && typeof result === 'object') {
+                nextCursor = result.cursor
+                keys = result.keys || []
+            } else {
+                break
+            }
+            cursor = nextCursor.toString()
+            for (const key of keys || []) {
+                const s = String(key)
+                if (!s.startsWith(IN_CALL_PREFIX)) continue
+                const uid = normalizeUserId(s.slice(IN_CALL_PREFIX.length))
+                if (uid) busy.add(uid)
+            }
+        } while (cursor !== '0')
+    } catch (e) {
+        console.error('❌ [getBusyUserIdsFromInCallKeys]', e.message)
+    }
+    return busy
+}
+
 // Brief socket drops during incoming ring / WebRTC setup should not wipe call state (same idea as chess disconnect grace).
 const CALL_DISCONNECT_GRACE_MS = 10000
 const callDisconnectGraceTimers = new Map()
@@ -1261,13 +1304,7 @@ export const initializeSocket = async (app) => {
                 
                 if (socketCount === 0) {
                     // Use in-memory as fallback if Redis is empty
-                    // OPTIMIZED: Get busy users from Redis (active calls) instead of database
-                    const allActiveCalls = await getAllActiveCalls();
-                    const busyUserIds = new Set();
-                    for (const [callId, callData] of Object.entries(allActiveCalls)) {
-                        if (callData.user1) busyUserIds.add(callData.user1);
-                        if (callData.user2) busyUserIds.add(callData.user2);
-                    }
+                    const busyUserIds = await getBusyUserIdsFromInCallKeys()
                     
                     const memEntries = Object.entries(userSocketMap)
                     const keepPresence = await filterOutPresenceOfflineUserIds(memEntries.map(([id]) => id))
@@ -1286,14 +1323,8 @@ export const initializeSocket = async (app) => {
                 }
                 
                 // Emit online users as array of objects like madechess
-                // OPTIMIZED FOR 1M+ USERS: Get busy users from Redis (active calls) instead of database queries
-                // Build a Set of busy user IDs from all active calls (single Redis query, not 1M database queries)
-                const allActiveCalls = await getAllActiveCalls();
-                const busyUserIds = new Set();
-                for (const [callId, callData] of Object.entries(allActiveCalls)) {
-                    if (callData.user1) busyUserIds.add(callData.user1);
-                    if (callData.user2) busyUserIds.add(callData.user2);
-                }
+                // Busy = users with Redis `inCall:<id>` (same source as `isUserBusy`)
+                const busyUserIds = await getBusyUserIdsFromInCallKeys()
                 
                 // Map online users; respect clientPresence offline (socket may still exist during delayed disconnect)
                 const sockEntries = Object.entries(allSockets)
@@ -1313,12 +1344,7 @@ export const initializeSocket = async (app) => {
                 // Fallback: emit from in-memory cache
                 // OPTIMIZED: Get busy users from Redis (active calls) instead of database
                 try {
-                    const allActiveCalls = await getAllActiveCalls();
-                    const busyUserIds = new Set();
-                    for (const [callId, callData] of Object.entries(allActiveCalls)) {
-                        if (callData.user1) busyUserIds.add(callData.user1);
-                        if (callData.user2) busyUserIds.add(callData.user2);
-                    }
+                    const busyUserIds = await getBusyUserIdsFromInCallKeys()
                     
                     const memEntries2 = Object.entries(userSocketMap)
                     const keepPresenceFb = await filterOutPresenceOfflineUserIds(memEntries2.map(([id]) => id))
@@ -1340,16 +1366,12 @@ export const initializeSocket = async (app) => {
             }, 500) // Debounce: wait 500ms before emitting to prevent spam
         }
 
-        // Helper function to check if user is busy
+        // Helper: user is busy iff Redis `inCall:<userId>` exists (see `setInCall` / `clearCallStateForPair`).
+        // Stale `activeCall:*` keys without a matching inCall must NOT block new calls (orphans TTL out in ~1h).
         const isUserBusy = async (userId) => {
-            // Prefer O(1) inCall key; fallback to scan-based behavior for safety.
-            const fast = await isInCallFast(userId)
-            if (fast) return true
-            const allActiveCalls = await getAllActiveCalls()
-            for (const [callId, callData] of Object.entries(allActiveCalls)) {
-                if (callData.user1 === userId || callData.user2 === userId) return true
-            }
-            return false
+            const uid = normalizeUserId(userId)
+            if (!uid) return false
+            return isInCallFast(uid)
         }
 
         /** Block game invites while in a call or already in chess/card (server-side; app also filters). */
@@ -1506,6 +1528,11 @@ export const initializeSocket = async (app) => {
             }
 
             const callId = `${callerId}-${receiverId}`
+            // Mark inCall before activeCall so `isUserBusy` / scans never see activeCall without inCall (no orphan window).
+            await Promise.all([
+                setInCall(callerId, callId).catch(() => {}),
+                setInCall(receiverId, callId).catch(() => {}),
+            ])
             await setActiveCall(callId, {
                 user1: callerId,
                 user2: receiverId,
@@ -1513,10 +1540,6 @@ export const initializeSocket = async (app) => {
                 name: name,
                 callType: callType
             })
-            await Promise.all([
-                setInCall(callerId, callId).catch(() => {}),
-                setInCall(receiverId, callId).catch(() => {}),
-            ])
 
             User.findByIdAndUpdate(callerId, { inCall: true }).catch(err => console.log('Error updating caller inCall status:', err))
             User.findByIdAndUpdate(receiverId, { inCall: true }).catch(err => console.log('Error updating receiver inCall status:', err))
@@ -3359,13 +3382,7 @@ export const initializeSocket = async (app) => {
 
             // Emit updated online list as array of objects - get from Redis (source of truth)
             const remainingSockets = await getAllUserSockets()
-            // OPTIMIZED FOR 1M+ USERS: Get busy users from Redis (active calls) instead of database queries
-            const allActiveCalls = await getAllActiveCalls();
-            const busyUserIds = new Set();
-            for (const [callId, callData] of Object.entries(allActiveCalls)) {
-                if (callData.user1) busyUserIds.add(callData.user1);
-                if (callData.user2) busyUserIds.add(callData.user2);
-            }
+            const busyUserIds = await getBusyUserIdsFromInCallKeys()
             
             const updatedOnlineArray = Object.entries(remainingSockets).map(([id, data]) => ({
                 userId: id,
