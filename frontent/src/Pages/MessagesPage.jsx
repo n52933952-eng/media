@@ -200,17 +200,10 @@ const MessagesPage = () => {
   // Runs when socket becomes ready OR when conversation changes
   useEffect(() => {
     if (!setSelectedConversationId || !socket) return
-    
-    const participantId = selectedConversation?.participants[0]?._id
-    
-    if (participantId) {
-      setSelectedConversationId(participantId)
-    } else if (selectedConversation === null) {
-      setSelectedConversationId(null)
-    }
-    // Note: If selectedConversation is undefined (initial load), don't do anything
-    // This prevents clearing the ID during page load before data arrives
-  }, [socket, selectedConversation, selectedConversation?.participants[0]?._id, setSelectedConversationId])
+
+    const openConversationId = selectedConversation?._id || null
+    setSelectedConversationId(openConversationId)
+  }, [socket, selectedConversation?._id, setSelectedConversationId])
   
   // Clear selected conversation when component unmounts (user leaves Messages page)
   useEffect(() => {
@@ -221,7 +214,7 @@ const MessagesPage = () => {
         setSelectedConversationId(null)
       }
     }
-  }, [setSelectedConversationId])
+  }, [])
 
   // Force video elements to update when mounting MessagesPage with active call
   useEffect(() => {

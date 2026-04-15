@@ -1,5 +1,5 @@
 
-import { createContext, useEffect, useState, useContext, useRef } from 'react';
+import { createContext, useEffect, useState, useContext, useRef, useCallback } from 'react';
 import io from 'socket.io-client';
 import Peer from 'simple-peer';
 import { useToast } from '@chakra-ui/react';
@@ -295,14 +295,22 @@ export const SocketContextProvider = ({ children }) => {
       
       const isFromCurrentUser = messageSenderId !== '' && currentUserId !== '' && messageSenderId === currentUserId;
       
-      // Check if message is from the currently open conversation
-      const isFromOpenConversation = selectedConversationIdRef.current && 
-                                      messageSenderId === selectedConversationIdRef.current;
+      // Check if message belongs to the currently open conversation
+      const messageConversationId =
+        (typeof message.conversationId === 'string' && message.conversationId) ||
+        message.conversation?._id?.toString?.() ||
+        message.conversation?.toString?.() ||
+        '';
+      const isFromOpenConversation =
+        selectedConversationIdRef.current &&
+        messageConversationId &&
+        messageConversationId === selectedConversationIdRef.current;
       
       const shouldPlay = !isFromCurrentUser && !isFromOpenConversation
       
       console.log('🔔 Message notification check:', {
         sender: messageSenderId,
+        conversationId: messageConversationId || 'none',
         openConversation: selectedConversationIdRef.current || 'none',
         isFromMe: isFromCurrentUser,
         isFromOpenChat: isFromOpenConversation,
@@ -1319,10 +1327,11 @@ export const SocketContextProvider = ({ children }) => {
   };
 
   // Function to update which conversation is currently open (for notification sound control)
-  const setSelectedConversationId = (userId) => {
-    console.log('🔊 Setting selectedConversationId:', userId || 'none')
-    selectedConversationIdRef.current = userId;
-  };
+  const setSelectedConversationId = useCallback((conversationId) => {
+    const normalizedConversationId = conversationId || null;
+    if (selectedConversationIdRef.current === normalizedConversationId) return;
+    selectedConversationIdRef.current = normalizedConversationId;
+  }, []);
 
   return (
     <SocketContext.Provider
