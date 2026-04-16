@@ -1525,10 +1525,14 @@ const MessagesPage = () => {
       setSelectedConversationId(recipientId)
     }
     
-    // Check if conversation already exists
-    const existingConv = conversations.find((conv) =>
-      conv.participants.some((p) => p._id === recipientId)
-    )
+    // Check if 1-to-1 conversation already exists (never match groups here)
+    const existingConv = conversations.find((conv) => {
+      if (conv?.isGroup) return false
+      const otherUser = (conv.participants || []).find(
+        (p) => idStr(p?._id) !== idStr(user?._id)
+      )
+      return idStr(otherUser?._id) === idStr(recipientId)
+    })
 
     if (existingConv) {
       // Reset refs to force useEffect to trigger and fetch messages

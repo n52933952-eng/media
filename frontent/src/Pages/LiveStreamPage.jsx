@@ -11,7 +11,7 @@ import { useEffect, useRef, useState, useCallback, useContext } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   Box, Flex, Avatar, Text, VStack, HStack, Input, Button,
-  Badge, IconButton, useColorModeValue, keyframes,
+  Badge, IconButton, useColorModeValue, keyframes, useToast,
 } from '@chakra-ui/react';
 import { CloseIcon } from '@chakra-ui/icons';
 import { css } from '@emotion/react';
@@ -20,6 +20,7 @@ import { UserContext } from '../context/UserContext';
 import { SocketContext } from '../context/SocketContext';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
+const MAX_LIVE_MS = 25 * 60 * 1000; // 25 minutes
 
 // ── Floating message animation ────────────────────────────────────────────────
 const floatUp = keyframes`
@@ -57,6 +58,7 @@ const LiveStreamPage = () => {
   const navigate = useNavigate();
   const { user } = useContext(UserContext);
   const { socket } = useContext(SocketContext) || {};
+  const toast = useToast();
 
   const isBroadcaster = !streamerId || streamerId === String(user?._id);
 
@@ -78,6 +80,8 @@ const LiveStreamPage = () => {
   const remoteVideoRef = useRef(null);
   const audioElRef = useRef(null);
   const closingRef = useRef(false);
+  const liveEndedRef = useRef(false);
+  const liveTimeoutRef = useRef(null);
   let floatIdCounter = useRef(0);
 
   // ── scroll chat log ───────────────────────────────────────────────────────
@@ -123,9 +127,18 @@ const LiveStreamPage = () => {
   const safeClose = useCallback(async () => {
     if (closingRef.current) return;
     closingRef.current = true;
+    // If broadcaster leaves while live, end stream server-side too.
+    if (isBroadcaster && isLive && socket && !liveEndedRef.current) {
+      liveEndedRef.current = true;
+      socket.emit('livekit:endLive', { streamerId: String(user?._id), roomName });
+    }
+    if (liveTimeoutRef.current) {
+      clearTimeout(liveTimeoutRef.current);
+      liveTimeoutRef.current = null;
+    }
     await disconnectRoom();
     navigate(-1);
-  }, [disconnectRoom, navigate]);
+  }, [disconnectRoom, navigate, isBroadcaster, isLive, socket, user?._id, roomName]);
 
   useEffect(() => {
     if (!localVideoRef.current || !localVideoTrack) return;
@@ -159,6 +172,11 @@ const LiveStreamPage = () => {
   const startStream = useCallback(async () => {
     if (!user || !socket) return;
     try {
+      liveEndedRef.current = false;
+      if (liveTimeoutRef.current) {
+        clearTimeout(liveTimeoutRef.current);
+        liveTimeoutRef.current = null;
+      }
       const { token, roomName: rn, livekitUrl } = await fetchToken(String(user._id), 'livestream');
       setRoomName(rn);
       const room = new Room({ adaptiveStream: true, dynacast: true });
@@ -185,14 +203,39 @@ const LiveStreamPage = () => {
         streamerProfilePic: user.profilePic,
         roomName:           rn,
       });
+      // Hard stop live after 25 minutes
+      liveTimeoutRef.current = setTimeout(() => {
+        if (!liveEndedRef.current && socket) {
+          liveEndedRef.current = true;
+          socket.emit('livekit:endLive', { streamerId: String(user._id), roomName: rn });
+        }
+        disconnectRoom();
+        setIsLive(false);
+        toast({
+          title: 'Live ended',
+          description: 'Maximum live duration is 25 minutes.',
+          status: 'info',
+          duration: 4000,
+          isClosable: true,
+          position: 'top',
+        });
+        navigate(-1);
+      }, MAX_LIVE_MS);
     } catch (err) {
       console.error('[LiveStream] startStream:', err.message);
     }
-  }, [user, socket, fetchToken]);
+  }, [user, socket, fetchToken, disconnectRoom, navigate, toast]);
 
   // ── BROADCASTER: end stream ───────────────────────────────────────────────
   const endStream = useCallback(async () => {
-    if (socket) socket.emit('livekit:endLive', { streamerId: String(user._id), roomName });
+    if (socket && !liveEndedRef.current) {
+      liveEndedRef.current = true;
+      socket.emit('livekit:endLive', { streamerId: String(user._id), roomName });
+    }
+    if (liveTimeoutRef.current) {
+      clearTimeout(liveTimeoutRef.current);
+      liveTimeoutRef.current = null;
+    }
     await disconnectRoom();
     setIsLive(false);
     navigate(-1);
@@ -290,8 +333,16 @@ const LiveStreamPage = () => {
 
   useEffect(() => () => {
     closingRef.current = true;
+    if (liveTimeoutRef.current) {
+      clearTimeout(liveTimeoutRef.current);
+      liveTimeoutRef.current = null;
+    }
+    if (isBroadcaster && isLive && socket && !liveEndedRef.current) {
+      liveEndedRef.current = true;
+      socket.emit('livekit:endLive', { streamerId: String(user?._id), roomName });
+    }
     disconnectRoom();
-  }, [disconnectRoom]);
+  }, [disconnectRoom, isBroadcaster, isLive, socket, user?._id, roomName]);
 
   // ── render ─────────────────────────────────────────────────────────────────
   return (

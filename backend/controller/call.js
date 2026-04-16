@@ -61,10 +61,11 @@ export const getLiveKitToken = async (req, res) => {
         const canPublish   = type !== 'viewer'   // viewers only watch
         const canSubscribe = true                 // everyone can receive streams
 
+        const ttl = type === 'livestream' ? '25m' : '4h'
         const at = new AccessToken(LIVEKIT_API_KEY, LIVEKIT_API_SECRET, {
             identity: userId,
             name:     userName,
-            ttl:      '4h',
+            ttl,
         })
 
         at.addGrant({

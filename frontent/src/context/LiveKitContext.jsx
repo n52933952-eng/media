@@ -15,7 +15,7 @@
 import {
   createContext, useContext, useEffect, useRef, useState, useCallback,
 } from 'react';
-import { Room, RoomEvent, Track } from 'livekit-client';
+import { Room, RoomEvent } from 'livekit-client';
 import { useToast } from '@chakra-ui/react';
 import { UserContext } from './UserContext';
 import { SocketContext } from './SocketContext';
@@ -125,12 +125,13 @@ export const LiveKitProvider = ({ children }) => {
 
     await room.connect(livekitUrl, token);
 
-    // Publish local tracks
-    const sources = type === 'audio'
-      ? [Track.Source.Microphone]
-      : [Track.Source.Camera, Track.Source.Microphone];
-
-    await room.localParticipant.enableCameraAndMicrophone();
+    // Publish local tracks: audio calls should not keep camera enabled.
+    if (type === 'audio') {
+      await room.localParticipant.setCameraEnabled(false);
+      await room.localParticipant.setMicrophoneEnabled(true);
+    } else {
+      await room.localParticipant.enableCameraAndMicrophone();
+    }
     const published = room.localParticipant.trackPublications;
     const local = [];
     published.forEach((pub) => {

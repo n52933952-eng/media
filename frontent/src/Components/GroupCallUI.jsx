@@ -7,14 +7,12 @@
  *  3. Controls: Mute, Camera, Flip, End
  */
 
-import { useContext, useState, useRef, useCallback } from 'react';
+import { useContext, useState, useEffect, useRef } from 'react';
 import {
   Box, Flex, Avatar, Text, IconButton, HStack, VStack,
-  Badge, SimpleGrid, useToast,
+  Badge, SimpleGrid,
 } from '@chakra-ui/react';
 import { PhoneIcon } from '@chakra-ui/icons';
-import { VideoTrack, AudioTrack } from '@livekit/components-react';
-import '@livekit/components-styles';
 import { GroupCallContext } from '../context/GroupCallContext';
 
 const HangupIcon = () => <span style={{ fontSize: 20 }}>📵</span>;
@@ -25,6 +23,41 @@ const ParticipantTile = ({ participant }) => {
     .find(p => p.source === 'camera' && p.track)?.track;
   const audioTrack = [...participant.trackPublications.values()]
     .find(p => p.source === 'microphone' && p.track)?.track;
+  const videoRef = useRef(null);
+  const audioElRef = useRef(null);
+
+  useEffect(() => {
+    if (!videoTrack || !videoRef.current) return;
+    const el = videoRef.current;
+    try { videoTrack.attach(el); } catch (_) {}
+    return () => {
+      try { videoTrack.detach(el); } catch (_) {}
+      if (el) el.srcObject = null;
+    };
+  }, [videoTrack]);
+
+  useEffect(() => {
+    if (!audioTrack) return;
+    try {
+      const audioEl = audioTrack.attach();
+      audioEl.autoplay = true;
+      audioEl.style.display = 'none';
+      document.body.appendChild(audioEl);
+      if (audioElRef.current) {
+        try { audioElRef.current.remove(); } catch (_) {}
+      }
+      audioElRef.current = audioEl;
+    } catch (_) {}
+    return () => {
+      if (audioElRef.current) {
+        try {
+          audioTrack.detach(audioElRef.current);
+          audioElRef.current.remove();
+        } catch (_) {}
+        audioElRef.current = null;
+      }
+    };
+  }, [audioTrack]);
 
   return (
     <Box
@@ -33,8 +66,11 @@ const ParticipantTile = ({ participant }) => {
       border="2px solid" borderColor="gray.700"
     >
       {videoTrack ? (
-        <VideoTrack
-          trackRef={{ participant: participant.identity, publication: videoTrack }}
+        <Box
+          as="video"
+          ref={videoRef}
+          autoPlay
+          playsInline
           style={{ width: '100%', height: '100%', objectFit: 'cover' }}
         />
       ) : (
@@ -45,7 +81,6 @@ const ParticipantTile = ({ participant }) => {
           </VStack>
         </Flex>
       )}
-      {audioTrack && <AudioTrack trackRef={{ publication: audioTrack }} />}
       <Box position="absolute" bottom={2} left={2}>
         <Text color="white" fontSize="xs" bg="blackAlpha.600" px={2} py={0.5} borderRadius="md">
           {participant.name || participant.identity}

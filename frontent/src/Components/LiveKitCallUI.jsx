@@ -14,8 +14,6 @@ import {
   Box, Flex, Avatar, Text, IconButton, HStack, VStack, Badge,
 } from '@chakra-ui/react';
 import { PhoneIcon } from '@chakra-ui/icons';
-import { VideoTrack, AudioTrack } from '@livekit/components-react';
-import '@livekit/components-styles';
 import { useLiveKit } from '../context/LiveKitContext';
 
 // ── small helpers ────────────────────────────────────────────────────────────
@@ -119,6 +117,52 @@ const ActiveCallScreen = () => {
   const remoteVideo  = remoteTracks.find(t => t.track.kind === 'video');
   const remoteAudio  = remoteTracks.find(t => t.track.kind === 'audio');
   const localVideo   = localTracks.find(t => t.kind   === 'video');
+  const remoteVideoRef = useRef(null);
+  const localVideoRef = useRef(null);
+  const remoteAudioElRef = useRef(null);
+
+  useEffect(() => {
+    if (!remoteVideo?.track || !remoteVideoRef.current) return;
+    const el = remoteVideoRef.current;
+    try { remoteVideo.track.attach(el); } catch (_) {}
+    return () => {
+      try { remoteVideo.track.detach(el); } catch (_) {}
+      if (el) el.srcObject = null;
+    };
+  }, [remoteVideo]);
+
+  useEffect(() => {
+    if (!localVideo || !localVideoRef.current) return;
+    const el = localVideoRef.current;
+    try { localVideo.attach(el); } catch (_) {}
+    return () => {
+      try { localVideo.detach(el); } catch (_) {}
+      if (el) el.srcObject = null;
+    };
+  }, [localVideo]);
+
+  useEffect(() => {
+    if (!remoteAudio?.track) return;
+    try {
+      const audioEl = remoteAudio.track.attach();
+      audioEl.autoplay = true;
+      audioEl.style.display = 'none';
+      document.body.appendChild(audioEl);
+      if (remoteAudioElRef.current) {
+        try { remoteAudioElRef.current.remove(); } catch (_) {}
+      }
+      remoteAudioElRef.current = audioEl;
+    } catch (_) {}
+    return () => {
+      if (remoteAudioElRef.current) {
+        try {
+          remoteAudio.track.detach(remoteAudioElRef.current);
+          remoteAudioElRef.current.remove();
+        } catch (_) {}
+        remoteAudioElRef.current = null;
+      }
+    };
+  }, [remoteAudio]);
 
   return (
     <Box
@@ -129,8 +173,11 @@ const ActiveCallScreen = () => {
       {/* Remote video / audio-only placeholder */}
       <Box flex={1} w="100%" position="relative" display="flex" alignItems="center" justifyContent="center">
         {remoteVideo ? (
-          <VideoTrack
-            trackRef={{ participant: remoteVideo.participantId, publication: remoteVideo.track }}
+          <Box
+            as="video"
+            ref={remoteVideoRef}
+            autoPlay
+            playsInline
             style={{ width: '100%', height: '100%', objectFit: 'cover' }}
           />
         ) : (
@@ -140,8 +187,6 @@ const ActiveCallScreen = () => {
             <Text color="gray.400">{callType === 'audio' ? 'Voice call' : 'Connecting video…'}</Text>
           </VStack>
         )}
-        {remoteAudio && <AudioTrack trackRef={{ publication: remoteAudio.track }} />}
-
         {/* Local pip */}
         {localVideo && callType !== 'audio' && (
           <Box
@@ -149,10 +194,13 @@ const ActiveCallScreen = () => {
             w="120px" h="90px" borderRadius="lg" overflow="hidden"
             border="2px solid" borderColor="whiteAlpha.400"
           >
-            <VideoTrack
-              trackRef={{ publication: localVideo }}
+            <Box
+              as="video"
+              ref={localVideoRef}
+              autoPlay
+              muted
+              playsInline
               style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-              local
             />
           </Box>
         )}
