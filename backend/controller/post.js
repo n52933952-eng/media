@@ -2,6 +2,7 @@
 import User from '../models/user.js'
 import Post from '../models/post.js'
 import Follow from '../models/follow.js'
+import LiveStream from '../models/liveStream.js'
 import { v2 as cloudinary } from 'cloudinary'
 import { Readable } from 'stream'
 import { getIO, getUserSocket, getAllUserSockets } from '../socket/socket.js'
@@ -1175,10 +1176,32 @@ export const getFeedPost = async(req,res) => {
         }
         pinnedPosts.push(...channelPosts)
 
-        // Page 1: pinned + first 12 normal posts
+        // Page 1: live streams + pinned + first 12 normal posts
         if (skip === 0) {
+            // Fetch active live streams from followed users (+ own)
+            const liveFollowIds = [...following.map(String), String(userId)]
+            const activeStreams = await LiveStream.find({
+                streamer: { $in: liveFollowIds },
+                active: true,
+            })
+            .populate('streamer', 'name username profilePic')
+            .sort({ startedAt: -1 })
+            .lean()
+
+            // Shape live streams as pseudo-posts so the frontend renders them uniformly
+            const livePseudoPosts = activeStreams.map(s => ({
+                _id:      `live_${s._id}`,
+                isLive:   true,
+                liveStreamId: String(s._id),
+                roomName: s.roomName,
+                postedBy: s.streamer,
+                createdAt: s.startedAt,
+                updatedAt: s.startedAt,
+                __viewerSortBoostMs: Date.now() + 1e12, // always at top
+            }))
+
             const topNormalPosts = feedNormalPosts.slice(0, 12)
-            const combinedPosts = [...pinnedPosts, ...topNormalPosts]
+            const combinedPosts = [...livePseudoPosts, ...pinnedPosts, ...topNormalPosts]
             
             combinedPosts.sort((a, b) => {
                 const boostA = a && typeof a.__viewerSortBoostMs === 'number' ? a.__viewerSortBoostMs : 0
@@ -1193,7 +1216,8 @@ export const getFeedPost = async(req,res) => {
             return res.status(200).json({ 
                 posts: combinedPosts,
                 hasMore,
-                totalCount: feedNormalPosts.length
+                totalCount: feedNormalPosts.length,
+                liveStreams: livePseudoPosts,
             })
         }
         

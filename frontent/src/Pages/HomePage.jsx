@@ -3,6 +3,7 @@ import { useLocation } from 'react-router-dom'
 import useShowToast from '../hooks/useShowToast.js'
 import{Spinner,Flex,Box,Text,useColorModeValue} from '@chakra-ui/react'
 import Post from '../Components/Post'
+import LivePostCard from '../Components/LivePostCard'
 import {PostContext} from '../context/PostContext'
 import {SocketContext} from '../context/SocketContext'
 import {UserContext} from '../context/UserContext'
@@ -419,12 +420,34 @@ const HomePage = () => {
       getFeedPost(false, { silent: true })
     }
 
+    // Live stream: inject pseudo-post at the top when a followed user goes live
+    const handleStreamStarted = (data) => {
+      const pseudo = {
+        _id:           `live_${data.streamerId}`,
+        isLive:        true,
+        liveStreamId:  data.streamerId,
+        roomName:      data.roomName,
+        postedBy:      { _id: data.streamerId, name: data.streamerName, profilePic: data.streamerProfilePic },
+        createdAt:     new Date().toISOString(),
+        updatedAt:     new Date().toISOString(),
+      }
+      setFollowPost(prev => {
+        if (prev.some(p => p._id === pseudo._id)) return prev
+        return [pseudo, ...prev]
+      })
+    }
+    const handleStreamEnded = ({ streamerId }) => {
+      setFollowPost(prev => prev.filter(p => p._id !== `live_${streamerId}`))
+    }
+
     socket.on('newPost', handleNewPost)
     socket.on('postDeleted', handlePostDeleted)
     socket.on('postUpdated', handlePostUpdated)
     socket.on('footballPageUpdate', handleFootballFeedSync)
     socket.on('footballMatchUpdate', handleFootballFeedSync)
     socket.on('weatherUpdate', handleWeatherFeedSync)
+    socket.on('livekit:streamStarted', handleStreamStarted)
+    socket.on('livekit:streamEnded',   handleStreamEnded)
 
     return () => {
       socket.off('newPost', handleNewPost)
@@ -433,6 +456,8 @@ const HomePage = () => {
       socket.off('footballPageUpdate', handleFootballFeedSync)
       socket.off('footballMatchUpdate', handleFootballFeedSync)
       socket.off('weatherUpdate', handleWeatherFeedSync)
+      socket.off('livekit:streamStarted', handleStreamStarted)
+      socket.off('livekit:streamEnded',   handleStreamEnded)
     }
   }, [socket, setFollowPost, getFeedPost, user])
  
@@ -492,9 +517,11 @@ const HomePage = () => {
         {/* Posts list */}
         {!loading && followPost.length > 0 && (
           <>
-            {followPost.map((post) => (
-              <Post key={post._id} post={post} postedBy={post.postedBy} visibleVideoOnly />
-            ))}
+            {followPost.map((post) =>
+              post.isLive
+                ? <LivePostCard key={post._id} post={post} />
+                : <Post key={post._id} post={post} postedBy={post.postedBy} visibleVideoOnly />
+            )}
             
             {/* Infinite scroll trigger element */}
             <Box ref={observerTarget} h="20px" />

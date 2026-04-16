@@ -16,6 +16,7 @@ import LogOutButton from './Components/LogOutButton'
 import UpdateProfile from './Pages/UpdatProile'
 import CreatePost from './Components/CreatePost'
 import MessagesPage from './Pages/MessagesPage'
+import LiveStreamPage from './Pages/LiveStreamPage'
 import FootballPage from './Pages/FootballPage'
 import WeatherPage from './Pages/WeatherPage'
 import NewsPage from './Pages/NewsPage'
@@ -24,6 +25,8 @@ import ChessGamePage from './Pages/ChessGamePage'
 import CardGamePage from './Pages/CardGamePage'
 import RacingGamePage from './Pages/RacingGamePage'
 import CallNotification from './Components/CallNotification'
+import LiveKitCallUI from './Components/LiveKitCallUI'
+import GroupCallUI from './Components/GroupCallUI'
 import ChessChallengeNotification from './Components/ChessChallengeNotification'
 import CardChallengeNotification from './Components/CardChallengeNotification'
 import RacingChallengeNotification from './Components/RacingChallengeNotification'
@@ -88,6 +91,8 @@ const AppContent = () => {
       <CookieConsentBanner />
       {/* Global Call Notification - shows on all pages */}
       {user && <CallNotification />}
+      {user && <LiveKitCallUI />}
+      {user && <GroupCallUI />}
       
       {/* Global Chess Challenge Notification - shows on all pages */}
       {user && <ChessChallengeNotification />}
@@ -197,6 +202,8 @@ const AppContent = () => {
                 <Route path="/notifications" element={user ? <NotificationsPage /> : <Navigate to="/" />} />
                 <Route path="/chess/:opponentId" element={user ? <ChessGamePage /> : <Navigate to="/" />} />
                 <Route path="/card/:opponentId" element={user ? <CardGamePage /> : <Navigate to="/" />} />
+                <Route path="/live/broadcast" element={user ? <LiveStreamPage /> : <Navigate to="/" />} />
+                <Route path="/live/:streamerId" element={user ? <LiveStreamPage /> : <Navigate to="/" />} />
                 <Route path="/:username/post/:id" element={<PostPage/>}/>
               </Routes>
               {user && isOwnUserPage && <CreatePost/>}

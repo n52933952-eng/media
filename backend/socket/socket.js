@@ -6,6 +6,7 @@ import Message from '../models/message.js'
 import Conversation from '../models/conversation.js'
 import User from '../models/user.js'
 import { createChessGamePost, deleteChessGamePost, createCardGamePost, deleteCardGamePost } from '../controller/post.js'
+import LiveStream from '../models/liveStream.js'
 import * as redisService from '../services/redis.js'
 import { sendCallNotification, sendMissedCallNotification } from '../services/pushNotifications.js'
 // Use redisService namespace for all Redis functions to avoid import issues
@@ -1827,6 +1828,238 @@ export const initializeSocket = async (app) => {
                 io.emit("cancleCall", { userToCall: conversationId, from: sender })
             }
         })
+
+        // ── LiveKit signaling ────────────────────────────────────────────────
+        // Notify target user that someone is calling (sends room info so they
+        // can fetch a token and join). FCM push is sent for offline users.
+        socket.on("livekit:callUser", async ({ userToCall, callerName, callerProfilePic, callType, roomName, callerId: explicitCallerId }) => {
+            try {
+                const callerId   = explicitCallerId || socket.handshake.query.userId
+                const receiverId = String(userToCall)
+                const receiverSocketData = await getUserSocket(receiverId)
+                const receiverSocketId   = receiverSocketData?.socketId
+
+                // Mark both as inCall (Redis + MongoDB)
+                const callId = [String(callerId), receiverId].sort().join('-')
+                await Promise.all([
+                    setInCall(callerId,  callId).catch(() => {}),
+                    setInCall(receiverId, callId).catch(() => {}),
+                ])
+                User.findByIdAndUpdate(callerId,  { inCall: true }).catch(() => {})
+                User.findByIdAndUpdate(receiverId, { inCall: true }).catch(() => {})
+                io.emit('callBusy', { userToCall: receiverId, from: callerId })
+
+                if (receiverSocketId) {
+                    io.to(receiverSocketId).emit('livekit:incomingCall', {
+                        from:            callerId,
+                        callerName,
+                        callerProfilePic,
+                        callType:        callType || 'video',
+                        roomName,
+                    })
+                    console.log(`📞 [LiveKit] incomingCall sent to ${receiverId} (socket ${receiverSocketId})`)
+                } else {
+                    // Offline — send FCM push so phone rings
+                    try {
+                        const { sendCallNotification } = await import('../services/pushNotifications.js')
+                        await sendCallNotification(receiverId, callerName, callerId, callType || 'video', callId)
+                        console.log(`📬 [LiveKit] FCM call notification sent to offline user ${receiverId}`)
+                    } catch (fcmErr) {
+                        console.error('❌ [LiveKit] FCM push failed:', fcmErr.message)
+                    }
+                }
+            } catch (err) {
+                console.error('❌ [livekit:callUser]', err.message)
+            }
+        })
+
+        // Caller cancelled before receiver answered  OR  either side ended the call
+        socket.on("livekit:cancelCall", async ({ userToCall, roomName }) => {
+            try {
+                const callerId   = socket.handshake.query.userId
+                const receiverId = String(userToCall)
+
+                // Clear busy state
+                await clearCallStateForPair(callerId, receiverId)
+                User.findByIdAndUpdate(callerId,  { inCall: false }).catch(() => {})
+                User.findByIdAndUpdate(receiverId, { inCall: false }).catch(() => {})
+                io.emit('cancleCall', { userToCall: receiverId, from: callerId })
+
+                const receiverSocketData = await getUserSocket(receiverId)
+                const receiverSocketId   = receiverSocketData?.socketId
+                const callerSocketData   = await getUserSocket(callerId)
+                const callerSocketId     = callerSocketData?.socketId
+
+                if (receiverSocketId) io.to(receiverSocketId).emit('livekit:callCanceled', { from: callerId, roomName })
+                if (callerSocketId)   io.to(callerSocketId).emit('livekit:callCanceled',   { from: callerId, roomName })
+
+                // FCM stop-ringtone for offline receiver
+                try {
+                    const { sendCallEndedNotificationToUser } = await import('../services/fcmNotifications.js')
+                    await sendCallEndedNotificationToUser(receiverId, callerId)
+                } catch (_) {}
+
+                console.log(`📴 [LiveKit] cancelCall — caller:${callerId} receiver:${receiverId}`)
+            } catch (err) {
+                console.error('❌ [livekit:cancelCall]', err.message)
+            }
+        })
+
+        // Receiver explicitly declines (sends back to caller)
+        socket.on("livekit:declineCall", async ({ callerId, roomName }) => {
+            try {
+                const receiverId = socket.handshake.query.userId
+
+                await clearCallStateForPair(callerId, receiverId)
+                User.findByIdAndUpdate(callerId,  { inCall: false }).catch(() => {})
+                User.findByIdAndUpdate(receiverId, { inCall: false }).catch(() => {})
+                io.emit('cancleCall', { userToCall: receiverId, from: callerId })
+
+                const callerSocketData = await getUserSocket(String(callerId))
+                const callerSocketId   = callerSocketData?.socketId
+                if (callerSocketId) io.to(callerSocketId).emit('livekit:callDeclined', { by: receiverId, roomName })
+
+                console.log(`📴 [LiveKit] declineCall — receiver:${receiverId} declined caller:${callerId}`)
+            } catch (err) {
+                console.error('❌ [livekit:declineCall]', err.message)
+            }
+        })
+
+        // Live stream: notify all followers that a user went live
+        socket.on("livekit:goLive", async ({ streamerId, streamerName, streamerProfilePic, roomName }) => {
+            try {
+                // Save live stream to DB so feed can surface it
+                await LiveStream.findOneAndUpdate(
+                    { streamer: streamerId },
+                    { streamer: streamerId, roomName, active: true, startedAt: new Date(), endedAt: null },
+                    { upsert: true, new: true }
+                )
+                // Notify all followers via their personal rooms
+                const streamer = await User.findById(streamerId).select('followers').lean()
+                if (streamer?.followers?.length) {
+                    for (const followerId of streamer.followers) {
+                        const followerSocket = await getUserSocket(String(followerId))
+                        if (followerSocket?.socketId) {
+                            io.to(followerSocket.socketId).emit('livekit:streamStarted', {
+                                streamerId,
+                                streamerName,
+                                streamerProfilePic,
+                                roomName,
+                            })
+                        }
+                    }
+                }
+                console.log(`🔴 [LiveKit] ${streamerName} went live — room:${roomName}`)
+            } catch (err) {
+                console.error('❌ [livekit:goLive]', err.message)
+            }
+        })
+
+        // Live stream ended
+        socket.on("livekit:endLive", async ({ streamerId, roomName }) => {
+            try {
+                // Mark stream as ended in DB
+                await LiveStream.findOneAndUpdate(
+                    { streamer: streamerId, active: true },
+                    { active: false, endedAt: new Date() }
+                )
+                const streamer = await User.findById(streamerId).select('followers').lean()
+                if (streamer?.followers?.length) {
+                    for (const followerId of streamer.followers) {
+                        const followerSocket = await getUserSocket(String(followerId))
+                        if (followerSocket?.socketId) {
+                            io.to(followerSocket.socketId).emit('livekit:streamEnded', { streamerId, roomName })
+                        }
+                    }
+                }
+                console.log(`⬛ [LiveKit] Stream ended — streamer:${streamerId}`)
+            } catch (err) {
+                console.error('❌ [livekit:endLive]', err.message)
+            }
+        })
+        // ── Group call signaling ─────────────────────────────────────────────
+        /**
+         * livekit:startGroupCall — caller starts a group call in a conversation.
+         * Notifies every online member (except caller). Offline members get FCM.
+         * payload: { conversationId, callerName, callerProfilePic, callType, roomName }
+         */
+        socket.on("livekit:startGroupCall", async ({ conversationId, callerName, callerProfilePic, callType, roomName }) => {
+            try {
+                const callerId = socket.handshake.query.userId
+                const conv = await Conversation.findById(conversationId).lean()
+                if (!conv) return
+
+                const otherIds = conv.participants
+                    .map(p => String(p))
+                    .filter(id => id !== callerId)
+
+                for (const memberId of otherIds) {
+                    const memberSocket = userSocketMap[memberId]
+                    if (memberSocket?.socketId) {
+                        io.to(memberSocket.socketId).emit('livekit:incomingGroupCall', {
+                            conversationId,
+                            roomName,
+                            callerId,
+                            callerName,
+                            callerProfilePic,
+                            callType: callType || 'video',
+                        })
+                    } else {
+                        // FCM push for offline members
+                        try {
+                            const memberUser = await User.findById(memberId).select('fcmToken').lean()
+                            if (memberUser?.fcmToken) {
+                                const { sendCallNotification } = await import('../utils/fcmHelper.js')
+                                await sendCallNotification(memberUser.fcmToken, {
+                                    type:        'incoming_group_call',
+                                    callerId,
+                                    callerName,
+                                    callerProfilePic: callerProfilePic || '',
+                                    callType:    callType || 'video',
+                                    conversationId,
+                                    roomName,
+                                })
+                            }
+                        } catch (fcmErr) {
+                            console.warn('⚠️ [livekit:startGroupCall] FCM error:', fcmErr.message)
+                        }
+                    }
+                }
+                console.log(`📞 [LiveKit] Group call started — room:${roomName} members:${otherIds.length}`)
+            } catch (err) {
+                console.error('❌ [livekit:startGroupCall]', err.message)
+            }
+        })
+
+        /**
+         * livekit:endGroupCall — a participant leaves/ends the group call.
+         * Notifies remaining online members.
+         */
+        socket.on("livekit:endGroupCall", async ({ conversationId, roomName }) => {
+            try {
+                const userId = socket.handshake.query.userId
+                const conv   = await Conversation.findById(conversationId).lean()
+                if (!conv) return
+
+                const otherIds = conv.participants
+                    .map(p => String(p))
+                    .filter(id => id !== userId)
+
+                for (const memberId of otherIds) {
+                    const memberSocket = userSocketMap[memberId]
+                    if (memberSocket?.socketId) {
+                        io.to(memberSocket.socketId).emit('livekit:groupCallEnded', {
+                            conversationId,
+                            roomName,
+                            by: userId,
+                        })
+                    }
+                }
+            } catch (err) {
+                console.error('❌ [livekit:endGroupCall]', err.message)
+            }
+        })
+        // ── end LiveKit signaling ─────────────────────────────────────────────
 
         // Mark messages as seen
         socket.on("markmessageasSeen", async ({ conversationId, userId }) => {

@@ -1,15 +1,19 @@
 import express from 'express'
-import { cancelCall, getIceServers } from '../controller/call.js'
+import { cancelCall, getIceServers, getLiveKitToken } from '../controller/call.js'
 import protectRoute from '../middlware/protectRoute.js'
 
 const router = express.Router()
 
-// GET /api/call/ice-servers - ICE config for WebRTC (STUN + TURN from env)
-router.get("/ice-servers", protectRoute, getIceServers)
+// ── LiveKit ──────────────────────────────────────────────────────────────────
+// POST /api/call/token  →  returns { token, roomName, livekitUrl }
+// Used for: direct calls, group calls, live streams, viewers
+router.post('/token', protectRoute, getLiveKitToken)
 
-// POST /api/call/cancel
-// Body: { conversationId: callerId, sender: receiverId }
-// Allows canceling calls even when the app is killed
-router.post("/cancel", cancelCall)
+// ── Legacy / kept for compatibility ─────────────────────────────────────────
+// ICE servers still returned (legacy clients / fallback)
+router.get('/ice-servers', protectRoute, getIceServers)
+
+// HTTP cancel — used when app is killed / no socket (FCM offline flow)
+router.post('/cancel', cancelCall)
 
 export default router

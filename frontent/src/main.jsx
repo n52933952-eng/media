@@ -11,6 +11,8 @@ import{BrowserRouter} from 'react-router-dom'
 import{UserContextProvider} from './context/UserContext'
 import{PostContextProvider} from './context/PostContext'
 import{SocketContextProvider} from './context/SocketContext'
+import { LiveKitProvider } from './context/LiveKitContext'
+import { GroupCallProvider } from './context/GroupCallContext'
 import { GoogleOAuthProvider } from '@react-oauth/google'
 import { GOOGLE_WEB_CLIENT_ID } from './config/googleWebClient'
 
@@ -75,6 +77,8 @@ const appShell = (
   <UserContextProvider>
 	<PostContextProvider>
     <SocketContextProvider>
+    <LiveKitProvider>
+    <GroupCallProvider>
    <BrowserRouter>
   
   <ChakraProvider theme={theme}>
@@ -84,6 +88,8 @@ const appShell = (
   </ChakraProvider>
 
   </BrowserRouter>
+  </GroupCallProvider>
+  </LiveKitProvider>
   </SocketContextProvider>
   </PostContextProvider>
   </UserContextProvider>

@@ -1,206 +1,199 @@
 import User from '../models/user.js'
 import { getIO, getRecipientSockedId } from '../socket/socket.js'
 import * as redisService from '../services/redis.js'
+import { AccessToken } from 'livekit-server-sdk'
 
-// STUN servers (public, no auth)
+// ─── LiveKit helpers ────────────────────────────────────────────────────────
+
+const LIVEKIT_API_KEY    = process.env.LIVEKIT_API_KEY
+const LIVEKIT_API_SECRET = process.env.LIVEKIT_API_SECRET
+const LIVEKIT_URL        = process.env.LIVEKIT_URL
+
+/**
+ * Build a deterministic room name so both participants always land in the
+ * same room without storing anything in the database.
+ *
+ *  type        roomName
+ *  ─────────── ────────────────────────────────────
+ *  direct      call_<smallerId>_<largerId>
+ *  group       group_<conversationId>
+ *  livestream  live_<streamerId>
+ *  viewer      live_<streamerId>   (same room, subscribe-only)
+ */
+const buildRoomName = ({ type, userId, targetId, conversationId }) => {
+    switch (type) {
+        case 'group':
+            return `group_${conversationId}`
+        case 'livestream':
+        case 'viewer':
+            return `live_${targetId || userId}`   // targetId = streamerId for viewers
+        default: {                                  // 'direct'
+            const ids = [String(userId), String(targetId)].sort()
+            return `call_${ids[0]}_${ids[1]}`
+        }
+    }
+}
+
+/**
+ * POST /api/call/token
+ * Generate a LiveKit access token for the requesting user.
+ *
+ * Body:
+ *   type           'direct' | 'group' | 'livestream' | 'viewer'
+ *   targetId       other user's _id  (direct calls & viewers passing streamerId)
+ *   conversationId group conversation _id (group calls)
+ *
+ * Returns:
+ *   { token, roomName, livekitUrl }
+ */
+export const getLiveKitToken = async (req, res) => {
+    try {
+        const userId   = String(req.user._id)
+        const userName = req.user.name || req.user.username || userId
+        const { type = 'direct', targetId, conversationId } = req.body
+
+        if (!LIVEKIT_API_KEY || !LIVEKIT_API_SECRET) {
+            return res.status(500).json({ error: 'LiveKit not configured on server' })
+        }
+
+        const roomName = buildRoomName({ type, userId, targetId, conversationId })
+
+        const canPublish   = type !== 'viewer'   // viewers only watch
+        const canSubscribe = true                 // everyone can receive streams
+
+        const at = new AccessToken(LIVEKIT_API_KEY, LIVEKIT_API_SECRET, {
+            identity: userId,
+            name:     userName,
+            ttl:      '4h',
+        })
+
+        at.addGrant({
+            roomJoin:       true,
+            room:           roomName,
+            canPublish,
+            canSubscribe,
+            canPublishData: true,
+        })
+
+        const token = await at.toJwt()
+
+        console.log(`✅ [LiveKit] Token issued — user:${userId} room:${roomName} type:${type}`)
+
+        return res.status(200).json({ token, roomName, livekitUrl: LIVEKIT_URL })
+    } catch (error) {
+        console.error('❌ [getLiveKitToken]', error.message)
+        return res.status(500).json({ error: 'Failed to generate LiveKit token' })
+    }
+}
+
+// ─── ICE servers (kept for any legacy fallback — safe to leave) ─────────────
+
 const STUN_SERVERS = [
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
     { urls: 'stun:stun2.l.google.com:19302' },
-];
+]
 
-/**
- * GET /api/call/ice-servers
- * Returns ICE servers (STUN + TURN) for WebRTC. TURN credentials from env for security.
- * Set TURN_USERNAME and TURN_CREDENTIAL in .env to enable TURN relay (Metered.ca, etc.)
- */
 export const getIceServers = async (req, res) => {
     try {
-        const servers = [...STUN_SERVERS];
-        const username = process.env.TURN_USERNAME;
-        const credential = process.env.TURN_CREDENTIAL;
-
+        const servers  = [...STUN_SERVERS]
+        const username = process.env.TURN_USERNAME
+        const credential = process.env.TURN_CREDENTIAL
         if (username && credential) {
             servers.push(
-                { urls: 'turn:global.relay.metered.ca:80', username, credential },
+                { urls: 'turn:global.relay.metered.ca:80',               username, credential },
                 { urls: 'turn:global.relay.metered.ca:80?transport=tcp', username, credential },
-                { urls: 'turn:global.relay.metered.ca:443', username, credential },
-                { urls: 'turns:global.relay.metered.ca:443?transport=tcp', username, credential }
-            );
+                { urls: 'turn:global.relay.metered.ca:443',              username, credential },
+                { urls: 'turns:global.relay.metered.ca:443?transport=tcp', username, credential },
+            )
         }
-
-        return res.status(200).json({ iceServers: servers });
+        return res.status(200).json({ iceServers: servers })
     } catch (error) {
-        console.error('❌ [getIceServers] Error:', error);
-        return res.status(500).json({ error: 'Failed to get ICE servers' });
+        console.error('❌ [getIceServers]', error)
+        return res.status(500).json({ error: 'Failed to get ICE servers' })
     }
-};
+}
 
-// Helper functions (same as in socket.js)
+// ─── Redis helpers (used by cancelCall below) ───────────────────────────────
+
 const getActiveCall = async (callId) => {
-    if (!redisService.isRedisAvailable()) {
-        return null
-    }
-    try {
-        // redisGet already parses JSON, so we don't need to parse again
-        const callData = await redisService.redisGet(`activeCall:${callId}`)
-        return callData || null
-    } catch (error) {
-        console.error(`❌ [call] Error getting active call ${callId}:`, error.message)
-        return null
-    }
+    if (!redisService.isRedisAvailable()) return null
+    try { return await redisService.redisGet(`activeCall:${callId}`) || null }
+    catch (e) { console.error(`❌ [call] getActiveCall ${callId}:`, e.message); return null }
 }
 
 const deleteActiveCall = async (callId) => {
-    if (!redisService.isRedisAvailable()) {
-        return
-    }
-    try {
-        await redisService.redisDel(`activeCall:${callId}`)
-    } catch (error) {
-        console.error(`❌ [call] Error deleting active call ${callId}:`, error.message)
-    }
+    if (!redisService.isRedisAvailable()) return
+    try { await redisService.redisDel(`activeCall:${callId}`) }
+    catch (e) { console.error(`❌ [call] deleteActiveCall ${callId}:`, e.message) }
 }
 
 const deletePendingCall = async (receiverId) => {
-    if (!redisService.isRedisAvailable()) {
-        return
-    }
-    try {
-        await redisService.redisDel(`pendingCall:${receiverId}`)
-    } catch (error) {
-        console.error(`❌ [call] Error deleting pending call for ${receiverId}:`, error.message)
-    }
+    if (!redisService.isRedisAvailable()) return
+    try { await redisService.redisDel(`pendingCall:${receiverId}`) }
+    catch (e) { console.error(`❌ [call] deletePendingCall ${receiverId}:`, e.message) }
 }
 
 const clearInCall = async (userId) => {
     if (!redisService.isRedisAvailable() || !userId) return
-    try {
-        await redisService.redisDel(`inCall:${String(userId).trim()}`)
-    } catch (error) {
-        console.error(`❌ [call] Error clearing inCall for ${userId}:`, error.message)
-    }
+    try { await redisService.redisDel(`inCall:${String(userId).trim()}`) }
+    catch (e) { console.error(`❌ [call] clearInCall ${userId}:`, e.message) }
 }
 
+// ─── HTTP cancel (kept — FCM offline cancel still uses this) ────────────────
+
 /**
- * HTTP endpoint to cancel a call
  * POST /api/call/cancel
- * Body: { conversationId: callerId, sender: receiverId }
- * 
- * This allows canceling calls even when the app is killed
+ * Allows canceling calls even when the app is killed (no socket).
+ * FCM push + socket notify both sides.
  */
 export const cancelCall = async (req, res) => {
     try {
         const { conversationId, sender } = req.body
-
         if (!conversationId || !sender) {
-            return res.status(400).json({ 
-                success: false, 
-                error: 'Missing conversationId or sender' 
-            })
+            return res.status(400).json({ success: false, error: 'Missing conversationId or sender' })
         }
 
-        console.log(`📴 [HTTP cancelCall] CALLBACK_FLOW: Canceling call`, {
-            conversationId,
-            sender,
-            note: 'conversationId=CALLER(A), sender=RECEIVER(B) who declined',
-            whenBCallsABack: 'After this, B can call A - A must NOT be busy',
-        })
+        console.log(`📴 [HTTP cancelCall] Canceling call`, { conversationId, sender })
 
-        // Live Socket.IO ids only (Redis may list a socketId while presence is "offline" or row is stale)
-        // conversationId = caller (who made the call)
-        // sender = receiver (who declined the call)
-        const callerSocketId = await getRecipientSockedId(conversationId)
+        const callerSocketId   = await getRecipientSockedId(conversationId)
         const receiverSocketId = await getRecipientSockedId(sender)
 
-        console.log(`📴 [HTTP cancelCall] Socket IDs - Caller: ${callerSocketId || 'NOT CONNECTED'}, Receiver: ${receiverSocketId || 'NOT CONNECTED'}`)
-
-        // Remove from active calls - try both possible call IDs
+        // Clean Redis call state
         const callId1 = `${sender}-${conversationId}`
         const callId2 = `${conversationId}-${sender}`
-        const call1 = await getActiveCall(callId1)
-        const call2 = await getActiveCall(callId2)
+        const [call1, call2] = await Promise.all([getActiveCall(callId1), getActiveCall(callId2)])
         if (call1) await deleteActiveCall(callId1)
         if (call2) await deleteActiveCall(callId2)
-        
-        // Delete pending call: keyed by receiver (sender = B who declined had the pending call when A called)
-        await deletePendingCall(sender)
-        await deletePendingCall(conversationId)
+        await Promise.all([deletePendingCall(sender), deletePendingCall(conversationId)])
+        await Promise.all([clearInCall(sender), clearInCall(conversationId)])
 
-        // CRITICAL: Clear Redis inCall so isUserBusy returns false – allows recall after cancel
-        console.log(`📴 [HTTP cancelCall] CALLBACK_CLEANUP: Clearing Redis inCall for both users (sender + conversationId)`)
-        await Promise.all([
-            clearInCall(sender).catch((e) => console.error('❌ [HTTP cancelCall] clearInCall(sender) failed:', e)),
-            clearInCall(conversationId).catch((e) => console.error('❌ [HTTP cancelCall] clearInCall(conversationId) failed:', e))
-        ])
-        console.log(`✅ [HTTP cancelCall] CALLBACK_CLEANUP: Redis inCall cleared - ready for B to call A back`)
-
-        // Update database - mark users as NOT in call (non-blocking, fire-and-forget)
-        // OPTIMIZATION: Use Promise.all for parallel updates (faster for 1M+ users)
-        // Don't await - fire and forget to ensure immediate cancellation response
+        // Update MongoDB (fire-and-forget)
         Promise.all([
-            User.findByIdAndUpdate(sender, { inCall: false }).catch(err => 
-                console.log('⚠️ [HTTP cancelCall] Error updating sender inCall status:', err)
-            ),
-            User.findByIdAndUpdate(conversationId, { inCall: false }).catch(err => 
-                console.log('⚠️ [HTTP cancelCall] Error updating receiver inCall status:', err)
-            )
-        ]).then(() => {
-            console.log('✅ [HTTP cancelCall] Database inCall status updated for both users')
-        }).catch(err => {
-            console.error('❌ [HTTP cancelCall] Error updating database inCall status:', err)
-        })
+            User.findByIdAndUpdate(sender,         { inCall: false }).catch(() => {}),
+            User.findByIdAndUpdate(conversationId, { inCall: false }).catch(() => {}),
+        ])
 
-        // Send FCM notification to stop ringtone
+        // FCM stop-ringtone push (keeps offline ringing working)
         try {
             const { sendCallEndedNotificationToUser } = await import('../services/fcmNotifications.js')
-            const fcmResult = await sendCallEndedNotificationToUser(conversationId, sender)
-            if (fcmResult.success) {
-                console.log('✅ [HTTP cancelCall] Sent call ended FCM notification to receiver')
-            } else {
-                console.log('⚠️ [HTTP cancelCall] FCM call ended notification failed:', fcmResult.error)
-            }
-        } catch (fcmError) {
-            console.error('❌ [HTTP cancelCall] Error sending FCM call ended notification:', fcmError)
+            await sendCallEndedNotificationToUser(conversationId, sender)
+            console.log('✅ [HTTP cancelCall] FCM call-ended sent')
+        } catch (fcmErr) {
+            console.error('❌ [HTTP cancelCall] FCM error:', fcmErr.message)
         }
 
-        // Emit socket events to notify both users
-        // CRITICAL: Emit to CALLER (conversationId) so they know the call was declined
-        // Also emit to RECEIVER (sender) in case they're online (though they already declined)
+        // Socket notify both sides
         const io = getIO()
         if (io) {
-            // Emit to caller (conversationId) - this is the most important one
-            if (callerSocketId) {
-                console.log(`📴 [HTTP cancelCall] Emitting CallCanceled to CALLER (${conversationId}) at socket ${callerSocketId}`)
-                io.to(callerSocketId).emit("CallCanceled")
-            } else {
-                console.warn(`⚠️ [HTTP cancelCall] Caller (${conversationId}) is NOT CONNECTED - CallCanceled event not sent`)
-            }
-            
-            // Also emit to receiver (sender) - they already declined but good to confirm
-            if (receiverSocketId) {
-                console.log(`📴 [HTTP cancelCall] Emitting CallCanceled to RECEIVER (${sender}) at socket ${receiverSocketId}`)
-                io.to(receiverSocketId).emit("CallCanceled")
-            }
-            
-            // General broadcast (for other listeners if needed)
-            io.emit("cancleCall", { userToCall: conversationId, from: sender })
-        } else {
-            console.error('❌ [HTTP cancelCall] Socket.IO instance not available!')
+            if (callerSocketId)   io.to(callerSocketId).emit('CallCanceled')
+            if (receiverSocketId) io.to(receiverSocketId).emit('CallCanceled')
+            io.emit('cancleCall', { userToCall: conversationId, from: sender })
         }
 
-        console.log(`✅ [HTTP cancelCall] Call canceled successfully`)
-        return res.status(200).json({ 
-            success: true, 
-            message: 'Call canceled successfully' 
-        })
-
+        return res.status(200).json({ success: true })
     } catch (error) {
-        console.error('❌ [HTTP cancelCall] Error:', error)
-        return res.status(500).json({ 
-            success: false, 
-            error: 'Internal server error',
-            message: error.message 
-        })
+        console.error('❌ [HTTP cancelCall]', error)
+        return res.status(500).json({ success: false, error: error.message })
     }
 }

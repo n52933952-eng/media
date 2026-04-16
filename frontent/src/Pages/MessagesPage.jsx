@@ -43,6 +43,8 @@ import { MdGroup } from 'react-icons/md'
 import { UserContext } from '../context/UserContext'
 import { SocketContext } from '../context/SocketContext'
 import useShowToast from '../hooks/useShowToast'
+import { LiveKitContext } from '../context/LiveKitContext'
+import { GroupCallContext } from '../context/GroupCallContext'
 import { formatDistanceToNow } from 'date-fns'
 import { FaPhone, FaPhoneSlash, FaVideo } from 'react-icons/fa'
 import { BsCheck2All, BsReply, BsFillImageFill, BsTrash } from 'react-icons/bs'
@@ -65,7 +67,11 @@ const isUserInOnlineList = (onlineList, userId) =>
 const MessagesPage = () => {
   const { user } = useContext(UserContext)
   const socketContext = useContext(SocketContext)
-  const { socket, onlineUser, callUser, callAccepted, callEnded, isCalling, callType, call, answerCall, leaveCall, myVideo, userVideo, stream, remoteStream, busyUsers, setSelectedConversationId } = socketContext || {}
+  const { socket, onlineUser, setSelectedConversationId } = socketContext || {}
+  // LiveKit replaces old WebRTC call system
+  const { startCall, busyUsers, isCalling, callAccepted } = useContext(LiveKitContext) || {}
+  // Group calling
+  const { startGroupCall, groupCallActive } = useContext(GroupCallContext) || {}
   const showToast = useShowToast()
 
   // State
@@ -226,81 +232,9 @@ const MessagesPage = () => {
     }
   }, [])
 
-  // Force video elements to update when mounting MessagesPage with active call
+  // [LiveKit] Old WebRTC video attachment removed — LiveKit handles tracks automatically
   useEffect(() => {
-    if (callAccepted && !callEnded) {
-      // Force a small delay then check video elements
-      const timer = setTimeout(() => {
-        if (myVideo?.current && stream && !myVideo.current.srcObject) {
-          myVideo.current.srcObject = stream
-          myVideo.current.muted = true
-        }
-        if (userVideo?.current) {
-          if (userVideo.current.srcObject) {
-            userVideo.current.volume = 1.0
-            userVideo.current.muted = false
-            userVideo.current.play().catch(e => console.log('Play error:', e))
-          } else if (remoteStream) {
-            userVideo.current.srcObject = remoteStream
-            userVideo.current.volume = 1.0
-            userVideo.current.muted = false
-            userVideo.current.play().catch(e => console.log('Remote play error:', e))
-          }
-        }
-      }, 200)
-      return () => clearTimeout(timer)
-    }
-  }, []) // Only run on mount
-
-  // Attach video streams if navigating to chat during active call
-  useEffect(() => {
-    // Small delay to ensure video elements are rendered
     const timer = setTimeout(() => {
-      if (callAccepted && !callEnded && selectedConversation) {
-        // Ensure my video (local) has the stream attached
-        if (myVideo?.current && stream) {
-          myVideo.current.srcObject = stream
-          myVideo.current.muted = true // Always mute own video to prevent echo
-          myVideo.current.play().catch(err => {
-          })
-        }
-        
-        // Ensure user video (remote) has stream and plays
-        if (userVideo?.current) {
-          // Check if userVideo already has a stream (from peer connection)
-          if (userVideo.current.srcObject) {
-            userVideo.current.volume = 1.0
-            userVideo.current.muted = false
-            userVideo.current.play().catch(err => {
-            })
-          } else if (remoteStream) {
-            // Attach remoteStream from context if userVideo doesn't have it yet
-            userVideo.current.srcObject = remoteStream
-            userVideo.current.volume = 1.0
-            userVideo.current.muted = false
-            userVideo.current.play().catch(err => {
-            })
-          } else {
-            // Wait a bit longer for peer connection to attach stream
-            setTimeout(() => {
-              if (userVideo?.current?.srcObject) {
-                userVideo.current.volume = 1.0
-                userVideo.current.muted = false
-                userVideo.current.play().catch(err => {
-                })
-              } else if (remoteStream && userVideo?.current) {
-                userVideo.current.srcObject = remoteStream
-                userVideo.current.volume = 1.0
-                userVideo.current.muted = false
-                userVideo.current.play().catch(err => {
-                })
-              } else {
-              }
-            }, 500)
-          }
-        }
-      }
-    }, 100) // Small delay to ensure DOM is ready
     
     return () => clearTimeout(timer)
   }, [callAccepted, callEnded, stream, remoteStream, myVideo, userVideo, selectedConversation])
@@ -2563,115 +2497,6 @@ const MessagesPage = () => {
         w={{ base: "100%", md: "auto" }}
         minW={0}
       >
-        {/* ── Active call UI ── shown regardless of which conversation is open ── */}
-        {callAccepted && !callEnded && stream && (() => {
-          const callPartnerId = call ? (idStr(call.from) === idStr(user?._id) ? idStr(call.userToCall) : idStr(call.from)) : null
-          const callPartnerUser = callPartnerId
-            ? (followedUsers?.find(u => idStr(u._id) === callPartnerId) ||
-               conversations?.flatMap(c => c.participants || []).find(p => idStr(p?._id) === callPartnerId))
-            : null
-          const callPartnerName = call?.name || callPartnerUser?.name || callPartnerUser?.username || 'User'
-          const callPartnerPic  = callPartnerUser?.profilePic || undefined
-          return (
-            <Box
-              borderBottom="1px solid"
-              borderColor={borderColor}
-              p={{ base: 2, md: 4 }}
-              bg={useColorModeValue('gray.50', 'gray.900')}
-            >
-              <Flex direction="column" gap={{ base: 2, md: 3 }}>
-                <Flex justifyContent="space-between" alignItems="center" flexWrap="wrap" gap={2}>
-                  <Text fontWeight="semibold" fontSize={{ base: "xs", md: "md" }} color={useColorModeValue('black', 'white')}>
-                    {callType === 'audio' ? 'Voice' : 'Video'} Call Active
-                  </Text>
-                  <Button
-                    colorScheme="red"
-                    size={{ base: "xs", md: "sm" }}
-                    leftIcon={<FaPhoneSlash />}
-                    onClick={() => leaveCall?.()}
-                    borderRadius="full"
-                  >
-                    <Text display={{ base: 'none', sm: 'block' }}>End</Text>
-                  </Button>
-                </Flex>
-                {callType === 'video' ? (
-                  <Flex 
-                    gap={{ base: 2, md: 3 }} 
-                    flexDirection={{ base: "column", md: "row" }}
-                    alignItems={{ base: "stretch", md: "flex-start" }}
-                  >
-                    <Box
-                      flex={{ base: 0, md: 1 }}
-                      w={{ base: "100%", md: "auto" }}
-                      minW={{ base: "100%", md: "300px" }}
-                      h={{ base: "250px", sm: "300px", md: "250px" }}
-                      borderRadius="md"
-                      overflow="hidden"
-                      bg="black"
-                      position="relative"
-                      order={{ base: 1, md: 1 }}
-                    >
-                      <video ref={userVideo} autoPlay playsInline style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                    </Box>
-                    <Box
-                      w={{ base: "120px", md: "150px" }}
-                      h={{ base: "90px", md: "112px" }}
-                      borderRadius="md"
-                      overflow="hidden"
-                      bg="gray.800"
-                      border="2px solid"
-                      borderColor={useColorModeValue('gray.200', 'white')}
-                      flexShrink={0}
-                      alignSelf={{ base: "flex-end", md: "flex-start" }}
-                      order={{ base: 2, md: 2 }}
-                    >
-                      <video ref={myVideo} autoPlay muted playsInline style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                    </Box>
-                  </Flex>
-                ) : (
-                  <Flex direction="column" alignItems="center" gap={4} py={4}>
-                    {/* Hidden audio elements off-screen */}
-                    <Box as="video" ref={userVideo} autoPlay playsInline controls={false}
-                      style={{ position: 'absolute', left: '-9999px', width: '1px', height: '1px', opacity: 0, pointerEvents: 'none' }} />
-                    <Box as="video" ref={myVideo} autoPlay muted playsInline controls={false}
-                      style={{ position: 'absolute', left: '-9999px', width: '1px', height: '1px', opacity: 0, pointerEvents: 'none' }} />
-                    <Avatar src={callPartnerPic} name={callPartnerName} size="xl" />
-                    <Text fontSize="lg" fontWeight="semibold" color={useColorModeValue('black', 'white')}>{callPartnerName}</Text>
-                    <Text fontSize="sm" color={useColorModeValue('gray.600', 'gray.400')}>Voice Call</Text>
-                  </Flex>
-                )}
-              </Flex>
-            </Box>
-          )
-        })()}
-
-        {/* ── Ringing / calling-out UI ── also independent of selected conversation ── */}
-        {isCalling && call?.isCalling && !callAccepted && (
-          <Box
-            borderBottom="1px solid"
-            borderColor={borderColor}
-            p={{ base: 3, md: 4 }}
-            bg={useColorModeValue('blue.600', 'blue.900')}
-          >
-            <Flex direction="column" gap={{ base: 2, md: 3 }} alignItems="center">
-              <Text fontWeight="bold" fontSize={{ base: "md", md: "lg" }} textAlign="center" color="white">
-                Ringing...
-              </Text>
-              <Text fontSize={{ base: "sm", md: "md" }} color="whiteAlpha.800" textAlign="center">
-                {call?.callType === 'audio' ? 'Voice ' : 'Video '}Calling {call?.recipientName || 'User'}...
-              </Text>
-              <Button
-                colorScheme="red"
-                leftIcon={<FaPhoneSlash />}
-                onClick={() => leaveCall?.()}
-                size={{ base: "sm", md: "md" }}
-              >
-                Cancel
-              </Button>
-            </Flex>
-          </Box>
-        )}
-
         {selectedConversation ? (
           <>
             {/* Chat Header - Responsive with back button */}
@@ -2730,7 +2555,7 @@ const MessagesPage = () => {
                     <Text fontSize={{ base: "2xs", md: "xs" }} color="green.500">Online</Text>
                   </>
                 )}
-                {!selectedConversation.isGroup && busyUsers?.has(selectedConversation.participants[0]?._id) && (
+                {!selectedConversation.isGroup && (busyUsers?.has(selectedConversation.participants[0]?._id) || selectedConversation.participants[0]?.inCall) && (
                   <>
                     <Text fontSize={{ base: "2xs", md: "xs" }} color="gray.500">•</Text>
                     <Badge colorScheme="red" fontSize={{ base: "2xs", md: "xs" }} px={2} py={0.5} borderRadius="full">In a call</Badge>
@@ -2750,6 +2575,9 @@ const MessagesPage = () => {
               />
               )}
             </Flex>
+
+            {/* Group call UI handled by GroupCallUI overlay in App.jsx */}
+
 
             {/* Messages - Mobile optimized */}
             <Box
@@ -3581,8 +3409,55 @@ const MessagesPage = () => {
                 ref={imageInputRef}
                 onChange={handleFileSelect}
               />
-              {/* Call button with menu - Optimized for mobile */}
-              <Menu>
+              {/* Group call button — shown only for group conversations */}
+              {selectedConversation?.isGroup && (
+                <Menu>
+                  <MenuButton
+                    as={IconButton}
+                    aria-label="Group call"
+                    icon={<FaPhone size={14} />}
+                    bg="green.500"
+                    color="white"
+                    _hover={{ bg: 'green.600' }}
+                    borderRadius="full"
+                    size={{ base: "sm", md: "md" }}
+                    isDisabled={groupCallActive}
+                    flexShrink={0}
+                    title="Start group call"
+                  />
+                  <MenuList
+                    bg={bgColor}
+                    borderColor={borderColor}
+                    borderRadius="lg"
+                    boxShadow="xl"
+                    py={1}
+                    minW="160px"
+                  >
+                    <MenuItem
+                      icon={<FaVideo />}
+                      onClick={() => startGroupCall?.(selectedConversation._id, 'video')}
+                      bg={bgColor}
+                      color={useColorModeValue('black', 'white')}
+                      _hover={{ bg: useColorModeValue('green.50', 'green.900') }}
+                      borderRadius="md" py={2} px={3} closeOnSelect
+                    >
+                      <Text fontWeight="medium">Group Video Call</Text>
+                    </MenuItem>
+                    <MenuItem
+                      icon={<FaPhone />}
+                      onClick={() => startGroupCall?.(selectedConversation._id, 'audio')}
+                      bg={bgColor}
+                      color={useColorModeValue('black', 'white')}
+                      _hover={{ bg: useColorModeValue('green.50', 'green.900') }}
+                      borderRadius="md" py={2} px={3} closeOnSelect
+                    >
+                      <Text fontWeight="medium">Group Voice Call</Text>
+                    </MenuItem>
+                  </MenuList>
+                </Menu>
+              )}
+              {/* 1-to-1 call button with menu - Optimized for mobile */}
+              {!selectedConversation?.isGroup && <Menu>
                 <MenuButton
                   as={IconButton}
                   aria-label="Start call"
@@ -3593,15 +3468,17 @@ const MessagesPage = () => {
                   borderRadius="full"
                   size={{ base: "sm", md: "md" }}
                   isDisabled={
-                    !selectedConversation?.participants[0]?._id || 
-                    callAccepted || 
-                    !callUser ||
-                    busyUsers?.has(selectedConversation?.participants[0]?._id) ||
-                    busyUsers?.has(user?._id)
+                    !selectedConversation?.participants[0]?._id ||
+                    isCalling ||
+                    callAccepted ||
+                    busyUsers?.has(idStr(selectedConversation?.participants[0]?._id)) ||
+                    selectedConversation?.participants[0]?.inCall ||
+                    busyUsers?.has(idStr(user?._id)) ||
+                    user?.inCall
                   }
                   flexShrink={0}
                   title={
-                    busyUsers?.has(selectedConversation?.participants[0]?._id) || busyUsers?.has(user?._id)
+                    busyUsers?.has(idStr(selectedConversation?.participants[0]?._id)) || selectedConversation?.participants[0]?.inCall
                       ? "User is currently in a call"
                       : "Start call"
                   }
@@ -3622,17 +3499,12 @@ const MessagesPage = () => {
                       const recipient = selectedConversation?.participants?.find(
                         (p) => idStr(p?._id) !== currentUserId
                       ) || selectedConversation?.participants?.[0]
-                      const recipientId = recipient?._id
-                      if (recipientId && callUser) {
-                        // Check if user is busy before calling - check both socket AND database
-                        if (busyUsers?.has(idStr(recipientId)) || recipient?.inCall || busyUsers?.has(idStr(user?._id)) || user?.inCall) {
-                          showToast('Error', 'User is currently in a call', 'error')
-                          return
-                        }
-                        // Get recipient name from conversation
-                        const recipientName = recipient?.name || recipient?.username
-                        callUser(recipientId, recipientName, 'video')
+                      if (!recipient) return
+                      if (busyUsers?.has(idStr(recipient._id)) || recipient?.inCall) {
+                        showToast('Error', 'User is currently in a call', 'error')
+                        return
                       }
+                      startCall(recipient, 'video')
                     }}
                     bg={bgColor}
                     color={useColorModeValue('black', 'white')}
@@ -3662,17 +3534,12 @@ const MessagesPage = () => {
                       const recipient = selectedConversation?.participants?.find(
                         (p) => idStr(p?._id) !== currentUserId
                       ) || selectedConversation?.participants?.[0]
-                      const recipientId = recipient?._id
-                      if (recipientId && callUser) {
-                        // Check if user is busy before calling - check both socket AND database
-                        if (busyUsers?.has(idStr(recipientId)) || recipient?.inCall || busyUsers?.has(idStr(user?._id)) || user?.inCall) {
-                          showToast('Error', 'User is currently in a call', 'error')
-                          return
-                        }
-                        // Get recipient name from conversation
-                        const recipientName = recipient?.name || recipient?.username
-                        callUser(recipientId, recipientName, 'audio')
+                      if (!recipient) return
+                      if (busyUsers?.has(idStr(recipient._id)) || recipient?.inCall) {
+                        showToast('Error', 'User is currently in a call', 'error')
+                        return
                       }
+                      startCall(recipient, 'audio')
                     }}
                     bg={bgColor}
                     color={useColorModeValue('black', 'white')}
@@ -3696,7 +3563,7 @@ const MessagesPage = () => {
                     <Text fontWeight="medium">Voice Call</Text>
                   </MenuItem>
                 </MenuList>
-              </Menu>
+              </Menu>}
               <Input
                 ref={messageInputRef}
                 type="text"

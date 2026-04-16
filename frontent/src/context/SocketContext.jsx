@@ -1328,6 +1328,36 @@ export const SocketContextProvider = ({ children }) => {
     localStorage.removeItem('myPlayerId');
   };
 
+  // ── LiveKit live streams tracking ────────────────────────────────────────
+  const [liveStreams, setLiveStreams] = useState([]); // [{ streamerId, streamerName, streamerProfilePic, roomName }]
+
+  useEffect(() => {
+    if (!socket) return;
+    const onStreamStarted = (data) => {
+      setLiveStreams(prev => {
+        if (prev.some(s => s.streamerId === data.streamerId)) return prev;
+        return [...prev, data];
+      });
+      toast({
+        title: `${data.streamerName} is live!`,
+        description: 'Tap to watch',
+        status: 'info',
+        duration: 6000,
+        isClosable: true,
+        position: 'top',
+      });
+    };
+    const onStreamEnded = ({ streamerId }) => {
+      setLiveStreams(prev => prev.filter(s => s.streamerId !== streamerId));
+    };
+    socket.on('livekit:streamStarted', onStreamStarted);
+    socket.on('livekit:streamEnded',   onStreamEnded);
+    return () => {
+      socket.off('livekit:streamStarted', onStreamStarted);
+      socket.off('livekit:streamEnded',   onStreamEnded);
+    };
+  }, [socket, toast]);
+
   // Function to update which conversation is currently open (for notification sound control)
   const setSelectedConversationId = useCallback((conversationId) => {
     const normalizedConversationId = conversationId || null;
@@ -1371,6 +1401,7 @@ export const SocketContextProvider = ({ children }) => {
         acceptRaceChallenge, // Function to accept race challenge
         declineRaceChallenge, // Function to decline race challenge
         endRaceGameOnNavigate, // Function to end race when navigating away
+        liveStreams, // Array of currently active live streams
       }}
     >
       {children}
