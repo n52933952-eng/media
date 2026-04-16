@@ -27,10 +27,12 @@ const START_LINE_LANE_OFFSET = 1.85
 const RACE_TOP_OFFSET_PX = 88
 
 /** If socket drops, wait for reconnect this long before leaving the race (ms) */
-const RACE_DISCONNECT_GRACE_MS = 5000
+const RACE_DISCONNECT_GRACE_MS = 12000
 
 /** If the second player never joins the room, auto-exit (ms) */
 const RACE_WAIT_OPPONENT_MS = 120000
+/** Hard disconnect timeout before force exit (ms) */
+const RACE_HARD_DISCONNECT_EXIT_MS = 45000
 
 /** Match SocketContext / backend: ids may be ObjectId or string */
 function userIdToStr(id) {
@@ -49,6 +51,9 @@ export default function RacingGamePage() {
   const {
     startCall,
     leaveCall,
+    incomingCall,
+    answerCall,
+    declineCall,
     callAccepted,
     callEnded,
     callPartner,
@@ -73,6 +78,7 @@ export default function RacingGamePage() {
   const [muted,         setMuted]         = useState(false)
   /** Drives React re-renders when the race clock starts (avoid relying on raceStateRef in JSX). */
   const [raceLive,      setRaceLive]      = useState(false)
+  const [reconnecting,  setReconnecting]  = useState(false)
 
   // ── Three.js / physics refs ─────────────────────────────────────────────────
   const containerRef   = useRef(null)
@@ -122,9 +128,9 @@ export default function RacingGamePage() {
   // ─── Fetch opponent profile ────────────────────────────────────────────────
   useEffect(() => {
     if (!opponentId) return
-    fetch(`${API_BASE_URL}/api/user/profile/${opponentId}`, { credentials:'include' })
-      .then(r => r.json())
-      .then(d => setOpponent(d))
+    fetch(`${API_BASE_URL}/api/user/getUserPro/${opponentId}`, { credentials:'include' })
+      .then(r => (r.ok ? r.json() : null))
+      .then(d => { if (d) setOpponent(d) })
       .catch(() => {})
   }, [opponentId])
 
@@ -176,7 +182,7 @@ export default function RacingGamePage() {
 
   // ─── Load Ammo.js dynamically, then boot the game ─────────────────────────
   useEffect(() => {
-    if (!user) return
+    if (!user?._id) return
     let cancelled = false
 
     const boot = (AmmoLib) => {
@@ -224,7 +230,7 @@ export default function RacingGamePage() {
       cleanup()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user])
+  }, [user?._id])
 
   // ─── Socket.IO multiplayer ──────────────────────────────────────────────────
   useEffect(() => {
@@ -293,19 +299,25 @@ export default function RacingGamePage() {
       socket.off('raceResult',        onRaceResult)
       socket.off('raceOpponentLeft',  onOpponentLeft)
     }
-  }, [socket, user, exitRaceAndGoHome])
+  }, [socket, user?._id, exitRaceAndGoHome])
 
   // ─── Connection lost: leave race after grace (reconnect clears the timer) ───
   useEffect(() => {
     if (!socket) return
     let disconnectTimer = null
     const onDisconnect = () => {
+      setReconnecting(true)
       if (disconnectTimer) clearTimeout(disconnectTimer)
       disconnectTimer = setTimeout(() => {
-        exitRaceAndGoHomeRef.current?.()
+        if (!socket.connected) {
+          disconnectTimer = setTimeout(() => {
+            if (!socket.connected) exitRaceAndGoHomeRef.current?.()
+          }, RACE_HARD_DISCONNECT_EXIT_MS)
+        }
       }, RACE_DISCONNECT_GRACE_MS)
     }
     const onConnect = () => {
+      setReconnecting(false)
       if (disconnectTimer) {
         clearTimeout(disconnectTimer)
         disconnectTimer = null
@@ -320,6 +332,7 @@ export default function RacingGamePage() {
     socket.on('disconnect', onDisconnect)
     socket.on('connect', onConnect)
     return () => {
+      setReconnecting(false)
       if (disconnectTimer) clearTimeout(disconnectTimer)
       socket.off('disconnect', onDisconnect)
       socket.off('connect', onConnect)
@@ -426,7 +439,7 @@ export default function RacingGamePage() {
       } catch (_) { /* ignore — socket may be closing */ }
     }, 80)
     return () => clearInterval(id)
-  }, [socket, user])
+  }, [socket, user?._id])
 
   // ─── Navigation guard ───────────────────────────────────────────────────────
   useEffect(() => {
@@ -955,9 +968,12 @@ export default function RacingGamePage() {
         cancelAnimationFrame(afRef.current)
         afRef.current = null
       }
-      exitRaceAndGoHomeRef.current?.()
+      // Do not hard-exit on a single frame error; try recovering next tick.
+      setTimeout(() => {
+        if (!raceExitHandledRef.current) animate()
+      }, 100)
     }
-  }, [socket, user])
+  }, [socket, user?._id])
 
   // ─── Cleanup ────────────────────────────────────────────────────────────────
   const cleanup = useCallback(() => {
@@ -994,12 +1010,7 @@ export default function RacingGamePage() {
 
     // End any active voice call when leaving the race
     leaveCall?.()
-
-    // Notify server + clear raceRoomId so Redis "active race" and busy UI reset (tab close / hot reload)
-    if (endRaceGameOnNavigate && localStorage.getItem('raceRoomId')) {
-      endRaceGameOnNavigate()
-    }
-  }, [leaveCall, endRaceGameOnNavigate])
+  }, [leaveCall])
 
   // ─── Voice call ────────────────────────────────────────────────────────────
   const handleCallOpp = () => {
@@ -1020,6 +1031,11 @@ export default function RacingGamePage() {
       return nextMuted
     })
   }
+
+  const isIncomingOppCall =
+    !!incomingCall &&
+    userIdToStr(incomingCall?.from) === userIdToStr(opponentId) &&
+    incomingCall?.callType === 'audio'
 
   // ─── Navigate back / leave race ────────────────────────────────────────────
   const handleLeave = () => {
@@ -1196,6 +1212,24 @@ export default function RacingGamePage() {
         </div>
       )}
 
+      {!loading && reconnecting && (
+        <div style={{
+          position:'fixed',
+          top:`${RACE_TOP_OFFSET_PX + 84}px`,
+          left:'20px',
+          zIndex:1001,
+          background:'rgba(0,0,0,0.62)',
+          border:'1px solid rgba(255,255,255,0.2)',
+          borderRadius:'10px',
+          padding:'8px 12px',
+          color:'#fde68a',
+          fontFamily:'Poppins,sans-serif',
+          fontSize:'12px',
+        }}>
+          Reconnecting...
+        </div>
+      )}
+
       {/* HUD — top center: timer */}
       {!loading && raceLive && (
         <div style={{
@@ -1267,6 +1301,40 @@ export default function RacingGamePage() {
           }}>
             Voice with opponent — tap the phone, accept mic. Safari on Mac: allow when the browser asks.
           </div>
+          {isIncomingOppCall && !callActive && (
+            <div style={{
+              display:'flex', alignItems:'center', gap:'10px',
+              background:'rgba(15,23,42,0.95)', border:'1px solid rgba(255,255,255,0.18)',
+              borderRadius:'14px', padding:'10px 14px', color:'#e2e8f0', fontFamily:'Poppins,sans-serif',
+              fontSize:'13px', boxShadow:'0 8px 24px rgba(0,0,0,0.45)',
+            }}>
+              <span style={{ flex:1, opacity:0.95 }}>
+                {incomingCall?.callerName || 'Opponent'} is calling...
+              </span>
+              <button
+                onClick={answerCall}
+                title="Answer"
+                style={{
+                  width:40, height:40, borderRadius:'50%', border:'none', cursor:'pointer',
+                  background:'#22c55e', color:'#fff', fontSize:'18px',
+                  display:'flex', alignItems:'center', justifyContent:'center',
+                }}
+              >
+                📞
+              </button>
+              <button
+                onClick={declineCall}
+                title="Decline"
+                style={{
+                  width:40, height:40, borderRadius:'50%', border:'none', cursor:'pointer',
+                  background:'#ef4444', color:'#fff', fontSize:'18px',
+                  display:'flex', alignItems:'center', justifyContent:'center',
+                }}
+              >
+                📵
+              </button>
+            </div>
+          )}
           {callActive && (
             <div style={{
               display:'flex', alignItems:'center', gap:'10px',
