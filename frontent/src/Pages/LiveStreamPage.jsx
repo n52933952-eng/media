@@ -16,8 +16,6 @@ import {
 import { CloseIcon } from '@chakra-ui/icons';
 import { css } from '@emotion/react';
 import { Room, RoomEvent, Track } from 'livekit-client';
-import { VideoTrack, AudioTrack } from '@livekit/components-react';
-import '@livekit/components-styles';
 import { UserContext } from '../context/UserContext';
 import { SocketContext } from '../context/SocketContext';
 
@@ -72,11 +70,13 @@ const LiveStreamPage = () => {
   const [chatLog,         setChatLog]          = useState([]);
   const [localVideoTrack, setLocalVideoTrack]  = useState(null);
   const [remoteVideoTrack,setRemoteVideoTrack] = useState(null);
-  const [remoteAudioTrack,setRemoteAudioTrack] = useState(null);
   const [roomName,        setRoomName]         = useState('');
 
   const roomRef    = useRef(null);
   const chatLogRef = useRef(null);
+  const localVideoRef = useRef(null);
+  const remoteVideoRef = useRef(null);
+  const audioElRef = useRef(null);
   let floatIdCounter = useRef(0);
 
   // ── scroll chat log ───────────────────────────────────────────────────────
@@ -111,8 +111,41 @@ const LiveStreamPage = () => {
     }
     setLocalVideoTrack(null);
     setRemoteVideoTrack(null);
-    setRemoteAudioTrack(null);
+    if (audioElRef.current) {
+      try {
+        audioElRef.current.remove();
+      } catch (_) {}
+      audioElRef.current = null;
+    }
   }, []);
+
+  useEffect(() => {
+    if (!localVideoRef.current || !localVideoTrack) return;
+    const el = localVideoRef.current;
+    try {
+      localVideoTrack.attach(el);
+    } catch (_) {}
+    return () => {
+      try {
+        localVideoTrack.detach(el);
+      } catch (_) {}
+      if (el) el.srcObject = null;
+    };
+  }, [localVideoTrack]);
+
+  useEffect(() => {
+    if (!remoteVideoRef.current || !remoteVideoTrack) return;
+    const el = remoteVideoRef.current;
+    try {
+      remoteVideoTrack.attach(el);
+    } catch (_) {}
+    return () => {
+      try {
+        remoteVideoTrack.detach(el);
+      } catch (_) {}
+      if (el) el.srcObject = null;
+    };
+  }, [remoteVideoTrack]);
 
   // ── BROADCASTER: start stream ─────────────────────────────────────────────
   const startStream = useCallback(async () => {
@@ -172,11 +205,28 @@ const LiveStreamPage = () => {
         room.on(RoomEvent.TrackSubscribed, (track) => {
           if (!mounted) return;
           if (track.kind === 'video') setRemoteVideoTrack(track);
-          if (track.kind === 'audio') setRemoteAudioTrack(track);
+          if (track.kind === 'audio') {
+            try {
+              const audioEl = track.attach();
+              audioEl.autoplay = true;
+              audioEl.style.display = 'none';
+              document.body.appendChild(audioEl);
+              if (audioElRef.current) {
+                try { audioElRef.current.remove(); } catch (_) {}
+              }
+              audioElRef.current = audioEl;
+            } catch (_) {}
+          }
         });
         room.on(RoomEvent.TrackUnsubscribed, (track) => {
           if (track.kind === 'video') setRemoteVideoTrack(null);
-          if (track.kind === 'audio') setRemoteAudioTrack(null);
+          if (track.kind === 'audio' && audioElRef.current) {
+            try {
+              track.detach(audioElRef.current);
+              audioElRef.current.remove();
+            } catch (_) {}
+            audioElRef.current = null;
+          }
         });
         room.on(RoomEvent.ParticipantConnected,    () => mounted && setViewerCount(c => c + 1));
         room.on(RoomEvent.ParticipantDisconnected, () => mounted && setViewerCount(c => Math.max(0, c - 1)));
@@ -229,22 +279,25 @@ const LiveStreamPage = () => {
     <Box h="100vh" bg="black" position="relative" overflow="hidden">
       {/* ── Video layer ── */}
       {isBroadcaster && localVideoTrack ? (
-        <VideoTrack
-          trackRef={{ publication: localVideoTrack }}
+        <Box
+          as="video"
+          ref={localVideoRef}
+          autoPlay
+          muted
+          playsInline
           style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }}
-          local
         />
       ) : !isBroadcaster && remoteVideoTrack ? (
-        <>
-          <VideoTrack
-            trackRef={{ publication: remoteVideoTrack }}
-            style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }}
-          />
-          {remoteAudioTrack && <AudioTrack trackRef={{ publication: remoteAudioTrack }} />}
-        </>
+        <Box
+          as="video"
+          ref={remoteVideoRef}
+          autoPlay
+          playsInline
+          style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }}
+        />
       ) : (
         <Flex h="100%" alignItems="center" justifyContent="center" bg="gray.900">
-          <Avatar src={user?.profilePic} name={user?.name} size="2xl" />
+          <Avatar src={user?.profilePic} name={user?.name || user?.username || 'User'} size="2xl" />
         </Flex>
       )}
 
@@ -256,7 +309,7 @@ const LiveStreamPage = () => {
         alignItems="center" justifyContent="space-between"
       >
         <HStack spacing={3}>
-          <Avatar src={user?.profilePic} name={user?.name} size="sm" />
+          <Avatar src={user?.profilePic} name={user?.name || user?.username || 'User'} size="sm" />
           <VStack spacing={0} align="flex-start">
             <Text color="white" fontWeight="bold" fontSize="sm">
               {user?.name || user?.username}
