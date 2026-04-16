@@ -9,7 +9,7 @@
  * Uses @livekit/components-react for track rendering — no manual <video> wiring.
  */
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   Box, Flex, Avatar, Text, IconButton, HStack, VStack, Badge,
 } from '@chakra-ui/react';
