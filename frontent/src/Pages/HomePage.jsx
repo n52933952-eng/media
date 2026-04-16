@@ -233,7 +233,7 @@ const HomePage = () => {
 
   // Keep feed synced with global live stream state (no manual refresh needed)
   useEffect(() => {
-    if (!Array.isArray(liveStreams) || liveStreams.length === 0) return
+    if (!Array.isArray(liveStreams)) return
     setFollowPost(prev => {
       const withoutOldLive = prev.filter(p => !p?.isLive)
       const livePseudo = liveStreams.map(s => ({
@@ -249,6 +249,8 @@ const HomePage = () => {
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       }))
+      // When liveStreams is empty, this returns only non-live posts,
+      // which guarantees stale live cards are removed.
       return [...livePseudo, ...withoutOldLive]
     })
   }, [liveStreams, setFollowPost])

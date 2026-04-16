@@ -1958,11 +1958,8 @@ export const initializeSocket = async (app) => {
         // Live stream ended
         socket.on("livekit:endLive", async ({ streamerId, roomName }) => {
             try {
-                // Mark stream as ended in DB
-                await LiveStream.findOneAndUpdate(
-                    { streamer: streamerId, active: true },
-                    { active: false, endedAt: new Date() }
-                )
+                // Remove ended live stream from DB so no stale live row remains.
+                await LiveStream.deleteMany({ streamer: streamerId })
                 const streamer = await User.findById(streamerId).select('followers').lean()
                 if (streamer?.followers?.length) {
                     for (const followerId of streamer.followers) {
