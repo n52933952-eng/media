@@ -7,17 +7,13 @@
  * Clicking the card or button navigates to /live/:streamerId (full viewer).
  */
 
-import { useContext, useEffect, useRef, useState } from 'react';
+import { useContext } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Box, Flex, Avatar, Text, Badge, Button, VStack,
   useColorModeValue,
 } from '@chakra-ui/react';
-import { Room, RoomEvent } from 'livekit-client';
-import { VideoTrack } from '@livekit/components-react';
 import { UserContext } from '../context/UserContext';
-
-const API_BASE = import.meta.env.VITE_API_URL || '';
 
 const LivePostCard = ({ post }) => {
   const navigate = useNavigate();
@@ -26,52 +22,7 @@ const LivePostCard = ({ post }) => {
   const border    = useColorModeValue('gray.200', 'gray.700');
 
   const streamer   = post.postedBy;
-  const roomName   = post.roomName;
   const streamerId = streamer?._id;
-
-  const [previewTrack, setPreviewTrack] = useState(null);
-  const [viewerCount,  setViewerCount]  = useState(0);
-  const roomRef = useRef(null);
-
-  // ── Join as silent viewer to get a preview track ─────────────────────────
-  useEffect(() => {
-    if (!roomName || !user) return;
-    let mounted = true;
-
-    const join = async () => {
-      try {
-        const res = await fetch(`${API_BASE}/api/call/token`, {
-          method:      'POST',
-          credentials: 'include',
-          headers:     { 'Content-Type': 'application/json' },
-          body:        JSON.stringify({ type: 'viewer', targetId: String(streamerId) }),
-        });
-        if (!res.ok || !mounted) return;
-        const { token, livekitUrl } = await res.json();
-
-        const room = new Room();
-        roomRef.current = room;
-
-        room.on(RoomEvent.TrackSubscribed, (track) => {
-          if (track.kind === 'video' && mounted) setPreviewTrack(track);
-        });
-        room.on(RoomEvent.TrackUnsubscribed, () => {
-          if (mounted) setPreviewTrack(null);
-        });
-        room.on(RoomEvent.ParticipantConnected,    () => mounted && setViewerCount(c => c + 1));
-        room.on(RoomEvent.ParticipantDisconnected, () => mounted && setViewerCount(c => Math.max(0, c - 1)));
-
-        await room.connect(livekitUrl, token);
-        if (mounted) setViewerCount(room.remoteParticipants.size);
-      } catch (_) {}
-    };
-
-    join();
-    return () => {
-      mounted = false;
-      roomRef.current?.disconnect().catch(() => {});
-    };
-  }, [roomName, streamerId, user]);
 
   const goWatch = () => navigate(`/live/${streamerId}`);
 
@@ -87,18 +38,11 @@ const LivePostCard = ({ post }) => {
       _hover={{ transform: 'translateY(-2px)', boxShadow: 'lg', transition: 'all 0.2s' }}
       transition="all 0.2s"
     >
-      {/* Video preview */}
+      {/* Lightweight preview (no room join here, avoids fake views) */}
       <Box position="relative" h="240px" bg="black">
-        {previewTrack ? (
-          <VideoTrack
-            trackRef={{ publication: previewTrack }}
-            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-          />
-        ) : (
-          <Flex h="100%" alignItems="center" justifyContent="center" bg="gray.900">
-            <Avatar src={streamer?.profilePic} name={streamer?.name} size="xl" />
-          </Flex>
-        )}
+        <Flex h="100%" alignItems="center" justifyContent="center" bg="gray.900">
+          <Avatar src={streamer?.profilePic} name={streamer?.name} size="2xl" />
+        </Flex>
 
         {/* LIVE badge */}
         <Box position="absolute" top={3} left={3}>
@@ -117,10 +61,10 @@ const LivePostCard = ({ post }) => {
           </Badge>
         </Box>
 
-        {/* Viewer count */}
+        {/* Clear CTA label */}
         <Box position="absolute" top={3} right={3}>
           <Badge bg="blackAlpha.700" color="white" borderRadius="full" px={2} py={1} fontSize="xs">
-            👁 {viewerCount}
+            Tap to watch
           </Badge>
         </Box>
       </Box>

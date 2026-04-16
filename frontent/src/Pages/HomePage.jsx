@@ -17,7 +17,7 @@ import StoryStrip from '../Components/StoryStrip'
 const HomePage = () => {
   const location = useLocation()
   const{followPost,setFollowPost}=useContext(PostContext)
-  const {socket} = useContext(SocketContext) || {}
+  const {socket, liveStreams} = useContext(SocketContext) || {}
   const {user} = useContext(UserContext) || {}
   
   const[loading,setLoading]=useState(true)
@@ -230,6 +230,28 @@ const HomePage = () => {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []) // Only run once on mount
+
+  // Keep feed synced with global live stream state (no manual refresh needed)
+  useEffect(() => {
+    if (!Array.isArray(liveStreams) || liveStreams.length === 0) return
+    setFollowPost(prev => {
+      const withoutOldLive = prev.filter(p => !p?.isLive)
+      const livePseudo = liveStreams.map(s => ({
+        _id: `live_${s.streamerId}`,
+        isLive: true,
+        liveStreamId: s.streamerId,
+        roomName: s.roomName,
+        postedBy: {
+          _id: s.streamerId,
+          name: s.streamerName,
+          profilePic: s.streamerProfilePic,
+        },
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }))
+      return [...livePseudo, ...withoutOldLive]
+    })
+  }, [liveStreams, setFollowPost])
 
   // Infinite scroll with Intersection Observer
   useEffect(() => {

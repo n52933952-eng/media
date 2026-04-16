@@ -77,6 +77,7 @@ const LiveStreamPage = () => {
   const localVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
   const audioElRef = useRef(null);
+  const closingRef = useRef(false);
   let floatIdCounter = useRef(0);
 
   // ── scroll chat log ───────────────────────────────────────────────────────
@@ -118,6 +119,13 @@ const LiveStreamPage = () => {
       audioElRef.current = null;
     }
   }, []);
+
+  const safeClose = useCallback(async () => {
+    if (closingRef.current) return;
+    closingRef.current = true;
+    await disconnectRoom();
+    navigate(-1);
+  }, [disconnectRoom, navigate]);
 
   useEffect(() => {
     if (!localVideoRef.current || !localVideoTrack) return;
@@ -230,7 +238,11 @@ const LiveStreamPage = () => {
         });
         room.on(RoomEvent.ParticipantConnected,    () => mounted && setViewerCount(c => c + 1));
         room.on(RoomEvent.ParticipantDisconnected, () => mounted && setViewerCount(c => Math.max(0, c - 1)));
-        room.on(RoomEvent.Disconnected, () => mounted && navigate(-1));
+        room.on(RoomEvent.Disconnected, () => {
+          if (!mounted || closingRef.current) return;
+          closingRef.current = true;
+          navigate(-1);
+        });
         room.on(RoomEvent.DataReceived, (payload) => {
           try {
             const msg = JSON.parse(new TextDecoder().decode(payload));
@@ -256,7 +268,11 @@ const LiveStreamPage = () => {
   useEffect(() => {
     if (!socket || isBroadcaster) return;
     const onEnded = ({ streamerId: sid }) => {
-      if (sid === streamerId) { disconnectRoom(); navigate(-1); }
+      if (sid === streamerId && !closingRef.current) {
+        closingRef.current = true;
+        disconnectRoom();
+        navigate(-1);
+      }
     };
     socket.on('livekit:streamEnded', onEnded);
     return () => socket.off('livekit:streamEnded', onEnded);
@@ -272,11 +288,22 @@ const LiveStreamPage = () => {
     setChatInput('');
   }, [chatInput, user]);
 
-  useEffect(() => () => { disconnectRoom(); }, []);
+  useEffect(() => () => {
+    closingRef.current = true;
+    disconnectRoom();
+  }, [disconnectRoom]);
 
   // ── render ─────────────────────────────────────────────────────────────────
   return (
-    <Box h="100vh" bg="black" position="relative" overflow="hidden">
+    <Box
+      position="fixed"
+      inset={0}
+      w="100vw"
+      h="100dvh"
+      bg="black"
+      zIndex={1600}
+      overflow="hidden"
+    >
       {/* ── Video layer ── */}
       {isBroadcaster && localVideoTrack ? (
         <Box
@@ -305,7 +332,7 @@ const LiveStreamPage = () => {
       <Flex
         position="absolute" top={0} left={0} right={0} zIndex={20}
         px={4} pt={4} pb={2}
-        bg="linear-gradient(to bottom, rgba(0,0,0,0.7) 0%, transparent 100%)"
+        bg="linear-gradient(to bottom, rgba(0,0,0,0.55) 0%, transparent 100%)"
         alignItems="center" justifyContent="space-between"
       >
         <HStack spacing={3}>
@@ -337,22 +364,22 @@ const LiveStreamPage = () => {
           <IconButton
             icon={<CloseIcon boxSize={3} />} size="sm" variant="ghost"
             colorScheme="whiteAlpha" color="white"
-            onClick={() => { disconnectRoom(); navigate(-1); }}
+            onClick={safeClose}
             aria-label="Close"
           />
         </HStack>
       </Flex>
 
       {/* ── Floating messages ── */}
-      <Box position="absolute" bottom="80px" left={0} right={0} pointerEvents="none" zIndex={15}>
+      <Box position="absolute" bottom="108px" left={0} right={0} pointerEvents="none" zIndex={15}>
         {floatingMsgs.map(m => <FloatingMessage key={m.id} msg={m} />)}
       </Box>
 
       {/* ── Chat log (right side — desktop) ── */}
       <Box
-        position="absolute" top="60px" bottom="70px" right={0}
+        position="absolute" top="66px" bottom="96px" right={0}
         w={{ base: '0', md: '280px' }} overflowY="auto"
-        bg="blackAlpha.500"
+        bg="blackAlpha.350"
         display={{ base: 'none', md: 'flex' }}
         flexDir="column"
         ref={chatLogRef}
@@ -373,8 +400,10 @@ const LiveStreamPage = () => {
       {/* ── Chat input ── */}
       <Flex
         position="absolute" bottom={0} left={0} right={0} zIndex={20}
-        px={4} py={3}
-        bg="linear-gradient(to top, rgba(0,0,0,0.8) 0%, transparent 100%)"
+        px={4}
+        pt={2}
+        pb="calc(env(safe-area-inset-bottom, 0px) + 12px)"
+        bg="linear-gradient(to top, rgba(0,0,0,0.62) 0%, transparent 100%)"
         gap={2} alignItems="center"
       >
         <Input
