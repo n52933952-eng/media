@@ -38,6 +38,18 @@ const sortedRoomName = (a, b) => {
   return `call_${ids[0]}_${ids[1]}`;
 };
 
+const warmupUserMedia = async ({ video = true, audio = true } = {}) => {
+  try {
+    if (!navigator?.mediaDevices?.getUserMedia) return;
+    const stream = await navigator.mediaDevices.getUserMedia({ video, audio });
+    stream.getTracks().forEach((t) => {
+      try { t.stop(); } catch (_) {}
+    });
+  } catch (_) {
+    // Silent: fallback is normal LiveKit publish flow.
+  }
+};
+
 // ─── Provider ────────────────────────────────────────────────────────────────
 export const LiveKitProvider = ({ children }) => {
   const { user }   = useContext(UserContext);
@@ -54,9 +66,12 @@ export const LiveKitProvider = ({ children }) => {
   const [callPartner,  setCallPartner]  = useState(null);   // { id, name, profilePic }
   const [roomName,     setRoomName]     = useState('');
   const [busyUsers,    setBusyUsers]    = useState(new Set());
+  const [isStartingCall, setIsStartingCall] = useState(false);
 
   // ── LiveKit room ─────────────────────────────────────────────────────────
   const roomRef         = useRef(null);
+  const incomingCallRef = useRef(null);
+  const callPartnerRef  = useRef(null);
   const [localTracks,  setLocalTracks]  = useState([]);
   const [remoteTracks, setRemoteTracks] = useState([]);
 
@@ -154,10 +169,19 @@ export const LiveKitProvider = ({ children }) => {
     setTimeout(() => setCallEnded(false), 300);
   }, [disconnectRoom]);
 
+  useEffect(() => {
+    incomingCallRef.current = incomingCall;
+  }, [incomingCall]);
+
+  useEffect(() => {
+    callPartnerRef.current = callPartner;
+  }, [callPartner]);
+
   // ── PUBLIC: start a 1-to-1 call ──────────────────────────────────────────
   const startCall = useCallback(async (targetUser, type = 'video') => {
-    if (!user || !socket) return;
+    if (!user || !socket || isStartingCall || isCalling || callAccepted) return;
     try {
+      setIsStartingCall(true);
       setCallType(type);
       setCallPartner({ id: idStr(targetUser._id), name: targetUser.name, profilePic: targetUser.profilePic });
       setIsCalling(true);
@@ -168,11 +192,10 @@ export const LiveKitProvider = ({ children }) => {
       const room = sortedRoomName(myId, theirId);
       setRoomName(room);
 
-      // Get token & connect to room first so we're ready when they answer
-      const { token, livekitUrl } = await fetchToken({ type: 'direct', targetId: theirId });
-      await connectRoom(token, livekitUrl, type);
+      // Start permission prompt early so camera/mic is ready sooner.
+      warmupUserMedia({ video: type !== 'audio', audio: true });
 
-      // Notify receiver via socket (backend handles FCM for offline)
+      // Notify receiver immediately so ringing starts with less delay.
       socket.emit('livekit:callUser', {
         userToCall:       theirId,
         callerId:         myId,
@@ -183,13 +206,19 @@ export const LiveKitProvider = ({ children }) => {
       });
 
       playRingtone();
+
+      // Connect ourselves in parallel path.
+      const { token, livekitUrl } = await fetchToken({ type: 'direct', targetId: theirId });
+      await connectRoom(token, livekitUrl, type);
     } catch (err) {
       console.error('❌ [LiveKit] startCall error:', err.message);
       setIsCalling(false);
       await disconnectRoom();
       toast({ title: 'Call failed', description: err.message, status: 'error', duration: 4000, isClosable: true, position: 'top' });
+    } finally {
+      setIsStartingCall(false);
     }
-  }, [user, socket, fetchToken, connectRoom, disconnectRoom, toast]);
+  }, [user, socket, isStartingCall, isCalling, callAccepted, fetchToken, connectRoom, disconnectRoom, toast]);
 
   // ── PUBLIC: answer incoming call ─────────────────────────────────────────
   const answerCall = useCallback(async () => {
@@ -249,7 +278,7 @@ export const LiveKitProvider = ({ children }) => {
     };
 
     const onCallCanceled = ({ from }) => {
-      if (incomingCall?.from === from || callPartner?.id === from) {
+      if (incomingCallRef.current?.from === from || callPartnerRef.current?.id === from) {
         stopRingtone();
         setIncomingCall(null);
         setIsCalling(false);
@@ -260,7 +289,7 @@ export const LiveKitProvider = ({ children }) => {
     };
 
     const onCallDeclined = ({ by }) => {
-      if (callPartner?.id === by) {
+      if (callPartnerRef.current?.id === by) {
         stopRingtone();
         toast({ title: 'Call declined', description: 'The user declined your call.', status: 'warning', duration: 3000, isClosable: true, position: 'top' });
         handleCallEnded();
@@ -300,7 +329,7 @@ export const LiveKitProvider = ({ children }) => {
       socket.off('callBusy',              onCallBusy);
       socket.off('cancleCall',            onCancleCall);
     };
-  }, [socket, incomingCall, callPartner, handleCallEnded, disconnectRoom, toast]);
+  }, [socket, handleCallEnded, disconnectRoom, toast]);
 
   return (
     <LiveKitContext.Provider value={{

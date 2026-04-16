@@ -20,6 +20,7 @@ import { Room, RoomEvent } from 'livekit-client';
 import { useToast } from '@chakra-ui/react';
 import { UserContext } from './UserContext';
 import { SocketContext } from './SocketContext';
+import ringTone from '../assets/ring.mp3';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
 
@@ -38,6 +39,23 @@ export const GroupCallProvider = ({ children }) => {
   const [activeConvId,      setActiveConvId]       = useState('');
 
   const groupCallRoom = useRef(null);
+  const ringtoneRef = useRef(null);
+
+  useEffect(() => {
+    ringtoneRef.current = new Audio(ringTone);
+    ringtoneRef.current.loop = true;
+    return () => {
+      try { ringtoneRef.current?.pause(); } catch (_) {}
+    };
+  }, []);
+
+  const playRingtone = () => { try { ringtoneRef.current?.play(); } catch (_) {} };
+  const stopRingtone = () => {
+    try {
+      ringtoneRef.current?.pause();
+      if (ringtoneRef.current) ringtoneRef.current.currentTime = 0;
+    } catch (_) {}
+  };
 
   // ── fetch token ───────────────────────────────────────────────────────────
   const fetchToken = useCallback(async (conversationId) => {
@@ -53,6 +71,7 @@ export const GroupCallProvider = ({ children }) => {
 
   // ── disconnect room ───────────────────────────────────────────────────────
   const disconnectRoom = useCallback(async () => {
+    stopRingtone();
     if (groupCallRoom.current) {
       try { await groupCallRoom.current.disconnect(); } catch (_) {}
       groupCallRoom.current = null;
@@ -122,6 +141,7 @@ export const GroupCallProvider = ({ children }) => {
   // ── PUBLIC: join (answer) incoming group call ─────────────────────────────
   const joinGroupCall = useCallback(async () => {
     if (!incomingGroupCall) return;
+    stopRingtone();
     const { conversationId, callType } = incomingGroupCall;
     try {
       const { token, livekitUrl } = await fetchToken(conversationId);
@@ -140,6 +160,7 @@ export const GroupCallProvider = ({ children }) => {
 
   // ── PUBLIC: decline incoming group call ──────────────────────────────────
   const declineGroupCall = useCallback(() => {
+    stopRingtone();
     setIncomingGroupCall(null);
   }, []);
 
@@ -159,6 +180,7 @@ export const GroupCallProvider = ({ children }) => {
 
     const onIncoming = (data) => {
       setIncomingGroupCall(data);
+      playRingtone();
     };
 
     const onEnded = ({ by }) => {
@@ -170,6 +192,7 @@ export const GroupCallProvider = ({ children }) => {
     socket.on('livekit:groupCallEnded',    onEnded);
 
     return () => {
+      stopRingtone();
       socket.off('livekit:incomingGroupCall', onIncoming);
       socket.off('livekit:groupCallEnded',    onEnded);
     };

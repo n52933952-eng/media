@@ -1928,6 +1928,16 @@ export const initializeSocket = async (app) => {
         // Live stream: notify all followers that a user went live
         socket.on("livekit:goLive", async ({ streamerId, streamerName, streamerProfilePic, roomName }) => {
             try {
+                const socketUserId = String(socket.handshake?.query?.userId || '')
+                if (!socketUserId || String(streamerId) !== socketUserId) {
+                    console.warn(`⚠️ [livekit:goLive] rejected mismatched streamerId:${streamerId} socketUser:${socketUserId}`)
+                    return
+                }
+                const existingLive = await LiveStream.findOne({ streamer: streamerId, active: true }).lean()
+                if (existingLive?.roomName === roomName) {
+                    // Ignore duplicate emits from double-click/retry to avoid noisy feed updates.
+                    return
+                }
                 // Save live stream to DB so feed can surface it
                 await LiveStream.findOneAndUpdate(
                     { streamer: streamerId },
@@ -1958,8 +1968,14 @@ export const initializeSocket = async (app) => {
         // Live stream ended
         socket.on("livekit:endLive", async ({ streamerId, roomName }) => {
             try {
+                const socketUserId = String(socket.handshake?.query?.userId || '')
+                if (!socketUserId || String(streamerId) !== socketUserId) {
+                    console.warn(`⚠️ [livekit:endLive] rejected mismatched streamerId:${streamerId} socketUser:${socketUserId}`)
+                    return
+                }
                 // Remove ended live stream from DB so no stale live row remains.
-                await LiveStream.deleteMany({ streamer: streamerId })
+                const deleteResult = await LiveStream.deleteMany({ streamer: streamerId })
+                if (!deleteResult?.deletedCount) return
                 const streamer = await User.findById(streamerId).select('followers').lean()
                 if (streamer?.followers?.length) {
                     for (const followerId of streamer.followers) {

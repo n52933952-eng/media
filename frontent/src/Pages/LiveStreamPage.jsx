@@ -53,6 +53,18 @@ const ViewerBadge = ({ count }) => (
   </Badge>
 );
 
+const warmupUserMedia = async ({ video = true, audio = true } = {}) => {
+  try {
+    if (!navigator?.mediaDevices?.getUserMedia) return;
+    const stream = await navigator.mediaDevices.getUserMedia({ video, audio });
+    stream.getTracks().forEach((t) => {
+      try { t.stop(); } catch (_) {}
+    });
+  } catch (_) {
+    // Silent fallback to normal LiveKit capture.
+  }
+};
+
 const LiveStreamPage = () => {
   const { streamerId } = useParams();
   const navigate = useNavigate();
@@ -64,6 +76,7 @@ const LiveStreamPage = () => {
 
   // ── state ─────────────────────────────────────────────────────────────────
   const [isLive,          setIsLive]          = useState(false);
+  const [isStartingLive,  setIsStartingLive]  = useState(false);
   const [viewerCount,     setViewerCount]      = useState(0);
   const [chatInput,       setChatInput]        = useState('');
   // floating messages: { id, sender, text }
@@ -170,13 +183,16 @@ const LiveStreamPage = () => {
 
   // ── BROADCASTER: start stream ─────────────────────────────────────────────
   const startStream = useCallback(async () => {
-    if (!user || !socket) return;
+    if (!user || !socket || isLive || isStartingLive) return;
     try {
+      setIsStartingLive(true);
       liveEndedRef.current = false;
       if (liveTimeoutRef.current) {
         clearTimeout(liveTimeoutRef.current);
         liveTimeoutRef.current = null;
       }
+      // Prompt and warm up camera/mic early to reduce publish delay.
+      warmupUserMedia({ video: true, audio: true });
       const { token, roomName: rn, livekitUrl } = await fetchToken(String(user._id), 'livestream');
       setRoomName(rn);
       const room = new Room({ adaptiveStream: true, dynacast: true });
@@ -223,8 +239,10 @@ const LiveStreamPage = () => {
       }, MAX_LIVE_MS);
     } catch (err) {
       console.error('[LiveStream] startStream:', err.message);
+    } finally {
+      setIsStartingLive(false);
     }
-  }, [user, socket, fetchToken, disconnectRoom, navigate, toast]);
+  }, [user, socket, isLive, isStartingLive, fetchToken, disconnectRoom, navigate, toast]);
 
   // ── BROADCASTER: end stream ───────────────────────────────────────────────
   const endStream = useCallback(async () => {
@@ -405,7 +423,17 @@ const LiveStreamPage = () => {
         </HStack>
         <HStack spacing={2}>
           {isBroadcaster && !isLive && (
-            <Button colorScheme="red" size="sm" borderRadius="full" onClick={startStream}>Go Live</Button>
+            <Button
+              colorScheme="red"
+              size="sm"
+              borderRadius="full"
+              onClick={startStream}
+              isLoading={isStartingLive}
+              loadingText="Starting..."
+              isDisabled={isStartingLive}
+            >
+              Go Live
+            </Button>
           )}
           {isBroadcaster && isLive && (
             <Button variant="outline" colorScheme="whiteAlpha" size="sm" borderRadius="full" color="white" onClick={endStream}>
