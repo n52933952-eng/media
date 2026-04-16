@@ -1393,6 +1393,47 @@ export const initializeSocket = async (app) => {
             return false
         }
 
+        /**
+         * Calls policy while gaming:
+         * - Block calls if either user is in chess/card.
+         * - For race: allow call only when BOTH users are in the SAME race room
+         *   (race opponents talking in-game). Otherwise block.
+         */
+        const evaluateGameCallPolicy = async (callerId, receiverId) => {
+            const caller = normalizeUserId(callerId) || callerId
+            const receiver = normalizeUserId(receiverId) || receiverId
+            if (!caller || !receiver) return { allowed: false, reason: 'invalid_users' }
+
+            const [callerChess, receiverChess, callerCard, receiverCard] = await Promise.all([
+                hasActiveChessGame(caller),
+                hasActiveChessGame(receiver),
+                hasActiveCardGame(caller),
+                hasActiveCardGame(receiver),
+            ])
+
+            if (callerChess || receiverChess || callerCard || receiverCard) {
+                return { allowed: false, reason: 'user_in_chess_or_card' }
+            }
+
+            const [callerRaceRoom, receiverRaceRoom] = await Promise.all([
+                getActiveRaceGame(caller),
+                getActiveRaceGame(receiver),
+            ])
+
+            const callerInRace = !!callerRaceRoom
+            const receiverInRace = !!receiverRaceRoom
+
+            // If no one is in race, normal call is allowed.
+            if (!callerInRace && !receiverInRace) return { allowed: true, reason: 'ok' }
+
+            // Allow only same-race opponents.
+            if (callerInRace && receiverInRace && String(callerRaceRoom) === String(receiverRaceRoom)) {
+                return { allowed: true, reason: 'same_race_room' }
+            }
+
+            return { allowed: false, reason: 'race_call_not_same_room' }
+        }
+
         // WebRTC: Handle call user - emit to both receiver AND sender like madechess
         socket.on("callUser", async ({ userToCall, signalData, signal: signalAlt, from, name, callType = 'video', callId: clientCallId }) => {
             const signalPayload = signalData || signalAlt
@@ -1405,6 +1446,20 @@ export const initializeSocket = async (app) => {
             const callerId = normalizeUserId(from) || from
             if (!receiverId || !callerId) {
                 console.error('❌ [callUser] Missing or invalid userToCall/from – rejecting', { userToCall, from })
+                return
+            }
+            const gamePolicy = await evaluateGameCallPolicy(callerId, receiverId)
+            if (!gamePolicy.allowed) {
+                const senderData = await getUserSocket(callerId)
+                const senderSocketId = senderData?.socketId
+                if (senderSocketId) {
+                    io.to(senderSocketId).emit("callBusyError", {
+                        message: "Call blocked: user is in a game",
+                        busyUserId: receiverId,
+                        reason: gamePolicy.reason,
+                    })
+                }
+                console.log(`🚫 [callUser] Blocked by game policy (${gamePolicy.reason}) caller:${callerId} receiver:${receiverId}`)
                 return
             }
             // Check if either user is already in a call
@@ -1836,6 +1891,20 @@ export const initializeSocket = async (app) => {
             try {
                 const callerId   = explicitCallerId || socket.handshake.query.userId
                 const receiverId = String(userToCall)
+                const gamePolicy = await evaluateGameCallPolicy(callerId, receiverId)
+                if (!gamePolicy.allowed) {
+                    const callerSocketData = await getUserSocket(String(callerId))
+                    const callerSocketId = callerSocketData?.socketId
+                    if (callerSocketId) {
+                        io.to(callerSocketId).emit('livekit:callDeclined', {
+                            by: receiverId,
+                            roomName,
+                            reason: gamePolicy.reason,
+                        })
+                    }
+                    console.log(`🚫 [livekit:callUser] Blocked by game policy (${gamePolicy.reason}) caller:${callerId} receiver:${receiverId}`)
+                    return
+                }
                 const receiverSocketData = await getUserSocket(receiverId)
                 const receiverSocketId   = receiverSocketData?.socketId
 

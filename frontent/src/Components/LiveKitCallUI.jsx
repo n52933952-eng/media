@@ -289,15 +289,37 @@ const ActiveCallScreen = () => {
       </Flex>
 
       {/* Remote video / audio-only placeholder */}
-      <Box flex={1} w="100%" position="relative" display="flex" alignItems="center" justifyContent="center">
+      <Box
+        flex={1}
+        w="100%"
+        position="relative"
+        display="flex"
+        alignItems="center"
+        justifyContent="center"
+        px={{ base: 2, md: 6 }}
+        py={{ base: 2, md: 4 }}
+      >
         {remoteVideo ? (
           <Box
-            as="video"
-            ref={remoteVideoRef}
-            autoPlay
-            playsInline
-            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-          />
+            w="100%"
+            h="100%"
+            maxW="1100px"
+            maxH="calc(100vh - 170px)"
+            borderRadius={{ base: 'md', md: '2xl' }}
+            overflow="hidden"
+            bg="black"
+            border="1px solid"
+            borderColor="whiteAlpha.300"
+            boxShadow="0 14px 36px rgba(0,0,0,0.45)"
+          >
+            <Box
+              as="video"
+              ref={remoteVideoRef}
+              autoPlay
+              playsInline
+              style={{ width: '100%', height: '100%', objectFit: 'contain' }}
+            />
+          </Box>
         ) : (
           <VStack>
             <Avatar src={callPartner?.profilePic} name={callPartner?.name} size="2xl" />
@@ -309,7 +331,7 @@ const ActiveCallScreen = () => {
         {localVideo && callType !== 'audio' && (
           <Box
             position="absolute"
-            bottom={{ base: 96, md: 28 }}
+            bottom={{ base: 100, md: 34 }}
             right={{ base: 3, md: 5 }}
             w={{ base: '108px', md: '142px' }}
             h={{ base: '80px', md: '106px' }}

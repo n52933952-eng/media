@@ -91,7 +91,7 @@ const AppContent = () => {
       <CookieConsentBanner />
       {/* Global Call Notification - shows on all pages */}
       {user && <CallNotification />}
-      {user && <LiveKitCallUI />}
+      {user && !isRacePage && <LiveKitCallUI />}
       {user && <GroupCallUI />}
       
       {/* Global Chess Challenge Notification - shows on all pages */}

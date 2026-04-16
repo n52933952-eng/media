@@ -5,6 +5,7 @@ import { clone as cloneSkeleton } from 'three/examples/jsm/utils/SkeletonUtils.j
 import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import { UserContext } from '../context/UserContext'
 import { SocketContext } from '../context/SocketContext'
+import { LiveKitContext } from '../context/LiveKitContext'
 import API_BASE_URL from '../config/api'
 import { initPhysics, updatePhysics, FIXED_PHYSICS_STEP } from '../game/racing/physics.js'
 import { createVehicle, updateSteering, resetCarPosition, updateCarPosition } from '../game/racing/car.js'
@@ -44,13 +45,16 @@ export default function RacingGamePage() {
   const navigate       = useNavigate()
   const location       = useLocation()
   const { user }       = useContext(UserContext)
+  const { socket, endRaceGameOnNavigate } = useContext(SocketContext) || {}
   const {
-    socket,
-    callUser, leaveCall,
-    stream, remoteStream,
-    callAccepted, callEnded, call,
-    endRaceGameOnNavigate,
-  } = useContext(SocketContext) || {}
+    startCall,
+    leaveCall,
+    callAccepted,
+    callEnded,
+    callPartner,
+    remoteTracks,
+    room,
+  } = useContext(LiveKitContext) || {}
 
   // ── UI state ────────────────────────────────────────────────────────────────
   const [loading,       setLoading]       = useState(true)
@@ -332,35 +336,38 @@ export default function RacingGamePage() {
     return () => clearTimeout(t)
   }, [loading, waitingOpp])
 
-  // ─── Sync callActive with real WebRTC state ─────────────────────────────────
-  // If the call gets rejected, dropped, or ended by the opponent, reflect it here
+  // ─── Sync race voice state with LiveKit state ───────────────────────────────
   useEffect(() => {
-    if (callAccepted && !callEnded) {
+    const partnerId = userIdToStr(callPartner?.id)
+    if (callAccepted && !callEnded && partnerId === userIdToStr(opponentId)) {
       setCallActive(true)
     } else {
       setCallActive(false)
     }
-  }, [callAccepted, callEnded])
+  }, [callAccepted, callEnded, callPartner?.id, opponentId])
 
-  // ─── Play opponent voice in-page (WebRTC MediaStream → <audio>) ─────────────
-  // Same remote stream path as chat/calls — Safari/macOS may block autoplay until play() succeeds.
+  // ─── Play opponent voice in-page (LiveKit audio track → <audio>) ────────────
   useEffect(() => {
     const el = remoteAudioRef.current
     if (!el) return
-    if (remoteStream) {
-      el.srcObject = remoteStream
+    const remoteAudio = remoteTracks?.find((t) => t?.track?.kind === 'audio')?.track
+    if (!remoteAudio) {
+      el.srcObject = null
+      return
+    }
+    try {
+      remoteAudio.attach(el)
       el.volume = 1
       el.setAttribute('playsinline', 'true')
       el.setAttribute('webkit-playsinline', 'true')
       const p = el.play?.()
       if (p && typeof p.catch === 'function') p.catch(() => {})
-    } else {
-      el.srcObject = null
-    }
+    } catch (_) {}
     return () => {
+      try { remoteAudio.detach(el) } catch (_) {}
       if (el) el.srcObject = null
     }
-  }, [remoteStream])
+  }, [remoteTracks])
 
   // ─── Keyboard controls ──────────────────────────────────────────────────────
   useEffect(() => {
@@ -997,7 +1004,7 @@ export default function RacingGamePage() {
   // ─── Voice call ────────────────────────────────────────────────────────────
   const handleCallOpp = () => {
     if (!callActive && opponentId) {
-      callUser?.(opponentId, opponent?.name || 'Opponent', 'audio')
+      startCall?.({ _id: opponentId, name: opponent?.name || 'Opponent', profilePic: opponent?.profilePic || '' }, 'audio')
       setCallActive(true)
     } else {
       leaveCall?.()
@@ -1005,12 +1012,11 @@ export default function RacingGamePage() {
     }
   }
   const handleMute = () => {
-    if (!stream) return
+    const roomObj = room?.current
+    if (!roomObj?.localParticipant) return
     setMuted((prev) => {
       const nextMuted = !prev
-      stream.getAudioTracks().forEach((t) => {
-        t.enabled = !nextMuted
-      })
+      roomObj.localParticipant.setMicrophoneEnabled(!nextMuted).catch(() => {})
       return nextMuted
     })
   }
@@ -1249,7 +1255,7 @@ export default function RacingGamePage() {
         </div>
       )}
 
-      {/* Voice: uses SocketContext callUser / leaveCall (same pipeline as chat calls — not duplicated WebRTC) */}
+      {/* Voice: LiveKit in-race opponent voice */}
       {!loading && (
         <div style={{
           position:'fixed', bottom:'20px', left:'20px', right:'220px', zIndex:1000,
@@ -1270,7 +1276,7 @@ export default function RacingGamePage() {
             }}>
               <span style={{ fontSize:'18px' }}>🎧</span>
               <span style={{ flex:1, opacity:0.95 }}>
-                {remoteStream ? 'Connected — opponent audio is live' : 'Connecting… accept mic if the browser asks'}
+                {callActive ? 'Connected — opponent audio is live' : 'Connecting… accept mic if the browser asks'}
               </span>
             </div>
           )}
