@@ -74,34 +74,101 @@ const IncomingCallOverlay = () => {
 
 // ── Outgoing / ringing UI ─────────────────────────────────────────────────────
 const OutgoingCallOverlay = () => {
-  const { isCalling, callPartner, leaveCall } = useLiveKit();
+  const { isCalling, callPartner, leaveCall, callType, localTracks } = useLiveKit();
   if (!isCalling) return null;
+  const localVideo = localTracks.find(t => t.kind === 'video');
+  const localVideoRef = useRef(null);
+
+  useEffect(() => {
+    if (!localVideo || !localVideoRef.current) return;
+    const el = localVideoRef.current;
+    try { localVideo.attach(el); } catch (_) {}
+    return () => {
+      try { localVideo.detach(el); } catch (_) {}
+      if (el) el.srcObject = null;
+    };
+  }, [localVideo]);
 
   return (
     <Box
       position="fixed" top={0} left={0} right={0} bottom={0}
-      bg="blackAlpha.800" zIndex={9998}
+      bg="blackAlpha.900" zIndex={9998}
       display="flex" alignItems="center" justifyContent="center"
     >
-      <VStack
-        bg="gray.800" borderRadius="2xl" p={8} spacing={6}
-        boxShadow="0 0 40px rgba(0,0,0,0.6)" minW="300px" align="center"
+      <Box
+        bg="gray.900"
+        borderRadius="2xl"
+        p={4}
+        boxShadow="0 0 40px rgba(0,0,0,0.6)"
+        w={{ base: '92vw', md: '460px' }}
+        maxW="460px"
       >
-        <Avatar src={callPartner?.profilePic} name={callPartner?.name} size="xl" />
-        <VStack spacing={1}>
-          <Text color="white" fontWeight="bold" fontSize="xl">{callPartner?.name}</Text>
-          <Text color="gray.400" fontSize="sm" className="lk-calling-pulse">Calling…</Text>
+        <VStack spacing={4} align="stretch">
+          {/* Caller self preview for video calls */}
+          {callType === 'video' ? (
+            <Box
+              h={{ base: '280px', md: '320px' }}
+              borderRadius="xl"
+              overflow="hidden"
+              bg="black"
+              position="relative"
+              border="1px solid"
+              borderColor="whiteAlpha.300"
+            >
+              {localVideo ? (
+                <Box
+                  as="video"
+                  ref={localVideoRef}
+                  autoPlay
+                  muted
+                  playsInline
+                  style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                />
+              ) : (
+                <Flex h="100%" alignItems="center" justifyContent="center">
+                  <Text color="gray.400" fontSize="sm">Opening camera…</Text>
+                </Flex>
+              )}
+
+              <Badge
+                position="absolute"
+                top={3}
+                left={3}
+                colorScheme="purple"
+                borderRadius="full"
+                px={2}
+                py={1}
+              >
+                Video Call
+              </Badge>
+            </Box>
+          ) : null}
+
+          <Flex alignItems="center" gap={3}>
+            <Avatar src={callPartner?.profilePic} name={callPartner?.name} size="md" />
+            <VStack spacing={0} align="flex-start" flex={1}>
+              <Text color="white" fontWeight="bold" fontSize="lg">{callPartner?.name}</Text>
+              <Text color="gray.400" fontSize="sm" className="lk-calling-pulse">
+                Calling…
+              </Text>
+            </VStack>
+          </Flex>
+
+          <Flex justifyContent="center" pt={1}>
+            <VStack spacing={1}>
+              <IconButton
+                icon={<HangupIcon />}
+                colorScheme="red"
+                borderRadius="full"
+                size="lg"
+                onClick={leaveCall}
+                aria-label="Cancel call"
+              />
+              <Text color="gray.400" fontSize="sm">Cancel</Text>
+            </VStack>
+          </Flex>
         </VStack>
-        <VStack spacing={1}>
-          <IconButton
-            icon={<HangupIcon />}
-            colorScheme="red" borderRadius="full" size="lg"
-            onClick={leaveCall}
-            aria-label="Cancel call"
-          />
-          <Text color="gray.400" fontSize="sm">Cancel</Text>
-        </VStack>
-      </VStack>
+      </Box>
     </Box>
   );
 };
