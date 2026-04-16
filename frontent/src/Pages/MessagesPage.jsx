@@ -3659,6 +3659,13 @@ const MessagesPage = () => {
         
         <VStack align="stretch" spacing={0} p={2}>
           {followedUsers
+            .reduce((acc, user) => {
+              const userId = idStr(user?._id);
+              if (!userId) return acc;
+              if (acc.some((u) => idStr(u?._id) === userId)) return acc;
+              acc.push(user);
+              return acc;
+            }, [])
             .filter((user) => isUserInOnlineList(onlineUser, user._id))
             .sort((a, b) => {
               // Get onlineAt timestamps for both users
@@ -3710,7 +3717,15 @@ const MessagesPage = () => {
                 </Box>
               </Flex>
             ))}
-          {followedUsers.filter((user) => isUserInOnlineList(onlineUser, user._id)).length === 0 && (
+          {followedUsers
+            .reduce((acc, user) => {
+              const userId = idStr(user?._id);
+              if (!userId) return acc;
+              if (acc.some((u) => idStr(u?._id) === userId)) return acc;
+              acc.push(user);
+              return acc;
+            }, [])
+            .filter((user) => isUserInOnlineList(onlineUser, user._id)).length === 0 && (
             <Text px={4} py={8} color="gray.500" fontSize="sm" textAlign="center">
               No friends online
             </Text>

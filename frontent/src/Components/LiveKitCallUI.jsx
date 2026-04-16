@@ -18,8 +18,6 @@ import { useLiveKit } from '../context/LiveKitContext';
 
 // ── small helpers ────────────────────────────────────────────────────────────
 const HangupIcon = () => <span style={{ fontSize: 20 }}>📵</span>;
-const MicIcon    = () => <span style={{ fontSize: 20 }}>🎙️</span>;
-const CamIcon    = () => <span style={{ fontSize: 20 }}>📹</span>;
 
 // ── Incoming call overlay ─────────────────────────────────────────────────────
 const IncomingCallOverlay = () => {
@@ -234,9 +232,31 @@ const ActiveCallScreen = () => {
   return (
     <Box
       position="fixed" top={0} left={0} right={0} bottom={0}
-      bg="black" zIndex={9997}
-      display="flex" flexDir="column" alignItems="center" justifyContent="center"
+      bg="blackAlpha.900" zIndex={9997}
+      display="flex" flexDir="column"
     >
+      {/* Top info bar */}
+      <Flex
+        px={4}
+        py={3}
+        alignItems="center"
+        justifyContent="space-between"
+        bg="blackAlpha.500"
+        borderBottom="1px solid"
+        borderColor="whiteAlpha.200"
+      >
+        <HStack spacing={3}>
+          <Avatar src={callPartner?.profilePic} name={callPartner?.name} size="sm" />
+          <VStack spacing={0} align="flex-start">
+            <Text color="white" fontWeight="bold" fontSize="sm">{callPartner?.name || 'User'}</Text>
+            <Text color="gray.300" fontSize="xs">{callType === 'audio' ? 'Voice call' : 'Video call'}</Text>
+          </VStack>
+        </HStack>
+        <Badge colorScheme={callType === 'audio' ? 'green' : 'purple'} borderRadius="full">
+          Live
+        </Badge>
+      </Flex>
+
       {/* Remote video / audio-only placeholder */}
       <Box flex={1} w="100%" position="relative" display="flex" alignItems="center" justifyContent="center">
         {remoteVideo ? (
@@ -257,9 +277,17 @@ const ActiveCallScreen = () => {
         {/* Local pip */}
         {localVideo && callType !== 'audio' && (
           <Box
-            position="absolute" bottom={4} right={4}
-            w="120px" h="90px" borderRadius="lg" overflow="hidden"
-            border="2px solid" borderColor="whiteAlpha.400"
+            position="absolute"
+            bottom={{ base: 96, md: 28 }}
+            right={{ base: 3, md: 5 }}
+            w={{ base: '108px', md: '142px' }}
+            h={{ base: '80px', md: '106px' }}
+            borderRadius="xl"
+            overflow="hidden"
+            border="2px solid"
+            borderColor="whiteAlpha.500"
+            boxShadow="0 6px 20px rgba(0,0,0,0.45)"
+            bg="black"
           >
             <Box
               as="video"
@@ -274,11 +302,20 @@ const ActiveCallScreen = () => {
       </Box>
 
       {/* Controls */}
-      <HStack spacing={6} p={6}>
+      <HStack
+        spacing={6}
+        p={5}
+        justifyContent="center"
+        bg="blackAlpha.550"
+        borderTop="1px solid"
+        borderColor="whiteAlpha.200"
+      >
         <VStack spacing={1}>
           <IconButton
             icon={<HangupIcon />}
-            colorScheme="red" borderRadius="full" size="lg"
+            colorScheme="red"
+            borderRadius="full"
+            size="lg"
             onClick={leaveCall}
             aria-label="End call"
           />
