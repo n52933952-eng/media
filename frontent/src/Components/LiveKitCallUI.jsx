@@ -18,6 +18,8 @@ import { useLiveKit } from '../context/LiveKitContext';
 
 // ── small helpers ────────────────────────────────────────────────────────────
 const HangupIcon = () => <span style={{ fontSize: 20 }}>📵</span>;
+const MicIcon = ({ muted }) => <span style={{ fontSize: 18 }}>{muted ? '🔇' : '🎙️'}</span>;
+const CamIcon = ({ off }) => <span style={{ fontSize: 18 }}>{off ? '📷' : '📹'}</span>;
 
 // ── Incoming call overlay ─────────────────────────────────────────────────────
 const IncomingCallOverlay = () => {
@@ -175,9 +177,11 @@ const OutgoingCallOverlay = () => {
 const ActiveCallScreen = () => {
   const {
     callAccepted, callPartner, callType,
-    localTracks, remoteTracks, leaveCall,
+    localTracks, remoteTracks, leaveCall, room,
   } = useLiveKit();
   if (!callAccepted) return null;
+  const [isMuted, setIsMuted] = useState(false);
+  const [isCamOff, setIsCamOff] = useState(callType === 'audio');
 
   const remoteVideo  = remoteTracks.find(t => t.track.kind === 'video');
   const remoteAudio  = remoteTracks.find(t => t.track.kind === 'audio');
@@ -228,6 +232,33 @@ const ActiveCallScreen = () => {
       }
     };
   }, [remoteAudio]);
+
+  useEffect(() => {
+    if (callType === 'audio') {
+      setIsCamOff(true);
+    }
+  }, [callType]);
+
+  const handleToggleMute = async () => {
+    const roomObj = room?.current;
+    if (!roomObj?.localParticipant) return;
+    const nextMuted = !isMuted;
+    try {
+      await roomObj.localParticipant.setMicrophoneEnabled(!nextMuted);
+      setIsMuted(nextMuted);
+    } catch (_) {}
+  };
+
+  const handleToggleCam = async () => {
+    if (callType === 'audio') return;
+    const roomObj = room?.current;
+    if (!roomObj?.localParticipant) return;
+    const nextCamOff = !isCamOff;
+    try {
+      await roomObj.localParticipant.setCameraEnabled(!nextCamOff);
+      setIsCamOff(nextCamOff);
+    } catch (_) {}
+  };
 
   return (
     <Box
@@ -310,6 +341,32 @@ const ActiveCallScreen = () => {
         borderTop="1px solid"
         borderColor="whiteAlpha.200"
       >
+        <VStack spacing={1}>
+          <IconButton
+            icon={<MicIcon muted={isMuted} />}
+            colorScheme={isMuted ? 'red' : 'gray'}
+            borderRadius="full"
+            size="md"
+            onClick={handleToggleMute}
+            aria-label={isMuted ? 'Unmute' : 'Mute'}
+          />
+          <Text color="gray.400" fontSize="xs">{isMuted ? 'Unmute' : 'Mute'}</Text>
+        </VStack>
+
+        {callType !== 'audio' && (
+          <VStack spacing={1}>
+            <IconButton
+              icon={<CamIcon off={isCamOff} />}
+              colorScheme={isCamOff ? 'red' : 'gray'}
+              borderRadius="full"
+              size="md"
+              onClick={handleToggleCam}
+              aria-label={isCamOff ? 'Turn camera on' : 'Turn camera off'}
+            />
+            <Text color="gray.400" fontSize="xs">{isCamOff ? 'Cam On' : 'Cam Off'}</Text>
+          </VStack>
+        )}
+
         <VStack spacing={1}>
           <IconButton
             icon={<HangupIcon />}

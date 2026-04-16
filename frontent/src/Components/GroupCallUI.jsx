@@ -139,15 +139,19 @@ const ActiveGroupCallScreen = () => {
   const handleMute = async () => {
     if (!groupCallRoom.current) return;
     const next = !isMuted;
-    await groupCallRoom.current.localParticipant.setMicrophoneEnabled(!next);
-    setIsMuted(next);
+    try {
+      await groupCallRoom.current.localParticipant.setMicrophoneEnabled(!next);
+      setIsMuted(next);
+    } catch (_) {}
   };
 
   const handleCam = async () => {
     if (!groupCallRoom.current) return;
     const next = !isCamOff;
-    await groupCallRoom.current.localParticipant.setCameraEnabled(!next);
-    setIsCamOff(next);
+    try {
+      await groupCallRoom.current.localParticipant.setCameraEnabled(!next);
+      setIsCamOff(next);
+    } catch (_) {}
   };
 
   // Include local participant in grid

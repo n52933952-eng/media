@@ -95,7 +95,18 @@ const LiveStreamPage = () => {
   const closingRef = useRef(false);
   const liveEndedRef = useRef(false);
   const liveTimeoutRef = useRef(null);
+  const isLiveRef = useRef(false);
+  const roomNameRef = useRef('');
+  const socketRef = useRef(null);
+  const userIdRef = useRef('');
+  const isBroadcasterRef = useRef(false);
   let floatIdCounter = useRef(0);
+
+  useEffect(() => { isLiveRef.current = isLive; }, [isLive]);
+  useEffect(() => { roomNameRef.current = roomName; }, [roomName]);
+  useEffect(() => { socketRef.current = socket; }, [socket]);
+  useEffect(() => { userIdRef.current = String(user?._id || ''); }, [user?._id]);
+  useEffect(() => { isBroadcasterRef.current = isBroadcaster; }, [isBroadcaster]);
 
   // ── scroll chat log ───────────────────────────────────────────────────────
   useEffect(() => {
@@ -137,6 +148,16 @@ const LiveStreamPage = () => {
     }
   }, []);
 
+  const exitLivePage = useCallback(() => {
+    // Try back first (best UX), then hard-fallback for direct-open/live deep links.
+    navigate(-1);
+    setTimeout(() => {
+      if (window.location.pathname.startsWith('/live/')) {
+        navigate('/home', { replace: true });
+      }
+    }, 80);
+  }, [navigate]);
+
   const safeClose = useCallback(async () => {
     if (closingRef.current) return;
     closingRef.current = true;
@@ -150,8 +171,8 @@ const LiveStreamPage = () => {
       liveTimeoutRef.current = null;
     }
     await disconnectRoom();
-    navigate(-1);
-  }, [disconnectRoom, navigate, isBroadcaster, isLive, socket, user?._id, roomName]);
+    exitLivePage();
+  }, [disconnectRoom, exitLivePage, isBroadcaster, isLive, socket, user?._id, roomName]);
 
   useEffect(() => {
     if (!localVideoRef.current || !localVideoTrack) return;
@@ -235,14 +256,14 @@ const LiveStreamPage = () => {
           isClosable: true,
           position: 'top',
         });
-        navigate(-1);
+        exitLivePage();
       }, MAX_LIVE_MS);
     } catch (err) {
       console.error('[LiveStream] startStream:', err.message);
     } finally {
       setIsStartingLive(false);
     }
-  }, [user, socket, isLive, isStartingLive, fetchToken, disconnectRoom, navigate, toast]);
+  }, [user, socket, isLive, isStartingLive, fetchToken, disconnectRoom, exitLivePage, toast]);
 
   // ── BROADCASTER: end stream ───────────────────────────────────────────────
   const endStream = useCallback(async () => {
@@ -256,8 +277,8 @@ const LiveStreamPage = () => {
     }
     await disconnectRoom();
     setIsLive(false);
-    navigate(-1);
-  }, [socket, user, roomName, disconnectRoom, navigate]);
+    exitLivePage();
+  }, [socket, user, roomName, disconnectRoom, exitLivePage]);
 
   // ── VIEWER: join stream ───────────────────────────────────────────────────
   useEffect(() => {
@@ -302,7 +323,7 @@ const LiveStreamPage = () => {
         room.on(RoomEvent.Disconnected, () => {
           if (!mounted || closingRef.current) return;
           closingRef.current = true;
-          navigate(-1);
+          exitLivePage();
         });
         room.on(RoomEvent.DataReceived, (payload) => {
           try {
@@ -317,13 +338,13 @@ const LiveStreamPage = () => {
           setViewerCount(room.remoteParticipants.size);
         }
       } catch (err) {
-        if (mounted) navigate(-1);
+        if (mounted) exitLivePage();
       }
     };
 
     join();
     return () => { mounted = false; disconnectRoom(); };
-  }, [isBroadcaster, streamerId]);
+  }, [isBroadcaster, streamerId, disconnectRoom, exitLivePage]);
 
   // ── socket: stream ended (viewer) ─────────────────────────────────────────
   useEffect(() => {
@@ -332,12 +353,12 @@ const LiveStreamPage = () => {
       if (sid === streamerId && !closingRef.current) {
         closingRef.current = true;
         disconnectRoom();
-        navigate(-1);
+        exitLivePage();
       }
     };
     socket.on('livekit:streamEnded', onEnded);
     return () => socket.off('livekit:streamEnded', onEnded);
-  }, [socket, isBroadcaster, streamerId, navigate, disconnectRoom]);
+  }, [socket, isBroadcaster, streamerId, exitLivePage, disconnectRoom]);
 
   // ── send chat message ─────────────────────────────────────────────────────
   const sendChat = useCallback(async () => {
@@ -349,18 +370,29 @@ const LiveStreamPage = () => {
     setChatInput('');
   }, [chatInput, user]);
 
-  useEffect(() => () => {
-    closingRef.current = true;
-    if (liveTimeoutRef.current) {
-      clearTimeout(liveTimeoutRef.current);
-      liveTimeoutRef.current = null;
-    }
-    if (isBroadcaster && isLive && socket && !liveEndedRef.current) {
-      liveEndedRef.current = true;
-      socket.emit('livekit:endLive', { streamerId: String(user?._id), roomName });
-    }
-    disconnectRoom();
-  }, [disconnectRoom, isBroadcaster, isLive, socket, user?._id, roomName]);
+  // Unmount cleanup only (do not tie to changing deps, or it can disconnect an active live).
+  useEffect(() => {
+    return () => {
+      closingRef.current = true;
+      if (liveTimeoutRef.current) {
+        clearTimeout(liveTimeoutRef.current);
+        liveTimeoutRef.current = null;
+      }
+      if (
+        isBroadcasterRef.current &&
+        isLiveRef.current &&
+        socketRef.current &&
+        !liveEndedRef.current
+      ) {
+        liveEndedRef.current = true;
+        socketRef.current.emit('livekit:endLive', {
+          streamerId: userIdRef.current,
+          roomName: roomNameRef.current,
+        });
+      }
+      disconnectRoom();
+    };
+  }, [disconnectRoom]);
 
   // ── render ─────────────────────────────────────────────────────────────────
   return (
