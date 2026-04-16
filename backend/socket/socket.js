@@ -1885,12 +1885,14 @@ export const initializeSocket = async (app) => {
         })
 
         // ── LiveKit signaling ────────────────────────────────────────────────
-        // Notify target user that someone is calling (sends room info so they
-        // can fetch a token and join). FCM push is sent for offline users.
+        // Notify callee with room info. Must mirror WebRTC reliability:
+        // - Use resolveLiveSocketIdForUser (stale Redis socket rows are common)
+        // - If clientPresence is offline (e.g. app backgrounded), FCM rings even when TCP socket still exists
+        // - Retry socket emits briefly — RN listener may attach one tick after connect
         socket.on("livekit:callUser", async ({ userToCall, callerName, callerProfilePic, callType, roomName, callerId: explicitCallerId }) => {
             try {
                 const callerId   = explicitCallerId || socket.handshake.query.userId
-                const receiverId = String(userToCall)
+                const receiverId = normalizeUserId(userToCall) || String(userToCall)
                 const gamePolicy = await evaluateGameCallPolicy(callerId, receiverId)
                 if (!gamePolicy.allowed) {
                     const callerSocketData = await getUserSocket(String(callerId))
@@ -1905,8 +1907,6 @@ export const initializeSocket = async (app) => {
                     console.log(`🚫 [livekit:callUser] Blocked by game policy (${gamePolicy.reason}) caller:${callerId} receiver:${receiverId}`)
                     return
                 }
-                const receiverSocketData = await getUserSocket(receiverId)
-                const receiverSocketId   = receiverSocketData?.socketId
 
                 // Mark both as inCall (Redis + MongoDB)
                 const callId = [String(callerId), receiverId].sort().join('-')
@@ -1918,21 +1918,50 @@ export const initializeSocket = async (app) => {
                 User.findByIdAndUpdate(receiverId, { inCall: true }).catch(() => {})
                 io.emit('callBusy', { userToCall: receiverId, from: callerId })
 
-                if (receiverSocketId) {
-                    io.to(receiverSocketId).emit('livekit:incomingCall', {
-                        from:            callerId,
-                        callerName,
-                        callerProfilePic,
-                        callType:        callType || 'video',
-                        roomName,
+                const incomingPayload = {
+                    from:            callerId,
+                    callerName,
+                    callerProfilePic,
+                    callType:        callType || 'video',
+                    roomName,
+                }
+
+                const receiverData = await getUserSocket(receiverId)
+                const liveReceiverSocketId = await resolveLiveSocketIdForUser(receiverId)
+                const rcvPresence = await getUserPresence(receiverId)
+                const pr = rcvPresence != null ? String(rcvPresence).toLowerCase() : ''
+                const clientMarkedOffline = pr === 'offline'
+                const receiverClientType = String(receiverData?.clientType || '').toLowerCase()
+                const allowLiveSocketForWeb = clientMarkedOffline && receiverClientType === 'web' && !!liveReceiverSocketId
+                const deliverSocketId = (clientMarkedOffline && !allowLiveSocketForWeb) ? null : liveReceiverSocketId
+
+                const emitIncomingTo = (sid) => {
+                    if (!sid) return
+                    io.to(sid).emit('livekit:incomingCall', incomingPayload)
+                }
+
+                if (deliverSocketId) {
+                    emitIncomingTo(deliverSocketId)
+                    console.log(`📞 [LiveKit] incomingCall sent to ${receiverId} (live socket ${deliverSocketId})`)
+                    ;[350, 1200].forEach((ms) => {
+                        setTimeout(async () => {
+                            try {
+                                const sid = await resolveLiveSocketIdForUser(receiverId)
+                                if (sid) emitIncomingTo(sid)
+                            } catch (_) {}
+                        }, ms)
                     })
-                    console.log(`📞 [LiveKit] incomingCall sent to ${receiverId} (socket ${receiverSocketId})`)
                 } else {
-                    // Offline — send FCM push so phone rings
+                    console.log(`📞 [LiveKit] No live in-app socket for ${receiverId} (stale map or presence offline) — will use FCM`)
+                }
+
+                // FCM: truly offline OR mobile background (presence offline) — same idea as WebRTC callUser
+                const needsFcm = !deliverSocketId || (clientMarkedOffline && receiverClientType !== 'web')
+                if (needsFcm) {
                     try {
                         const { sendCallNotification } = await import('../services/pushNotifications.js')
-                        await sendCallNotification(receiverId, callerName, callerId, callType || 'video', callId)
-                        console.log(`📬 [LiveKit] FCM call notification sent to offline user ${receiverId}`)
+                        await sendCallNotification(receiverId, callerName, callerId, callType || 'video')
+                        console.log(`📬 [LiveKit] FCM call notification → ${receiverId} (needsFcm=${needsFcm})`)
                     } catch (fcmErr) {
                         console.error('❌ [LiveKit] FCM push failed:', fcmErr.message)
                     }
