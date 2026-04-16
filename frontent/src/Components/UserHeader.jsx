@@ -226,12 +226,16 @@ const UserHeader = ({ users, activeTab, setActiveTab, onUserFollowed, postsCount
     
     <Text>{users?.bio}</Text>
    
-    {currentUser?._id === users?._id &&
-     <Link to="/update">
-     <Button>update Profile</Button>
-     </Link>
-
-    }
+    {currentUser?._id === users?._id && (
+      <Flex gap={2} flexWrap="wrap">
+        <Link to="/update">
+          <Button>update Profile</Button>
+        </Link>
+        <Link to="/live/broadcast">
+          <Button colorScheme="red">🔴 Go Live</Button>
+        </Link>
+      </Flex>
+    )}
 
 
     {currentUser?._id !== users?._id && <Button onClick={handleFollowAndUnfollow} isLoading={updating}>
