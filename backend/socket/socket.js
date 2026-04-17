@@ -39,6 +39,14 @@ const PRESENCE_ROOM_PREFIX = 'presence:'
 const PRESENCE_KEY_PREFIX = 'userPresence:'
 /** Queued WebRTC answer SDP when caller socket drops before callee answers (Wi‑Fi / reconnect race). */
 const PENDING_ANSWER_PREFIX = 'pendingAnswer:'
+const LIVEKIT_DEFAULT_MAX_SESSION_MS = 25 * 60 * 1000
+const LIVEKIT_MAX_SESSION_MS = (() => {
+    const raw = Number(process.env.LIVEKIT_MAX_SESSION_MS || LIVEKIT_DEFAULT_MAX_SESSION_MS)
+    return Number.isFinite(raw) && raw > 0 ? raw : LIVEKIT_DEFAULT_MAX_SESSION_MS
+})()
+const livekitDirectCallTimers = new Map()
+const livekitGroupCallTimers = new Map()
+const livekitStreamTimers = new Map()
 
 const setUserPresence = async (userId, status) => {
     redisService.ensureRedis()
@@ -106,6 +114,28 @@ const uniqueUserIds = (ids) => {
         out.push(id)
     }
     return out
+}
+
+const safeClearTimer = (timerMap, key) => {
+    if (!key || !timerMap?.has(key)) return
+    clearTimeout(timerMap.get(key))
+    timerMap.delete(key)
+}
+
+const directCallTimerKey = ({ roomName, callerId, receiverId }) => {
+    const room = typeof roomName === 'string' ? roomName.trim() : ''
+    if (room) return `room:${room}`
+    const a = normalizeUserId(callerId)
+    const b = normalizeUserId(receiverId)
+    if (a && b) return `pair:${[a, b].sort().join(':')}`
+    return null
+}
+
+const groupCallTimerKey = ({ roomName, conversationId }) => {
+    const room = typeof roomName === 'string' ? roomName.trim() : ''
+    if (room) return `room:${room}`
+    const conv = normalizeUserId(conversationId)
+    return conv ? `conversation:${conv}` : null
 }
 
 // ============================================================
@@ -1966,6 +1996,30 @@ export const initializeSocket = async (app) => {
                         console.error('❌ [LiveKit] FCM push failed:', fcmErr.message)
                     }
                 }
+
+                const directTimerKey = directCallTimerKey({ roomName, callerId, receiverId })
+                if (directTimerKey) {
+                    safeClearTimer(livekitDirectCallTimers, directTimerKey)
+                    livekitDirectCallTimers.set(directTimerKey, setTimeout(async () => {
+                        try {
+                            await clearCallStateForPair(callerId, receiverId)
+                            User.findByIdAndUpdate(callerId, { inCall: false }).catch(() => {})
+                            User.findByIdAndUpdate(receiverId, { inCall: false }).catch(() => {})
+                            io.emit('cancleCall', { userToCall: receiverId, from: callerId })
+
+                            const timeoutPayload = { from: callerId, roomName, reason: 'timeout' }
+                            const callerLiveSocketId = await resolveLiveSocketIdForUser(callerId)
+                            const receiverLiveSocketId = await resolveLiveSocketIdForUser(receiverId)
+                            if (callerLiveSocketId) io.to(callerLiveSocketId).emit('livekit:callCanceled', timeoutPayload)
+                            if (receiverLiveSocketId) io.to(receiverLiveSocketId).emit('livekit:callCanceled', timeoutPayload)
+                            console.log(`⏱️ [LiveKit] Direct call timed out (25m) caller:${callerId} receiver:${receiverId} room:${roomName || '-'}`)
+                        } catch (timeoutErr) {
+                            console.error('❌ [LiveKit] direct timeout cleanup failed:', timeoutErr.message)
+                        } finally {
+                            safeClearTimer(livekitDirectCallTimers, directTimerKey)
+                        }
+                    }, LIVEKIT_MAX_SESSION_MS))
+                }
             } catch (err) {
                 console.error('❌ [livekit:callUser]', err.message)
             }
@@ -1976,6 +2030,10 @@ export const initializeSocket = async (app) => {
             try {
                 const callerId   = socket.handshake.query.userId
                 const receiverId = String(userToCall)
+                safeClearTimer(
+                    livekitDirectCallTimers,
+                    directCallTimerKey({ roomName, callerId, receiverId })
+                )
 
                 // Clear busy state
                 await clearCallStateForPair(callerId, receiverId)
@@ -2007,6 +2065,10 @@ export const initializeSocket = async (app) => {
         socket.on("livekit:declineCall", async ({ callerId, roomName }) => {
             try {
                 const receiverId = socket.handshake.query.userId
+                safeClearTimer(
+                    livekitDirectCallTimers,
+                    directCallTimerKey({ roomName, callerId, receiverId })
+                )
 
                 await clearCallStateForPair(callerId, receiverId)
                 User.findByIdAndUpdate(callerId,  { inCall: false }).catch(() => {})
@@ -2057,6 +2119,42 @@ export const initializeSocket = async (app) => {
                         }
                     }
                 }
+                const streamTimerKey = normalizeUserId(streamerId)
+                if (streamTimerKey) {
+                    safeClearTimer(livekitStreamTimers, streamTimerKey)
+                    livekitStreamTimers.set(streamTimerKey, setTimeout(async () => {
+                        try {
+                            const deleteResult = await LiveStream.deleteMany({ streamer: streamerId })
+                            if (!deleteResult?.deletedCount) return
+                            const streamerDoc = await User.findById(streamerId).select('followers').lean()
+                            if (streamerDoc?.followers?.length) {
+                                for (const followerId of streamerDoc.followers) {
+                                    const followerSocket = await getUserSocket(String(followerId))
+                                    if (followerSocket?.socketId) {
+                                        io.to(followerSocket.socketId).emit('livekit:streamEnded', {
+                                            streamerId,
+                                            roomName,
+                                            reason: 'timeout',
+                                        })
+                                    }
+                                }
+                            }
+                            const streamerSocketId = await resolveLiveSocketIdForUser(streamerId)
+                            if (streamerSocketId) {
+                                io.to(streamerSocketId).emit('livekit:streamEnded', {
+                                    streamerId,
+                                    roomName,
+                                    reason: 'timeout',
+                                })
+                            }
+                            console.log(`⏱️ [LiveKit] Stream timed out (25m) streamer:${streamerId}`)
+                        } catch (timeoutErr) {
+                            console.error('❌ [LiveKit] stream timeout cleanup failed:', timeoutErr.message)
+                        } finally {
+                            safeClearTimer(livekitStreamTimers, streamTimerKey)
+                        }
+                    }, LIVEKIT_MAX_SESSION_MS))
+                }
                 console.log(`🔴 [LiveKit] ${streamerName} went live — room:${roomName}`)
             } catch (err) {
                 console.error('❌ [livekit:goLive]', err.message)
@@ -2071,6 +2169,7 @@ export const initializeSocket = async (app) => {
                     console.warn(`⚠️ [livekit:endLive] rejected mismatched streamerId:${streamerId} socketUser:${socketUserId}`)
                     return
                 }
+                safeClearTimer(livekitStreamTimers, normalizeUserId(streamerId))
                 // Remove ended live stream from DB so no stale live row remains.
                 const deleteResult = await LiveStream.deleteMany({ streamer: streamerId })
                 if (!deleteResult?.deletedCount) return
@@ -2136,6 +2235,33 @@ export const initializeSocket = async (app) => {
                         }
                     }
                 }
+                const groupTimerKey = groupCallTimerKey({ roomName, conversationId })
+                if (groupTimerKey) {
+                    safeClearTimer(livekitGroupCallTimers, groupTimerKey)
+                    livekitGroupCallTimers.set(groupTimerKey, setTimeout(async () => {
+                        try {
+                            const convDoc = await Conversation.findById(conversationId).lean()
+                            if (!convDoc) return
+                            const participantIds = convDoc.participants.map(p => String(p))
+                            for (const participantId of participantIds) {
+                                const participantSocket = await getUserSocket(String(participantId))
+                                if (participantSocket?.socketId) {
+                                    io.to(participantSocket.socketId).emit('livekit:groupCallEnded', {
+                                        conversationId,
+                                        roomName,
+                                        by: 'system',
+                                        reason: 'timeout',
+                                    })
+                                }
+                            }
+                            console.log(`⏱️ [LiveKit] Group call timed out (25m) room:${roomName || '-'} conversation:${conversationId}`)
+                        } catch (timeoutErr) {
+                            console.error('❌ [LiveKit] group timeout cleanup failed:', timeoutErr.message)
+                        } finally {
+                            safeClearTimer(livekitGroupCallTimers, groupTimerKey)
+                        }
+                    }, LIVEKIT_MAX_SESSION_MS))
+                }
                 console.log(`📞 [LiveKit] Group call started — room:${roomName} members:${otherIds.length}`)
             } catch (err) {
                 console.error('❌ [livekit:startGroupCall]', err.message)
@@ -2151,6 +2277,10 @@ export const initializeSocket = async (app) => {
                 const userId = socket.handshake.query.userId
                 const conv   = await Conversation.findById(conversationId).lean()
                 if (!conv) return
+                safeClearTimer(
+                    livekitGroupCallTimers,
+                    groupCallTimerKey({ roomName, conversationId })
+                )
 
                 const otherIds = conv.participants
                     .map(p => String(p))

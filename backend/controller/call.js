@@ -61,7 +61,8 @@ export const getLiveKitToken = async (req, res) => {
         const canPublish   = type !== 'viewer'   // viewers only watch
         const canSubscribe = true                 // everyone can receive streams
 
-        const ttl = type === 'livestream' ? '25m' : '4h'
+        // Cost-control policy: cap all LiveKit sessions at 25 minutes.
+        const ttl = '25m'
         const at = new AccessToken(LIVEKIT_API_KEY, LIVEKIT_API_SECRET, {
             identity: userId,
             name:     userName,
