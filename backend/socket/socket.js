@@ -2195,37 +2195,68 @@ export const initializeSocket = async (app) => {
          */
         socket.on("livekit:startGroupCall", async ({ conversationId, callerName, callerProfilePic, callType, roomName }) => {
             try {
-                const callerId = socket.handshake.query.userId
+                // Must match direct-call path: handshake ids can differ from DB participant strings (ObjectId formatting).
+                const callerId = normalizeUserId(socket.handshake.query.userId) || String(socket.handshake.query.userId || '')
                 const conv = await Conversation.findById(conversationId).lean()
                 if (!conv) return
 
                 const otherIds = conv.participants
-                    .map(p => String(p))
-                    .filter(id => id !== callerId)
+                    .map((p) => normalizeUserId(p) || String(p))
+                    .filter((id) => id && id !== callerId)
+
+                const incomingPayload = {
+                    conversationId,
+                    roomName,
+                    callerId,
+                    callerName,
+                    callerProfilePic,
+                    callType: callType || 'video',
+                }
 
                 for (const memberId of otherIds) {
-                    const memberSocket = userSocketMap[memberId]
-                    if (memberSocket?.socketId) {
-                        io.to(memberSocket.socketId).emit('livekit:incomingGroupCall', {
-                            conversationId,
-                            roomName,
-                            callerId,
-                            callerName,
-                            callerProfilePic,
-                            callType: callType || 'video',
+                    const uid = normalizeUserId(memberId) || String(memberId)
+                    // In-memory userSocketMap alone misses Redis-only rows (multi-instance / restart). Mirror livekit:callUser.
+                    const receiverData = await getUserSocket(uid)
+                    const liveReceiverSocketId = await resolveLiveSocketIdForUser(uid)
+                    const rcvPresence = await getUserPresence(uid)
+                    const pr = rcvPresence != null ? String(rcvPresence).toLowerCase() : ''
+                    const clientMarkedOffline = pr === 'offline'
+                    const receiverClientType = String(receiverData?.clientType || '').toLowerCase()
+                    const allowLiveSocketForWeb = clientMarkedOffline && receiverClientType === 'web' && !!liveReceiverSocketId
+                    const deliverSocketId = (clientMarkedOffline && !allowLiveSocketForWeb) ? null : liveReceiverSocketId
+
+                    const emitIncomingTo = (sid) => {
+                        if (!sid) return
+                        io.to(sid).emit('livekit:incomingGroupCall', incomingPayload)
+                    }
+
+                    if (deliverSocketId) {
+                        emitIncomingTo(deliverSocketId)
+                        console.log(`📞 [livekit:startGroupCall] incomingGroupCall → ${uid} socket ${deliverSocketId}`)
+                        ;[350, 1200].forEach((ms) => {
+                            setTimeout(async () => {
+                                try {
+                                    const sid = await resolveLiveSocketIdForUser(uid)
+                                    if (sid) emitIncomingTo(sid)
+                                } catch (_) {}
+                            }, ms)
                         })
                     } else {
-                        // FCM push for offline members
+                        console.log(`📞 [livekit:startGroupCall] No live in-app socket for ${uid} — will use FCM if token present`)
+                    }
+
+                    const needsFcm = !deliverSocketId || (clientMarkedOffline && receiverClientType !== 'web')
+                    if (needsFcm) {
                         try {
-                            const memberUser = await User.findById(memberId).select('fcmToken').lean()
+                            const memberUser = await User.findById(uid).select('fcmToken').lean()
                             if (memberUser?.fcmToken) {
                                 const { sendCallNotification } = await import('../utils/fcmHelper.js')
                                 await sendCallNotification(memberUser.fcmToken, {
-                                    type:        'incoming_group_call',
+                                    type: 'incoming_group_call',
                                     callerId,
                                     callerName,
                                     callerProfilePic: callerProfilePic || '',
-                                    callType:    callType || 'video',
+                                    callType: callType || 'video',
                                     conversationId,
                                     roomName,
                                 })
@@ -2274,7 +2305,7 @@ export const initializeSocket = async (app) => {
          */
         socket.on("livekit:endGroupCall", async ({ conversationId, roomName }) => {
             try {
-                const userId = socket.handshake.query.userId
+                const userId = normalizeUserId(socket.handshake.query.userId) || String(socket.handshake.query.userId || '')
                 const conv   = await Conversation.findById(conversationId).lean()
                 if (!conv) return
                 safeClearTimer(
@@ -2283,13 +2314,14 @@ export const initializeSocket = async (app) => {
                 )
 
                 const otherIds = conv.participants
-                    .map(p => String(p))
-                    .filter(id => id !== userId)
+                    .map((p) => normalizeUserId(p) || String(p))
+                    .filter((id) => id && id !== userId)
 
                 for (const memberId of otherIds) {
-                    const memberSocket = userSocketMap[memberId]
-                    if (memberSocket?.socketId) {
-                        io.to(memberSocket.socketId).emit('livekit:groupCallEnded', {
+                    const uid = normalizeUserId(memberId) || String(memberId)
+                    const liveSid = await resolveLiveSocketIdForUser(uid)
+                    if (liveSid) {
+                        io.to(liveSid).emit('livekit:groupCallEnded', {
                             conversationId,
                             roomName,
                             by: userId,

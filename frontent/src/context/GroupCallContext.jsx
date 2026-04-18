@@ -165,14 +165,13 @@ export const GroupCallProvider = ({ children }) => {
   }, []);
 
   // ── PUBLIC: leave active group call ──────────────────────────────────────
+  // Only disconnect locally. Do NOT emit `livekit:endGroupCall` — server broadcasts that to all
+  // members as a full "call ended", so one person leaving used to drop everyone.
   const leaveGroupCall = useCallback(async () => {
-    if (socket && activeConvId) {
-      socket.emit('livekit:endGroupCall', { conversationId: activeConvId, roomName: `group_${activeConvId}` });
-    }
     await disconnectRoom();
     setGroupCallActive(false);
     setActiveConvId('');
-  }, [socket, activeConvId, disconnectRoom]);
+  }, [disconnectRoom]);
 
   // ── Socket: incoming group call ───────────────────────────────────────────
   useEffect(() => {
