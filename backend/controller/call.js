@@ -1,7 +1,11 @@
 import User from '../models/user.js'
+import Conversation from '../models/conversation.js'
 import { getIO, getRecipientSockedId } from '../socket/socket.js'
 import * as redisService from '../services/redis.js'
 import { AccessToken } from 'livekit-server-sdk'
+
+/** Same idea as socket `normalizeUserId` — compare participant ids reliably. */
+const sameId = (a, b) => String(a ?? '').trim() === String(b ?? '').trim()
 
 // ─── LiveKit helpers ────────────────────────────────────────────────────────
 
@@ -54,6 +58,20 @@ export const getLiveKitToken = async (req, res) => {
 
         if (!LIVEKIT_API_KEY || !LIVEKIT_API_SECRET) {
             return res.status(500).json({ error: 'LiveKit not configured on server' })
+        }
+
+        if (type === 'group') {
+            if (!conversationId) {
+                return res.status(400).json({ error: 'conversationId required for group calls' })
+            }
+            const conv = await Conversation.findById(conversationId).select('participants').lean()
+            if (!conv) {
+                return res.status(404).json({ error: 'Conversation not found' })
+            }
+            const member = (conv.participants || []).some((p) => sameId(p, userId))
+            if (!member) {
+                return res.status(403).json({ error: 'Not a member of this conversation' })
+            }
         }
 
         const roomName = buildRoomName({ type, userId, targetId, conversationId })
