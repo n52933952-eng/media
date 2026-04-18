@@ -11,6 +11,73 @@ const CLOUDINARY_UPLOAD_QUALITY = (process.env.CLOUDINARY_UPLOAD_QUALITY || 'aut
 const idStr = (id) => (id != null ? id.toString() : '')
 
 /**
+ * Best-effort delete of a Cloudinary image/video referenced by a chat message URL.
+ * Same parsing rules as single-message delete (upload path + optional v123 version folder).
+ */
+async function destroyCloudinaryAssetForMessageImgUrl(imgUrl) {
+  try {
+    if (!imgUrl || typeof imgUrl !== 'string') return
+    const trimmed = imgUrl.trim()
+    if (!trimmed.includes('cloudinary') || !trimmed.includes('res.cloudinary.com')) return
+
+    const isVideo =
+      trimmed.includes('/video/upload/') ||
+      /\.(mp4|webm|ogg|mov)$/i.test(trimmed) ||
+      (trimmed.includes('cloudinary') && trimmed.includes('video'))
+
+    const urlParts = trimmed.split('/')
+    const uploadIndex = urlParts.findIndex((part) => part === 'upload')
+
+    if (uploadIndex !== -1 && uploadIndex < urlParts.length - 1) {
+      let publicIdParts = urlParts.slice(uploadIndex + 1)
+      if (publicIdParts.length > 0 && /^v\d+$/.test(publicIdParts[0])) {
+        publicIdParts = publicIdParts.slice(1)
+      }
+      let publicId = publicIdParts.join('/')
+      try {
+        publicId = decodeURIComponent(publicId)
+      } catch (_) {
+        /* keep raw */
+      }
+      publicId = publicId.replace(/\.(jpg|jpeg|png|gif|webp|bmp|mp4|webm|ogg|mov)$/i, '')
+      if (publicId) {
+        await cloudinary.uploader.destroy(publicId, {
+          resource_type: isVideo ? 'video' : 'image',
+        })
+        console.log(`🗑️ [message] Cloudinary deleted ${isVideo ? 'video' : 'image'}: ${publicId}`)
+      }
+      return
+    }
+
+    const filename = urlParts[urlParts.length - 1]
+    const base = filename.split('.')[0]
+    if (base) {
+      await cloudinary.uploader.destroy(base, {
+        resource_type: isVideo ? 'video' : 'image',
+      })
+      console.log(`🗑️ [message] Cloudinary deleted (fallback): ${base}`)
+    }
+  } catch (e) {
+    console.warn('⚠️ [message] Cloudinary destroy failed:', imgUrl?.slice?.(0, 80), e?.message || e)
+  }
+}
+
+/** Delete all unique Cloudinary assets attached to messages in a conversation, then callers remove Mongo docs. */
+async function destroyCloudinaryAssetsForConversation(conversationId) {
+  const msgs = await Message.find({ conversationId }).select('img').lean()
+  const urls = [
+    ...new Set(
+      msgs
+        .map((m) => (m?.img && String(m.img).trim()) || '')
+        .filter((u) => u.includes('cloudinary'))
+    ),
+  ]
+  if (!urls.length) return
+  await Promise.all(urls.map((u) => destroyCloudinaryAssetForMessageImgUrl(u)))
+  console.log(`🧹 [message] Cloudinary cleanup for conversation ${idStr(conversationId)}: ${urls.length} unique asset(s)`)
+}
+
+/**
  * Broadcast to a Socket.IO conversation room (all online members) and send
  * FCM push to participants who are NOT currently in the room (offline).
  */
@@ -530,22 +597,21 @@ export const getTotalUnreadCount = async (req, res) => {
   }
 }
 
-export const deletconversation =async (req,res) => {
- 
-
-
-  try{
-  
-  
- await Message.deleteMany({conversationId:req.params.id})
-
-await Conversation.findByIdAndDelete(req.params.id)
-res.status(200).json("all deleted")
-}
- catch(error){
-     res.status(500).json(error)
-     console.log(error)
- }
+export const deletconversation = async (req, res) => {
+  try {
+    const convId = req.params.id
+    const conv = await Conversation.findById(convId).select('groupAvatar').lean()
+    await destroyCloudinaryAssetsForConversation(convId)
+    if (conv?.groupAvatar && String(conv.groupAvatar).includes('cloudinary')) {
+      await destroyCloudinaryAssetForMessageImgUrl(conv.groupAvatar)
+    }
+    await Message.deleteMany({ conversationId: convId })
+    await Conversation.findByIdAndDelete(convId)
+    res.status(200).json('all deleted')
+  } catch (error) {
+    res.status(500).json(error)
+    console.log(error)
+  }
 }
 
 // Delete a single message
@@ -573,57 +639,11 @@ export const deleteMessage = async (req, res) => {
       return res.status(403).json({ error: 'You can only delete messages in conversations you are part of' })
     }
 
-    // Delete image/video from Cloudinary if it exists
-    if (message.img && message.img.includes('cloudinary')) {
+    if (message.img && String(message.img).includes('cloudinary')) {
       try {
-        // Determine resource type (image or video)
-        const isVideo = message.img.includes('/video/upload/') || 
-                       message.img.match(/\.(mp4|webm|ogg|mov)$/i) ||
-                       (message.img.includes('cloudinary') && message.img.includes('video'))
-        
-        // Extract public ID from Cloudinary URL
-        // URL format: https://res.cloudinary.com/{cloud_name}/{resource_type}/upload/{version}/{folder}/{filename}.{ext}
-        // We need to extract: {folder}/{filename} (public ID)
-        const urlParts = message.img.split('/')
-        const uploadIndex = urlParts.findIndex(part => part === 'upload')
-        
-        if (uploadIndex !== -1 && uploadIndex < urlParts.length - 1) {
-          // Get everything after 'upload' (skip version if present)
-          let publicIdParts = urlParts.slice(uploadIndex + 1)
-          
-          // Remove version if it's a numeric v{timestamp}
-          if (publicIdParts.length > 0 && /^v\d+$/.test(publicIdParts[0])) {
-            publicIdParts = publicIdParts.slice(1)
-          }
-          
-          // Join remaining parts to get public ID
-          let publicId = publicIdParts.join('/')
-          
-          // Remove file extension
-          publicId = publicId.replace(/\.(jpg|jpeg|png|gif|webp|bmp|mp4|webm|ogg|mov)$/i, '')
-          
-          // Delete from Cloudinary
-          if (publicId) {
-            await cloudinary.uploader.destroy(publicId, {
-              resource_type: isVideo ? 'video' : 'image'
-            })
-            console.log(`Deleted ${isVideo ? 'video' : 'image'} from Cloudinary: ${publicId}`)
-          }
-        } else {
-          // Fallback: try to extract public ID using simpler method
-          const filename = urlParts[urlParts.length - 1]
-          const publicId = filename.split('.')[0]
-          if (publicId) {
-            await cloudinary.uploader.destroy(publicId, {
-              resource_type: isVideo ? 'video' : 'image'
-            })
-            console.log(`Deleted ${isVideo ? 'video' : 'image'} from Cloudinary (fallback): ${publicId}`)
-          }
-        }
+        await destroyCloudinaryAssetForMessageImgUrl(message.img)
       } catch (cloudinaryError) {
-        // Log error but don't fail the message deletion
         console.error('Error deleting file from Cloudinary:', cloudinaryError)
-        // Continue with message deletion even if Cloudinary deletion fails
       }
     }
 
@@ -883,7 +903,10 @@ export const deleteGroup = async (req, res) => {
       io.to(conversationId).emit('groupDeleted', { conversationId })
     }
 
-    // Clean up database
+    await destroyCloudinaryAssetsForConversation(conversation._id)
+    if (conversation.groupAvatar && String(conversation.groupAvatar).includes('cloudinary')) {
+      await destroyCloudinaryAssetForMessageImgUrl(conversation.groupAvatar)
+    }
     await Message.deleteMany({ conversationId: conversation._id })
     await Conversation.findByIdAndDelete(conversation._id)
 
@@ -911,9 +934,13 @@ export const leaveGroup = async (req, res) => {
     }
 
     if (conversation.participants.length === 0) {
-      // Empty group: delete it
-      await Conversation.findByIdAndDelete(conversation._id)
-      await Message.deleteMany({ conversationId: conversation._id })
+      const emptyConvId = conversation._id
+      await destroyCloudinaryAssetsForConversation(emptyConvId)
+      if (conversation.groupAvatar && String(conversation.groupAvatar).includes('cloudinary')) {
+        await destroyCloudinaryAssetForMessageImgUrl(conversation.groupAvatar)
+      }
+      await Message.deleteMany({ conversationId: emptyConvId })
+      await Conversation.findByIdAndDelete(emptyConvId)
     } else {
       await conversation.save()
       const io = getIO()

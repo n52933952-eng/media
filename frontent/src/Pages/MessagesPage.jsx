@@ -37,6 +37,7 @@ import {
   DrawerHeader,
   DrawerBody,
   DrawerCloseButton,
+  Tooltip,
 } from '@chakra-ui/react'
 import { SearchIcon, ArrowBackIcon, AddIcon } from '@chakra-ui/icons'
 import { MdGroup } from 'react-icons/md'
@@ -2377,15 +2378,22 @@ const MessagesPage = () => {
                         )}
                       </Box>
                       <Box flex={1} minW={0} position="relative">
-                        <Flex alignItems="center" gap={2}>
-                          <Text fontWeight="semibold" noOfLines={1} color={useColorModeValue('black', 'white')}>
+                        <Flex alignItems="center" gap={2} minW={0}>
+                          <Text
+                            fontWeight="semibold"
+                            noOfLines={1}
+                            flex={1}
+                            minW={0}
+                            color={useColorModeValue('black', 'white')}
+                          >
                             {isGroupConv ? (conv.groupName || 'Group') : (otherUser?.name || otherUser?.username || 'Unknown User')}
                           </Text>
                           {isGroupConv && (
-                            <Badge colorScheme="blue" fontSize="9px" borderRadius="full" px={1.5}>Group</Badge>
+                            <Badge flexShrink={0} colorScheme="blue" fontSize="9px" borderRadius="full" px={1.5}>Group</Badge>
                           )}
                           {conv.unreadCount > 0 && (
                             <Badge
+                              flexShrink={0}
                               borderRadius="full"
                               bg="red.500"
                               color="white"
@@ -3833,10 +3841,13 @@ const MessagesPage = () => {
                       <Button size="xs" variant="ghost" onClick={() => setEditGroupNameVisible(false)}>✕</Button>
                     </Flex>
                   ) : (
-                    <Flex alignItems="center" gap={2}>
-                      <Text noOfLines={1}>{selectedConversation.groupName || 'Group'}</Text>
+                    <Flex alignItems="center" gap={2} minW={0}>
+                      <Text noOfLines={2} flex={1} minW={0} wordBreak="break-word">
+                        {selectedConversation.groupName || 'Group'}
+                      </Text>
                       {iAmAdmin && (
                         <IconButton
+                          flexShrink={0}
                           icon={<Box as="span" fontSize="12px">✏️</Box>}
                           size="xs"
                           variant="ghost"
@@ -3869,14 +3880,17 @@ const MessagesPage = () => {
                         </Flex>
                       </Box>
                       {iAmAdmin && !isMe && (
-                        <IconButton
-                          icon={<MdDelete size={14} />}
-                          size="xs"
-                          colorScheme="red"
-                          variant="ghost"
-                          aria-label="Remove member"
-                          onClick={() => handleRemoveGroupMember(selectedConversation._id, idStr(pId))}
-                        />
+                        <Tooltip label="Remove from group" placement="left" hasArrow openDelay={400}>
+                          <IconButton
+                            icon={<MdDelete size={16} />}
+                            size="sm"
+                            colorScheme="red"
+                            variant="outline"
+                            aria-label="Remove member from group"
+                            borderWidth="1px"
+                            onClick={() => handleRemoveGroupMember(selectedConversation._id, idStr(pId))}
+                          />
+                        </Tooltip>
                       )}
                     </Flex>
                   )
