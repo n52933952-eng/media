@@ -1,5 +1,6 @@
 import React,{useContext} from 'react'
 import{Button} from '@chakra-ui/react'
+import { useNavigate } from 'react-router-dom'
 import{UserContext} from '../context/UserContext'
 import{SocketContext} from '../context/SocketContext'
 import useShowToast from '../hooks/useShowToast.js'
@@ -7,6 +8,7 @@ import useShowToast from '../hooks/useShowToast.js'
 const LogOutButton = () => {
     
      const{setUser}=useContext(UserContext)
+     const navigate = useNavigate()
      const {endChessGameOnNavigate} = useContext(SocketContext) || {}
        
      const showToast = useShowToast()
@@ -23,7 +25,7 @@ const LogOutButton = () => {
             method:"POST",
               credentials: "include",
             headers:{
-                "Content-Type" : "application-json"
+                "Content-Type" : "application/json"
             }
           })  
                
@@ -45,6 +47,8 @@ const LogOutButton = () => {
              
              localStorage.removeItem("userInfo")
              setUser(null)
+             // Leave app-only routes (e.g. /football, /weather, /home) so login shows instead of a stale screen
+             navigate('/', { replace: true })
         }
         catch(error){
             console.log(error)
