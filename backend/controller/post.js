@@ -1200,16 +1200,15 @@ export const getFeedPost = async(req,res) => {
             }))
 
             const topNormalPosts = feedNormalPosts.slice(0, 12)
-            // Sort only pinned + normals; live is prepended so it never affects their relative order.
-            const rest = [...pinnedPosts, ...topNormalPosts]
-            rest.sort((a, b) => {
-                const boostA = a && typeof a.__viewerSortBoostMs === 'number' ? a.__viewerSortBoostMs : 0
-                const boostB = b && typeof b.__viewerSortBoostMs === 'number' ? b.__viewerSortBoostMs : 0
-                const dateA = Math.max(new Date(a.updatedAt || a.createdAt).getTime(), boostA)
-                const dateB = Math.max(new Date(b.updatedAt || b.createdAt).getTime(), boostB)
-                return dateB - dateA
-            })
-            const combinedPosts = [...livePseudoPosts, ...rest]
+            // Pinned (Football / Weather / channels) must not compete with normal posts — otherwise
+            // Football can sink below fresher normals when multiple lives prepend. Sort each group only.
+            const feedSortKey = (a) => {
+                const boost = a && typeof a.__viewerSortBoostMs === 'number' ? a.__viewerSortBoostMs : 0
+                return Math.max(new Date(a.updatedAt || a.createdAt).getTime(), boost)
+            }
+            const pinnedSorted = [...pinnedPosts].sort((a, b) => feedSortKey(b) - feedSortKey(a))
+            const normalsSorted = [...topNormalPosts].sort((a, b) => feedSortKey(b) - feedSortKey(a))
+            const combinedPosts = [...livePseudoPosts, ...pinnedSorted, ...normalsSorted]
             
             const hasMore = feedNormalPosts.length > 12
             
