@@ -40,6 +40,17 @@ export const GroupCallProvider = ({ children }) => {
 
   const groupCallRoom = useRef(null);
   const ringtoneRef = useRef(null);
+  /** Latest values for socket handler (avoids stale closure + re-ring while already in call). */
+  const groupCallActiveRef = useRef(false);
+  const activeConvIdRef = useRef('');
+
+  useEffect(() => {
+    groupCallActiveRef.current = groupCallActive;
+  }, [groupCallActive]);
+
+  useEffect(() => {
+    activeConvIdRef.current = activeConvId;
+  }, [activeConvId]);
 
   useEffect(() => {
     ringtoneRef.current = new Audio(ringTone);
@@ -178,6 +189,15 @@ export const GroupCallProvider = ({ children }) => {
     if (!socket) return;
 
     const onIncoming = (data) => {
+      const convId = String(data?.conversationId || '');
+      // Already in this group's LiveKit room — late joiner re-emitted startGroupCall; don't re-ring.
+      if (
+        groupCallActiveRef.current
+        && convId
+        && convId === String(activeConvIdRef.current || '')
+      ) {
+        return;
+      }
       setIncomingGroupCall(data);
       playRingtone();
     };
