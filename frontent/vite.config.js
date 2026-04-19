@@ -55,12 +55,13 @@ function playsocialSeoPlugin(siteUrl) {
     closeBundle() {
       if (!base) return
       const outDir = path.resolve(__dirname, 'dist')
-      const urls = ['/', '/welcome', '/privacy', '/terms', '/sign']
+      const urls = ['/', '/welcome', '/about', '/privacy', '/terms', '/sign']
       const today = new Date().toISOString().slice(0, 10)
       const body = urls
         .map((p) => {
-          const priority = p === '/' ? '1.0' : p === '/welcome' ? '0.9' : '0.6'
-          const changefreq = p === '/' || p === '/welcome' ? 'weekly' : 'monthly'
+          const priority =
+            p === '/' ? '1.0' : p === '/welcome' ? '0.9' : p === '/about' ? '0.85' : '0.6'
+          const changefreq = p === '/' || p === '/welcome' || p === '/about' ? 'weekly' : 'monthly'
           return `  <url>\n    <loc>${base}${p}</loc>\n    <lastmod>${today}</lastmod>\n    <changefreq>${changefreq}</changefreq>\n    <priority>${priority}</priority>\n  </url>`
         })
         .join('\n')

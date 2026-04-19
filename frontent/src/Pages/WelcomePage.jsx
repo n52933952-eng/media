@@ -41,6 +41,9 @@ export default function WelcomePage() {
         </Box>
 
         <Text fontSize="sm" color={muted} textAlign="center">
+          <ChakraLink as={Link} to="/about" color="blue.400" mr={3}>
+            About
+          </ChakraLink>
           <ChakraLink as={Link} to="/privacy" color="blue.400" mr={3}>
             Privacy
           </ChakraLink>

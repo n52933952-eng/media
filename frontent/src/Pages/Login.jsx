@@ -246,6 +246,9 @@ export default function Login() {
             </Link>
           </Text>
           <Text align="center" fontSize="xs" color="gray.500" pt={2}>
+            <Link to="/about" style={{ marginRight: 8 }}>
+              About
+            </Link>
             <Link to="/privacy" style={{ marginRight: 8 }}>
               Privacy
             </Link>
