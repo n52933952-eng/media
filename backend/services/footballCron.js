@@ -1,18 +1,59 @@
 import cron from 'node-cron'
+import mongoose from 'mongoose'
 import { Match } from '../models/football.js'
 import User from '../models/user.js'
 import Post from '../models/post.js'
 import Follow from '../models/follow.js'
 import { getIO, getAllUserSockets, getUserSocketMap } from '../socket/socket.js'
-import mongoose from 'mongoose'
 import { autoPostTodayMatches, getFootballAccount, fetchMatchDetails } from '../controller/football.js'
-import { 
-    getCachedLiveMatches, 
+import {
+    getCachedLiveMatches,
     setCachedLiveMatches,
     getCachedMatchDetails,
     setCachedMatchDetails,
-    getCacheStats
+    getCacheStats,
 } from './footballCache.js'
+
+/** Find a row in feed `footballData` JSON: prefer fixtureId, then normalized team names. */
+const findFeedMatchIndex = (matchDataArray, fixtureIdNum, updatedMatch) => {
+    if (!Array.isArray(matchDataArray) || !updatedMatch?.teams) return -1
+    const fid = Number(fixtureIdNum)
+    if (Number.isFinite(fid)) {
+        const byId = matchDataArray.findIndex(
+            (m) => m && m.fixtureId != null && Number(m.fixtureId) === fid
+        )
+        if (byId !== -1) return byId
+    }
+    const norm = (s) => String(s || '').trim().toLowerCase()
+    const h = norm(updatedMatch.teams?.home?.name)
+    const a = norm(updatedMatch.teams?.away?.name)
+    return matchDataArray.findIndex((m) => {
+        const homeName1 = norm(m?.homeTeam?.name || m?.homeTeam)
+        const awayName1 = norm(m?.awayTeam?.name || m?.awayTeam)
+        return homeName1 === h && awayName1 === a
+    })
+}
+
+const emitFootballMatchUpdateToFollowers = async (footballAccountId, payload) => {
+    const io = getIO()
+    if (!io) return
+    const followerDocs = await Follow.find({ followeeId: footballAccountId })
+        .select('followerId')
+        .limit(5000)
+        .lean()
+    const followerIds = followerDocs.map((d) => d.followerId.toString())
+    if (followerIds.length === 0) return
+    const userSocketMap = getUserSocketMap()
+    let n = 0
+    followerIds.forEach((followerId) => {
+        const sock = userSocketMap[followerId]
+        if (sock?.socketId) {
+            io.to(sock.socketId).emit('footballMatchUpdate', payload)
+            n++
+        }
+    })
+    return n
+}
 
 // football-data.org API configuration
 // API token from www.football-data.org
@@ -290,28 +331,16 @@ const updateFeedPostWhenMatchesFinish = async () => {
                 await autoPostTodayMatches()
             } else {
                 // Some matches finished, update post with remaining live matches
+                todayPost.updatedAt = new Date()
                 todayPost.footballData = JSON.stringify(updatedMatches)
                 await todayPost.save()
-                
-                // Emit socket event
-                const io = getIO()
-                if (io) {
-                    const freshFootballAccount = await User.findById(footballAccount._id).select('followers')
-                    const followerIds = freshFootballAccount?.followers?.map(f => f.toString()) || []
-                    const socketMap = await getAllUserSockets()
-                    
-                    followerIds.forEach(followerId => {
-                        const socketData = socketMap[followerId]
-                        if (socketData && socketData.socketId) {
-                            io.to(socketData.socketId).emit('footballMatchUpdate', {
-                                postId: todayPost._id.toString(),
-                                matchData: updatedMatches,
-                                updatedAt: new Date()
-                            })
-                        }
-                    })
-                }
-                
+
+                await emitFootballMatchUpdateToFollowers(footballAccount._id, {
+                    postId: todayPost._id.toString(),
+                    matchData: updatedMatches,
+                    updatedAt: new Date(),
+                })
+
                 console.log(`  ✅ Updated feed post: Removed finished matches, ${updatedMatches.length} live matches remaining`)
             }
         }
@@ -617,15 +646,12 @@ const fetchAndUpdateLiveMatches = async () => {
                             console.error('Failed to parse football data:', e)
                         }
                         
-                        const matchIndex = matchDataArray.findIndex(m => {
-                            const homeName1 = m.homeTeam?.name || m.homeTeam
-                            const awayName1 = m.awayTeam?.name || m.awayTeam
-                            return homeName1 === updatedMatch.teams?.home?.name && awayName1 === updatedMatch.teams?.away?.name
-                        })
+                        const matchIndex = findFeedMatchIndex(matchDataArray, fixtureIdNum, updatedMatch)
                         
                         if (matchIndex !== -1) {
                             matchDataArray[matchIndex] = {
                                 ...matchDataArray[matchIndex],
+                                fixtureId: fixtureIdNum,
                                 score: {
                                     home: updatedMatch.goals?.home ?? 0,
                                     away: updatedMatch.goals?.away ?? 0
@@ -653,37 +679,40 @@ const fetchAndUpdateLiveMatches = async () => {
                                 const { autoPostTodayMatches } = await import('../controller/football.js')
                                 await autoPostTodayMatches()
                             } else {
+                                todayPost.updatedAt = new Date()
                                 todayPost.footballData = JSON.stringify(liveMatchesOnly)
                                 await todayPost.save()
                                 
                                 // Emit socket event to update frontend ONLY if score or status changed
                                 // This prevents post from moving to top on every time update
                                 if (shouldEmitSocket) {
-                                    const io = getIO()
-                                    if (io) {
-                                        const freshFootballAccount = await User.findById(footballAccount._id).select('followers')
-                                        const followerIds = freshFootballAccount?.followers?.map(f => f.toString()) || []
-                                        const socketMap = await getAllUserSockets()
-                                        let onlineCount = 0
-                                        
-                                        followerIds.forEach(followerId => {
-                                            const socketData = socketMap[followerId]
-                                            if (socketData && socketData.socketId) {
-                                                io.to(socketData.socketId).emit('footballMatchUpdate', {
-                                                    postId: todayPost._id.toString(),
-                                                    matchData: liveMatchesOnly,
-                                                    updatedAt: new Date()
-                                                })
-                                                onlineCount++
-                                            }
-                                        })
-                                        
-                                        console.log(`  ✅ Emitted match update to ${onlineCount} online followers (score/status changed)`)
-                                    }
-                                } else {
-                                    // Silent update - just saved to database, no socket emit
-                                    // Client-side timer will handle elapsed time updates
+                                    const onlineCount = await emitFootballMatchUpdateToFollowers(footballAccount._id, {
+                                        postId: todayPost._id.toString(),
+                                        matchData: liveMatchesOnly,
+                                        updatedAt: new Date(),
+                                    })
+                                    console.log(
+                                        `  Emitted match update to ${onlineCount || 0} online followers (score/status changed)`
+                                    )
                                 }
+                            }
+                        } else if (shouldEmitSocket) {
+                            try {
+                                todayPost.updatedAt = new Date()
+                                await todayPost.save()
+                                console.warn(
+                                    `  [fetchAndUpdateLiveMatches] No feed JSON row for fixture ${fixtureIdNum}; bumped updatedAt only`
+                                )
+                                const onlineCount = await emitFootballMatchUpdateToFollowers(footballAccount._id, {
+                                    postId: todayPost._id.toString(),
+                                    matchData: JSON.parse(todayPost.footballData || '[]'),
+                                    updatedAt: new Date(),
+                                })
+                                console.log(
+                                    `  Emitted match update to ${onlineCount || 0} online followers (feed bump only)`
+                                )
+                            } catch (e) {
+                                console.error('Failed to bump football feed post after unmatched fixture:', e)
                             }
                         }
                     }

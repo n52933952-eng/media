@@ -1263,6 +1263,8 @@ export const autoPostTodayMatches = async () => {
         
         // Store matches as JSON structure for visual rendering
         const matchData = matches.map(match => ({
+            // Stable key for cron to patch scores into this post (name-only matching was too brittle)
+            fixtureId: match.fixtureId,
             homeTeam: {
                 name: match.teams.home.name,
                 logo: match.teams.home.logo
