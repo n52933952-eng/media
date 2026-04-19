@@ -55,6 +55,39 @@ const emitFootballMatchUpdateToFollowers = async (footballAccountId, payload) =>
     return n
 }
 
+/**
+ * When the newest Football post for today is still the "no live matches" stub (no `footballData`),
+ * score cron only updates `Match` + clients that call getMatches — the feed `Post` is never touched,
+ * so `updatedAt` does not move and the card will not sort. If we now have live supported-league
+ * games, delete the stub and recreate a real live post.
+ */
+const reconcileNoMatchesFeedPost = async (filteredLiveCount, todayStart, todayEnd) => {
+    if (filteredLiveCount === 0) return
+    const footballAccount = await getFootballAccount()
+    if (!footballAccount) return
+
+    const latest = await Post.findOne({
+        postedBy: footballAccount._id,
+        createdAt: { $gte: todayStart, $lte: todayEnd },
+    }).sort({ createdAt: -1 })
+
+    if (!latest) return
+
+    const raw = latest.footballData
+    const hasFootballData =
+        raw != null && String(raw).trim() !== '' && String(raw).trim() !== 'null'
+    if (hasFootballData) return
+
+    const txt = String(latest.text || '')
+    if (!/no live matches/i.test(txt)) return
+
+    console.log(
+        '⚽ [reconcileNoMatchesFeedPost] Stale "no matches" feed post while live games exist — recreating feed post'
+    )
+    await Post.findByIdAndDelete(latest._id)
+    await autoPostTodayMatches()
+}
+
 // football-data.org API configuration
 // API token from www.football-data.org
 const getAPIKey = () => '5449eacc047c4b529267d309d166d09b'
@@ -504,7 +537,9 @@ const fetchAndUpdateLiveMatches = async () => {
         if (isDev && filteredMatches.length > 0) {
             console.log(`📊 Found ${filteredMatches.length} live matches`)
         }
-        
+
+        await reconcileNoMatchesFeedPost(filteredMatches.length, todayStart, todayEnd)
+
         // Normalize fixture IDs so API (number) and DB (number|string) always match in the Set
         const toFixtureIdNum = (raw) => {
             if (raw == null || raw === '') return NaN
