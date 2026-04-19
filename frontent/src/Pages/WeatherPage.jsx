@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useContext, useCallback, useMemo } from 'react'
+import React, { useState, useEffect, useContext, useCallback } from 'react'
 import {
     Box,
     Container,
@@ -50,13 +50,10 @@ if (typeof window !== 'undefined') {
 }
 
 const WeatherPage = () => {
-    const { user, setUser } = useContext(UserContext)
+    const { user } = useContext(UserContext)
     const { socket } = useContext(SocketContext) || {}
     const [weatherData, setWeatherData] = useState([])
     const [loading, setLoading] = useState(true)
-    const [isFollowing, setIsFollowing] = useState(false)
-    const [followLoading, setFollowLoading] = useState(false)
-    const [weatherAccountId, setWeatherAccountId] = useState(null)
     
     // City selection states
     const [selectedCities, setSelectedCities] = useState([])
@@ -102,30 +99,6 @@ const WeatherPage = () => {
     useEffect(() => {
         loadPreferences()
     }, [user, loadPreferences])
-    
-    // Check if user follows Weather account
-    useEffect(() => {
-        const checkFollowStatus = async () => {
-            try {
-                const res = await fetch(
-                    `${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/user/getUserPro/Weather`,
-                    { credentials: 'include' }
-                )
-                const data = await res.json()
-                
-                if (res.ok && user && data._id) {
-                    setWeatherAccountId(data._id)
-                    setIsFollowing(user.following?.includes(data._id))
-                }
-            } catch (error) {
-                console.error('Error checking follow status:', error)
-            }
-        }
-        
-        if (user) {
-            checkFollowStatus()
-        }
-    }, [user])
     
     // Fetch weather function - always fetch all available cities from database to show in table
     const fetchWeather = async (silent = false) => {
@@ -337,49 +310,6 @@ const WeatherPage = () => {
         }
     }
     
-    // Follow/Unfollow Weather account
-    const handleFollowToggle = useCallback(async () => {
-        if (!weatherAccountId) {
-            showToast('Error', 'Weather account not found', 'error')
-            return
-        }
-        
-        try {
-            setFollowLoading(true)
-            
-            const res = await fetch(
-                `${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/user/follow/${weatherAccountId}`,
-                {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    credentials: 'include'
-                }
-            )
-            
-            const data = await res.json()
-            
-            if (res.ok) {
-                setIsFollowing(!isFollowing)
-                if (data.current) {
-                    setUser(data.current)
-                    localStorage.setItem('userInfo', JSON.stringify(data.current))
-                }
-                showToast(
-                    'Success',
-                    isFollowing ? 'Unfollowed Weather channel' : 'Following Weather channel! You\'ll now see updates in your feed',
-                    'success'
-                )
-            } else {
-                showToast('Error', data.error || 'Failed to update follow status', 'error')
-            }
-        } catch (error) {
-            console.error('Error toggling follow:', error)
-            showToast('Error', 'Failed to update follow status', 'error')
-        } finally {
-            setFollowLoading(false)
-        }
-    }, [weatherAccountId, isFollowing, setUser, showToast])
-    
     // Get weather icon URL
     const getWeatherIcon = (iconCode) => {
         return `https://openweathermap.org/img/wn/${iconCode}@2x.png`
@@ -399,21 +329,10 @@ const WeatherPage = () => {
                             </Text>
                         </VStack>
                     </HStack>
-                    
-                    {user && (
-                        <Button
-                            onClick={handleFollowToggle}
-                            isLoading={followLoading}
-                            colorScheme={isFollowing ? 'gray' : 'blue'}
-                            size="md"
-                        >
-                            {isFollowing ? 'Following' : 'Follow Weather'}
-                        </Button>
-                    )}
                 </Flex>
                 
                 {/* Onboarding Alert */}
-                {user && isFollowing && selectedCities.length === 0 && (
+                {user && selectedCities.length === 0 && (
                     <Alert status="info" borderRadius="md">
                         <AlertIcon />
                         <Box>
@@ -429,7 +348,7 @@ const WeatherPage = () => {
                     <Alert status="info" borderRadius="md">
                         <AlertIcon />
                         <AlertDescription>
-                            Login to follow Weather and select your preferred cities
+                            Sign in to select your preferred cities and save them to your feed
                         </AlertDescription>
                     </Alert>
                 )}

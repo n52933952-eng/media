@@ -1110,6 +1110,14 @@ export const initializeSocket = async (app) => {
         }
     }
 
+    /** All tabs for a user join `userSelf:<id>` — prefer this over a single `getUserSocket` id for feed UI events. */
+    const emitToUserSelf = (userId, event, payload) => {
+        const uid = normalizeUserId(userId) || (userId != null && String(userId).trim() !== '' ? String(userId).trim() : null)
+        if (!uid) return
+        const room = getUserSelfRoomId(uid)
+        if (room) io.to(room).emit(event, payload)
+    }
+
     io.on("connection", async (socket) => {
         console.log("user connected", socket.id)
         
@@ -2105,18 +2113,17 @@ export const initializeSocket = async (app) => {
                     { upsert: true, new: true }
                 )
                 // Notify all followers via their personal rooms
+                const streamerNorm = normalizeUserId(streamerId) || String(streamerId)
                 const streamer = await User.findById(streamerId).select('followers').lean()
                 if (streamer?.followers?.length) {
                     for (const followerId of streamer.followers) {
-                        const followerSocket = await getUserSocket(String(followerId))
-                        if (followerSocket?.socketId) {
-                            io.to(followerSocket.socketId).emit('livekit:streamStarted', {
-                                streamerId,
-                                streamerName,
-                                streamerProfilePic,
-                                roomName,
-                            })
-                        }
+                        const fid = normalizeUserId(followerId) || String(followerId)
+                        emitToUserSelf(fid, 'livekit:streamStarted', {
+                            streamerId: streamerNorm,
+                            streamerName,
+                            streamerProfilePic,
+                            roomName,
+                        })
                     }
                 }
                 const streamTimerKey = normalizeUserId(streamerId)
@@ -2124,29 +2131,17 @@ export const initializeSocket = async (app) => {
                     safeClearTimer(livekitStreamTimers, streamTimerKey)
                     livekitStreamTimers.set(streamTimerKey, setTimeout(async () => {
                         try {
-                            const deleteResult = await LiveStream.deleteMany({ streamer: streamerId })
-                            if (!deleteResult?.deletedCount) return
+                            await LiveStream.deleteMany({ streamer: streamerId })
+                            const streamerNorm = normalizeUserId(streamerId) || String(streamerId)
+                            const endPayload = { streamerId: streamerNorm, roomName, reason: 'timeout' }
                             const streamerDoc = await User.findById(streamerId).select('followers').lean()
                             if (streamerDoc?.followers?.length) {
                                 for (const followerId of streamerDoc.followers) {
-                                    const followerSocket = await getUserSocket(String(followerId))
-                                    if (followerSocket?.socketId) {
-                                        io.to(followerSocket.socketId).emit('livekit:streamEnded', {
-                                            streamerId,
-                                            roomName,
-                                            reason: 'timeout',
-                                        })
-                                    }
+                                    const fid = normalizeUserId(followerId) || String(followerId)
+                                    emitToUserSelf(fid, 'livekit:streamEnded', endPayload)
                                 }
                             }
-                            const streamerSocketId = await resolveLiveSocketIdForUser(streamerId)
-                            if (streamerSocketId) {
-                                io.to(streamerSocketId).emit('livekit:streamEnded', {
-                                    streamerId,
-                                    roomName,
-                                    reason: 'timeout',
-                                })
-                            }
+                            emitToUserSelf(streamerNorm, 'livekit:streamEnded', endPayload)
                             console.log(`⏱️ [LiveKit] Stream timed out (25m) streamer:${streamerId}`)
                         } catch (timeoutErr) {
                             console.error('❌ [LiveKit] stream timeout cleanup failed:', timeoutErr.message)
@@ -2171,17 +2166,17 @@ export const initializeSocket = async (app) => {
                 }
                 safeClearTimer(livekitStreamTimers, normalizeUserId(streamerId))
                 // Remove ended live stream from DB so no stale live row remains.
-                const deleteResult = await LiveStream.deleteMany({ streamer: streamerId })
-                if (!deleteResult?.deletedCount) return
+                await LiveStream.deleteMany({ streamer: streamerId })
+                const streamerNorm = normalizeUserId(streamerId) || String(streamerId)
+                const endPayload = { streamerId: streamerNorm, roomName }
                 const streamer = await User.findById(streamerId).select('followers').lean()
                 if (streamer?.followers?.length) {
                     for (const followerId of streamer.followers) {
-                        const followerSocket = await getUserSocket(String(followerId))
-                        if (followerSocket?.socketId) {
-                            io.to(followerSocket.socketId).emit('livekit:streamEnded', { streamerId, roomName })
-                        }
+                        const fid = normalizeUserId(followerId) || String(followerId)
+                        emitToUserSelf(fid, 'livekit:streamEnded', endPayload)
                     }
                 }
+                emitToUserSelf(streamerNorm, 'livekit:streamEnded', endPayload)
                 console.log(`⬛ [LiveKit] Stream ended — streamer:${streamerId}`)
             } catch (err) {
                 console.error('❌ [livekit:endLive]', err.message)

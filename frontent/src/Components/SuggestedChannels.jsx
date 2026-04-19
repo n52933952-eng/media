@@ -259,14 +259,9 @@ const SuggestedChannels = () => {
             maxW="280px"
         >
             {/* Header */}
-            <Box mb={3}>
-                <Text fontSize="sm" fontWeight="bold" color={textColor}>
-                    Explore
-                </Text>
-                <Text fontSize="xs" color={secondaryTextColor} mt={0.5}>
-                    Open full pages — no follow needed
-                </Text>
-            </Box>
+            <Text fontSize="sm" fontWeight="bold" mb={3} color={textColor}>
+                Explore
+            </Text>
             
             {/* Loading */}
             {loading ? (

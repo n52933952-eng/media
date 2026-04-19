@@ -407,24 +407,38 @@ const HomePage = () => {
       getFeedPost(false, { silent: true })
     }
 
+    const normalizeStreamerId = (raw) => {
+      if (raw == null || raw === '') return ''
+      if (typeof raw === 'string') return raw.trim()
+      if (typeof raw === 'object' && raw != null && typeof raw.toString === 'function') {
+        return String(raw.toString()).trim()
+      }
+      return String(raw).trim()
+    }
+
     // Live stream: inject pseudo-post at the top when a followed user goes live
     const handleStreamStarted = (data) => {
+      const sid = normalizeStreamerId(data?.streamerId)
+      if (!sid) return
       const pseudo = {
-        _id:           `live_${data.streamerId}`,
+        _id:           `live_${sid}`,
         isLive:        true,
-        liveStreamId:  data.streamerId,
+        liveStreamId:  sid,
         roomName:      data.roomName,
-        postedBy:      { _id: data.streamerId, name: data.streamerName, profilePic: data.streamerProfilePic },
+        postedBy:      { _id: sid, name: data.streamerName, profilePic: data.streamerProfilePic },
         createdAt:     new Date().toISOString(),
         updatedAt:     new Date().toISOString(),
       }
       setFollowPost(prev => {
-        if (prev.some(p => p._id === pseudo._id)) return prev
+        if (prev.some(p => String(p._id) === pseudo._id)) return prev
         return [pseudo, ...prev]
       })
     }
-    const handleStreamEnded = ({ streamerId }) => {
-      setFollowPost(prev => prev.filter(p => p._id !== `live_${streamerId}`))
+    const handleStreamEnded = (payload) => {
+      const sid = normalizeStreamerId(payload?.streamerId)
+      if (!sid) return
+      const liveId = `live_${sid}`
+      setFollowPost(prev => prev.filter(p => String(p._id) !== liveId))
     }
 
     socket.on('newPost', handleNewPost)

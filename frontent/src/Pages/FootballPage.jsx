@@ -13,7 +13,6 @@ import {
     TabPanels,
     Tab,
     TabPanel,
-    Button,
     useColorModeValue,
     VStack,
     HStack,
@@ -33,9 +32,6 @@ const FootballPage = () => {
     const [upcomingMatches, setUpcomingMatches] = useState([])
     const [finishedMatches, setFinishedMatches] = useState([])
     const [loading, setLoading] = useState(true)
-    const [isFollowing, setIsFollowing] = useState(false)
-    const [followLoading, setFollowLoading] = useState(false)
-    const [footballAccountId, setFootballAccountId] = useState(null)
     const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]) // Today by default
     
     const showToast = useShowToast()
@@ -45,30 +41,6 @@ const FootballPage = () => {
     const liveColor = useColorModeValue('red.500', 'red.400')
     const textColor = useColorModeValue('gray.800', 'white')
     const secondaryTextColor = useColorModeValue('gray.600', 'gray.400')
-    
-    // Check if user follows Football account
-    useEffect(() => {
-        const checkFollowStatus = async () => {
-            try {
-                const res = await fetch(
-                    `${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/user/getUserPro/Football`,
-                    { credentials: 'include' }
-                )
-                const data = await res.json()
-                
-                if (res.ok && user && data._id) {
-                    setFootballAccountId(data._id)
-                    setIsFollowing(user.following?.includes(data._id))
-                }
-            } catch (error) {
-                console.error('Error checking follow status:', error)
-            }
-        }
-        
-        if (user) {
-            checkFollowStatus()
-        }
-    }, [user])
     
     // Fetch matches function (can be called manually or via socket)
     const fetchMatches = async (silent = false) => {
@@ -215,45 +187,6 @@ const FootballPage = () => {
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [socket])
-    
-    // Follow/Unfollow Football account
-    const handleFollowToggle = async () => {
-        if (!footballAccountId) {
-            showToast('Error', 'Football account not found', 'error')
-            return
-        }
-        
-        try {
-            setFollowLoading(true)
-            
-            const res = await fetch(
-                `${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/user/follow/${footballAccountId}`,
-                {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    credentials: 'include'
-                }
-            )
-            
-            const data = await res.json()
-            
-            if (res.ok) {
-                setIsFollowing(!isFollowing)
-                showToast(
-                    'Success',
-                    isFollowing ? 'Unfollowed Football channel' : 'Following Football channel! You\'ll now see updates in your feed',
-                    'success'
-                )
-            } else {
-                showToast('Error', data.error || 'Failed to update follow status', 'error')
-            }
-        } catch (error) {
-            console.error('Error toggling follow:', error)
-            showToast('Error', 'Failed to update follow status', 'error')
-        } finally {
-            setFollowLoading(false)
-        }
-    }
     
     // Format time
     const formatTime = (date) => {
@@ -463,17 +396,6 @@ const FootballPage = () => {
                         </Text>
                     </VStack>
                 </HStack>
-                
-                {user && (
-                    <Button
-                        onClick={handleFollowToggle}
-                        isLoading={followLoading}
-                        colorScheme={isFollowing ? 'gray' : 'blue'}
-                        size="sm"
-                    >
-                        {isFollowing ? 'Following' : 'Follow'}
-                    </Button>
-                )}
             </Flex>
             
             {!user && (
@@ -486,7 +408,7 @@ const FootballPage = () => {
                     borderColor="blue.200"
                 >
                     <Text color="blue.700" fontSize="sm">
-                        💡 Follow the Football channel to get live match updates in your feed!
+                        💡 Sign in to save preferences and use all features.
                     </Text>
                 </Box>
             )}
