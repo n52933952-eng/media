@@ -714,21 +714,23 @@ const fetchAndUpdateLiveMatches = async () => {
                                 const { autoPostTodayMatches } = await import('../controller/football.js')
                                 await autoPostTodayMatches()
                             } else {
-                                todayPost.updatedAt = new Date()
                                 todayPost.footballData = JSON.stringify(liveMatchesOnly)
-                                await todayPost.save()
-                                
-                                // Emit socket event to update frontend ONLY if score or status changed
-                                // This prevents post from moving to top on every time update
                                 if (shouldEmitSocket) {
-                                    const onlineCount = await emitFootballMatchUpdateToFollowers(footballAccount._id, {
-                                        postId: todayPost._id.toString(),
-                                        matchData: liveMatchesOnly,
-                                        updatedAt: new Date(),
-                                    })
+                                    todayPost.updatedAt = new Date()
+                                    await todayPost.save()
+                                    const onlineCount = await emitFootballMatchUpdateToFollowers(
+                                        footballAccount._id,
+                                        {
+                                            postId: todayPost._id.toString(),
+                                            matchData: liveMatchesOnly,
+                                            updatedAt: new Date(),
+                                        }
+                                    )
                                     console.log(
                                         `  Emitted match update to ${onlineCount || 0} online followers (score/status changed)`
                                     )
+                                } else {
+                                    await todayPost.save({ timestamps: false })
                                 }
                             }
                         } else if (shouldEmitSocket) {
