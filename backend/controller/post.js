@@ -1197,19 +1197,19 @@ export const getFeedPost = async(req,res) => {
                 postedBy: s.streamer,
                 createdAt: s.startedAt,
                 updatedAt: s.startedAt,
-                __viewerSortBoostMs: Date.now() + 1e12, // always at top
             }))
 
             const topNormalPosts = feedNormalPosts.slice(0, 12)
-            const combinedPosts = [...livePseudoPosts, ...pinnedPosts, ...topNormalPosts]
-            
-            combinedPosts.sort((a, b) => {
+            // Sort only pinned + normals; live is prepended so it never affects their relative order.
+            const rest = [...pinnedPosts, ...topNormalPosts]
+            rest.sort((a, b) => {
                 const boostA = a && typeof a.__viewerSortBoostMs === 'number' ? a.__viewerSortBoostMs : 0
                 const boostB = b && typeof b.__viewerSortBoostMs === 'number' ? b.__viewerSortBoostMs : 0
                 const dateA = Math.max(new Date(a.updatedAt || a.createdAt).getTime(), boostA)
                 const dateB = Math.max(new Date(b.updatedAt || b.createdAt).getTime(), boostB)
                 return dateB - dateA
             })
+            const combinedPosts = [...livePseudoPosts, ...rest]
             
             const hasMore = feedNormalPosts.length > 12
             
