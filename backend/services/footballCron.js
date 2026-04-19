@@ -246,6 +246,8 @@ const fetchFromAPI = async (endpoint) => {
 // Helper: Update feed post when matches finish (check database for finished matches)
 const updateFeedPostWhenMatchesFinish = async () => {
     try {
+        // Football no longer uses Post documents for the feed — Match collection + sockets only.
+        return
         const footballAccount = await getFootballAccount()
         if (!footballAccount) return
         
@@ -352,6 +354,8 @@ const updateFeedPostWhenMatchesFinish = async () => {
 // Auto-post match update
 const autoPostMatchUpdate = async (match, updateType) => {
     try {
+        // Kickoff/goal/full-time as separate Posts disabled (no Football posts in Post collection).
+        return
         const footballAccount = await getFootballAccount()
         if (!footballAccount) return
         
@@ -626,97 +630,7 @@ const fetchAndUpdateLiveMatches = async () => {
                     console.log(`     Time: ${previousMatch?.fixture?.status?.elapsed || '?'}' → ${updatedMatch.fixture?.status?.elapsed || '?'}' (silent update)`)
                 }
                 
-                // Update post if it exists
-                const footballAccount = await getFootballAccount()
-                if (footballAccount) {
-                    const todayPost = await Post.findOne({
-                        postedBy: footballAccount._id,
-                        footballData: { $exists: true, $ne: null },
-                        createdAt: { 
-                            $gte: new Date(new Date().setHours(0, 0, 0, 0)),
-                            $lte: new Date(new Date().setHours(23, 59, 59, 999))
-                        }
-                    }).sort({ createdAt: -1 })
-                    
-                    if (todayPost) {
-                        let matchDataArray = []
-                        try {
-                            matchDataArray = JSON.parse(todayPost.footballData)
-                        } catch (e) {
-                            console.error('Failed to parse football data:', e)
-                        }
-                        
-                        const matchIndex = findFeedMatchIndex(matchDataArray, fixtureIdNum, updatedMatch)
-                        
-                        if (matchIndex !== -1) {
-                            matchDataArray[matchIndex] = {
-                                ...matchDataArray[matchIndex],
-                                fixtureId: fixtureIdNum,
-                                score: {
-                                    home: updatedMatch.goals?.home ?? 0,
-                                    away: updatedMatch.goals?.away ?? 0
-                                },
-                                status: {
-                                    short: updatedMatch.fixture?.status?.short,
-                                    long: updatedMatch.fixture?.status?.long,
-                                    elapsed: updatedMatch.fixture?.status?.elapsed
-                                }
-                            }
-                            
-                            // Filter out finished matches - only keep live matches
-                            const finishedStatuses = ['FT', 'FINISHED', 'AET', 'PEN', 'CANC', 'POSTP', 'SUSP']
-                            const liveMatchesOnly = matchDataArray.filter(m => {
-                                const status = m.status?.short || m.status
-                                return !finishedStatuses.includes(status)
-                            })
-                            
-                            // If all matches finished, delete the post or create "no matches" post
-                            if (liveMatchesOnly.length === 0) {
-                                console.log('  🏁 All matches finished, deleting feed post...')
-                                await Post.findByIdAndDelete(todayPost._id)
-                                
-                                // Create "no matches" post
-                                const { autoPostTodayMatches } = await import('../controller/football.js')
-                                await autoPostTodayMatches()
-                            } else {
-                                todayPost.updatedAt = new Date()
-                                todayPost.footballData = JSON.stringify(liveMatchesOnly)
-                                await todayPost.save()
-                                
-                                // Emit socket event to update frontend ONLY if score or status changed
-                                // This prevents post from moving to top on every time update
-                                if (shouldEmitSocket) {
-                                    const onlineCount = await emitFootballMatchUpdateToFollowers(footballAccount._id, {
-                                        postId: todayPost._id.toString(),
-                                        matchData: liveMatchesOnly,
-                                        updatedAt: new Date(),
-                                    })
-                                    console.log(
-                                        `  Emitted match update to ${onlineCount || 0} online followers (score/status changed)`
-                                    )
-                                }
-                            }
-                        } else if (shouldEmitSocket) {
-                            try {
-                                todayPost.updatedAt = new Date()
-                                await todayPost.save()
-                                console.warn(
-                                    `  [fetchAndUpdateLiveMatches] No feed JSON row for fixture ${fixtureIdNum}; bumped updatedAt only`
-                                )
-                                const onlineCount = await emitFootballMatchUpdateToFollowers(footballAccount._id, {
-                                    postId: todayPost._id.toString(),
-                                    matchData: JSON.parse(todayPost.footballData || '[]'),
-                                    updatedAt: new Date(),
-                                })
-                                console.log(
-                                    `  Emitted match update to ${onlineCount || 0} online followers (feed bump only)`
-                                )
-                            } catch (e) {
-                                console.error('Failed to bump football feed post after unmatched fixture:', e)
-                            }
-                        }
-                    }
-                }
+                // Feed Post collection updates disabled — `emitFootballPageUpdate` refreshes Football screen.
             }
         }
         

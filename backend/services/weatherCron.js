@@ -39,20 +39,19 @@ const fetchAndUpdateWeather = async () => {
     }
 }
 
-// Post weather update to feed
+// Sync weather from API + prune legacy Post rows (no feed weather posts)
 const postWeatherUpdate = async () => {
     try {
         const startTime = Date.now()
         console.log('📬 [postWeatherUpdate] =================================')
-        console.log('📬 [postWeatherUpdate] Posting weather update to feed...')
+        console.log('📬 [postWeatherUpdate] Syncing weather data (Post collection not used for feed)...')
         console.log(`📬 [postWeatherUpdate] Time: ${new Date().toLocaleString()}`)
         
         await autoPostWeatherUpdate()
         
         const duration = ((Date.now() - startTime) / 1000).toFixed(1)
-        console.log(`✅ [postWeatherUpdate] Weather post updated successfully (took ${duration}s)`)
-        console.log(`📬 [postWeatherUpdate] Followers will see fresh weather data in their feed`)
-        console.log(`📬 [postWeatherUpdate] Next post update: ${new Date(Date.now() + 2 * 60 * 60 * 1000).toLocaleString()} (in 2 hours)`)
+        console.log(`✅ [postWeatherUpdate] Weather sync finished (took ${duration}s)`)
+        console.log(`📬 [postWeatherUpdate] Next sync: ${new Date(Date.now() + 2 * 60 * 60 * 1000).toLocaleString()} (in 2 hours)`)
         console.log('📬 [postWeatherUpdate] =================================')
     } catch (error) {
         console.error('❌ [postWeatherUpdate] Error:', error)
@@ -106,7 +105,7 @@ export const initializeWeatherCron = async () => {
         console.log(`   - API: OpenWeatherMap (api.openweathermap.org/data/2.5)`)
         console.log(`   - Default cities: London, New York, Tokyo, Dubai, Paris`)
         console.log(`   - Weather fetch: Every 1 hour (~24 calls/day)`)
-        console.log(`   - Feed post: Every 2 hours (12 times/day)`)
+        console.log(`   - Weather sync (no feed posts): Every 2 hours`)
         console.log(`   - Total API calls: ~120 calls/day (Free tier: 1,000 calls/day - well under limit)`)
         
         // 1. Fetch weather data every 1 hour
@@ -118,10 +117,9 @@ export const initializeWeatherCron = async () => {
             timezone: "UTC"
         })
         
-        // 2. Post weather update to feed every 2 hours (12 times/day: 00:00, 02:00, 04:00, 06:00, 08:00, 10:00, 12:00, 14:00, 16:00, 18:00, 20:00, 22:00 UTC)
-        // This ensures followers see fresh weather data every 2 hours instead of every 6 hours
+        // 2. Full weather sync every 2 hours (+ socket emit); Post collection not used for feed
         cron.schedule('0 */2 * * *', async () => {
-            console.log(`🌤️ [CRON] Running weather feed post - ${new Date().toLocaleString('en-US', { timeZone: 'UTC' })} UTC`)
+            console.log(`🌤️ [CRON] Running weather sync - ${new Date().toLocaleString('en-US', { timeZone: 'UTC' })} UTC`)
             await postWeatherUpdate()
             await emitWeatherPageUpdate()
         }, {
@@ -134,7 +132,7 @@ export const initializeWeatherCron = async () => {
         setTimeout(async () => {
             console.log('🌤️ [STARTUP] Fetching fresh weather data from API...')
             await fetchAndUpdateWeather()
-            console.log('🌤️ [STARTUP] Creating/updating weather feed post...')
+            console.log('🌤️ [STARTUP] Running weather sync (no feed posts)...')
             await postWeatherUpdate()
             console.log('✅ [STARTUP] Weather initialization complete!')
             console.log(`   Next update: ${new Date(Date.now() + 2 * 60 * 60 * 1000).toLocaleString('en-US', { timeZone: 'UTC' })} UTC (in 2 hours)`)

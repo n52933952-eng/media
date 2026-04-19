@@ -981,50 +981,12 @@ export const getFeedPost = async(req,res) => {
         const limit = parseInt(req.query.limit) || 10 // Default to 10 posts per page
         const skip = parseInt(req.query.skip) || 0 // Skip for pagination
         
-        // Get Football account and check if user follows it
+        // Football / Weather are not injected into the home feed — users open those from their screens.
+        // Still resolve ids so those system accounts stay out of the "normal" followed-post query.
         const footballAccount = await User.findOne({ username: 'Football' }).select('_id')
-        // Check if user follows Football - convert all to strings for reliable comparison
-        const followsFootball = footballAccount && following.some(followId => {
-            return followId.toString() === footballAccount._id.toString()
-        })
-        // If user follows Football, capture *follow time* so Football post can sort as "just added"
-        // without mutating the Football post document for all users.
-        let footballFollowedAtMs = 0
-        if (followsFootball && footballAccount) {
-            try {
-                const footballFollowDoc = await Follow.findOne({ followerId: userId, followeeId: footballAccount._id })
-                    .select('createdAt')
-                    .lean()
-                if (footballFollowDoc?.createdAt) {
-                    footballFollowedAtMs = new Date(footballFollowDoc.createdAt).getTime()
-                }
-            } catch (_) {
-                footballFollowedAtMs = 0
-            }
-        }
-
-        // Get Weather account and check if user follows it
         const weatherAccount = await User.findOne({ username: 'Weather' }).select('_id')
-        const followsWeather = weatherAccount && following.some(followId => {
-            return followId.toString() === weatherAccount._id.toString()
-        })
-        let weatherFollowedAtMs = 0
-        if (followsWeather && weatherAccount) {
-            try {
-                const weatherFollowDoc = await Follow.findOne({ followerId: userId, followeeId: weatherAccount._id })
-                    .select('createdAt')
-                    .lean()
-                if (weatherFollowDoc?.createdAt) {
-                    weatherFollowedAtMs = new Date(weatherFollowDoc.createdAt).getTime()
-                }
-            } catch (_) {
-                weatherFollowedAtMs = 0
-            }
-        }
-        
-        // Strategy: Always include Football and channel posts in first page, sorted with normal posts
-        // For first page (skip=0): Get normal posts + always include Football + channels
-        // For subsequent pages: Get normal posts only (Football and channels already shown on page 1)
+
+        // Strategy: First page = live + channel cards + normal slice; later pages = normal only.
         
         // SCALABLE: Single $in query replaces N per-user queries
         const followedUserIds = following.filter(id => id.toString() !== userId.toString())
@@ -1061,32 +1023,6 @@ export const getFeedPost = async(req,res) => {
             .sort({ createdAt: -1 })
             .limit(20) // Get all channel posts user added
         
-        // Get Football post if user follows Football
-        // Get the latest post from Football account (works for both live matches and "no matches" posts)
-        let footballPostsPromise = Promise.resolve([])
-        if (followsFootball && footballAccount) {
-            footballPostsPromise = Post.find({ 
-                postedBy: footballAccount._id
-            })
-                .populate("postedBy", "-password")
-                .populate("contributors", "username profilePic name")
-                .sort({ createdAt: -1 })
-                .limit(1)
-        }
-
-        // Get Weather post if user follows Weather (latest 1)
-        let weatherPostsPromise = Promise.resolve([])
-        if (followsWeather && weatherAccount) {
-            weatherPostsPromise = Post.find({
-                postedBy: weatherAccount._id,
-                weatherData: { $exists: true, $ne: null },
-            })
-                .populate("postedBy", "-password")
-                .populate("contributors", "username profilePic name")
-                .sort({ updatedAt: -1, createdAt: -1 })
-                .limit(1)
-        }
-        
         // Collaborative posts where the current user is a contributor (even if they don't follow the author)
         const contributorPostsPromise = Post.find({
             isCollaborative: true,
@@ -1097,21 +1033,15 @@ export const getFeedPost = async(req,res) => {
             .sort({ updatedAt: -1, createdAt: -1 })
             .limit(40)
 
-        // Wait for all posts to be fetched
-        const [normalPosts, channelPosts, footballPosts, weatherPosts, contributorPosts] = await Promise.all([
+        const [normalPosts, channelPosts, contributorPosts] = await Promise.all([
             normalPostsPromise,
             channelPostsPromise,
-            footballPostsPromise,
-            weatherPostsPromise,
             contributorPostsPromise
         ])
         
-        // SIMPLE APPROACH: 
-        // 1. Get 3 newest posts from each followed user
-        // 2. Combine with Football and channel posts
-        // 3. Sort ALL together by createdAt (newest first)
-        // 4. First page: Football + Channels + 12 normal posts (all sorted together)
-        // 5. Subsequent pages: Only normal posts
+        // 1) Cap to 3 newest posts per followed user (after single DB query)
+        // 2) Merge with contributor posts, dedupe, sort by activity
+        // 3) Page 1: live + channel cards + first slice of normals; page 2+: normals only
         
         // Cap to 3 newest posts per user (in JS, after single DB query)
         const perUserMap = new Map()
@@ -1161,20 +1091,8 @@ export const getFeedPost = async(req,res) => {
             return hasAnotherContributor(post, viewerIdStr)
         })
 
-        // Build pinned posts (Football + Weather + Channels) — always sent on every page
-        // Mobile deduplication handles not showing them twice
-        const pinnedPosts = []
-        if (footballPosts.length > 0) {
-            const fp = footballPosts[0]
-            try { if (footballFollowedAtMs) fp.__viewerSortBoostMs = footballFollowedAtMs } catch (_) {}
-            pinnedPosts.push(fp)
-        }
-        if (weatherPosts.length > 0) {
-            const wp = weatherPosts[0]
-            try { if (weatherFollowedAtMs) wp.__viewerSortBoostMs = weatherFollowedAtMs } catch (_) {}
-            pinnedPosts.push(wp)
-        }
-        pinnedPosts.push(...channelPosts)
+        // Pinned strip on page 1: user-added channel posts only (not Football/Weather — those have their own screens)
+        const pinnedPosts = [...channelPosts]
 
         // Page 1: live streams + pinned + first 12 normal posts
         if (skip === 0) {
@@ -1200,8 +1118,7 @@ export const getFeedPost = async(req,res) => {
             }))
 
             const topNormalPosts = feedNormalPosts.slice(0, 12)
-            // Pinned (Football / Weather / channels) must not compete with normal posts — otherwise
-            // Football can sink below fresher normals when multiple lives prepend. Sort each group only.
+            // Pinned (channels only) vs normals: sort each group separately; live prepended.
             const feedSortKey = (a) => {
                 const boost = a && typeof a.__viewerSortBoostMs === 'number' ? a.__viewerSortBoostMs : 0
                 return Math.max(new Date(a.updatedAt || a.createdAt).getTime(), boost)
@@ -1220,7 +1137,7 @@ export const getFeedPost = async(req,res) => {
             })
         }
         
-        // Subsequent pages: normal posts only (Football/Weather/Channels already on page 1, stay in place)
+        // Subsequent pages: normal posts only (channel cards already on page 1)
         const startIndex = skip
         const endIndex = startIndex + limit
         const paginatedNormal = feedNormalPosts.slice(startIndex, endIndex)
