@@ -34,6 +34,13 @@ import PrivacyPolicy from './Pages/PrivacyPolicy'
 import TermsOfService from './Pages/TermsOfService'
 import WelcomePage from './Pages/WelcomePage'
 import AboutPage from './Pages/AboutPage'
+import {
+  ChessSeoPage,
+  CardSeoPage,
+  RaceSeoPage,
+  LiveSeoPage,
+  ChatSeoPage,
+} from './Pages/FeatureSeoPages'
 import CookieConsentBanner from './Components/CookieConsentBanner'
 import AdSenseLoader from './Components/AdSenseLoader'
 
@@ -82,7 +89,7 @@ const AppContent = () => {
   // Check if current path is a user page (e.g., /username, but not /username/post/123 or other routes)
   const pathParts = location.pathname.split('/').filter(Boolean)
   const isUserPage = pathParts.length === 1 &&
-                     !['sign', 'update', 'football', 'weather', 'news', 'notifications', 'chess', 'card', 'race', 'home', 'messages', 'welcome', 'about', 'privacy', 'terms'].includes(pathParts[0])
+                     !['sign', 'update', 'football', 'weather', 'news', 'notifications', 'chess', 'card', 'race', 'home', 'messages', 'welcome', 'about', 'privacy', 'terms', 'live', 'chat'].includes(pathParts[0])
   // Check if it's the current user's own page
   const isOwnUserPage = isUserPage && user && pathParts[0] === user.username
 
@@ -194,7 +201,13 @@ const AppContent = () => {
                 <Route path="/about" element={<AboutPage />} />
                 <Route path="/privacy" element={<PrivacyPolicy />} />
                 <Route path="/terms" element={<TermsOfService />} />
-                <Route path="/:username" element={user ?<UserPage/> : <Navigate to="/"/>}/>
+                <Route path="/chess" element={<ChessSeoPage />} />
+                <Route path="/card" element={<CardSeoPage />} />
+                <Route path="/race" element={<RaceSeoPage />} />
+                <Route path="/chat" element={<ChatSeoPage />} />
+                <Route path="/live/broadcast" element={user ? <LiveStreamPage /> : <Navigate to="/" />} />
+                <Route path="/live/:streamerId" element={user ? <LiveStreamPage /> : <Navigate to="/" />} />
+                <Route path="/live" element={<LiveSeoPage />} />
                 <Route path="/" element={!user ? <Login/>  : <Navigate to="/home" />}/>
                 <Route path="/sign" element={<SignUp/>}/>
                 <Route path="/update" element={user ? <UpdateProfile/> : <Navigate  to="/"/>}/>
@@ -202,10 +215,9 @@ const AppContent = () => {
                 <Route path="/weather" element={<WeatherPage/>} />
                 <Route path="/news" element={<NewsPage/>} />
                 <Route path="/notifications" element={user ? <NotificationsPage /> : <Navigate to="/" />} />
+                <Route path="/:username" element={user ?<UserPage/> : <Navigate to="/"/>}/>
                 <Route path="/chess/:opponentId" element={user ? <ChessGamePage /> : <Navigate to="/" />} />
                 <Route path="/card/:opponentId" element={user ? <CardGamePage /> : <Navigate to="/" />} />
-                <Route path="/live/broadcast" element={user ? <LiveStreamPage /> : <Navigate to="/" />} />
-                <Route path="/live/:streamerId" element={user ? <LiveStreamPage /> : <Navigate to="/" />} />
                 <Route path="/:username/post/:id" element={<PostPage/>}/>
               </Routes>
               {user && isOwnUserPage && <CreatePost/>}

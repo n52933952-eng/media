@@ -55,13 +55,22 @@ function playsocialSeoPlugin(siteUrl) {
     closeBundle() {
       if (!base) return
       const outDir = path.resolve(__dirname, 'dist')
-      const urls = ['/', '/welcome', '/about', '/privacy', '/terms', '/sign']
+      const urlEntries = [
+        ['/', '1.0', 'weekly'],
+        ['/welcome', '0.9', 'weekly'],
+        ['/about', '0.85', 'weekly'],
+        ['/chess', '0.75', 'weekly'],
+        ['/card', '0.75', 'weekly'],
+        ['/race', '0.75', 'weekly'],
+        ['/live', '0.75', 'weekly'],
+        ['/chat', '0.75', 'weekly'],
+        ['/privacy', '0.6', 'monthly'],
+        ['/terms', '0.6', 'monthly'],
+        ['/sign', '0.6', 'monthly'],
+      ]
       const today = new Date().toISOString().slice(0, 10)
-      const body = urls
-        .map((p) => {
-          const priority =
-            p === '/' ? '1.0' : p === '/welcome' ? '0.9' : p === '/about' ? '0.85' : '0.6'
-          const changefreq = p === '/' || p === '/welcome' || p === '/about' ? 'weekly' : 'monthly'
+      const body = urlEntries
+        .map(([p, priority, changefreq]) => {
           return `  <url>\n    <loc>${base}${p}</loc>\n    <lastmod>${today}</lastmod>\n    <changefreq>${changefreq}</changefreq>\n    <priority>${priority}</priority>\n  </url>`
         })
         .join('\n')

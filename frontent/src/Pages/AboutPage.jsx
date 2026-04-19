@@ -101,6 +101,28 @@ export default function AboutPage() {
           </Button>
         </VStack>
 
+        <Text fontSize="xs" color={muted} textAlign="center" lineHeight="tall">
+          <ChakraLink as={Link} to="/chess" color="blue.400" mr={2}>
+            Chess
+          </ChakraLink>
+          ·{' '}
+          <ChakraLink as={Link} to="/card" color="blue.400" mx={2}>
+            Cards
+          </ChakraLink>
+          ·{' '}
+          <ChakraLink as={Link} to="/race" color="blue.400" mx={2}>
+            Racing
+          </ChakraLink>
+          ·{' '}
+          <ChakraLink as={Link} to="/live" color="blue.400" mx={2}>
+            Live
+          </ChakraLink>
+          ·{' '}
+          <ChakraLink as={Link} to="/chat" color="blue.400" ml={2}>
+            Chat
+          </ChakraLink>
+        </Text>
+
         <Text fontSize="sm" color={muted} textAlign="center">
           <ChakraLink as={Link} to="/welcome" color="blue.400" mr={3}>
             Welcome
