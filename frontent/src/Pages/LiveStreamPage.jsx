@@ -287,6 +287,16 @@ const LiveStreamPage = () => {
 
     const join = async () => {
       try {
+        const statusRes = await fetch(`${API_BASE}/api/call/livestream/${encodeURIComponent(streamerId)}/status`, {
+          credentials: 'include',
+        });
+        if (statusRes.ok && mounted) {
+          const st = await statusRes.json().catch(() => ({}));
+          if (st && st.active === false) {
+            if (mounted) exitLivePage();
+            return;
+          }
+        }
         const { token, livekitUrl } = await fetchToken(streamerId, 'viewer');
         if (!mounted) return;
         const room = new Room({ adaptiveStream: true, dynacast: true });
@@ -349,8 +359,9 @@ const LiveStreamPage = () => {
   // ── socket: stream ended (viewer) ─────────────────────────────────────────
   useEffect(() => {
     if (!socket || isBroadcaster) return;
-    const onEnded = ({ streamerId: sid }) => {
-      if (sid === streamerId && !closingRef.current) {
+    const onEnded = (payload) => {
+      const sid = payload?.streamerId != null ? String(payload.streamerId) : '';
+      if (sid && sid === String(streamerId) && !closingRef.current) {
         closingRef.current = true;
         disconnectRoom();
         exitLivePage();
@@ -393,6 +404,23 @@ const LiveStreamPage = () => {
       disconnectRoom();
     };
   }, [disconnectRoom]);
+
+  // Tab close / refresh while broadcasting: best-effort notify server (full cleanup also runs on socket disconnect).
+  useEffect(() => {
+    const onBeforeUnload = () => {
+      if (isBroadcasterRef.current && isLiveRef.current && socketRef.current && !liveEndedRef.current) {
+        liveEndedRef.current = true;
+        try {
+          socketRef.current.emit('livekit:endLive', {
+            streamerId: userIdRef.current,
+            roomName: roomNameRef.current,
+          });
+        } catch (_) {}
+      }
+    };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => window.removeEventListener('beforeunload', onBeforeUnload);
+  }, []);
 
   // ── render ─────────────────────────────────────────────────────────────────
   return (

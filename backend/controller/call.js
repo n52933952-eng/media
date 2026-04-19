@@ -1,5 +1,6 @@
 import User from '../models/user.js'
 import Conversation from '../models/conversation.js'
+import LiveStream from '../models/liveStream.js'
 import { getIO, getRecipientSockedId } from '../socket/socket.js'
 import * as redisService from '../services/redis.js'
 import { AccessToken } from 'livekit-server-sdk'
@@ -103,6 +104,24 @@ export const getLiveKitToken = async (req, res) => {
     } catch (error) {
         console.error('❌ [getLiveKitToken]', error.message)
         return res.status(500).json({ error: 'Failed to generate LiveKit token' })
+    }
+}
+
+/**
+ * GET /api/call/livestream/:streamerId/status
+ * Lets viewers verify Mongo still has an active row before joining LiveKit (avoids "Connecting" when DB was cleared).
+ */
+export const getLiveStreamStatus = async (req, res) => {
+    try {
+        const { streamerId } = req.params
+        if (!streamerId) {
+            return res.status(400).json({ error: 'streamerId required' })
+        }
+        const doc = await LiveStream.findOne({ streamer: streamerId }).lean()
+        return res.status(200).json({ active: !!doc, roomName: doc?.roomName || null })
+    } catch (error) {
+        console.error('❌ [getLiveStreamStatus]', error.message)
+        return res.status(500).json({ error: 'Failed to read live stream status' })
     }
 }
 

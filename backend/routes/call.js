@@ -1,5 +1,5 @@
 import express from 'express'
-import { cancelCall, getIceServers, getLiveKitToken } from '../controller/call.js'
+import { cancelCall, getIceServers, getLiveKitToken, getLiveStreamStatus } from '../controller/call.js'
 import protectRoute from '../middlware/protectRoute.js'
 
 const router = express.Router()
@@ -8,6 +8,7 @@ const router = express.Router()
 // POST /api/call/token  →  returns { token, roomName, livekitUrl }
 // Used for: direct calls, group calls, live streams, viewers
 router.post('/token', protectRoute, getLiveKitToken)
+router.get('/livestream/:streamerId/status', protectRoute, getLiveStreamStatus)
 
 // ── Legacy / kept for compatibility ─────────────────────────────────────────
 // ICE servers still returned (legacy clients / fallback)

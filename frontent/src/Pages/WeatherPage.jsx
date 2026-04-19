@@ -274,9 +274,9 @@ const WeatherPage = () => {
             const data = await res.json()
             
             if (res.ok) {
-                showToast('Success', 'Preferences saved! Your feed will now show weather for your selected cities.', 'success')
+                showToast('Success', 'Your cities have been saved.', 'success')
                 
-                // Clear all weather caches immediately so feed post updates
+                // Clear all weather caches so UI and weather cards refresh
                 if (window.weatherCache) {
                     window.weatherCache.data = null
                     window.weatherCache.timestamp = null
@@ -294,11 +294,10 @@ const WeatherPage = () => {
                     console.error('Error clearing localStorage cache:', e)
                 }
                 
-                // Trigger feed refresh - dispatch event for Post components
                 window.dispatchEvent(new CustomEvent('weatherPreferencesUpdated', { 
                     detail: { cities: selectedCities } 
                 }))
-                console.log('✅ [WeatherPage] Preferences saved, cache cleared, feed will update')
+                console.log('✅ [WeatherPage] Preferences saved, cache cleared')
             } else {
                 showToast('Error', data.error || 'Failed to save preferences', 'error')
             }
@@ -325,7 +324,7 @@ const WeatherPage = () => {
                         <VStack align="start" spacing={0}>
                             <Heading size="lg">World Temperatures — Weather Around The World</Heading>
                             <Text fontSize="sm" color={secondaryTextColor}>
-                                Select your cities to see personalized weather in your feed
+                                Search and save up to 10 cities for your personal weather list
                             </Text>
                         </VStack>
                     </HStack>
@@ -338,7 +337,7 @@ const WeatherPage = () => {
                         <Box>
                             <AlertTitle>Select your cities!</AlertTitle>
                             <AlertDescription>
-                                Search and select cities below to see personalized weather in your feed
+                                Search and add cities below, then tap Save cities to keep your list
                             </AlertDescription>
                         </Box>
                     </Alert>
@@ -348,7 +347,7 @@ const WeatherPage = () => {
                     <Alert status="info" borderRadius="md">
                         <AlertIcon />
                         <AlertDescription>
-                            Sign in to select your preferred cities and save them to your feed
+                            Sign in to select and save your preferred cities
                         </AlertDescription>
                     </Alert>
                 )}
@@ -432,7 +431,7 @@ const WeatherPage = () => {
                                         onClick={handleSavePreferences}
                                         isLoading={saving}
                                     >
-                                        Save & Update Feed
+                                        Save cities
                                     </Button>
                                 )}
                             </Flex>

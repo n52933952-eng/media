@@ -1118,6 +1118,13 @@ export const initializeSocket = async (app) => {
         if (room) io.to(room).emit(event, payload)
     }
 
+    /** Broadcaster refresh/kill-tab without `livekit:endLive` — clean Mongo + notify after grace; reconnect cancels. */
+    const LIVE_STREAM_DISCONNECT_GRACE_MS = (() => {
+        const n = Number(process.env.LIVE_STREAM_DISCONNECT_GRACE_MS || 6000)
+        return Number.isFinite(n) && n >= 2000 && n <= 60000 ? n : 6000
+    })()
+    const liveStreamDisconnectTimers = new Map()
+
     io.on("connection", async (socket) => {
         console.log("user connected", socket.id)
         
@@ -1143,6 +1150,13 @@ export const initializeSocket = async (app) => {
             const selfRoom = getUserSelfRoomId(userId)
             if (selfRoom) {
                 socket.join(selfRoom)
+            }
+            {
+                const lsUid = normalizeUserId(userId)
+                if (lsUid && liveStreamDisconnectTimers.has(lsUid)) {
+                    clearTimeout(liveStreamDisconnectTimers.get(lsUid))
+                    liveStreamDisconnectTimers.delete(lsUid)
+                }
             }
             console.log(`✅ [socket] User ${userId} added to socket map (socket: ${socket.id})`)
 
@@ -3645,6 +3659,45 @@ export const initializeSocket = async (app) => {
                 }
             } catch (e) {
                 console.error('❌ [socket] Failed to emit presenceUpdate (offline):', e.message)
+            }
+
+            // LiveKit broadcast: streamer closed tab / lost socket without `livekit:endLive` — clear Mongo + notify after grace (reconnect cancels).
+            if (disconnectedUserId) {
+                const lsUid = normalizeUserId(disconnectedUserId)
+                if (lsUid) {
+                    const prevLs = liveStreamDisconnectTimers.get(lsUid)
+                    if (prevLs) clearTimeout(prevLs)
+                    liveStreamDisconnectTimers.set(
+                        lsUid,
+                        setTimeout(async () => {
+                            liveStreamDisconnectTimers.delete(lsUid)
+                            try {
+                                const sock = await getUserSocket(lsUid)
+                                if (sock?.socketId) return
+                                const active = await LiveStream.findOne({ streamer: lsUid }).lean()
+                                if (!active) return
+                                const roomNm = active.roomName || ''
+                                safeClearTimer(livekitStreamTimers, lsUid)
+                                await LiveStream.deleteMany({ streamer: lsUid })
+                                const streamerNorm = normalizeUserId(lsUid) || String(lsUid)
+                                const endPayload = { streamerId: streamerNorm, roomName: roomNm, reason: 'disconnect' }
+                                const streamerDoc = await User.findById(lsUid).select('followers').lean()
+                                if (streamerDoc?.followers?.length) {
+                                    for (const followerId of streamerDoc.followers) {
+                                        const fid = normalizeUserId(followerId) || String(followerId)
+                                        emitToUserSelf(fid, 'livekit:streamEnded', endPayload)
+                                    }
+                                }
+                                emitToUserSelf(streamerNorm, 'livekit:streamEnded', endPayload)
+                                console.log(
+                                    `⬛ [LiveKit] Live stream cleaned up after socket loss (${LIVE_STREAM_DISCONNECT_GRACE_MS}ms) — streamer:${lsUid}`
+                                )
+                            } catch (e) {
+                                console.error('❌ [LiveKit] live stream disconnect cleanup failed:', e?.message)
+                            }
+                        }, LIVE_STREAM_DISCONNECT_GRACE_MS)
+                    )
+                }
             }
 
             // Call teardown on disconnect: wait for reconnect (ringing / WebRTC churn) before clearing Redis + FCM.
