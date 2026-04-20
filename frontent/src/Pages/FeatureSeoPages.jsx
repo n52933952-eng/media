@@ -1,4 +1,3 @@
-import { useEffect } from 'react'
 import {
   Box,
   Heading,
@@ -13,19 +12,18 @@ import {
 } from '@chakra-ui/react'
 import { Link } from 'react-router-dom'
 import { CheckIcon } from '@chakra-ui/icons'
+import { usePublicSeo } from '../hooks/usePublicSeo'
 
-function SeoFeatureShell({ pageTitle, h1, intro, points }) {
+function SeoFeatureShell({ pageTitle, h1, intro, points, path }) {
   const muted = useColorModeValue('gray.600', 'gray.400')
   const cardBg = useColorModeValue('white', 'gray.900')
   const border = useColorModeValue('gray.200', 'whiteAlpha.200')
 
-  useEffect(() => {
-    const prev = document.title
-    document.title = pageTitle
-    return () => {
-      document.title = prev
-    }
-  }, [pageTitle])
+  usePublicSeo({
+    title: pageTitle,
+    description: intro,
+    path,
+  })
 
   return (
     <Box py={10} px={4}>
@@ -92,6 +90,7 @@ export function ChessSeoPage() {
       pageTitle="Play chess online with friends — playsocial"
       h1="Chess with friends on playsocial"
       intro="Play chess online with people you follow. Send a challenge from the app, pick your color, and play in real time. playsocial combines a social feed and messaging with built-in chess — no separate chess account needed."
+      path="/chess"
       points={[
         'Challenge friends to a rated-style match from your connections.',
         'Play in the browser with an interactive board while you chat elsewhere in the app.',
@@ -108,6 +107,7 @@ export function CardSeoPage() {
       pageTitle="Go Fish card game online with friends — playsocial"
       h1="Go Fish & card games on playsocial"
       intro="Play Go Fish with friends on playsocial: challenge someone online, accept from notifications, and play a full card session inside the app. It’s part of the same social experience as your feed and chat."
+      path="/card"
       points={[
         'Challenge and accept card games through the app’s real-time system.',
         'Stay connected with chat and calls while you play.',
@@ -124,6 +124,7 @@ export function RaceSeoPage() {
       pageTitle="Street racing game with friends — playsocial"
       h1="Racing challenges on playsocial"
       intro="Race friends in playsocial’s street-style racing game: send a challenge, join the room, and compete in real time. Racing lives next to your social feed, chess, and cards — one account for everything."
+      path="/race"
       points={[
         'Challenge online friends when both of you are available.',
         'Full-screen race experience with app-wide notifications.',
@@ -140,6 +141,7 @@ export function LiveSeoPage() {
       pageTitle="Go live & live streaming to followers — playsocial"
       h1="Go live on playsocial"
       intro="Broadcast live to your followers on playsocial: start a live stream from the app, let viewers join watch, and stay part of the same community as your posts and stories. Live streaming is integrated with your social graph — not a separate platform."
+      path="/live"
       points={[
         'Stream to people who follow you; discovery through your feed and channels.',
         'Works with your playsocial profile and notifications.',
@@ -156,6 +158,7 @@ export function ChatSeoPage() {
       pageTitle="Group chat & messaging — playsocial"
       h1="Chat and group chat on playsocial"
       intro="Message friends with direct chats and group conversations on playsocial. Create groups, share updates, and jump into voice or video calls when you need more than text. Your inbox sits alongside the feed, games, and live — one place for social life."
+      path="/chat"
       points={[
         'Direct messages and group threads with real-time delivery.',
         'Group spaces for teams, friends, or communities you build.',

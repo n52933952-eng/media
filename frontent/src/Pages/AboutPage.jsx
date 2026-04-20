@@ -1,7 +1,7 @@
-import { useEffect } from 'react'
 import { Box, Heading, Text, VStack, Button, useColorModeValue, Link as ChakraLink, List, ListItem, ListIcon } from '@chakra-ui/react'
 import { Link } from 'react-router-dom'
 import { CheckIcon } from '@chakra-ui/icons'
+import { usePublicSeo } from '../hooks/usePublicSeo'
 
 const PAGE_TITLE = 'About playsocial — social feed, live stream, chat & games'
 
@@ -12,14 +12,12 @@ export default function AboutPage() {
   const muted = useColorModeValue('gray.600', 'gray.400')
   const cardBg = useColorModeValue('white', 'gray.900')
   const border = useColorModeValue('gray.200', 'whiteAlpha.200')
-
-  useEffect(() => {
-    const prev = document.title
-    document.title = PAGE_TITLE
-    return () => {
-      document.title = prev
-    }
-  }, [])
+  usePublicSeo({
+    title: PAGE_TITLE,
+    description:
+      'Learn what playsocial offers: feed, stories, messages, voice and video calls, live streaming, and multiplayer games like chess, cards, and racing.',
+    path: '/about',
+  })
 
   return (
     <Box py={10} px={4}>

@@ -1,5 +1,6 @@
 import { Box, Heading, Text, VStack, Button, useColorModeValue, Link as ChakraLink } from '@chakra-ui/react'
 import { Link } from 'react-router-dom'
+import { usePublicSeo } from '../hooks/usePublicSeo'
 
 /**
  * Public landing copy for crawlers and shares. Does not replace / (login) — link here from marketing or footer.
@@ -8,6 +9,12 @@ export default function WelcomePage() {
   const muted = useColorModeValue('gray.600', 'gray.400')
   const cardBg = useColorModeValue('white', 'gray.900')
   const border = useColorModeValue('gray.200', 'whiteAlpha.200')
+  usePublicSeo({
+    title: 'playsocial — social app with chat, live, calls and games',
+    description:
+      'playsocial combines social feed, direct messages, voice and video calls, live streaming, and games like chess, cards, and racing in one app.',
+    path: '/welcome',
+  })
 
   return (
     <Box py={10} px={4}>
