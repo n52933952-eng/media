@@ -3854,8 +3854,15 @@ export const initializeSocket = async (app) => {
                 setTimeout(async () => {
                     const stillInRace = await hasActiveRaceGame(disconnectedUserId)
                     const reconnected = await getUserSocket(disconnectedUserId)
-                    if (stillInRace && reconnected) {
-                        console.log(`✅ Racer ${disconnectedUserId} reconnected — race continues!`)
+                    // A fast refresh can reconnect on Home page (socket alive) without rejoining race room.
+                    // Only keep race alive when the reconnected socket is actually back in the race room.
+                    let rejoinedRaceRoom = false
+                    if (raceRoomId && reconnected?.socketId) {
+                        const raceRoomSockets = io.sockets.adapter.rooms.get(raceRoomId)
+                        rejoinedRaceRoom = !!(raceRoomSockets && raceRoomSockets.has(reconnected.socketId))
+                    }
+                    if (stillInRace && reconnected && rejoinedRaceRoom) {
+                        console.log(`✅ Racer ${disconnectedUserId} reconnected in race room — race continues!`)
                         return
                     }
                     console.log(`❌ Racer ${disconnectedUserId} did not reconnect — ending race`)
@@ -3866,6 +3873,20 @@ export const initializeSocket = async (app) => {
                         const sp2 = normalizeUserId(state.player2) || state.player2
                         const dNorm = normalizeUserId(disconnectedUserId) || disconnectedUserId
                         otherPlayerId = sp1 === dNorm ? sp2 : sp1
+                    }
+                    // Fallback: parse race room id when state is missing (e.g. prior partial cleanup)
+                    if (!otherPlayerId && raceRoomId && typeof raceRoomId === 'string') {
+                        const m = raceRoomId.match(/^race_(.+?)_(.+?)_\d+$/)
+                        if (m) {
+                            const p1 = normalizeUserId(m[1]) || m[1]
+                            const p2 = normalizeUserId(m[2]) || m[2]
+                            const dNorm = normalizeUserId(disconnectedUserId) || disconnectedUserId
+                            otherPlayerId = p1 === dNorm ? p2 : p1
+                        }
+                    }
+                    // Notify everyone still in that race room first (spectators + opponent if present)
+                    if (raceRoomId) {
+                        io.to(raceRoomId).emit('raceOpponentLeft')
                     }
                     if (otherPlayerId) {
                         const otherData = await getUserSocket(otherPlayerId)
