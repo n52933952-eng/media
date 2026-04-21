@@ -394,6 +394,24 @@ export default function RacingGamePage() {
     }
   }, [socket, loading, user?._id])
 
+  // Keep race room membership alive during gameplay.
+  // Some devices/browsers can briefly drop room membership around media/call operations.
+  // A light rejoin heartbeat prevents false "opponent left" cleanup.
+  useEffect(() => {
+    if (!socket) return
+    const tick = () => {
+      try {
+        if (raceExitHandledRef.current) return
+        const rid = roomIdRef.current || localStorage.getItem('raceRoomId')
+        if (!rid || !socket.connected) return
+        socket.emit('joinRaceRoom', { roomId: rid })
+      } catch (_) { /* ignore */ }
+    }
+    tick()
+    const id = window.setInterval(tick, 3000)
+    return () => window.clearInterval(id)
+  }, [socket])
+
   // ─── Opponent never joins — avoid infinite "Waiting..." ─────────────────────
   useEffect(() => {
     if (loading || !waitingOpp || raceExitHandledRef.current) return
