@@ -570,7 +570,7 @@ export default function RacingGamePage() {
   useEffect(() => {
     const music = raceMusicRef.current
     if (!music) return
-    music.volume = callActive ? 0.12 : 0.4
+    music.volume = callActive ? 0.06 : 0.4
   }, [callActive])
 
   // ─── Keyboard controls ──────────────────────────────────────────────────────
@@ -1275,6 +1275,12 @@ export default function RacingGamePage() {
   const handleGoHome = () => {
     exitRaceAndGoHome()
   }
+
+  // Hard-stop voice when race finishes to avoid extra LiveKit usage.
+  useEffect(() => {
+    if (!raceFinished) return
+    disconnectRaceVoice()
+  }, [raceFinished, disconnectRaceVoice])
 
   // ─── Render ─────────────────────────────────────────────────────────────────
   return (
