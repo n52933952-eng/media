@@ -733,7 +733,8 @@ export const createGroup = async (req, res) => {
     const adminId = req.user._id
     const { groupName, participantIds } = req.body
 
-    if (!groupName || typeof groupName !== 'string' || !groupName.trim()) {
+    const normalizedGroupName = typeof groupName === 'string' ? groupName.trim() : ''
+    if (!normalizedGroupName) {
       return res.status(400).json({ error: 'groupName is required' })
     }
     if (!Array.isArray(participantIds) || participantIds.length < 1) {
@@ -744,10 +745,22 @@ export const createGroup = async (req, res) => {
       .filter(id => mongoose.isValidObjectId(id))
       .map(id => new mongoose.Types.ObjectId(id))
 
+    // Idempotency guard: avoid creating duplicate groups from rapid double-submit.
+    const existing = await Conversation.findOne({
+      isGroup: true,
+      admin: adminId,
+      groupName: normalizedGroupName,
+      participants: { $all: uniqueIds },
+      $expr: { $eq: [{ $size: '$participants' }, uniqueIds.length] },
+    }).populate('participants', 'username profilePic name')
+    if (existing) {
+      return res.status(200).json(existing)
+    }
+
     const conversation = await Conversation.create({
       participants: uniqueIds,
       isGroup: true,
-      groupName: groupName.trim(),
+      groupName: normalizedGroupName,
       admin: adminId,
       lastMessage: { text: '', sender: adminId },
     })
@@ -780,7 +793,7 @@ export const createGroup = async (req, res) => {
       const { sendGroupAddedNotification } = await import('../services/pushNotifications.js')
       await Promise.allSettled(
         participantIds.map(uid =>
-          sendGroupAddedNotification(idStr(uid), req.user.name || req.user.username, groupName.trim(), idStr(conversation._id))
+          sendGroupAddedNotification(idStr(uid), req.user.name || req.user.username, normalizedGroupName, idStr(conversation._id))
         )
       )
     } catch (_) {}

@@ -1400,7 +1400,7 @@ const MessagesPage = () => {
 
   // Create a group conversation
   const handleCreateGroup = async () => {
-    if (!groupNameInput.trim() || selectedGroupMembers.length === 0) return
+    if (creatingGroup || !groupNameInput.trim() || selectedGroupMembers.length === 0) return
     setCreatingGroup(true)
     try {
       const baseUrl = import.meta.env.PROD ? window.location.origin : 'http://localhost:5000'
@@ -1412,9 +1412,12 @@ const MessagesPage = () => {
       })
       const data = await res.json()
       if (!res.ok) { showToast('Error', data.error || 'Failed to create group', 'error'); return }
-      setConversations(prev => [data, ...prev])
-      setSelectedConversation(data)
-      setMessages([])
+      // Add once (socket can also emit groupCreated for creator).
+      setConversations(prev => {
+        const exists = prev.some(c => idStr(c?._id) === idStr(data?._id))
+        if (exists) return prev
+        return [data, ...prev]
+      })
       setGroupNameInput('')
       setSelectedGroupMembers([])
       closeGroupModal()
@@ -2111,7 +2114,7 @@ const MessagesPage = () => {
             return {
               ...conv,
               lastMessage: {
-                text: data.text || '',
+                text: (data.text && data.text.trim()) || (data.img ? '📷 Image' : ''),
                 sender: data.sender || {
                   _id: user._id,
                   name: user.name,
@@ -2135,7 +2138,7 @@ const MessagesPage = () => {
             _id: data.conversationId,
             participants: selectedConversation?.participants || [],
             lastMessage: {
-              text: data.text || '',
+              text: (data.text && data.text.trim()) || (data.img ? '📷 Image' : ''),
               sender: data.sender || {
                 _id: user._id,
                 name: user.name,
@@ -2454,9 +2457,12 @@ const MessagesPage = () => {
                             }
                           }
                           
-                          const messagePreview = conv.lastMessage.text?.length > 30 
-                            ? conv.lastMessage.text.substring(0, 30) + "..." 
-                            : conv.lastMessage.text || "📷 Image"
+                          const lastText = typeof conv.lastMessage.text === 'string' ? conv.lastMessage.text.trim() : ''
+                          const hasImageAttachment = !!conv.lastMessage.img
+                          const normalizedPreview = lastText || (hasImageAttachment ? '📷 Image' : '📷 Image')
+                          const messagePreview = normalizedPreview.length > 30
+                            ? normalizedPreview.substring(0, 30) + "..."
+                            : normalizedPreview
                           
                           return (
                             <Flex alignItems="center" gap={1} mt={0.5}>
