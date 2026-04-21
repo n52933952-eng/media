@@ -3051,6 +3051,64 @@ export const initializeSocket = async (app) => {
             socket.to(roomId).emit('raceCountdownStart')
         })
 
+        // Race voice invite flow (separate from global call UI):
+        // caller -> invite -> opponent accepts/declines -> both connect dedicated race voice.
+        socket.on('raceVoiceInvite', async ({ roomId }) => {
+            try {
+                if (!roomId) return
+                const state = await getRaceGameState(roomId).catch(() => null)
+                if (!state) return
+                const senderId = normalizeUserId(socket.handshake.query.userId)
+                const p1 = normalizeUserId(state.player1) || state.player1
+                const p2 = normalizeUserId(state.player2) || state.player2
+                if (!senderId || (senderId !== p1 && senderId !== p2)) return
+                const targetId = senderId === p1 ? p2 : p1
+                if (!targetId) return
+                const senderUser = await User.findById(senderId).select('name username profilePic').lean().catch(() => null)
+                const targetData = await getUserSocket(targetId).catch(() => null)
+                if (targetData?.socketId) {
+                    io.to(targetData.socketId).emit('raceVoiceInvite', {
+                        roomId,
+                        from: senderId,
+                        callerName: senderUser?.name || senderUser?.username || 'Opponent',
+                        callerProfilePic: senderUser?.profilePic || '',
+                    })
+                }
+            } catch (err) {
+                console.error('❌ [raceVoiceInvite]', err.message)
+            }
+        })
+
+        socket.on('raceVoiceAccepted', async ({ roomId }) => {
+            try {
+                if (!roomId) return
+                const state = await getRaceGameState(roomId).catch(() => null)
+                if (!state) return
+                const senderId = normalizeUserId(socket.handshake.query.userId)
+                const p1 = normalizeUserId(state.player1) || state.player1
+                const p2 = normalizeUserId(state.player2) || state.player2
+                if (!senderId || (senderId !== p1 && senderId !== p2)) return
+                io.to(roomId).emit('raceVoiceAccepted', { roomId, by: senderId })
+            } catch (err) {
+                console.error('❌ [raceVoiceAccepted]', err.message)
+            }
+        })
+
+        socket.on('raceVoiceDeclined', async ({ roomId }) => {
+            try {
+                if (!roomId) return
+                const state = await getRaceGameState(roomId).catch(() => null)
+                if (!state) return
+                const senderId = normalizeUserId(socket.handshake.query.userId)
+                const p1 = normalizeUserId(state.player1) || state.player1
+                const p2 = normalizeUserId(state.player2) || state.player2
+                if (!senderId || (senderId !== p1 && senderId !== p2)) return
+                io.to(roomId).emit('raceVoiceDeclined', { roomId, by: senderId })
+            } catch (err) {
+                console.error('❌ [raceVoiceDeclined]', err.message)
+            }
+        })
+
         // Position relay — server-side rate limit: max 20 updates/sec per socket
         // Prevents buggy/malicious clients from flooding opponents
         const racePosLastSent = new Map()

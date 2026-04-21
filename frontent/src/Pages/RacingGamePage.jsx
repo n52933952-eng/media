@@ -73,6 +73,7 @@ export default function RacingGamePage() {
   const [voiceConnecting, setVoiceConnecting] = useState(false)
   const [remoteAudioLive, setRemoteAudioLive] = useState(false)
   const [localMicLive, setLocalMicLive] = useState(false)
+  const [raceVoicePending, setRaceVoicePending] = useState(false)
   /** Drives React re-renders when the race clock starts (avoid relying on raceStateRef in JSX). */
   const [raceLive,      setRaceLive]      = useState(false)
   const [reconnecting,  setReconnecting]  = useState(false)
@@ -308,6 +309,36 @@ export default function RacingGamePage() {
       maybeStartCountdown()
     }
 
+    const onRaceVoiceInvite = ({ roomId, from, callerName }) => {
+      const myId = userIdToStr(user?._id)
+      const currentRoom = roomIdRef.current
+      if (!roomId || !currentRoom || roomId !== currentRoom) return
+      if (!from || userIdToStr(from) === myId) return
+      if (callActive || voiceConnecting) {
+        socket.emit('raceVoiceDeclined', { roomId })
+        return
+      }
+      const ok = window.confirm(`${callerName || 'Opponent'} is calling you in race voice. Accept?`)
+      if (ok) {
+        socket.emit('raceVoiceAccepted', { roomId })
+      } else {
+        socket.emit('raceVoiceDeclined', { roomId })
+      }
+    }
+
+    const onRaceVoiceAccepted = ({ roomId }) => {
+      const currentRoom = roomIdRef.current
+      if (!roomId || !currentRoom || roomId !== currentRoom) return
+      setRaceVoicePending(false)
+      connectRaceVoice()
+    }
+
+    const onRaceVoiceDeclined = ({ roomId }) => {
+      const currentRoom = roomIdRef.current
+      if (!roomId || !currentRoom || roomId !== currentRoom) return
+      setRaceVoicePending(false)
+    }
+
     const onOpponentPos = (data) => {
       updateOpponentCarPosition(data)
       if (data.raceProgress) setOppGate(data.raceProgress.currentGateIndex || 0)
@@ -343,6 +374,9 @@ export default function RacingGamePage() {
     socket.on('raceResult',        onRaceResult)
     socket.on('raceOpponentLeft',  onOpponentLeft)
     socket.on('raceReadyState',    onRaceReadyState)
+    socket.on('raceVoiceInvite',   onRaceVoiceInvite)
+    socket.on('raceVoiceAccepted', onRaceVoiceAccepted)
+    socket.on('raceVoiceDeclined', onRaceVoiceDeclined)
 
     return () => {
       socket.off('racePlayerJoined',  onPlayerJoined)
@@ -351,8 +385,11 @@ export default function RacingGamePage() {
       socket.off('raceResult',        onRaceResult)
       socket.off('raceOpponentLeft',  onOpponentLeft)
       socket.off('raceReadyState',    onRaceReadyState)
+      socket.off('raceVoiceInvite',   onRaceVoiceInvite)
+      socket.off('raceVoiceAccepted', onRaceVoiceAccepted)
+      socket.off('raceVoiceDeclined', onRaceVoiceDeclined)
     }
-  }, [socket, user?._id, exitRaceAndGoHome])
+  }, [socket, user?._id, exitRaceAndGoHome, callActive, voiceConnecting])
 
   // Declare this client "ready" only after race assets are fully loaded.
   useEffect(() => {
@@ -470,6 +507,7 @@ export default function RacingGamePage() {
         setCallActive(false)
         setRemoteAudioLive(false)
         setLocalMicLive(false)
+        setRaceVoicePending(false)
       })
 
       await room.connect(data.livekitUrl, data.token)
@@ -486,6 +524,7 @@ export default function RacingGamePage() {
       setCallActive(false)
       setRemoteAudioLive(false)
       setLocalMicLive(false)
+      setRaceVoicePending(false)
     } finally {
       setVoiceConnecting(false)
     }
@@ -500,6 +539,7 @@ export default function RacingGamePage() {
     setMuted(false)
     setRemoteAudioLive(false)
     setLocalMicLive(false)
+    setRaceVoicePending(false)
     const el = remoteAudioRef.current
     if (el) {
       try { el.srcObject = null } catch (_) { /* ignore */ }
@@ -1184,7 +1224,11 @@ export default function RacingGamePage() {
     if (callActive) {
       disconnectRaceVoice()
     } else {
-      connectRaceVoice()
+      if (raceVoicePending || voiceConnecting) return
+      const roomId = roomIdRef.current
+      if (!socket || !roomId) return
+      setRaceVoicePending(true)
+      socket.emit('raceVoiceInvite', { roomId })
     }
   }
   const handleMute = () => {
@@ -1491,12 +1535,17 @@ export default function RacingGamePage() {
           <div style={{ display:'flex', gap:'10px', alignItems:'center' }}>
             <button onClick={handleCallOpp} title={callActive ? 'End race voice' : 'Start race voice'} style={{
               width:52, height:52, borderRadius:'50%', border:'none', cursor:'pointer',
-              background: callActive ? '#ef4444' : '#22c55e',
+              background: callActive ? '#ef4444' : (raceVoicePending ? '#f59e0b' : '#22c55e'),
               color:'#fff', fontSize:'22px', display:'flex', alignItems:'center', justifyContent:'center',
               boxShadow:'0 4px 0 rgba(0,0,0,0.4)', fontFamily:'sans-serif',
             }}>
               📞
             </button>
+            {raceVoicePending && !callActive && !voiceConnecting && (
+              <div style={{ color:'rgba(255,255,255,0.75)', fontSize:'12px', fontFamily:'Poppins,sans-serif' }}>
+                Calling opponent...
+              </div>
+            )}
             {voiceConnecting && (
               <div style={{ color:'rgba(255,255,255,0.75)', fontSize:'12px', fontFamily:'Poppins,sans-serif' }}>
                 Connecting voice...
