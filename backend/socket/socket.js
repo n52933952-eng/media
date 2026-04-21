@@ -2956,7 +2956,13 @@ export const initializeSocket = async (app) => {
             await setActiveRaceGame(fromId, roomId)
             await setActiveRaceGame(toId, roomId)
 
-            const gameState = { player1: toId, player2: fromId, startTime: Date.now(), totalLaps: 3 }
+            const gameState = {
+                player1: toId,
+                player2: fromId,
+                startTime: Date.now(),
+                totalLaps: 3,
+                readyPlayers: [],
+            }
             await setRaceGameState(roomId, gameState)
 
             const challengerSock = await getUserSocket(toId)
@@ -2998,6 +3004,34 @@ export const initializeSocket = async (app) => {
             const count = roomSockets ? roomSockets.size : 0
             // Notify everyone in the room (including sender) how many have joined
             io.to(roomId).emit('racePlayerJoined', { count })
+        })
+
+        // Player finished loading race assets and is ready to start.
+        socket.on('racePlayerReady', async ({ roomId, userId }) => {
+            if (!roomId) return
+            const uid = normalizeUserId(userId || socket.handshake.query.userId)
+            if (!uid) return
+            const state = await getRaceGameState(roomId).catch(() => null)
+            if (!state) return
+            const p1 = normalizeUserId(state.player1) || state.player1
+            const p2 = normalizeUserId(state.player2) || state.player2
+            if (uid !== p1 && uid !== p2) return
+
+            const ready = Array.isArray(state.readyPlayers) ? state.readyPlayers.map((x) => normalizeUserId(x) || x) : []
+            if (!ready.includes(uid)) ready.push(uid)
+            state.readyPlayers = ready
+            await setRaceGameState(roomId, state).catch(() => {})
+
+            const bothReady = !!p1 && !!p2 && ready.includes(p1) && ready.includes(p2)
+            io.to(roomId).emit('raceReadyState', {
+                roomId,
+                readyPlayers: ready,
+                readyCount: ready.length,
+                bothReady,
+            })
+            if (bothReady) {
+                io.to(roomId).emit('raceBothReady', { roomId })
+            }
         })
 
         // Host signals countdown start — relay to the rest of the room (guest)

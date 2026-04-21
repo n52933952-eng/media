@@ -7,6 +7,8 @@ import { UserContext } from '../context/UserContext'
 import { SocketContext } from '../context/SocketContext'
 import { LiveKitContext } from '../context/LiveKitContext'
 import API_BASE_URL from '../config/api'
+import raceStartSfx from '../assets/start.mp3'
+import raceLoopMusic from '../assets/k.mp3'
 import { initPhysics, updatePhysics, FIXED_PHYSICS_STEP } from '../game/racing/physics.js'
 import { createVehicle, updateSteering, resetCarPosition, updateCarPosition } from '../game/racing/car.js'
 import { loadTrackModel, loadMapDecorations, checkGroundCollision } from '../game/racing/track.js'
@@ -124,6 +126,12 @@ export default function RacingGamePage() {
   /** Prevents double teardown / navigate when disconnect + opponentLeft both fire */
   const raceExitHandledRef = useRef(false)
   const exitRaceAndGoHomeRef = useRef(() => {})
+  const raceEndSentRef = useRef(false)
+  const assetsReadyRef = useRef(false)
+  const raceReadySentRef = useRef(false)
+  const bothPlayersReadyRef = useRef(false)
+  const startSfxRef = useRef(null)
+  const raceMusicRef = useRef(null)
 
   // ─── Fetch opponent profile ────────────────────────────────────────────────
   useEffect(() => {
@@ -254,16 +262,22 @@ export default function RacingGamePage() {
       }
     } catch (_) { /* ignore */ }
 
+    const maybeStartCountdown = () => {
+      if (!isHostRef.current) return
+      if (!assetsReadyRef.current) return
+      if (!raceStateRef.current.allPlayersConnected) return
+      if (!bothPlayersReadyRef.current) return
+      if (raceStateRef.current.countdownStarted) return
+      raceStateRef.current.countdownStarted = true
+      startCountdown()
+      socket.emit('raceCountdownStart', { roomId: roomIdRef.current })
+    }
+
     const onPlayerJoined = ({ count }) => {
-      if (count >= 2) {
-        setWaitingOpp(false)
-        raceStateRef.current.allPlayersConnected = true
-        if (isHostRef.current && !raceStateRef.current.countdownStarted) {
-          raceStateRef.current.countdownStarted = true
-          startCountdown()
-          socket.emit('raceCountdownStart', { roomId: roomIdRef.current })
-        }
-      }
+      const hasBoth = count >= 2
+      setWaitingOpp(!hasBoth)
+      raceStateRef.current.allPlayersConnected = hasBoth
+      maybeStartCountdown()
     }
 
     const onCountdownStart = () => {
@@ -272,6 +286,11 @@ export default function RacingGamePage() {
         setWaitingOpp(false)
         startCountdown()
       }
+    }
+
+    const onRaceReadyState = ({ bothReady }) => {
+      bothPlayersReadyRef.current = !!bothReady
+      maybeStartCountdown()
     }
 
     const onOpponentPos = (data) => {
@@ -286,6 +305,12 @@ export default function RacingGamePage() {
       setRaceFinished(true)
       raceStateRef.current.raceFinished = true
       if (timerRef.current) clearInterval(timerRef.current)
+      try {
+        if (raceMusicRef.current) {
+          raceMusicRef.current.pause()
+          raceMusicRef.current.currentTime = 0
+        }
+      } catch (_) { /* ignore */ }
     }
 
     const onOpponentLeft = () => {
@@ -302,6 +327,7 @@ export default function RacingGamePage() {
     socket.on('raceOpponentPos',   onOpponentPos)
     socket.on('raceResult',        onRaceResult)
     socket.on('raceOpponentLeft',  onOpponentLeft)
+    socket.on('raceReadyState',    onRaceReadyState)
 
     return () => {
       socket.off('racePlayerJoined',  onPlayerJoined)
@@ -309,8 +335,20 @@ export default function RacingGamePage() {
       socket.off('raceOpponentPos',   onOpponentPos)
       socket.off('raceResult',        onRaceResult)
       socket.off('raceOpponentLeft',  onOpponentLeft)
+      socket.off('raceReadyState',    onRaceReadyState)
     }
   }, [socket, user?._id, exitRaceAndGoHome])
+
+  // Declare this client "ready" only after race assets are fully loaded.
+  useEffect(() => {
+    if (!socket || !user?._id || !roomIdRef.current) return
+    if (loading) return
+    if (raceReadySentRef.current) return
+    if (!socket.connected) return
+    assetsReadyRef.current = true
+    raceReadySentRef.current = true
+    socket.emit('racePlayerReady', { roomId: roomIdRef.current, userId: user._id })
+  }, [socket, user?._id, loading])
 
   // ─── Connection lost: leave race after grace (reconnect clears the timer) ───
   useEffect(() => {
@@ -337,6 +375,10 @@ export default function RacingGamePage() {
         const rid = roomIdRef.current || localStorage.getItem('raceRoomId')
         if (rid && socket.connected) {
           socket.emit('joinRaceRoom', { roomId: rid })
+          if (!loading && user?._id) {
+            assetsReadyRef.current = true
+            socket.emit('racePlayerReady', { roomId: rid, userId: user._id })
+          }
         }
       } catch (_) { /* ignore */ }
     }
@@ -348,7 +390,7 @@ export default function RacingGamePage() {
       socket.off('disconnect', onDisconnect)
       socket.off('connect', onConnect)
     }
-  }, [socket])
+  }, [socket, loading, user?._id])
 
   // ─── Opponent never joins — avoid infinite "Waiting..." ─────────────────────
   useEffect(() => {
@@ -487,6 +529,19 @@ export default function RacingGamePage() {
     }
     prevPathRef.current = location.pathname
   }, [location.pathname, endRaceGameOnNavigate])
+
+  // Safety: if this page unmounts (logout / auth redirect / app shell remount),
+  // end race once so both players are cleaned up server-side.
+  useEffect(() => {
+    return () => {
+      if (raceEndSentRef.current) return
+      const activeRoom = localStorage.getItem('raceRoomId')
+      if (activeRoom && endRaceGameOnNavigate) {
+        raceEndSentRef.current = true
+        endRaceGameOnNavigate()
+      }
+    }
+  }, [endRaceGameOnNavigate])
 
   // ─── GAME INIT ──────────────────────────────────────────────────────────────
   const initGame = useCallback(() => {
@@ -768,6 +823,19 @@ export default function RacingGamePage() {
         setCountdown(null)
         raceStateRef.current.raceStarted = true
         setRaceLive(true)
+        try {
+          if (!startSfxRef.current) startSfxRef.current = new Audio(raceStartSfx)
+          startSfxRef.current.currentTime = 0
+          startSfxRef.current.play().catch(() => {})
+          if (!raceMusicRef.current) {
+            raceMusicRef.current = new Audio(raceLoopMusic)
+            raceMusicRef.current.loop = true
+            raceMusicRef.current.volume = 0.4
+          }
+          setTimeout(() => {
+            raceMusicRef.current?.play?.().catch(() => {})
+          }, 650)
+        } catch (_) { /* ignore */ }
         // Start race timer
         startTimeRef.current = Date.now()
         timerRef.current = setInterval(() => {
@@ -1021,6 +1089,16 @@ export default function RacingGamePage() {
 
     // End any active voice call when leaving the race
     leaveCall?.()
+    try {
+      if (startSfxRef.current) {
+        startSfxRef.current.pause()
+        startSfxRef.current.currentTime = 0
+      }
+      if (raceMusicRef.current) {
+        raceMusicRef.current.pause()
+        raceMusicRef.current.currentTime = 0
+      }
+    } catch (_) { /* ignore */ }
   }, [leaveCall])
 
   // ─── Voice call ────────────────────────────────────────────────────────────
