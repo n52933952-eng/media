@@ -9,6 +9,7 @@ import { getIO, getUserSocket, getAllUserSockets } from '../socket/socket.js'
 
 const CLOUDINARY_UPLOAD_QUALITY = (process.env.CLOUDINARY_UPLOAD_QUALITY || 'auto:eco').trim()
 
+
 /** Notify everyone listed as contributor except the poster when a collaborative post is created. */
 async function notifyContributorsOnCollaborativeCreate(newPost, posterId) {
     if (!newPost?.isCollaborative || !Array.isArray(newPost.contributors)) return
@@ -981,22 +982,11 @@ export const getFeedPost = async(req,res) => {
         const limit = parseInt(req.query.limit) || 10 // Default to 10 posts per page
         const skip = parseInt(req.query.skip) || 0 // Skip for pagination
         
-        // Football / Weather are not injected into the home feed — users open those from their screens.
-        // Still resolve ids so those system accounts stay out of the "normal" followed-post query.
-        const footballAccount = await User.findOne({ username: 'Football' }).select('_id')
-        const weatherAccount = await User.findOne({ username: 'Weather' }).select('_id')
-
         // Strategy: First page = live + channel cards + normal slice; later pages = normal only.
         
         // SCALABLE: Single $in query replaces N per-user queries
         const followedUserIds = following.filter(id => id.toString() !== userId.toString())
-
-        // Exclude system accounts (Football/Weather) from the normal feed query — fetched separately below
-        const systemAccountIds = [
-            footballAccount?._id?.toString(),
-            weatherAccount?._id?.toString()
-        ].filter(Boolean)
-        const normalFollowedIds = followedUserIds.filter(id => !systemAccountIds.includes(id.toString()))
+        const normalFollowedIds = followedUserIds
 
         // ONE query instead of N queries, then cap to 3 posts per user in JS
         let normalPostsPromise = Promise.resolve([])
@@ -1022,6 +1012,7 @@ export const getFeedPost = async(req,res) => {
             .populate("contributors", "username profilePic name")
             .sort({ createdAt: -1 })
             .limit(20) // Get all channel posts user added
+            .lean()
         
         // Collaborative posts where the current user is a contributor (even if they don't follow the author)
         const contributorPostsPromise = Post.find({
@@ -1032,6 +1023,7 @@ export const getFeedPost = async(req,res) => {
             .populate("contributors", "username profilePic name")
             .sort({ updatedAt: -1, createdAt: -1 })
             .limit(40)
+            .lean()
 
         const [normalPosts, channelPosts, contributorPosts] = await Promise.all([
             normalPostsPromise,

@@ -1188,6 +1188,7 @@ const MessagesPage = () => {
   // This ensures User C sees updated status when clicking on conversations
   useEffect(() => {
     const refreshParticipantData = async () => {
+      if (selectedConversation?.isGroup) return
       if (!selectedConversation || !selectedConversation.participants[0]?._id) return
       
       try {
@@ -1201,14 +1202,17 @@ const MessagesPage = () => {
           const userData = await res.json()
           
           // Update the selected conversation with fresh user data
-          setSelectedConversation(prev => ({
-            ...prev,
-            participants: [userData]
-          }))
+          setSelectedConversation(prev => {
+            if (!prev || prev.isGroup) return prev
+            return {
+              ...prev,
+              participants: [userData]
+            }
+          })
           
           // Also update in conversations list
           setConversations(prev => prev.map(conv => {
-            if (conv._id === selectedConversation._id) {
+            if (conv._id === selectedConversation._id && !conv.isGroup) {
               return {
                 ...conv,
                 participants: [userData]
@@ -1222,7 +1226,7 @@ const MessagesPage = () => {
     }
     
     refreshParticipantData()
-  }, [selectedConversation?._id])
+  }, [selectedConversation?._id, selectedConversation?.isGroup])
 
   // Listen for typing indicator from other user
   useEffect(() => {
@@ -3821,8 +3825,8 @@ const MessagesPage = () => {
         <Drawer isOpen={isGroupInfoOpen} onClose={() => { closeGroupInfo(); setEditGroupNameVisible(false); setAddMembersVisible(false) }} placement="right" size="sm">
           <DrawerOverlay />
           <DrawerContent bg={bgColor}>
-            <DrawerCloseButton />
-            <DrawerHeader color={useColorModeValue('black','white')}>
+            <DrawerCloseButton top={3} right={3} zIndex={2} />
+            <DrawerHeader color={useColorModeValue('black','white')} pr={14}>
               <Flex alignItems="center" gap={2}>
                 <MdGroup size={22} />
                 <Box flex={1} minW={0}>
