@@ -74,6 +74,7 @@ export default function RacingGamePage() {
   const [remoteAudioLive, setRemoteAudioLive] = useState(false)
   const [localMicLive, setLocalMicLive] = useState(false)
   const [raceVoicePending, setRaceVoicePending] = useState(false)
+  const [incomingRaceVoiceInvite, setIncomingRaceVoiceInvite] = useState(null)
   /** Drives React re-renders when the race clock starts (avoid relying on raceStateRef in JSX). */
   const [raceLive,      setRaceLive]      = useState(false)
   const [reconnecting,  setReconnecting]  = useState(false)
@@ -309,7 +310,7 @@ export default function RacingGamePage() {
       maybeStartCountdown()
     }
 
-    const onRaceVoiceInvite = ({ roomId, from, callerName }) => {
+    const onRaceVoiceInvite = ({ roomId, from, callerName, callerProfilePic }) => {
       const myId = userIdToStr(user?._id)
       const currentRoom = roomIdRef.current
       if (!roomId || !currentRoom || roomId !== currentRoom) return
@@ -318,18 +319,19 @@ export default function RacingGamePage() {
         socket.emit('raceVoiceDeclined', { roomId })
         return
       }
-      const ok = window.confirm(`${callerName || 'Opponent'} is calling you in race voice. Accept?`)
-      if (ok) {
-        socket.emit('raceVoiceAccepted', { roomId })
-      } else {
-        socket.emit('raceVoiceDeclined', { roomId })
-      }
+      setIncomingRaceVoiceInvite({
+        roomId,
+        from,
+        callerName: callerName || 'Opponent',
+        callerProfilePic: callerProfilePic || '',
+      })
     }
 
     const onRaceVoiceAccepted = ({ roomId }) => {
       const currentRoom = roomIdRef.current
       if (!roomId || !currentRoom || roomId !== currentRoom) return
       setRaceVoicePending(false)
+      setIncomingRaceVoiceInvite(null)
       connectRaceVoice()
     }
 
@@ -337,6 +339,7 @@ export default function RacingGamePage() {
       const currentRoom = roomIdRef.current
       if (!roomId || !currentRoom || roomId !== currentRoom) return
       setRaceVoicePending(false)
+      setIncomingRaceVoiceInvite(null)
     }
 
     const onOpponentPos = (data) => {
@@ -508,6 +511,7 @@ export default function RacingGamePage() {
         setRemoteAudioLive(false)
         setLocalMicLive(false)
         setRaceVoicePending(false)
+        setIncomingRaceVoiceInvite(null)
       })
 
       await room.connect(data.livekitUrl, data.token)
@@ -525,6 +529,7 @@ export default function RacingGamePage() {
       setRemoteAudioLive(false)
       setLocalMicLive(false)
       setRaceVoicePending(false)
+      setIncomingRaceVoiceInvite(null)
     } finally {
       setVoiceConnecting(false)
     }
@@ -540,11 +545,26 @@ export default function RacingGamePage() {
     setRemoteAudioLive(false)
     setLocalMicLive(false)
     setRaceVoicePending(false)
+    setIncomingRaceVoiceInvite(null)
     const el = remoteAudioRef.current
     if (el) {
       try { el.srcObject = null } catch (_) { /* ignore */ }
     }
   }, [])
+
+  const handleAcceptRaceVoiceInvite = () => {
+    if (!socket || !incomingRaceVoiceInvite?.roomId) return
+    socket.emit('raceVoiceAccepted', { roomId: incomingRaceVoiceInvite.roomId })
+  }
+
+  const handleDeclineRaceVoiceInvite = () => {
+    if (!socket || !incomingRaceVoiceInvite?.roomId) {
+      setIncomingRaceVoiceInvite(null)
+      return
+    }
+    socket.emit('raceVoiceDeclined', { roomId: incomingRaceVoiceInvite.roomId })
+    setIncomingRaceVoiceInvite(null)
+  }
 
   // Duck race music during voice chat so players can hear each other clearly.
   useEffect(() => {
@@ -1561,6 +1581,36 @@ export default function RacingGamePage() {
                 {muted ? '🔇' : '🎙️'}
               </button>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* In-race voice invite popup (non-blocking UI, avoids window.confirm side effects) */}
+      {!loading && incomingRaceVoiceInvite && !callActive && (
+        <div style={{
+          position:'fixed', top:'50%', left:'50%', transform:'translate(-50%,-50%)',
+          background:'rgba(9,14,28,0.96)', border:'1px solid rgba(255,255,255,0.16)',
+          borderRadius:'14px', padding:'18px 18px 14px', zIndex:2100, color:'#fff',
+          minWidth:'280px', maxWidth:'90vw', boxShadow:'0 12px 36px rgba(0,0,0,0.6)',
+          fontFamily:'Poppins,sans-serif',
+        }}>
+          <div style={{ fontSize:'12px', opacity:0.7, marginBottom:'6px' }}>Race Voice Call</div>
+          <div style={{ fontSize:'15px', fontWeight:600, marginBottom:'14px' }}>
+            {incomingRaceVoiceInvite.callerName} is calling...
+          </div>
+          <div style={{ display:'flex', gap:'10px', justifyContent:'flex-end' }}>
+            <button onClick={handleDeclineRaceVoiceInvite} style={{
+              border:'none', cursor:'pointer', borderRadius:'10px', padding:'8px 12px',
+              background:'#374151', color:'#fff', fontWeight:600,
+            }}>
+              Decline
+            </button>
+            <button onClick={handleAcceptRaceVoiceInvite} style={{
+              border:'none', cursor:'pointer', borderRadius:'10px', padding:'8px 12px',
+              background:'#16a34a', color:'#fff', fontWeight:700,
+            }}>
+              Accept
+            </button>
           </div>
         </div>
       )}
