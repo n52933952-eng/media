@@ -129,6 +129,14 @@ const CardGamePage = () => {
     const prevScoreRef = useRef(0)
     const prevBooksRef = useRef(0)
     const previousPathRef = useRef(null)
+    const cardExitHandledRef = useRef(false)
+
+    const endCardGameOnce = useCallback(() => {
+        const activeRoom = localStorage.getItem('cardRoomId')
+        if (!activeRoom || !endCardGameOnNavigate || cardExitHandledRef.current) return
+        cardExitHandledRef.current = true
+        endCardGameOnNavigate()
+    }, [endCardGameOnNavigate])
 
     // Browser back button guard
     useEffect(() => {
@@ -136,14 +144,15 @@ const CardGamePage = () => {
             previousPathRef.current = location.pathname
         }
 
-        const handlePopState = () => {
-            const activeRoom = localStorage.getItem('cardRoomId')
-            if (activeRoom && endCardGameOnNavigate) {
-                endCardGameOnNavigate()
-            }
+        const handlePopState = () => endCardGameOnce()
+
+        // Hard refresh / tab close / external navigation
+        const handleBeforeUnload = () => {
+            endCardGameOnce()
         }
 
         window.addEventListener('popstate', handlePopState)
+        window.addEventListener('beforeunload', handleBeforeUnload)
 
         // React Router navigation away from card page
         const currentPath = location.pathname
@@ -152,33 +161,23 @@ const CardGamePage = () => {
         const wasOnCardPage = previousPath && previousPath.startsWith('/card/')
 
         if (wasOnCardPage && !isCardPage && previousPath !== currentPath) {
-            const activeRoom = localStorage.getItem('cardRoomId')
-            if (activeRoom && endCardGameOnNavigate) {
-                endCardGameOnNavigate()
-            }
+            endCardGameOnce()
         }
 
         previousPathRef.current = currentPath
 
         return () => {
             window.removeEventListener('popstate', handlePopState)
+            window.removeEventListener('beforeunload', handleBeforeUnload)
         }
-    }, [location.pathname, endCardGameOnNavigate])
+    }, [location.pathname, endCardGameOnce])
 
     // Unmount cleanup (catches logout / any unmount that isn't a page refresh)
     useEffect(() => {
         return () => {
-            const activeRoom = localStorage.getItem('cardRoomId')
-            if (activeRoom && endCardGameOnNavigate) {
-                setTimeout(() => {
-                    const stillOnCardPage = window.location.pathname.startsWith('/card/')
-                    if (!stillOnCardPage) {
-                        endCardGameOnNavigate()
-                    }
-                }, 50)
-            }
+            endCardGameOnce()
         }
-    }, [endCardGameOnNavigate])
+    }, [endCardGameOnce])
 
     // Fetch opponent profile
     useEffect(() => {
@@ -321,7 +320,7 @@ const CardGamePage = () => {
 
     const handleResign = () => {
         if (socket && roomId && opponentId) socket.emit('resignCard', { roomId, to: opponentId })
-        endCardGameOnNavigate()
+        endCardGameOnce()
         removeOwnCardPost()
         navigate('/home')
     }
@@ -331,7 +330,7 @@ const CardGamePage = () => {
             if (!window.confirm('Leave the game? This counts as a resign.')) return
             handleResign()
         } else {
-            endCardGameOnNavigate()
+            endCardGameOnce()
             navigate('/home')
         }
     }
@@ -569,7 +568,7 @@ const CardGamePage = () => {
                         <Text fontSize="3xl" mb={2}>🃏</Text>
                         <Text fontSize="2xl" fontWeight="bold" color={textCol} mb={3}>Game Over</Text>
                         <Text color={mutedCol} mb={6}>{gameResult}</Text>
-                        <Button colorScheme="purple" onClick={() => { endCardGameOnNavigate(); navigate('/home') }}>
+                        <Button colorScheme="purple" onClick={() => { endCardGameOnce(); navigate('/home') }}>
                             Back to Home
                         </Button>
                     </Box>
