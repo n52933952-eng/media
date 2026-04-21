@@ -71,6 +71,8 @@ export default function RacingGamePage() {
   const [callActive,    setCallActive]    = useState(false)
   const [muted,         setMuted]         = useState(false)
   const [voiceConnecting, setVoiceConnecting] = useState(false)
+  const [remoteAudioLive, setRemoteAudioLive] = useState(false)
+  const [localMicLive, setLocalMicLive] = useState(false)
   /** Drives React re-renders when the race clock starts (avoid relying on raceStateRef in JSX). */
   const [raceLive,      setRaceLive]      = useState(false)
   const [reconnecting,  setReconnecting]  = useState(false)
@@ -174,6 +176,8 @@ export default function RacingGamePage() {
       }
     } catch (_) { /* ignore */ }
     try { setCallActive(false) } catch (_) { /* ignore */ }
+    try { setRemoteAudioLive(false) } catch (_) { /* ignore */ }
+    try { setLocalMicLive(false) } catch (_) { /* ignore */ }
     try {
       if (startSfxRef.current) {
         startSfxRef.current.pause()
@@ -284,8 +288,8 @@ export default function RacingGamePage() {
 
     const onPlayerJoined = ({ count }) => {
       const hasBoth = count >= 2
-      setWaitingOpp(!hasBoth)
       raceStateRef.current.allPlayersConnected = hasBoth
+      setWaitingOpp(!(hasBoth && bothPlayersReadyRef.current))
       if (hasBoth) lastOpponentPosAtRef.current = Date.now()
       maybeStartCountdown()
     }
@@ -300,6 +304,7 @@ export default function RacingGamePage() {
 
     const onRaceReadyState = ({ bothReady }) => {
       bothPlayersReadyRef.current = !!bothReady
+      setWaitingOpp(!(raceStateRef.current.allPlayersConnected && bothPlayersReadyRef.current))
       maybeStartCountdown()
     }
 
@@ -449,6 +454,7 @@ export default function RacingGamePage() {
           el.setAttribute('playsinline', 'true')
           el.setAttribute('webkit-playsinline', 'true')
           el.play?.().catch(() => {})
+          setRemoteAudioLive(true)
         } catch (_) { /* ignore */ }
       })
 
@@ -457,16 +463,20 @@ export default function RacingGamePage() {
         if (!el || !track || track.kind !== 'audio') return
         try { track.detach(el) } catch (_) { /* ignore */ }
         try { el.srcObject = null } catch (_) { /* ignore */ }
+        setRemoteAudioLive(false)
       })
 
       room.on(RoomEvent.Disconnected, () => {
         setCallActive(false)
+        setRemoteAudioLive(false)
+        setLocalMicLive(false)
       })
 
       await room.connect(data.livekitUrl, data.token)
       await room.localParticipant.setCameraEnabled(false).catch(() => {})
       await room.localParticipant.setMicrophoneEnabled(true).catch(() => {})
       setMuted(false)
+      setLocalMicLive(true)
       setCallActive(true)
     } catch (e) {
       try {
@@ -474,6 +484,8 @@ export default function RacingGamePage() {
       } catch (_) {}
       raceVoiceRoomRef.current = null
       setCallActive(false)
+      setRemoteAudioLive(false)
+      setLocalMicLive(false)
     } finally {
       setVoiceConnecting(false)
     }
@@ -486,11 +498,20 @@ export default function RacingGamePage() {
     raceVoiceRoomRef.current = null
     setCallActive(false)
     setMuted(false)
+    setRemoteAudioLive(false)
+    setLocalMicLive(false)
     const el = remoteAudioRef.current
     if (el) {
       try { el.srcObject = null } catch (_) { /* ignore */ }
     }
   }, [])
+
+  // Duck race music during voice chat so players can hear each other clearly.
+  useEffect(() => {
+    const music = raceMusicRef.current
+    if (!music) return
+    music.volume = callActive ? 0.12 : 0.4
+  }, [callActive])
 
   // ─── Keyboard controls ──────────────────────────────────────────────────────
   useEffect(() => {
@@ -1172,6 +1193,7 @@ export default function RacingGamePage() {
     setMuted((prev) => {
       const next = !prev
       roomObj.localParticipant.setMicrophoneEnabled(!next).catch(() => {})
+      setLocalMicLive(!next)
       return next
     })
   }
@@ -1453,6 +1475,17 @@ export default function RacingGamePage() {
               <span style={{ flex:1, opacity:0.95 }}>
                 {callActive ? 'Connected — opponent audio is live' : 'Connecting… accept mic if the browser asks'}
               </span>
+            </div>
+          )}
+          {callActive && (
+            <div style={{
+              display:'flex', alignItems:'center', gap:'12px', flexWrap:'wrap',
+              background:'rgba(0,0,0,0.45)', border:'1px solid rgba(255,255,255,0.1)',
+              borderRadius:'10px', padding:'8px 10px', color:'#fff', fontFamily:'Poppins,sans-serif',
+              fontSize:'12px',
+            }}>
+              <span>{localMicLive ? '🎙️ Your mic: live' : '🔇 Your mic: off'}</span>
+              <span>{remoteAudioLive ? '🔊 Opponent audio: detected' : '… Waiting opponent mic/audio'}</span>
             </div>
           )}
           <div style={{ display:'flex', gap:'10px', alignItems:'center' }}>

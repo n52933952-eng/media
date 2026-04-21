@@ -3901,15 +3901,17 @@ export const initializeSocket = async (app) => {
                 setTimeout(async () => {
                     const stillInRace = await hasActiveRaceGame(disconnectedUserId)
                     const reconnected = await getUserSocket(disconnectedUserId)
-                    // A fast refresh can reconnect on Home page (socket alive) without rejoining race room.
-                    // Only keep race alive when the reconnected socket is actually back in the race room.
-                    let rejoinedRaceRoom = false
-                    if (raceRoomId && reconnected?.socketId) {
-                        const raceRoomSockets = io.sockets.adapter.rooms.get(raceRoomId)
-                        rejoinedRaceRoom = !!(raceRoomSockets && raceRoomSockets.has(reconnected.socketId))
-                    }
-                    if (stillInRace && reconnected && rejoinedRaceRoom) {
-                        console.log(`✅ Racer ${disconnectedUserId} reconnected in race room — race continues!`)
+                    if (stillInRace && reconnected?.socketId) {
+                        // Harden against transient disconnects (e.g. media/call operations):
+                        // if user is still marked active in race, force-join their current socket
+                        // back into the race room and keep race alive.
+                        try {
+                            const liveSock = io.sockets.sockets.get(reconnected.socketId)
+                            if (liveSock && raceRoomId) {
+                                liveSock.join(raceRoomId)
+                            }
+                        } catch (_) {}
+                        console.log(`✅ Racer ${disconnectedUserId} reconnected with active race state — race continues!`)
                         return
                     }
                     console.log(`❌ Racer ${disconnectedUserId} did not reconnect — ending race`)
