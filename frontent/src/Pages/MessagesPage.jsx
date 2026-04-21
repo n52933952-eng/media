@@ -2428,6 +2428,12 @@ const MessagesPage = () => {
                         )}
                         {/* Last message with seen indicator */}
                         {conv.lastMessage && (() => {
+                          const lastTextRaw = typeof conv.lastMessage.text === 'string' ? conv.lastMessage.text : ''
+                          const lastText = lastTextRaw.trim()
+                          const hasImageAttachment = !!conv.lastMessage.img
+                          const hasRenderableLastMessage = Boolean(lastText || hasImageAttachment)
+                          if (!hasRenderableLastMessage) return null
+
                           // Check if last message is from current user
                           let lastMessageSenderId = ''
                           if (conv.lastMessage.sender?._id) {
@@ -2457,9 +2463,7 @@ const MessagesPage = () => {
                             }
                           }
                           
-                          const lastText = typeof conv.lastMessage.text === 'string' ? conv.lastMessage.text.trim() : ''
-                          const hasImageAttachment = !!conv.lastMessage.img
-                          const normalizedPreview = lastText || (hasImageAttachment ? '📷 Image' : '📷 Image')
+                          const normalizedPreview = lastText || (hasImageAttachment ? '📷 Image' : '')
                           const messagePreview = normalizedPreview.length > 30
                             ? normalizedPreview.substring(0, 30) + "..."
                             : normalizedPreview
