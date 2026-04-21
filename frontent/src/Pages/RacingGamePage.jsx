@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState, useContext, useCallback } from 'rea
 import * as THREE from 'three'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { clone as cloneSkeleton } from 'three/examples/jsm/utils/SkeletonUtils.js'
+import { Room, RoomEvent } from 'livekit-client'
 import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import { UserContext } from '../context/UserContext'
 import { SocketContext } from '../context/SocketContext'
@@ -52,18 +53,7 @@ export default function RacingGamePage() {
   const location       = useLocation()
   const { user }       = useContext(UserContext)
   const { socket, endRaceGameOnNavigate } = useContext(SocketContext) || {}
-  const {
-    startCall,
-    leaveCall,
-    incomingCall,
-    answerCall,
-    declineCall,
-    callAccepted,
-    callEnded,
-    callPartner,
-    remoteTracks,
-    room,
-  } = useContext(LiveKitContext) || {}
+  const { incomingCall, declineCall } = useContext(LiveKitContext) || {}
 
   // ── UI state ────────────────────────────────────────────────────────────────
   const [loading,       setLoading]       = useState(true)
@@ -80,6 +70,7 @@ export default function RacingGamePage() {
   const [waitingOpp,    setWaitingOpp]    = useState(true)
   const [callActive,    setCallActive]    = useState(false)
   const [muted,         setMuted]         = useState(false)
+  const [voiceConnecting, setVoiceConnecting] = useState(false)
   /** Drives React re-renders when the race clock starts (avoid relying on raceStateRef in JSX). */
   const [raceLive,      setRaceLive]      = useState(false)
   const [reconnecting,  setReconnecting]  = useState(false)
@@ -115,7 +106,6 @@ export default function RacingGamePage() {
   const oppTargetPosRef  = useRef(new THREE.Vector3(0, 100, 0))
   const oppTargetQuatRef = useRef(new THREE.Quaternion(0, 0, 0, 1))
   const oppSlerpTempRef  = useRef(new THREE.Quaternion())
-  const lastOpponentPosAtRef = useRef(0)
   /** Last displayed speed — avoid setState 60×/s (causes layout jitter / “page jumping”) */
   const lastSpeedDispRef = useRef(-1)
   // Pre-allocated Vector3 objects to avoid per-frame GC pressure
@@ -126,6 +116,7 @@ export default function RacingGamePage() {
   const _flipAxis      = useRef(new THREE.Vector3(0, 1, 0))
   const resizeCleanupRef = useRef(null)
   const remoteAudioRef = useRef(null)
+  const raceVoiceRoomRef = useRef(null)
   /** Prevents double teardown / navigate when disconnect + opponentLeft both fire */
   const raceExitHandledRef = useRef(false)
   const exitRaceAndGoHomeRef = useRef(() => {})
@@ -176,15 +167,30 @@ export default function RacingGamePage() {
         timerRef.current = null
       }
     } catch (_) { /* ignore */ }
-    try { leaveCall?.() } catch (_) { /* ignore */ }
+    try {
+      if (raceVoiceRoomRef.current) {
+        raceVoiceRoomRef.current.disconnect().catch(() => {})
+        raceVoiceRoomRef.current = null
+      }
+    } catch (_) { /* ignore */ }
     try { setCallActive(false) } catch (_) { /* ignore */ }
+    try {
+      if (startSfxRef.current) {
+        startSfxRef.current.pause()
+        startSfxRef.current.currentTime = 0
+      }
+      if (raceMusicRef.current) {
+        raceMusicRef.current.pause()
+        raceMusicRef.current.currentTime = 0
+      }
+    } catch (_) { /* ignore */ }
     try {
       raceStateRef.current.raceFinished = true
       raceStateRef.current.raceStarted = false
     } catch (_) { /* ignore */ }
     try { endRaceGameOnNavigate?.() } catch (_) { /* ignore */ }
     try { navigate('/', { replace: true }) } catch (_) { /* ignore */ }
-  }, [navigate, leaveCall, endRaceGameOnNavigate])
+  }, [navigate, endRaceGameOnNavigate])
 
   useEffect(() => {
     exitRaceAndGoHomeRef.current = exitRaceAndGoHome
@@ -298,7 +304,6 @@ export default function RacingGamePage() {
     }
 
     const onOpponentPos = (data) => {
-      lastOpponentPosAtRef.current = Date.now()
       updateOpponentCarPosition(data)
       if (data.raceProgress) setOppGate(data.raceProgress.currentGateIndex || 0)
     }
@@ -343,22 +348,6 @@ export default function RacingGamePage() {
       socket.off('raceReadyState',    onRaceReadyState)
     }
   }, [socket, user?._id, exitRaceAndGoHome])
-
-  // If opponent disappears (no position packets), exit both-side lifecycle instead of leaving user stuck.
-  useEffect(() => {
-    if (!socket) return
-    const id = window.setInterval(() => {
-      if (raceExitHandledRef.current) return
-      if (loading || waitingOpp) return
-      if (!raceStateRef.current.allPlayersConnected) return
-      const last = lastOpponentPosAtRef.current || 0
-      if (!last) return
-      if (Date.now() - last > 10000) {
-        exitRaceAndGoHomeRef.current?.()
-      }
-    }, 2000)
-    return () => window.clearInterval(id)
-  }, [socket, loading, waitingOpp])
 
   // Declare this client "ready" only after race assets are fully loaded.
   useEffect(() => {
@@ -413,24 +402,6 @@ export default function RacingGamePage() {
     }
   }, [socket, loading, user?._id])
 
-  // Keep race room membership alive during gameplay.
-  // Some devices/browsers can briefly drop room membership around media/call operations.
-  // A light rejoin heartbeat prevents false "opponent left" cleanup.
-  useEffect(() => {
-    if (!socket) return
-    const tick = () => {
-      try {
-        if (raceExitHandledRef.current) return
-        const rid = roomIdRef.current || localStorage.getItem('raceRoomId')
-        if (!rid || !socket.connected) return
-        socket.emit('joinRaceRoom', { roomId: rid })
-      } catch (_) { /* ignore */ }
-    }
-    tick()
-    const id = window.setInterval(tick, 3000)
-    return () => window.clearInterval(id)
-  }, [socket])
-
   // ─── Opponent never joins — avoid infinite "Waiting..." ─────────────────────
   useEffect(() => {
     if (loading || !waitingOpp || raceExitHandledRef.current) return
@@ -441,38 +412,85 @@ export default function RacingGamePage() {
     return () => clearTimeout(t)
   }, [loading, waitingOpp])
 
-  // ─── Sync race voice state with LiveKit state ───────────────────────────────
+  // If any normal direct call appears while racing, auto-decline immediately.
+  // Race page uses its own dedicated voice channel below.
   useEffect(() => {
-    const partnerId = userIdToStr(callPartner?.id)
-    if (callAccepted && !callEnded && partnerId === userIdToStr(opponentId)) {
-      setCallActive(true)
-    } else {
-      setCallActive(false)
-    }
-  }, [callAccepted, callEnded, callPartner?.id, opponentId])
+    if (!incomingCall) return
+    try { declineCall?.() } catch (_) { /* ignore */ }
+  }, [incomingCall, declineCall])
 
-  // ─── Play opponent voice in-page (LiveKit audio track → <audio>) ────────────
-  useEffect(() => {
-    const el = remoteAudioRef.current
-    if (!el) return
-    const remoteAudio = remoteTracks?.find((t) => t?.track?.kind === 'audio')?.track
-    if (!remoteAudio) {
-      el.srcObject = null
-      return
-    }
+  // ─── Race-only voice channel (separate from normal call system) ─────────────
+  const connectRaceVoice = useCallback(async () => {
+    if (voiceConnecting || callActive) return
+    if (!user?._id || !opponentId) return
+    setVoiceConnecting(true)
     try {
-      remoteAudio.attach(el)
-      el.volume = 1
-      el.setAttribute('playsinline', 'true')
-      el.setAttribute('webkit-playsinline', 'true')
-      const p = el.play?.()
-      if (p && typeof p.catch === 'function') p.catch(() => {})
-    } catch (_) {}
-    return () => {
-      try { remoteAudio.detach(el) } catch (_) {}
-      if (el) el.srcObject = null
+      const res = await fetch(`${API_BASE_URL}/api/call/token`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'direct', targetId: opponentId }),
+      })
+      const data = await res.json()
+      if (!res.ok || !data?.token || !data?.livekitUrl) {
+        throw new Error(data?.error || 'Failed to create race voice session')
+      }
+
+      const room = new Room({ adaptiveStream: true, dynacast: true })
+      raceVoiceRoomRef.current = room
+
+      room.on(RoomEvent.TrackSubscribed, (track) => {
+        if (track?.kind !== 'audio') return
+        const el = remoteAudioRef.current
+        if (!el) return
+        try {
+          track.attach(el)
+          el.volume = 1
+          el.setAttribute('playsinline', 'true')
+          el.setAttribute('webkit-playsinline', 'true')
+          el.play?.().catch(() => {})
+        } catch (_) { /* ignore */ }
+      })
+
+      room.on(RoomEvent.TrackUnsubscribed, (track) => {
+        const el = remoteAudioRef.current
+        if (!el || !track || track.kind !== 'audio') return
+        try { track.detach(el) } catch (_) { /* ignore */ }
+        try { el.srcObject = null } catch (_) { /* ignore */ }
+      })
+
+      room.on(RoomEvent.Disconnected, () => {
+        setCallActive(false)
+      })
+
+      await room.connect(data.livekitUrl, data.token)
+      await room.localParticipant.setCameraEnabled(false).catch(() => {})
+      await room.localParticipant.setMicrophoneEnabled(true).catch(() => {})
+      setMuted(false)
+      setCallActive(true)
+    } catch (e) {
+      try {
+        raceVoiceRoomRef.current?.disconnect?.()
+      } catch (_) {}
+      raceVoiceRoomRef.current = null
+      setCallActive(false)
+    } finally {
+      setVoiceConnecting(false)
     }
-  }, [remoteTracks])
+  }, [voiceConnecting, callActive, user?._id, opponentId])
+
+  const disconnectRaceVoice = useCallback(() => {
+    try {
+      raceVoiceRoomRef.current?.disconnect?.()
+    } catch (_) { /* ignore */ }
+    raceVoiceRoomRef.current = null
+    setCallActive(false)
+    setMuted(false)
+    const el = remoteAudioRef.current
+    if (el) {
+      try { el.srcObject = null } catch (_) { /* ignore */ }
+    }
+  }, [])
 
   // ─── Keyboard controls ──────────────────────────────────────────────────────
   useEffect(() => {
@@ -1142,28 +1160,23 @@ export default function RacingGamePage() {
 
   // ─── Voice call ────────────────────────────────────────────────────────────
   const handleCallOpp = () => {
-    if (!callActive && opponentId) {
-      startCall?.({ _id: opponentId, name: opponent?.name || 'Opponent', profilePic: opponent?.profilePic || '' }, 'audio')
-      setCallActive(true)
+    if (callActive) {
+      disconnectRaceVoice()
     } else {
-      leaveCall?.()
-      setCallActive(false)
+      connectRaceVoice()
     }
   }
   const handleMute = () => {
-    const roomObj = room?.current
+    const roomObj = raceVoiceRoomRef.current
     if (!roomObj?.localParticipant) return
     setMuted((prev) => {
-      const nextMuted = !prev
-      roomObj.localParticipant.setMicrophoneEnabled(!nextMuted).catch(() => {})
-      return nextMuted
+      const next = !prev
+      roomObj.localParticipant.setMicrophoneEnabled(!next).catch(() => {})
+      return next
     })
   }
 
-  const isIncomingOppCall =
-    !!incomingCall &&
-    userIdToStr(incomingCall?.from) === userIdToStr(opponentId) &&
-    incomingCall?.callType === 'audio'
+  const isIncomingOppCall = false
 
   // ─── Navigate back / leave race ────────────────────────────────────────────
   const handleLeave = () => {
@@ -1281,11 +1294,6 @@ export default function RacingGamePage() {
           ) : (
             <div style={{ color:'rgba(255,255,255,0.8)', fontWeight:600, fontSize:'1rem' }}>
               {loadingPct > 0 ? `Loading game assets ${loadingPct}%…` : 'Loading game assets…'}
-            </div>
-          )}
-          {waitingOpp && (
-            <div style={{ marginTop:'10px', color:'rgba(255,255,255,0.72)', fontSize:'0.92rem' }}>
-              Waiting for opponent to join and finish loading...
             </div>
           )}
         </div>
@@ -1434,40 +1442,6 @@ export default function RacingGamePage() {
           }}>
             Voice with opponent — tap the phone, accept mic. Safari on Mac: allow when the browser asks.
           </div>
-          {isIncomingOppCall && !callActive && (
-            <div style={{
-              display:'flex', alignItems:'center', gap:'10px',
-              background:'rgba(15,23,42,0.95)', border:'1px solid rgba(255,255,255,0.18)',
-              borderRadius:'14px', padding:'10px 14px', color:'#e2e8f0', fontFamily:'Poppins,sans-serif',
-              fontSize:'13px', boxShadow:'0 8px 24px rgba(0,0,0,0.45)',
-            }}>
-              <span style={{ flex:1, opacity:0.95 }}>
-                {incomingCall?.callerName || 'Opponent'} is calling...
-              </span>
-              <button
-                onClick={answerCall}
-                title="Answer"
-                style={{
-                  width:40, height:40, borderRadius:'50%', border:'none', cursor:'pointer',
-                  background:'#22c55e', color:'#fff', fontSize:'18px',
-                  display:'flex', alignItems:'center', justifyContent:'center',
-                }}
-              >
-                📞
-              </button>
-              <button
-                onClick={declineCall}
-                title="Decline"
-                style={{
-                  width:40, height:40, borderRadius:'50%', border:'none', cursor:'pointer',
-                  background:'#ef4444', color:'#fff', fontSize:'18px',
-                  display:'flex', alignItems:'center', justifyContent:'center',
-                }}
-              >
-                📵
-              </button>
-            </div>
-          )}
           {callActive && (
             <div style={{
               display:'flex', alignItems:'center', gap:'10px',
@@ -1482,14 +1456,19 @@ export default function RacingGamePage() {
             </div>
           )}
           <div style={{ display:'flex', gap:'10px', alignItems:'center' }}>
-            <button onClick={handleCallOpp} title={callActive ? 'End call' : 'Voice call opponent'} style={{
+            <button onClick={handleCallOpp} title={callActive ? 'End race voice' : 'Start race voice'} style={{
               width:52, height:52, borderRadius:'50%', border:'none', cursor:'pointer',
               background: callActive ? '#ef4444' : '#22c55e',
               color:'#fff', fontSize:'22px', display:'flex', alignItems:'center', justifyContent:'center',
               boxShadow:'0 4px 0 rgba(0,0,0,0.4)', fontFamily:'sans-serif',
             }}>
-              {callActive ? '📵' : '📞'}
+              📞
             </button>
+            {voiceConnecting && (
+              <div style={{ color:'rgba(255,255,255,0.75)', fontSize:'12px', fontFamily:'Poppins,sans-serif' }}>
+                Connecting voice...
+              </div>
+            )}
             {callActive && (
               <button onClick={handleMute} title={muted ? 'Unmute mic' : 'Mute mic'} style={{
                 width:52, height:52, borderRadius:'50%', border:'none', cursor:'pointer',
