@@ -3631,11 +3631,24 @@ export const initializeSocket = async (app) => {
             let disconnectedUserId = null
             
             // O(1) lookup by reverse mapping (fallback to scan for safety)
-            disconnectedUserId = await getSocketUser(socket.id)
-            if (disconnectedUserId) {
-                await deleteUserSocket(disconnectedUserId) // Delete from both in-memory and Redis
-                await deleteUserPresence(disconnectedUserId).catch(() => {})
+            const mappedUserId = await getSocketUser(socket.id)
+            if (mappedUserId) {
+                // Always remove reverse mapping for this exact socket id.
                 await deleteSocketUser(socket.id)
+
+                // Guard against stale-disconnect race:
+                // if user already reconnected on a newer socket, do NOT wipe their live mapping/presence.
+                const currentUserSocket = await getUserSocket(mappedUserId)
+                const currentSocketId = currentUserSocket?.socketId
+                if (currentSocketId && currentSocketId !== socket.id) {
+                    console.log(
+                        `⏭️ [socket] Ignoring stale disconnect for user ${mappedUserId}: old=${socket.id}, current=${currentSocketId}`
+                    )
+                } else {
+                    disconnectedUserId = mappedUserId
+                    await deleteUserSocket(mappedUserId) // Delete from both in-memory and Redis
+                    await deleteUserPresence(mappedUserId).catch(() => {})
+                }
             } else {
                 const allSockets = await getAllUserSockets()
                 for (const [id, data] of Object.entries(allSockets)) {
