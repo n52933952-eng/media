@@ -144,6 +144,17 @@ export default function RacingGamePage() {
     oppColorRef.current = isHost ? 'red'  : 'blue'
   }, [user])
 
+  // Hard guard: race route must have an active race room id.
+  // After refresh/unload we intentionally clear `raceRoomId`; without this guard
+  // the page can rebuild a local-only scene and look like it "returned to game".
+  useEffect(() => {
+    if (!user?._id) return
+    const roomId = localStorage.getItem('raceRoomId')
+    if (!roomId) {
+      navigate('/', { replace: true })
+    }
+  }, [user?._id, navigate])
+
   /** End race locally, notify server, clear storage, go home — safe if socket is dead */
   const exitRaceAndGoHome = useCallback(() => {
     if (raceExitHandledRef.current) return
