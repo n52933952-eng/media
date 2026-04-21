@@ -38,6 +38,8 @@ const RACE_DISCONNECT_GRACE_MS = 12000
 const RACE_WAIT_OPPONENT_MS = 120000
 /** Hard disconnect timeout before force exit (ms) */
 const RACE_HARD_DISCONNECT_EXIT_MS = 45000
+/** If opponent stops sending position updates during live race, end for both (ms) */
+const RACE_OPPONENT_SILENCE_MS = 12000
 
 /** Match SocketContext / backend: ids may be ObjectId or string */
 function userIdToStr(id) {
@@ -110,6 +112,7 @@ export default function RacingGamePage() {
   const oppTargetPosRef  = useRef(new THREE.Vector3(0, 100, 0))
   const oppTargetQuatRef = useRef(new THREE.Quaternion(0, 0, 0, 1))
   const oppSlerpTempRef  = useRef(new THREE.Quaternion())
+  const lastOpponentPosAtRef = useRef(0)
   /** Last displayed speed — avoid setState 60×/s (causes layout jitter / “page jumping”) */
   const lastSpeedDispRef = useRef(-1)
   // Pre-allocated Vector3 objects to avoid per-frame GC pressure
@@ -345,6 +348,7 @@ export default function RacingGamePage() {
     const onOpponentPos = (data) => {
       updateOpponentCarPosition(data)
       if (data.raceProgress) setOppGate(data.raceProgress.currentGateIndex || 0)
+      lastOpponentPosAtRef.current = Date.now()
     }
 
     const onRaceResult = ({ winnerId }) => {
@@ -393,6 +397,20 @@ export default function RacingGamePage() {
       socket.off('raceVoiceDeclined', onRaceVoiceDeclined)
     }
   }, [socket, user?._id, exitRaceAndGoHome, callActive, voiceConnecting])
+
+  // If opponent vanishes mid-race (disconnect/network loss) and no updates arrive, end race locally.
+  // This prevents one player staying in race while the other was sent home.
+  useEffect(() => {
+    if (loading || waitingOpp || !raceLive || raceFinished || raceExitHandledRef.current) return
+    const id = setInterval(() => {
+      const last = lastOpponentPosAtRef.current || 0
+      if (!last) return
+      if (Date.now() - last > RACE_OPPONENT_SILENCE_MS) {
+        exitRaceAndGoHomeRef.current?.()
+      }
+    }, 1000)
+    return () => clearInterval(id)
+  }, [loading, waitingOpp, raceLive, raceFinished])
 
   // Declare this client "ready" only after race assets are fully loaded.
   useEffect(() => {
@@ -1241,6 +1259,7 @@ export default function RacingGamePage() {
 
   // ─── Voice call ────────────────────────────────────────────────────────────
   const handleCallOpp = () => {
+    if (!raceLive || loading || waitingOpp || raceFinished) return
     if (callActive) {
       disconnectRaceVoice()
     } else {
@@ -1263,6 +1282,7 @@ export default function RacingGamePage() {
   }
 
   const isIncomingOppCall = false
+  const canUseRaceVoice = !loading && raceLive && !waitingOpp && !raceFinished
 
   // ─── Navigate back / leave race ────────────────────────────────────────────
   const handleLeave = () => {
@@ -1561,12 +1581,18 @@ export default function RacingGamePage() {
           <div style={{ display:'flex', gap:'10px', alignItems:'center' }}>
             <button onClick={handleCallOpp} title={callActive ? 'End race voice' : 'Start race voice'} style={{
               width:52, height:52, borderRadius:'50%', border:'none', cursor:'pointer',
-              background: callActive ? '#ef4444' : (raceVoicePending ? '#f59e0b' : '#22c55e'),
+              background: !canUseRaceVoice ? '#6b7280' : (callActive ? '#ef4444' : (raceVoicePending ? '#f59e0b' : '#22c55e')),
               color:'#fff', fontSize:'22px', display:'flex', alignItems:'center', justifyContent:'center',
               boxShadow:'0 4px 0 rgba(0,0,0,0.4)', fontFamily:'sans-serif',
+              opacity: canUseRaceVoice ? 1 : 0.7,
             }}>
               📞
             </button>
+            {!canUseRaceVoice && (
+              <div style={{ color:'rgba(255,255,255,0.75)', fontSize:'12px', fontFamily:'Poppins,sans-serif' }}>
+                Voice unlocks after GO
+              </div>
+            )}
             {raceVoicePending && !callActive && !voiceConnecting && (
               <div style={{ color:'rgba(255,255,255,0.75)', fontSize:'12px', fontFamily:'Poppins,sans-serif' }}>
                 Calling opponent...
