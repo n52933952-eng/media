@@ -9,6 +9,8 @@ import { LiveKitContext } from '../context/LiveKitContext'
 import API_BASE_URL from '../config/api'
 import raceStartSfx from '../assets/start.mp3'
 import raceLoopMusic from '../assets/k.mp3'
+import goSfx from '../assets/go.mp3'
+import raceMusicFile from '../assets/rasemusic.mp3'
 import { initPhysics, updatePhysics, FIXED_PHYSICS_STEP } from '../game/racing/physics.js'
 import { createVehicle, updateSteering, resetCarPosition, updateCarPosition } from '../game/racing/car.js'
 import { loadTrackModel, loadMapDecorations, checkGroundCollision } from '../game/racing/track.js'
@@ -824,11 +826,11 @@ export default function RacingGamePage() {
         raceStateRef.current.raceStarted = true
         setRaceLive(true)
         try {
-          if (!startSfxRef.current) startSfxRef.current = new Audio(raceStartSfx)
+          if (!startSfxRef.current) startSfxRef.current = new Audio(goSfx || raceStartSfx)
           startSfxRef.current.currentTime = 0
           startSfxRef.current.play().catch(() => {})
           if (!raceMusicRef.current) {
-            raceMusicRef.current = new Audio(raceLoopMusic)
+            raceMusicRef.current = new Audio(raceMusicFile || raceLoopMusic)
             raceMusicRef.current.loop = true
             raceMusicRef.current.volume = 0.4
           }
@@ -1242,6 +1244,11 @@ export default function RacingGamePage() {
           ) : (
             <div style={{ color:'rgba(255,255,255,0.8)', fontWeight:600, fontSize:'1rem' }}>
               {loadingPct > 0 ? `Loading game assets ${loadingPct}%…` : 'Loading game assets…'}
+            </div>
+          )}
+          {waitingOpp && (
+            <div style={{ marginTop:'10px', color:'rgba(255,255,255,0.72)', fontSize:'0.92rem' }}>
+              Waiting for opponent to join and finish loading...
             </div>
           )}
         </div>
