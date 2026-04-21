@@ -346,6 +346,12 @@ export default function RacingGamePage() {
       setIncomingRaceVoiceInvite(null)
     }
 
+    const onRaceVoiceEnded = ({ roomId }) => {
+      const currentRoom = roomIdRef.current
+      if (!roomId || !currentRoom || roomId !== currentRoom) return
+      disconnectRaceVoice()
+    }
+
     const onOpponentPos = (data) => {
       updateOpponentCarPosition(data)
       if (data.raceProgress) setOppGate(data.raceProgress.currentGateIndex || 0)
@@ -385,6 +391,7 @@ export default function RacingGamePage() {
     socket.on('raceVoiceInvite',   onRaceVoiceInvite)
     socket.on('raceVoiceAccepted', onRaceVoiceAccepted)
     socket.on('raceVoiceDeclined', onRaceVoiceDeclined)
+    socket.on('raceVoiceEnded',    onRaceVoiceEnded)
 
     return () => {
       socket.off('racePlayerJoined',  onPlayerJoined)
@@ -396,6 +403,7 @@ export default function RacingGamePage() {
       socket.off('raceVoiceInvite',   onRaceVoiceInvite)
       socket.off('raceVoiceAccepted', onRaceVoiceAccepted)
       socket.off('raceVoiceDeclined', onRaceVoiceDeclined)
+      socket.off('raceVoiceEnded',    onRaceVoiceEnded)
     }
   }, [socket, user?._id, exitRaceAndGoHome, callActive, voiceConnecting])
 
@@ -1268,6 +1276,8 @@ export default function RacingGamePage() {
   const handleCallOpp = () => {
     if (!raceLive || loading || waitingOpp || raceFinished) return
     if (callActive) {
+      const roomId = roomIdRef.current
+      if (socket && roomId) socket.emit('raceVoiceEnd', { roomId })
       disconnectRaceVoice()
     } else {
       if (raceVoicePending || voiceConnecting) return

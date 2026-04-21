@@ -3109,6 +3109,21 @@ export const initializeSocket = async (app) => {
             }
         })
 
+        socket.on('raceVoiceEnd', async ({ roomId }) => {
+            try {
+                if (!roomId) return
+                const state = await getRaceGameState(roomId).catch(() => null)
+                if (!state) return
+                const senderId = normalizeUserId(socket.handshake.query.userId)
+                const p1 = normalizeUserId(state.player1) || state.player1
+                const p2 = normalizeUserId(state.player2) || state.player2
+                if (!senderId || (senderId !== p1 && senderId !== p2)) return
+                io.to(roomId).emit('raceVoiceEnded', { roomId, by: senderId })
+            } catch (err) {
+                console.error('❌ [raceVoiceEnd]', err.message)
+            }
+        })
+
         // Position relay — server-side rate limit: max 20 updates/sec per socket
         // Prevents buggy/malicious clients from flooding opponents
         const racePosLastSent = new Map()
