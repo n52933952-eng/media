@@ -38,8 +38,9 @@ const RACE_DISCONNECT_GRACE_MS = 12000
 const RACE_WAIT_OPPONENT_MS = 120000
 /** Hard disconnect timeout before force exit (ms) */
 const RACE_HARD_DISCONNECT_EXIT_MS = 45000
-/** If opponent stops sending position updates during live race, end for both (ms) */
-const RACE_OPPONENT_SILENCE_MS = 12000
+/** If opponent stops sending position updates during live race, end for both (ms)
+ *  Keep this generous: browsers may pause timers during media permission/call toggles. */
+const RACE_OPPONENT_SILENCE_MS = 25000
 
 /** Match SocketContext / backend: ids may be ObjectId or string */
 function userIdToStr(id) {
@@ -402,7 +403,13 @@ export default function RacingGamePage() {
   // This prevents one player staying in race while the other was sent home.
   useEffect(() => {
     if (loading || waitingOpp || !raceLive || raceFinished || raceExitHandledRef.current) return
+    // Never end the race due to silence while voice is connecting/active.
+    if (callActive || voiceConnecting || raceVoicePending) return
+    if (!socket?.connected) return
     const id = setInterval(() => {
+      if (raceExitHandledRef.current) return
+      if (callActive || voiceConnecting || raceVoicePending) return
+      if (!socket?.connected) return
       const last = lastOpponentPosAtRef.current || 0
       if (!last) return
       if (Date.now() - last > RACE_OPPONENT_SILENCE_MS) {
@@ -410,7 +417,7 @@ export default function RacingGamePage() {
       }
     }, 1000)
     return () => clearInterval(id)
-  }, [loading, waitingOpp, raceLive, raceFinished])
+  }, [loading, waitingOpp, raceLive, raceFinished, callActive, voiceConnecting, raceVoicePending, socket?.connected])
 
   // Declare this client "ready" only after race assets are fully loaded.
   useEffect(() => {
