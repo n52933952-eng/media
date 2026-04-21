@@ -1144,8 +1144,8 @@ export default function RacingGamePage() {
     // Clean up sessionStorage game config
     sessionStorage.removeItem('gameConfig')
 
-    // End any active voice call when leaving the race
-    leaveCall?.()
+    // End any active race voice call when leaving the race
+    disconnectRaceVoice?.()
     try {
       if (startSfxRef.current) {
         startSfxRef.current.pause()
@@ -1156,7 +1156,7 @@ export default function RacingGamePage() {
         raceMusicRef.current.currentTime = 0
       }
     } catch (_) { /* ignore */ }
-  }, [leaveCall])
+  }, [disconnectRaceVoice])
 
   // ─── Voice call ────────────────────────────────────────────────────────────
   const handleCallOpp = () => {
