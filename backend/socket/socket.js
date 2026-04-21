@@ -3006,6 +3006,17 @@ export const initializeSocket = async (app) => {
             io.to(roomId).emit('racePlayerJoined', { count })
         })
 
+        // Explicit room leave (route navigation / cleanup) so stale room membership
+        // cannot keep opponents "stuck in race" when someone goes Home.
+        socket.on('leaveRaceRoom', ({ roomId }) => {
+            if (!roomId) return
+            socket.leave(roomId)
+            const roomSockets = io.sockets.adapter.rooms.get(roomId)
+            const count = roomSockets ? roomSockets.size : 0
+            io.to(roomId).emit('racePlayerJoined', { count })
+            console.log(`🏎️ Socket ${socket.id} left race room ${roomId} (remaining: ${count})`)
+        })
+
         // Player finished loading race assets and is ready to start.
         socket.on('racePlayerReady', async ({ roomId, userId }) => {
             if (!roomId) return
@@ -3117,6 +3128,8 @@ export const initializeSocket = async (app) => {
             if (p1) await deleteActiveRaceGame(p1).catch(() => {})
             if (p2) await deleteActiveRaceGame(p2).catch(() => {})
             await deleteRaceGameState(roomId).catch(() => {})
+            // Force all sockets out of this room so stale memberships never keep ghost races alive.
+            try { io.in(roomId).socketsLeave(roomId) } catch (_) {}
         })
 
         // Card Game Challenge Events (Same pattern as Chess)
@@ -3933,6 +3946,7 @@ export const initializeSocket = async (app) => {
                     io.emit('userAvailableRace', { userId: disconnectedUserId })
                     await deleteActiveRaceGame(disconnectedUserId).catch(() => {})
                     await deleteRaceGameState(raceRoomId).catch(() => {})
+                    try { io.in(raceRoomId).socketsLeave(raceRoomId) } catch (_) {}
                 }, 10000)
             }
 

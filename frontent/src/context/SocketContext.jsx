@@ -1312,6 +1312,7 @@ export const SocketContextProvider = ({ children }) => {
     const roomId = localStorage.getItem('raceRoomId');
     try {
       if (roomId && socket?.connected) {
+        socket.emit('leaveRaceRoom', { roomId });
         const match = roomId.match(/^race_(.+?)_(.+?)_(\d+)$/);
         if (match) {
           socket.emit('raceGameEnd', { roomId, player1: match[1], player2: match[2] });

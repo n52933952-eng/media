@@ -115,6 +115,7 @@ export default function RacingGamePage() {
   const oppTargetPosRef  = useRef(new THREE.Vector3(0, 100, 0))
   const oppTargetQuatRef = useRef(new THREE.Quaternion(0, 0, 0, 1))
   const oppSlerpTempRef  = useRef(new THREE.Quaternion())
+  const lastOpponentPosAtRef = useRef(0)
   /** Last displayed speed — avoid setState 60×/s (causes layout jitter / “page jumping”) */
   const lastSpeedDispRef = useRef(-1)
   // Pre-allocated Vector3 objects to avoid per-frame GC pressure
@@ -279,6 +280,7 @@ export default function RacingGamePage() {
       const hasBoth = count >= 2
       setWaitingOpp(!hasBoth)
       raceStateRef.current.allPlayersConnected = hasBoth
+      if (hasBoth) lastOpponentPosAtRef.current = Date.now()
       maybeStartCountdown()
     }
 
@@ -296,6 +298,7 @@ export default function RacingGamePage() {
     }
 
     const onOpponentPos = (data) => {
+      lastOpponentPosAtRef.current = Date.now()
       updateOpponentCarPosition(data)
       if (data.raceProgress) setOppGate(data.raceProgress.currentGateIndex || 0)
     }
@@ -340,6 +343,22 @@ export default function RacingGamePage() {
       socket.off('raceReadyState',    onRaceReadyState)
     }
   }, [socket, user?._id, exitRaceAndGoHome])
+
+  // If opponent disappears (no position packets), exit both-side lifecycle instead of leaving user stuck.
+  useEffect(() => {
+    if (!socket) return
+    const id = window.setInterval(() => {
+      if (raceExitHandledRef.current) return
+      if (loading || waitingOpp) return
+      if (!raceStateRef.current.allPlayersConnected) return
+      const last = lastOpponentPosAtRef.current || 0
+      if (!last) return
+      if (Date.now() - last > 10000) {
+        exitRaceAndGoHomeRef.current?.()
+      }
+    }, 2000)
+    return () => window.clearInterval(id)
+  }, [socket, loading, waitingOpp])
 
   // Declare this client "ready" only after race assets are fully loaded.
   useEffect(() => {
