@@ -21,7 +21,7 @@ const apiBaseUrl = () => (import.meta.env.PROD ? window.location.origin : 'http:
 const CLOUDINARY_DELIVERY_QUALITY = (import.meta.env.VITE_CLOUDINARY_DELIVERY_QUALITY || 'eco').trim()
 const ENABLE_CLOUDINARY_DPR_AUTO = (import.meta.env.VITE_CLOUDINARY_IMAGE_DPR_AUTO || 'true') !== 'false'
 
-const Post = ({post: initialPost, postedBy, onDelete, visibleVideoOnly = false}) => {
+const Post = ({post: initialPost, postedBy, onDelete, visibleVideoOnly = false, autoPlayMedia}) => {
     
   // Local state for this specific post (used when not in feed context)
   const [localPost, setLocalPost] = useState(initialPost)
@@ -30,7 +30,6 @@ const Post = ({post: initialPost, postedBy, onDelete, visibleVideoOnly = false})
   const post = localPost || initialPost
   const videoRef = useRef(null)
   const [isVideoInView, setIsVideoInView] = useState(!visibleVideoOnly)
-  const [manualVideoPlay, setManualVideoPlay] = useState(false)
   const optimizeCloudinaryMediaUrl = useCallback((rawUrl, kind) => {
     const url = String(rawUrl || '')
     if (!url.includes('res.cloudinary.com')) return url
@@ -56,6 +55,11 @@ const Post = ({post: initialPost, postedBy, onDelete, visibleVideoOnly = false})
   }, [initialPost])
 
   useEffect(() => {
+    // Feed can pass explicit playback control (single active video).
+    // In that case, don't run local intersection observer logic.
+    if (typeof autoPlayMedia === 'boolean') {
+      return
+    }
     if (!visibleVideoOnly) {
       setIsVideoInView(true)
       return
@@ -71,16 +75,17 @@ const Post = ({post: initialPost, postedBy, onDelete, visibleVideoOnly = false})
     )
     observer.observe(videoRef.current)
     return () => observer.disconnect()
-  }, [visibleVideoOnly, isVideoMedia, post?._id])
+  }, [visibleVideoOnly, isVideoMedia, post?._id, autoPlayMedia])
 
   useEffect(() => {
     if (!isVideoMedia || !videoRef.current) return
-    if (isVideoInView) {
+    const shouldPlay = typeof autoPlayMedia === 'boolean' ? autoPlayMedia : isVideoInView
+    if (shouldPlay) {
       videoRef.current.play?.().catch(() => {})
-    } else if (!manualVideoPlay) {
+    } else {
       videoRef.current.pause?.()
     }
-  }, [isVideoInView, isVideoMedia, manualVideoPlay])
+  }, [isVideoInView, isVideoMedia, autoPlayMedia])
 
   const navigate = useNavigate()
 
@@ -1305,22 +1310,12 @@ const showToast = useShowToast()
           ref={videoRef}
           src={optimizedVideoUrl}
           controls
-          autoPlay={visibleVideoOnly ? isVideoInView : true}
+          autoPlay={typeof autoPlayMedia === 'boolean' ? autoPlayMedia : (visibleVideoOnly ? isVideoInView : true)}
           muted
           playsInline
           loop
           w="full"
           maxH="400px"
-          onPlay={() => {
-            // If user pressed play manually, do not auto-pause due to minor visibility jitter.
-            setManualVideoPlay(true)
-          }}
-          onPause={() => {
-            setManualVideoPlay(false)
-          }}
-          onEnded={() => {
-            setManualVideoPlay(false)
-          }}
           onLoadedData={(e) => {
             // Ensure video plays when loaded (some browsers need this)
             if (visibleVideoOnly && !isVideoInView) return
