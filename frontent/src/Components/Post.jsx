@@ -30,6 +30,7 @@ const Post = ({post: initialPost, postedBy, onDelete, visibleVideoOnly = false})
   const post = localPost || initialPost
   const videoRef = useRef(null)
   const [isVideoInView, setIsVideoInView] = useState(!visibleVideoOnly)
+  const [manualVideoPlay, setManualVideoPlay] = useState(false)
   const optimizeCloudinaryMediaUrl = useCallback((rawUrl, kind) => {
     const url = String(rawUrl || '')
     if (!url.includes('res.cloudinary.com')) return url
@@ -63,9 +64,10 @@ const Post = ({post: initialPost, postedBy, onDelete, visibleVideoOnly = false})
 
     const observer = new IntersectionObserver(
       ([entry]) => {
-        setIsVideoInView(!!entry?.isIntersecting && entry.intersectionRatio >= 0.6)
+        // 0.35 is more stable on profile pages with sticky headers/overlays.
+        setIsVideoInView(!!entry?.isIntersecting && entry.intersectionRatio >= 0.35)
       },
-      { threshold: [0, 0.25, 0.6, 0.9] }
+      { threshold: [0, 0.2, 0.35, 0.6, 0.9] }
     )
     observer.observe(videoRef.current)
     return () => observer.disconnect()
@@ -75,10 +77,10 @@ const Post = ({post: initialPost, postedBy, onDelete, visibleVideoOnly = false})
     if (!isVideoMedia || !videoRef.current) return
     if (isVideoInView) {
       videoRef.current.play?.().catch(() => {})
-    } else {
+    } else if (!manualVideoPlay) {
       videoRef.current.pause?.()
     }
-  }, [isVideoInView, isVideoMedia])
+  }, [isVideoInView, isVideoMedia, manualVideoPlay])
 
   const navigate = useNavigate()
 
@@ -1309,6 +1311,16 @@ const showToast = useShowToast()
           loop
           w="full"
           maxH="400px"
+          onPlay={() => {
+            // If user pressed play manually, do not auto-pause due to minor visibility jitter.
+            setManualVideoPlay(true)
+          }}
+          onPause={() => {
+            setManualVideoPlay(false)
+          }}
+          onEnded={() => {
+            setManualVideoPlay(false)
+          }}
           onLoadedData={(e) => {
             // Ensure video plays when loaded (some browsers need this)
             if (visibleVideoOnly && !isVideoInView) return
