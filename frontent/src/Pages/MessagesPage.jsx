@@ -65,6 +65,101 @@ const isUserInOnlineList = (onlineList, userId) =>
   Array.isArray(onlineList) &&
   onlineList.some((ou) => idStr(ou.userId || ou._id) === idStr(userId))
 
+const SHARED_POST_LINK_REGEX = /https?:\/\/[^\s/]+\/[^/\s]+\/post\/([a-fA-F0-9]{24})/i
+const sharedPostCache = new Map()
+
+const extractSharedPostId = (text) => {
+  const value = typeof text === 'string' ? text.trim() : ''
+  if (!value) return null
+  const match = value.match(SHARED_POST_LINK_REGEX)
+  return match?.[1] || null
+}
+
+const SharedPostPreview = ({ postId, onOpen }) => {
+  const [postData, setPostData] = useState(() => sharedPostCache.get(postId) || null)
+  const [loadingPost, setLoadingPost] = useState(!sharedPostCache.has(postId))
+
+  useEffect(() => {
+    if (!postId) return
+    if (sharedPostCache.has(postId)) {
+      setPostData(sharedPostCache.get(postId))
+      setLoadingPost(false)
+      return
+    }
+    let alive = true
+    const fetchPost = async () => {
+      setLoadingPost(true)
+      try {
+        const base = import.meta.env.PROD ? window.location.origin : 'http://localhost:5000'
+        const res = await fetch(`${base}/api/post/${postId}`, { credentials: 'include' })
+        const data = await res.json()
+        if (!res.ok) throw new Error(data?.error || 'Failed to load shared post')
+        if (!alive) return
+        sharedPostCache.set(postId, data)
+        setPostData(data)
+      } catch (_) {
+        if (!alive) return
+        setPostData(null)
+      } finally {
+        if (alive) setLoadingPost(false)
+      }
+    }
+    fetchPost()
+    return () => {
+      alive = false
+    }
+  }, [postId])
+
+  if (!postId) return null
+
+  return (
+    <Box
+      mt={1}
+      mb={2}
+      p={2}
+      borderRadius="md"
+      border="1px solid"
+      borderColor={useColorModeValue('gray.300', 'gray.600')}
+      bg={useColorModeValue('blackAlpha.50', 'whiteAlpha.100')}
+      cursor="pointer"
+      onClick={onOpen}
+      _hover={{ opacity: 0.92 }}
+    >
+      {loadingPost ? (
+        <Flex align="center" gap={2}>
+          <Spinner size="xs" />
+          <Text fontSize="xs">Loading shared post...</Text>
+        </Flex>
+      ) : postData ? (
+        <VStack align="stretch" spacing={2}>
+          <Text fontSize="xs" color={useColorModeValue('gray.700', 'gray.300')} noOfLines={2}>
+            {postData?.text || 'Shared post'}
+          </Text>
+          {postData?.img && (
+            postData.img.includes('/video/upload/') || /\.(mp4|webm|ogg|mov)$/i.test(postData.img) ? (
+              <Box
+                as="video"
+                src={postData.img}
+                controls
+                maxW="100%"
+                maxH="260px"
+                borderRadius="md"
+                onClick={(e) => e.stopPropagation()}
+              />
+            ) : (
+              <Image src={postData.img} maxW="100%" maxH="260px" borderRadius="md" objectFit="contain" />
+            )
+          )}
+        </VStack>
+      ) : (
+        <Text fontSize="xs" color={useColorModeValue('gray.600', 'gray.400')}>
+          Shared post (tap to open)
+        </Text>
+      )}
+    </Box>
+  )
+}
+
 const MessagesPage = () => {
   const { user } = useContext(UserContext)
   const socketContext = useContext(SocketContext)
@@ -2721,6 +2816,20 @@ const MessagesPage = () => {
                               </Text>
                             </Box>
                           )}
+                          {(() => {
+                            const sharedPostId = extractSharedPostId(msg.text)
+                            if (!sharedPostId) return null
+                            return (
+                              <SharedPostPreview
+                                postId={sharedPostId}
+                                onOpen={() => {
+                                  const linkMatch = String(msg.text || '').match(/https?:\/\/[^\s]+/i)
+                                  const link = linkMatch?.[0]
+                                  if (link) window.open(link, '_blank')
+                                }}
+                              />
+                            )
+                          })()}
                           {/* Image/Video display */}
                           {msg.img && typeof msg.img === 'string' && msg.img.trim() !== '' && (
                             <Box
@@ -2857,9 +2966,13 @@ const MessagesPage = () => {
                           )}
                           {/* Text message bubble */}
                           {msg.text && (() => {
+                            const textWithoutSharedLink = extractSharedPostId(msg.text)
+                              ? String(msg.text).replace(/https?:\/\/[^\s]+/i, '').trim()
+                              : msg.text
+                            if (!textWithoutSharedLink) return null
                             // Check if message is emoji-only (contains only emojis and whitespace)
                             const emojiOnlyRegex = /^[\s\p{Emoji}]+$/u
-                            const isEmojiOnly = emojiOnlyRegex.test(msg.text.trim())
+                            const isEmojiOnly = emojiOnlyRegex.test(textWithoutSharedLink.trim())
                             
                             return (
                               <Flex
@@ -2882,7 +2995,7 @@ const MessagesPage = () => {
                                   whiteSpace="pre-wrap" 
                                   flex={1}
                                 >
-                                  {msg.text}
+                                  {textWithoutSharedLink}
                                 </Text>
                                 {isOwn && (
                                   <Box alignSelf="flex-end" color={msg.seen ? "blue.600" : "gray.600"} flexShrink={0} ml={1}>
