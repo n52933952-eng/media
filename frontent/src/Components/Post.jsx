@@ -899,19 +899,22 @@ const showToast = useShowToast()
         {(() => {
           const createdAt = post?.createdAt ? new Date(post.createdAt) : null
           const updatedAt = post?.updatedAt ? new Date(post.updatedAt) : null
+          const fallbackAt = post?.date ? new Date(post.date) : null
           const createdOk = createdAt && !Number.isNaN(createdAt.getTime())
           const updatedOk = updatedAt && !Number.isNaN(updatedAt.getTime())
+          const fallbackOk = fallbackAt && !Number.isNaN(fallbackAt.getTime())
+          const displayDate = createdOk ? createdAt : (updatedOk ? updatedAt : (fallbackOk ? fallbackAt : null))
           const isEdited =
             createdOk &&
             updatedOk &&
             Math.abs(updatedAt.getTime() - createdAt.getTime()) > 60 * 1000
 
-          if (!createdOk) return null
+          if (!displayDate) return null
 
           return (
             <Flex direction="column" alignItems="flex-end" gap={0}>
               <Text fontSize="sm" color="gray.light" textAlign="right" whiteSpace="nowrap">
-                {formatDistanceToNow(createdAt)} ago
+                {formatDistanceToNow(displayDate, { addSuffix: true })}
               </Text>
               {isEdited && (
                 <Text fontSize="xs" color="gray.light" textAlign="right" whiteSpace="nowrap">

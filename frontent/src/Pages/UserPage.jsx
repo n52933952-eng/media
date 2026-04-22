@@ -4,6 +4,7 @@ import UserPost from '../Components/UserPost'
 import{useParams} from 'react-router-dom'
 import useShowToast from '../hooks/useShowToast'
 import{Spinner,Flex,Button,Text,Box,Avatar,useColorModeValue} from '@chakra-ui/react'
+import { formatDistanceToNow } from 'date-fns'
 import Post from '../Components/Post'
 import{UserContext} from '../context/UserContext'
 import{PostContext} from '../context/PostContext'
@@ -414,7 +415,17 @@ if(!user && loading){
                           <Flex align="center" gap={2} mb={1}>
                             <Text fontWeight="bold" fontSize="sm">{comment.username}</Text>
                             <Text fontSize="xs" color="gray.500">
-                              {new Date(comment.date).toLocaleDateString()}
+                              {(() => {
+                                const c1 = comment?.createdAt ? new Date(comment.createdAt) : null
+                                const c2 = comment?.updatedAt ? new Date(comment.updatedAt) : null
+                                const c3 = comment?.date ? new Date(comment.date) : null
+                                const d1 = c1 && !Number.isNaN(c1.getTime()) ? c1 : null
+                                const d2 = c2 && !Number.isNaN(c2.getTime()) ? c2 : null
+                                const d3 = c3 && !Number.isNaN(c3.getTime()) ? c3 : null
+                                const when = d1 || d2 || d3
+                                if (!when) return ''
+                                return formatDistanceToNow(when, { addSuffix: true })
+                              })()}
                             </Text>
                           </Flex>
                           <Text fontSize="sm" mb={3}>{comment.text}</Text>
