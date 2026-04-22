@@ -4,6 +4,7 @@ import {
 	Flex,
 	FormControl,
 	Input,
+	Spinner,
 	Modal,
 	ModalBody,
 	ModalCloseButton,
@@ -16,7 +17,7 @@ import {
 	useToast,
 } from "@chakra-ui/react";
 
-import{useState,useContext} from 'react'
+import{useState,useContext,useMemo} from 'react'
 import{UserContext} from '../context/UserContext'
 import{PostContext} from '../context/PostContext'
 import useShowToast from '../hooks/useShowToast.js'
@@ -28,6 +29,7 @@ const Actions = ({post}) => {
 	
 
 	const{user}=useContext(UserContext)
+	const ENABLE_POST_SHARE_TO_CHAT = (import.meta.env.VITE_ENABLE_POST_SHARE_TO_CHAT || 'true') !== 'false'
 
 	const toast = useToast()
 	
@@ -41,12 +43,26 @@ const Actions = ({post}) => {
 	
 
     const{isOpen,onOpen,onClose}=useDisclosure()
+	const {
+		isOpen: isShareOpen,
+		onOpen: onShareOpen,
+		onClose: onShareClose,
+	} = useDisclosure()
    
 	const[reply,setReply]=useState("")
+	const [conversations, setConversations] = useState([])
+	const [loadingConversations, setLoadingConversations] = useState(false)
+	const [sendingShare, setSendingShare] = useState(false)
   
 	const[loading,setLoading]=useState(false)
  
 	const showToast = useShowToast()
+	const currentUserId = user?._id?.toString?.() || String(user?._id || '')
+	const baseUrl = import.meta.env.PROD ? window.location.origin : "http://localhost:5000"
+	const permalink = useMemo(() => {
+		const username = post?.postedBy?.username || post?.postedBy?.name || 'post'
+		return `${window.location.origin}/${username}/post/${post?._id}`
+	}, [post?._id, post?.postedBy?.username, post?.postedBy?.name])
   
 	
 	   
@@ -88,6 +104,89 @@ const Actions = ({post}) => {
 	 }catch(error){
 		console.log(error)
 	 }
+  }
+
+  const fetchConversations = async () => {
+	if (!ENABLE_POST_SHARE_TO_CHAT || !user) return
+	setLoadingConversations(true)
+	try {
+		const res = await fetch(`${baseUrl}/api/message/conversations?limit=30`, {
+			credentials: 'include',
+		})
+		const data = await res.json()
+		if (!res.ok) {
+			throw new Error(data?.error || 'Failed to load conversations')
+		}
+		const list = Array.isArray(data?.conversations) ? data.conversations : (Array.isArray(data) ? data : [])
+		setConversations(list)
+	} catch (e) {
+		console.error('[Actions] fetch conversations:', e)
+		showToast('Error', 'Could not load chats', 'error')
+	} finally {
+		setLoadingConversations(false)
+	}
+  }
+
+  const openShareModal = () => {
+	if (!ENABLE_POST_SHARE_TO_CHAT) {
+		showToast('Info', 'Sharing is disabled right now', 'info')
+		return
+	}
+	onShareOpen()
+	fetchConversations()
+  }
+
+  const getConversationLabel = (conv) => {
+	if (conv?.isGroup) return conv?.groupName || 'Group'
+	const other = (conv?.participants || []).find((p) => {
+		const id = p?._id?.toString?.() || String(p?._id || '')
+		return id && id !== currentUserId
+	})
+	return other?.name || other?.username || 'Direct chat'
+  }
+
+  const getRecipientIdForDirect = (conv) => {
+	if (conv?.isGroup) return null
+	const other = (conv?.participants || []).find((p) => {
+		const id = p?._id?.toString?.() || String(p?._id || '')
+		return id && id !== currentUserId
+	})
+	return other?._id || null
+  }
+
+  const handleShareToConversation = async (conv) => {
+	if (!conv?._id || sendingShare) return
+	setSendingShare(true)
+	try {
+		const isGroup = !!conv?.isGroup
+		const recipientId = getRecipientIdForDirect(conv)
+		const payload = {
+			message: `🔗 ${permalink}`,
+			...(isGroup
+				? { conversationId: conv._id }
+				: { recipientId }),
+		}
+		if (!isGroup && !recipientId) {
+			throw new Error('Could not resolve recipient')
+		}
+		const res = await fetch(`${baseUrl}/api/message`, {
+			method: 'POST',
+			credentials: 'include',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify(payload),
+		})
+		const data = await res.json()
+		if (!res.ok) {
+			throw new Error(data?.error || 'Failed to share post')
+		}
+		showToast('Shared', `Sent to ${getConversationLabel(conv)}`, 'success')
+		onShareClose()
+	} catch (e) {
+		console.error('[Actions] share to conversation:', e)
+		showToast('Error', 'Could not share post', 'error')
+	} finally {
+		setSendingShare(false)
+	}
   }
 
 
@@ -217,7 +316,7 @@ return (
 				</svg>
 
 				<RepostSVG />
-				<ShareSVG />
+				<ShareSVG onClick={openShareModal} disabled={!ENABLE_POST_SHARE_TO_CHAT} />
 			</Flex>
 
 			<Flex gap={2} alignItems={"center"}>
@@ -252,6 +351,43 @@ return (
 					</ModalFooter>
 				</ModalContent>
 			</Modal>
+
+			<Modal isOpen={isShareOpen} onClose={onShareClose}>
+				<ModalOverlay />
+				<ModalContent>
+					<ModalHeader>Share to chat</ModalHeader>
+					<ModalCloseButton />
+					<ModalBody pb={4}>
+						<Text fontSize="sm" color="gray.500" mb={3} noOfLines={2}>
+							{permalink}
+						</Text>
+						{loadingConversations ? (
+							<Flex justify="center" py={6}>
+								<Spinner size="md" />
+							</Flex>
+						) : conversations.length === 0 ? (
+							<Text fontSize="sm" color="gray.500">No chats found</Text>
+						) : (
+							<Flex direction="column" gap={2} maxH="320px" overflowY="auto">
+								{conversations.map((conv) => (
+									<Button
+										key={conv?._id}
+										variant="outline"
+										justifyContent="flex-start"
+										onClick={() => handleShareToConversation(conv)}
+										isLoading={sendingShare}
+									>
+										{conv?.isGroup ? '👥 ' : '💬 '}{getConversationLabel(conv)}
+									</Button>
+								))}
+							</Flex>
+						)}
+					</ModalBody>
+					<ModalFooter>
+						<Button variant="ghost" onClick={onShareClose}>Close</Button>
+					</ModalFooter>
+				</ModalContent>
+			</Modal>
 		</Flex>
 	);
 };
@@ -278,7 +414,7 @@ const RepostSVG = () => {
 	);
 };
 
-const ShareSVG = () => {
+const ShareSVG = ({ onClick, disabled = false }) => {
 	return (
 		<svg
 			aria-label='Share'
@@ -288,6 +424,8 @@ const ShareSVG = () => {
 			role='img'
 			viewBox='0 0 24 24'
 			width='20'
+			onClick={disabled ? undefined : onClick}
+			style={{ cursor: disabled ? 'not-allowed' : 'pointer', opacity: disabled ? 0.45 : 1 }}
 		>
 			<title>Share</title>
 			<line
