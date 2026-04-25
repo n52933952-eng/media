@@ -75,7 +75,7 @@ const extractSharedPostId = (text) => {
   return match?.[1] || null
 }
 
-const SharedPostPreview = ({ postId, onOpen }) => {
+const SharedPostPreview = ({ postId, onOpen, onMessageClick }) => {
   const [postData, setPostData] = useState(() => sharedPostCache.get(postId) || null)
   const [loadingPost, setLoadingPost] = useState(!sharedPostCache.has(postId))
   const cardBg = useColorModeValue('blackAlpha.50', 'whiteAlpha.100')
@@ -125,7 +125,11 @@ const SharedPostPreview = ({ postId, onOpen }) => {
       borderColor={borderColor}
       bg={cardBg}
       cursor="pointer"
-      onClick={onOpen}
+      onClick={onMessageClick}
+      onContextMenu={(e) => {
+        e.preventDefault()
+        onMessageClick?.(e)
+      }}
       _hover={{ opacity: 0.92 }}
     >
       {loadingPost ? (
@@ -146,7 +150,19 @@ const SharedPostPreview = ({ postId, onOpen }) => {
                 {postData?.postedBy?.name || postData?.postedBy?.username || 'Shared post'}
               </Text>
             </HStack>
-            <Text fontSize="2xs" color={muted} opacity={0.8} whiteSpace="nowrap">
+            <Text
+              as="button"
+              type="button"
+              fontSize="2xs"
+              color={muted}
+              opacity={0.9}
+              whiteSpace="nowrap"
+              textDecoration="underline"
+              onClick={(e) => {
+                e.stopPropagation()
+                onOpen?.()
+              }}
+            >
               Open
             </Text>
           </Flex>
@@ -2876,6 +2892,7 @@ const MessagesPage = () => {
                             return (
                               <SharedPostPreview
                                 postId={sharedPostId}
+                                onMessageClick={(e) => handleMessageClick(e, msg._id)}
                                 onOpen={() => {
                                   const linkMatch = String(msg.text || '').match(/https?:\/\/[^\s]+/i)
                                   const link = linkMatch?.[0]
