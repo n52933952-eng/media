@@ -218,7 +218,7 @@ const MessagesPage = () => {
   const [followedUsers, setFollowedUsers] = useState([])
   const [isTyping, setIsTyping] = useState(false)
   const [emojiPickerOpen, setEmojiPickerOpen] = useState(null) // Store messageId when picker is open
-  const [emojiPickerPlacement, setEmojiPickerPlacement] = useState('above') // 'above' | 'below'
+  const [emojiPickerPosition, setEmojiPickerPosition] = useState({ top: null, left: null })
   const [emojiPickerForMessage, setEmojiPickerForMessage] = useState(false) // Track if emoji picker is open for sending messages
   const [isAtBottom, setIsAtBottom] = useState(true) // Track if user is scrolled to bottom
   const [unreadCountInView, setUnreadCountInView] = useState(0) // Count of unread messages while scrolled up
@@ -1753,6 +1753,7 @@ const MessagesPage = () => {
     const emoji = emojiData.emoji || emojiData
     handleReaction(messageId, emoji)
     setEmojiPickerOpen(null)
+    setEmojiPickerPosition({ top: null, left: null })
   }
 
   // Handle message click to show emoji picker
@@ -1772,49 +1773,46 @@ const MessagesPage = () => {
     const nextOpenId = emojiPickerOpen === messageId ? null : messageId
     // Toggle emoji picker for this message
     setEmojiPickerOpen(nextOpenId)
-    setEmojiPickerPlacement('above')
-
-    // If opening the action bar, scroll message into a safe visible area
-    // so the popup (shown above the bubble) is not clipped.
-    if (nextOpenId) {
-      setTimeout(() => {
-        const container = messagesContainerRef.current
-        if (!container) return
-        const messageEl = container.querySelector?.(`[data-message-id="${messageId}"]`)
-        if (!messageEl) return
-
-        const containerRect = container.getBoundingClientRect()
-        const messageRect = messageEl.getBoundingClientRect()
-        // Reserve headroom above the message for popup/reactions.
-        const popupHeadroom = 120
-        const visibleTop = containerRect.top + popupHeadroom
-        const visibleBottom = containerRect.bottom - 24
-
-        const isClippedTop = messageRect.top < visibleTop
-        const isClippedBottom = messageRect.bottom > visibleBottom
-
-        // Smart placement:
-        // - near top: place below
-        // - near bottom (or enough room above): place above
-        // This avoids hiding under the composer at the bottom.
-        if (isClippedTop && !isClippedBottom) {
-          setEmojiPickerPlacement('below')
-        } else {
-          setEmojiPickerPlacement('above')
-        }
-
-        if (isClippedTop || isClippedBottom) {
-          // Centering gives stable UX for both top/bottom clipping cases.
-          messageEl.scrollIntoView({ behavior: 'smooth', block: 'center' })
-        }
-      }, 40)
+    if (!nextOpenId) {
+      setEmojiPickerPosition({ top: null, left: null })
+      return
     }
+
+    // Place popup in viewport coordinates so it never gets clipped by
+    // scroll containers/header/composer edges.
+    setTimeout(() => {
+      const container = messagesContainerRef.current
+      if (!container) return
+      const messageEl = container.querySelector?.(`[data-message-id="${messageId}"]`)
+      if (!messageEl) return
+
+      const messageRect = messageEl.getBoundingClientRect()
+      const viewportW = window.innerWidth
+      const viewportH = window.innerHeight
+      const menuWidth = 360
+      const menuHeight = 60
+      const margin = 12
+      const gap = 8
+
+      const topAbove = messageRect.top - menuHeight - gap
+      const topBelow = messageRect.bottom + gap
+      const top = topAbove >= margin
+        ? topAbove
+        : Math.min(viewportH - menuHeight - margin, topBelow)
+
+      const alignRight = messageRect.right > viewportW * 0.6
+      const preferredLeft = alignRight ? (messageRect.right - menuWidth) : messageRect.left
+      const left = Math.max(margin, Math.min(viewportW - menuWidth - margin, preferredLeft))
+
+      setEmojiPickerPosition({ top, left })
+    }, 20)
   }
 
   // Handle reply to message
   const handleReply = (message) => {
     setReplyingTo(message)
     setEmojiPickerOpen(null) // Close emoji picker if open
+    setEmojiPickerPosition({ top: null, left: null })
     // Focus on input after a small delay to ensure it's rendered
     setTimeout(() => {
       messageInputRef.current?.focus()
@@ -2075,6 +2073,7 @@ const MessagesPage = () => {
         const messageBubble = event.target.closest('[data-message-id]')
         if (!messageBubble) {
           setEmojiPickerOpen(null)
+          setEmojiPickerPosition({ top: null, left: null })
         }
       }
       // Close message emoji picker (G button)
@@ -3225,14 +3224,10 @@ const MessagesPage = () => {
                         {emojiPickerOpen === msg._id && (
                           <Box
                             ref={emojiPickerRef}
-                            position="absolute"
-                            left={isOwn ? 'auto' : 0}
-                            right={isOwn ? 0 : 'auto'}
-                            bottom={emojiPickerPlacement === 'above' ? '100%' : 'auto'}
-                            mb={emojiPickerPlacement === 'above' ? 2 : 0}
-                            top={emojiPickerPlacement === 'below' ? '100%' : 'auto'}
-                            mt={emojiPickerPlacement === 'below' ? 2 : 0}
-                            zIndex={1000}
+                            position="fixed"
+                            top={emojiPickerPosition.top ?? 120}
+                            left={emojiPickerPosition.left ?? 16}
+                            zIndex={2000}
                           >
                             <Flex
                               bg={useColorModeValue('white', '#2a2a2a')}
@@ -3297,6 +3292,7 @@ const MessagesPage = () => {
                                   e.nativeEvent?.stopImmediatePropagation?.()
                                   handleDeleteMessage(msg._id, e)
                                   setEmojiPickerOpen(null)
+                                  setEmojiPickerPosition({ top: null, left: null })
                                 }}
                                 _active={{
                                   transform: 'scale(1.1)'
