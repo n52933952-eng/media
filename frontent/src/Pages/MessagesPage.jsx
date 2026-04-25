@@ -1734,8 +1734,35 @@ const MessagesPage = () => {
   // Handle message click to show emoji picker
   const handleMessageClick = (e, messageId) => {
     e.stopPropagation()
+    const nextOpenId = emojiPickerOpen === messageId ? null : messageId
     // Toggle emoji picker for this message
-    setEmojiPickerOpen(emojiPickerOpen === messageId ? null : messageId)
+    setEmojiPickerOpen(nextOpenId)
+
+    // If opening the action bar, scroll message into a safe visible area
+    // so the popup (shown above the bubble) is not clipped.
+    if (nextOpenId) {
+      setTimeout(() => {
+        const container = messagesContainerRef.current
+        if (!container) return
+        const messageEl = container.querySelector?.(`[data-message-id="${messageId}"]`)
+        if (!messageEl) return
+
+        const containerRect = container.getBoundingClientRect()
+        const messageRect = messageEl.getBoundingClientRect()
+        // Reserve headroom above the message for popup/reactions.
+        const popupHeadroom = 120
+        const visibleTop = containerRect.top + popupHeadroom
+        const visibleBottom = containerRect.bottom - 24
+
+        const isClippedTop = messageRect.top < visibleTop
+        const isClippedBottom = messageRect.bottom > visibleBottom
+
+        if (isClippedTop || isClippedBottom) {
+          // Centering gives stable UX for both top/bottom clipping cases.
+          messageEl.scrollIntoView({ behavior: 'smooth', block: 'center' })
+        }
+      }, 40)
+    }
   }
 
   // Handle reply to message
