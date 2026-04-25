@@ -259,6 +259,9 @@ const MessagesPage = () => {
   const fetchedConversationsForUserRef = useRef(null) // Prevent duplicate initial fetches for same user
   const isLoadingOlderMessagesRef = useRef(false) // Prevent duplicate top-scroll pagination triggers
   const lastOlderBeforeIdRef = useRef(null) // Prevent requesting the same older-page cursor repeatedly
+  const lastScrollAtRef = useRef(0) // Avoid opening reactions while user is actively scrolling
+  const touchStartPointRef = useRef({ x: 0, y: 0, t: 0 })
+  const touchMovedRef = useRef(false)
 
   // Theme colors - white for light mode, dark for dark mode
   const bgColor = useColorModeValue('white', '#101010')  // White in light mode, dark in dark mode
@@ -750,6 +753,7 @@ const MessagesPage = () => {
     if (!container) return
 
     const handleScroll = () => {
+      lastScrollAtRef.current = Date.now()
       const scrollTop = container.scrollTop
       const scrollHeight = container.scrollHeight
       const clientHeight = container.clientHeight
@@ -1751,6 +1755,15 @@ const MessagesPage = () => {
   // Handle message click to show emoji picker
   const handleMessageClick = (e, messageId) => {
     e.stopPropagation()
+
+    // Guard: if user is scrolling/dragging, don't open reactions.
+    if (isUserScrollingRef.current) return
+    if (Date.now() - lastScrollAtRef.current < 220) return
+    if (touchMovedRef.current) {
+      touchMovedRef.current = false
+      return
+    }
+
     const nextOpenId = emojiPickerOpen === messageId ? null : messageId
     // Toggle emoji picker for this message
     setEmojiPickerOpen(nextOpenId)
@@ -2773,6 +2786,21 @@ const MessagesPage = () => {
               py={{ base: 2, sm: 3, md: 4 }}
               bg={useColorModeValue('white', '#101010')}
               position="relative"
+              onTouchStartCapture={(e) => {
+                const touch = e.touches?.[0]
+                if (!touch) return
+                touchStartPointRef.current = { x: touch.clientX, y: touch.clientY, t: Date.now() }
+                touchMovedRef.current = false
+              }}
+              onTouchMoveCapture={(e) => {
+                const touch = e.touches?.[0]
+                if (!touch) return
+                const dx = Math.abs(touch.clientX - touchStartPointRef.current.x)
+                const dy = Math.abs(touch.clientY - touchStartPointRef.current.y)
+                if (dx > 8 || dy > 8) {
+                  touchMovedRef.current = true
+                }
+              }}
             >
               <VStack align="stretch" spacing={{ base: 3, md: 4 }} px={{ base: 2, sm: 3, md: 4 }}>
                 {/* Loading indicator for older messages */}
