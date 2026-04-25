@@ -262,6 +262,9 @@ const MessagesPage = () => {
   const lastScrollAtRef = useRef(0) // Avoid opening reactions while user is actively scrolling
   const touchStartPointRef = useRef({ x: 0, y: 0, t: 0 })
   const touchMovedRef = useRef(false)
+  const pointerStartPointRef = useRef({ x: 0, y: 0, active: false })
+  const pointerDraggedRef = useRef(false)
+  const lastPointerDragAtRef = useRef(0)
 
   // Theme colors - white for light mode, dark for dark mode
   const bgColor = useColorModeValue('white', '#101010')  // White in light mode, dark in dark mode
@@ -1759,6 +1762,8 @@ const MessagesPage = () => {
     // Guard: if user is scrolling/dragging, don't open reactions.
     if (isUserScrollingRef.current) return
     if (Date.now() - lastScrollAtRef.current < 220) return
+    if (Date.now() - lastPointerDragAtRef.current < 320) return
+    if (pointerDraggedRef.current) return
     if (touchMovedRef.current) {
       touchMovedRef.current = false
       return
@@ -2800,6 +2805,35 @@ const MessagesPage = () => {
                 if (dx > 8 || dy > 8) {
                   touchMovedRef.current = true
                 }
+              }}
+              onPointerDownCapture={(e) => {
+                pointerStartPointRef.current = {
+                  x: e.clientX,
+                  y: e.clientY,
+                  active: true,
+                }
+                pointerDraggedRef.current = false
+              }}
+              onPointerMoveCapture={(e) => {
+                if (!pointerStartPointRef.current.active) return
+                const dx = Math.abs(e.clientX - pointerStartPointRef.current.x)
+                const dy = Math.abs(e.clientY - pointerStartPointRef.current.y)
+                if (dx > 6 || dy > 6) {
+                  pointerDraggedRef.current = true
+                }
+              }}
+              onPointerUpCapture={() => {
+                if (pointerDraggedRef.current) {
+                  lastPointerDragAtRef.current = Date.now()
+                }
+                pointerStartPointRef.current.active = false
+                setTimeout(() => {
+                  pointerDraggedRef.current = false
+                }, 0)
+              }}
+              onPointerCancelCapture={() => {
+                pointerStartPointRef.current.active = false
+                pointerDraggedRef.current = false
               }}
             >
               <VStack align="stretch" spacing={{ base: 3, md: 4 }} px={{ base: 2, sm: 3, md: 4 }}>
