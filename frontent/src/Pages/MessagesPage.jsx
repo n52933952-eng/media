@@ -202,6 +202,7 @@ const MessagesPage = () => {
   const [followedUsers, setFollowedUsers] = useState([])
   const [isTyping, setIsTyping] = useState(false)
   const [emojiPickerOpen, setEmojiPickerOpen] = useState(null) // Store messageId when picker is open
+  const [emojiPickerPlacement, setEmojiPickerPlacement] = useState('above') // 'above' | 'below'
   const [emojiPickerForMessage, setEmojiPickerForMessage] = useState(false) // Track if emoji picker is open for sending messages
   const [isAtBottom, setIsAtBottom] = useState(true) // Track if user is scrolled to bottom
   const [unreadCountInView, setUnreadCountInView] = useState(0) // Count of unread messages while scrolled up
@@ -1737,6 +1738,7 @@ const MessagesPage = () => {
     const nextOpenId = emojiPickerOpen === messageId ? null : messageId
     // Toggle emoji picker for this message
     setEmojiPickerOpen(nextOpenId)
+    setEmojiPickerPlacement('above')
 
     // If opening the action bar, scroll message into a safe visible area
     // so the popup (shown above the bubble) is not clipped.
@@ -1756,6 +1758,13 @@ const MessagesPage = () => {
 
         const isClippedTop = messageRect.top < visibleTop
         const isClippedBottom = messageRect.bottom > visibleBottom
+
+        // If this message is too close to the top edge, render menu below it.
+        if (isClippedTop) {
+          setEmojiPickerPlacement('below')
+        } else {
+          setEmojiPickerPlacement('above')
+        }
 
         if (isClippedTop || isClippedBottom) {
           // Centering gives stable UX for both top/bottom clipping cases.
@@ -3120,8 +3129,10 @@ const MessagesPage = () => {
                             position="absolute"
                             left={isOwn ? 'auto' : 0}
                             right={isOwn ? 0 : 'auto'}
-                            bottom="100%"
-                            mb={2}
+                            bottom={emojiPickerPlacement === 'above' ? '100%' : 'auto'}
+                            mb={emojiPickerPlacement === 'above' ? 2 : 0}
+                            top={emojiPickerPlacement === 'below' ? '100%' : 'auto'}
+                            mt={emojiPickerPlacement === 'below' ? 2 : 0}
                             zIndex={1000}
                           >
                             <Flex
