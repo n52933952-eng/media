@@ -1771,16 +1771,16 @@ const MessagesPage = () => {
     }
 
     const nextOpenId = emojiPickerOpen === messageId ? null : messageId
-    // Toggle emoji picker for this message
-    setEmojiPickerOpen(nextOpenId)
     if (!nextOpenId) {
+      // Close
+      setEmojiPickerOpen(null)
       setEmojiPickerPosition({ top: null, left: null })
       return
     }
 
     // Place popup in viewport coordinates so it never gets clipped by
     // scroll containers/header/composer edges.
-    setTimeout(() => {
+    const placePicker = () => {
       const container = messagesContainerRef.current
       if (!container) return
       const messageEl = container.querySelector?.(`[data-message-id="${messageId}"]`)
@@ -1805,7 +1805,11 @@ const MessagesPage = () => {
       const left = Math.max(margin, Math.min(viewportW - menuWidth - margin, preferredLeft))
 
       setEmojiPickerPosition({ top, left })
-    }, 20)
+      // Open only after position is ready (prevents left-corner flicker).
+      setEmojiPickerOpen(nextOpenId)
+    }
+
+    requestAnimationFrame(placePicker)
   }
 
   // Handle reply to message
@@ -3221,12 +3225,14 @@ const MessagesPage = () => {
                           </Flex>
                         )}
                         {/* Quick Reaction Bar (WhatsApp style) */}
-                        {emojiPickerOpen === msg._id && (
+                        {emojiPickerOpen === msg._id &&
+                          emojiPickerPosition.top !== null &&
+                          emojiPickerPosition.left !== null && (
                           <Box
                             ref={emojiPickerRef}
                             position="fixed"
-                            top={emojiPickerPosition.top ?? 120}
-                            left={emojiPickerPosition.left ?? 16}
+                            top={emojiPickerPosition.top}
+                            left={emojiPickerPosition.left}
                             zIndex={2000}
                           >
                             <Flex
