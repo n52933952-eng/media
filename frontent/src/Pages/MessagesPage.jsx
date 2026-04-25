@@ -1793,8 +1793,11 @@ const MessagesPage = () => {
         const isClippedTop = messageRect.top < visibleTop
         const isClippedBottom = messageRect.bottom > visibleBottom
 
-        // If this message is too close to the top edge, render menu below it.
-        if (isClippedTop) {
+        // Smart placement:
+        // - near top: place below
+        // - near bottom (or enough room above): place above
+        // This avoids hiding under the composer at the bottom.
+        if (isClippedTop && !isClippedBottom) {
           setEmojiPickerPlacement('below')
         } else {
           setEmojiPickerPlacement('above')
@@ -3007,6 +3010,14 @@ const MessagesPage = () => {
                                         maxH="400px"
                                         borderRadius="md"
                                         bg="transparent"
+                                        onClick={(e) => {
+                                          e.stopPropagation()
+                                          handleMessageClick(e, msg._id)
+                                        }}
+                                        onContextMenu={(e) => {
+                                          e.preventDefault()
+                                          handleMessageClick(e, msg._id)
+                                        }}
                                       />
                                       {/* Menu button overlay - always visible for easy access */}
                                       <Box
@@ -3045,6 +3056,15 @@ const MessagesPage = () => {
                                         borderRadius="md"
                                         objectFit="contain"
                                         bg="transparent" // No white background for images
+                                        cursor="pointer"
+                                        onClick={(e) => {
+                                          e.stopPropagation()
+                                          handleMessageClick(e, msg._id)
+                                        }}
+                                        onContextMenu={(e) => {
+                                          e.preventDefault()
+                                          handleMessageClick(e, msg._id)
+                                        }}
                                         onDoubleClick={(e) => {
                                           // Double-click opens in new tab
                                           e.stopPropagation()
