@@ -3093,8 +3093,8 @@ const MessagesPage = () => {
                             position="absolute"
                             left={isOwn ? 'auto' : 0}
                             right={isOwn ? 0 : 'auto'}
-                            top="100%"
-                            mt={2}
+                            bottom="100%"
+                            mb={2}
                             zIndex={1000}
                           >
                             <Flex
@@ -3108,7 +3108,7 @@ const MessagesPage = () => {
                               border="1px solid"
                               borderColor={useColorModeValue('gray.200', 'gray.700')}
                               sx={{
-                                animation: 'slideDown 0.2s ease-out'
+                                animation: 'slideIn 0.2s ease-out'
                               }}
                             >
                               {/* Reply button */}
