@@ -52,7 +52,7 @@ const Actions = ({post}) => {
 	const[reply,setReply]=useState("")
 	const [conversations, setConversations] = useState([])
 	const [loadingConversations, setLoadingConversations] = useState(false)
-	const [sendingShare, setSendingShare] = useState(false)
+	const [sendingShareToId, setSendingShareToId] = useState(null)
   
 	const[loading,setLoading]=useState(false)
  
@@ -155,8 +155,9 @@ const Actions = ({post}) => {
   }
 
   const handleShareToConversation = async (conv) => {
-	if (!conv?._id || sendingShare) return
-	setSendingShare(true)
+	const convId = conv?._id?.toString?.() || String(conv?._id || '')
+	if (!convId || sendingShareToId) return
+	setSendingShareToId(convId)
 	try {
 		const isGroup = !!conv?.isGroup
 		const recipientId = getRecipientIdForDirect(conv)
@@ -185,7 +186,7 @@ const Actions = ({post}) => {
 		console.error('[Actions] share to conversation:', e)
 		showToast('Error', 'Could not share post', 'error')
 	} finally {
-		setSendingShare(false)
+		setSendingShareToId(null)
 	}
   }
 
@@ -375,7 +376,8 @@ return (
 										variant="outline"
 										justifyContent="flex-start"
 										onClick={() => handleShareToConversation(conv)}
-										isLoading={sendingShare}
+										isLoading={sendingShareToId === (conv?._id?.toString?.() || String(conv?._id || ''))}
+										isDisabled={!!sendingShareToId}
 									>
 										{conv?.isGroup ? '👥 ' : '💬 '}{getConversationLabel(conv)}
 									</Button>

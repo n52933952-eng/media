@@ -78,6 +78,9 @@ const extractSharedPostId = (text) => {
 const SharedPostPreview = ({ postId, onOpen }) => {
   const [postData, setPostData] = useState(() => sharedPostCache.get(postId) || null)
   const [loadingPost, setLoadingPost] = useState(!sharedPostCache.has(postId))
+  const cardBg = useColorModeValue('blackAlpha.50', 'whiteAlpha.100')
+  const borderColor = useColorModeValue('gray.300', 'gray.600')
+  const muted = useColorModeValue('gray.700', 'gray.300')
 
   useEffect(() => {
     if (!postId) return
@@ -119,8 +122,8 @@ const SharedPostPreview = ({ postId, onOpen }) => {
       p={2}
       borderRadius="md"
       border="1px solid"
-      borderColor={useColorModeValue('gray.300', 'gray.600')}
-      bg={useColorModeValue('blackAlpha.50', 'whiteAlpha.100')}
+      borderColor={borderColor}
+      bg={cardBg}
       cursor="pointer"
       onClick={onOpen}
       _hover={{ opacity: 0.92 }}
@@ -132,7 +135,22 @@ const SharedPostPreview = ({ postId, onOpen }) => {
         </Flex>
       ) : postData ? (
         <VStack align="stretch" spacing={2}>
-          <Text fontSize="xs" color={useColorModeValue('gray.700', 'gray.300')} noOfLines={2}>
+          <Flex align="center" justify="space-between" gap={2}>
+            <HStack spacing={2} minW={0}>
+              <Avatar
+                size="2xs"
+                src={postData?.postedBy?.profilePic || undefined}
+                name={postData?.postedBy?.name || postData?.postedBy?.username || 'User'}
+              />
+              <Text fontSize="xs" color={muted} fontWeight="semibold" noOfLines={1}>
+                {postData?.postedBy?.name || postData?.postedBy?.username || 'Shared post'}
+              </Text>
+            </HStack>
+            <Text fontSize="2xs" color={muted} opacity={0.8} whiteSpace="nowrap">
+              Open
+            </Text>
+          </Flex>
+          <Text fontSize="xs" color={muted} noOfLines={2}>
             {postData?.text || 'Shared post'}
           </Text>
           {postData?.img && (
