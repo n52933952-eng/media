@@ -360,6 +360,14 @@ export default function RacingGamePage() {
       setWaitingOpp(!(hasBoth && bothPlayersReadyRef.current))
       if (hasBoth) lastOpponentPosAtRef.current = Date.now()
       maybeStartCountdown()
+      // Safety retry: if both players are now connected AND both already reported ready
+      // (e.g., B loaded and declared ready before A joined), retry after a short delay
+      // to ensure assetsReadyRef is committed before maybeStartCountdown checks it.
+      if (hasBoth && bothPlayersReadyRef.current && isHostRef.current && !raceStateRef.current.countdownStarted) {
+        setTimeout(() => {
+          if (!raceStateRef.current.countdownStarted) maybeStartCountdown()
+        }, 300)
+      }
     }
 
     const onCountdownStart = () => {
@@ -379,6 +387,13 @@ export default function RacingGamePage() {
       }
       setWaitingOpp(!(raceStateRef.current.allPlayersConnected && bothPlayersReadyRef.current))
       maybeStartCountdown()
+      // Safety retry for host: if bothReady just became true but assetsReadyRef wasn't
+      // set yet (tiny window between lm.onLoad and racePlayerReady useEffect), retry once.
+      if (bothReady && isHostRef.current && !raceStateRef.current.countdownStarted) {
+        setTimeout(() => {
+          if (!raceStateRef.current.countdownStarted) maybeStartCountdown()
+        }, 300)
+      }
     }
 
     // Skip countdown and go live immediately — used when recovering a race that was
