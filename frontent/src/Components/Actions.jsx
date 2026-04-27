@@ -70,6 +70,18 @@ const Actions = ({post}) => {
 	const showToast = useShowToast()
 	const currentUserId = user?._id?.toString?.() || String(user?._id || '')
 	const baseUrl = import.meta.env.PROD ? window.location.origin : "http://localhost:5000"
+	const isCapsuleEligiblePost = useMemo(() => {
+		const postId = String(post?._id || '')
+		return !(
+			post?.footballData ||
+			post?.weatherData ||
+			post?.chessGameData ||
+			post?.cardGameData ||
+			post?.raceGameData ||
+			post?.isMatchReaction ||
+			postId.startsWith('live_')
+		)
+	}, [post])
 	const permalink = useMemo(() => {
 		const username = post?.postedBy?.username || post?.postedBy?.name || 'post'
 		return `${window.location.origin}/${username}/post/${post?._id}`
@@ -212,7 +224,7 @@ const Actions = ({post}) => {
 
   // Fetch capsule status for this post when component mounts
   useEffect(() => {
-	if (!user || !post?._id) return
+	if (!user || !post?._id || !isCapsuleEligiblePost) return
 	const fetchStatus = async () => {
 		try {
 			const res = await fetch(`${baseUrl}/api/capsule/status/${post._id}`, { credentials: 'include' })
@@ -226,7 +238,7 @@ const Actions = ({post}) => {
 		} catch (_) {}
 	}
 	fetchStatus()
-  }, [post?._id, user])
+  }, [post?._id, user, isCapsuleEligiblePost])
 
   const handleSealCapsule = async (duration) => {
 	if (!user) return
@@ -399,19 +411,21 @@ return (
 					></path>
 				</svg>
 
-			<Tooltip label={capsuleSealed ? formatCapsuleCountdown(capsuleOpenAt) : 'Seal as Moment Capsule'} placement="top" hasArrow>
-				<Box
-					as="button"
-					display="flex"
-					alignItems="center"
-					justifyContent="center"
-					onClick={(e) => { e.preventDefault(); e.stopPropagation(); if (user) onCapsuleOpen() }}
-					style={{ cursor: user ? 'pointer' : 'default', opacity: user ? 1 : 0.45 }}
-					title="Moment Capsule"
-				>
-					<CapsuleSVG sealed={capsuleSealed} />
-				</Box>
-			</Tooltip>
+			{isCapsuleEligiblePost && (
+				<Tooltip label={capsuleSealed ? formatCapsuleCountdown(capsuleOpenAt) : 'Remind me later'} placement="top" hasArrow>
+					<Box
+						as="button"
+						display="flex"
+						alignItems="center"
+						justifyContent="center"
+						onClick={(e) => { e.preventDefault(); e.stopPropagation(); if (user) onCapsuleOpen() }}
+						style={{ cursor: user ? 'pointer' : 'default', opacity: user ? 1 : 0.45 }}
+						title="Remind me later"
+					>
+						<CapsuleSVG sealed={capsuleSealed} />
+					</Box>
+				</Tooltip>
+			)}
 			<ShareSVG onClick={openShareModal} disabled={!ENABLE_POST_SHARE_TO_CHAT} />
 			</Flex>
 
@@ -486,11 +500,12 @@ return (
 				</ModalContent>
 			</Modal>
 		{/* Moment Capsule Modal */}
+		{isCapsuleEligiblePost && (
 		<Modal isOpen={isCapsuleOpen} onClose={onCapsuleClose} isCentered size="sm">
 			<ModalOverlay />
 			<ModalContent>
 				<ModalHeader fontSize="md" pb={1}>
-					{capsuleSealed ? '💊 Your Moment Capsule' : '💊 Save as Moment Capsule'}
+					{capsuleSealed ? '💊 Reminder Set' : '💊 Remind me about this post'}
 				</ModalHeader>
 				<ModalCloseButton />
 				<ModalBody pb={4}>
@@ -518,13 +533,14 @@ return (
 					) : (
 						<VStack spacing={3} align="stretch">
 							<Text fontSize="sm" color="gray.400">
-								Save this post and we'll remind you to come back to it later — like a surprise from your past self. 🎁
+								Choose a time and we will send you a real-time notification to open this post later.
 							</Text>
 							<Text fontSize="xs" fontWeight="semibold" color="gray.300">Remind me in:</Text>
 							{[
 								{ label: '1 minute', value: '1m' },
+								{ label: '5 minutes', value: '5m' },
+								{ label: '1 hour', value: '1h' },
 								{ label: '3 days', value: '3d' },
-								{ label: '1 week', value: '1w' },
 							].map(({ label, value }) => (
 								<Button
 									key={value}
@@ -545,6 +561,7 @@ return (
 				</ModalFooter>
 			</ModalContent>
 		</Modal>
+		)}
 
 		</Flex>
 	);

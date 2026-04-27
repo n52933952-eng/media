@@ -116,7 +116,7 @@ const NotificationsPage = () => {
         // Navigate based on notification type
         if (notification.type === 'follow') {
             navigate(`/${notification.from?.username || notification.from?.name || 'user'}`)
-        } else if (notification.type === 'comment' || notification.type === 'mention' || notification.type === 'like' || notification.type === 'collaboration' || notification.type === 'post_edit') {
+        } else if (notification.type === 'comment' || notification.type === 'mention' || notification.type === 'like' || notification.type === 'collaboration' || notification.type === 'post_edit' || notification.type === 'capsule_opened') {
             if (notification.post && notification.post._id) {
                 // Get post owner from populated post
                 const postOwner = notification.post.postedBy?.username || notification.post.postedBy?.name || user?.username
@@ -208,6 +208,8 @@ const NotificationsPage = () => {
             case 'post_edit':
                 const editedPostText = notification.metadata?.postText || 'your collaborative post'
                 return `${fromName} edited "${editedPostText}"`
+            case 'capsule_opened':
+                return `Your reminder is ready. Tap to open the saved post.`
             default:
                 return 'New notification'
         }
@@ -227,6 +229,8 @@ const NotificationsPage = () => {
                 return '🤝'
             case 'post_edit':
                 return '✏️'
+            case 'capsule_opened':
+                return '⏰'
             default:
                 return '🔔'
         }

@@ -1,12 +1,14 @@
 import Capsule from '../models/capsule.js'
 import Post from '../models/post.js'
 import Notification from '../models/notification.js'
-import User from '../models/user.js'
+import { getIO, getRecipientSockedId } from '../socket/socket.js'
 
+const CAPSULE_RETENTION_MS = Number(process.env.CAPSULE_RETENTION_MS || (14 * 24 * 60 * 60 * 1000))
 const DURATIONS = {
   '1m': 60 * 1000,
+  '5m': 5 * 60 * 1000,
+  '1h': 60 * 60 * 1000,
   '3d': 3 * 24 * 60 * 60 * 1000,
-  '1w': 7 * 24 * 60 * 60 * 1000,
 }
 
 /** POST /api/capsule/seal  — seal a post as a capsule */
@@ -16,17 +18,31 @@ export const sealCapsule = async (req, res) => {
     const userId = req.user._id
 
     if (!postId || !DURATIONS[duration]) {
-      return res.status(400).json({ error: 'postId and duration (1m/3d/1w) required' })
+      return res.status(400).json({ error: 'postId and duration (1m/5m/1h/3d) required' })
     }
 
     const post = await Post.findById(postId).lean()
     if (!post) return res.status(404).json({ error: 'Post not found' })
+    const postIdStr = String(post?._id || '')
+    const isNormalFeedPost = !(
+      post?.footballData ||
+      post?.weatherData ||
+      post?.chessGameData ||
+      post?.cardGameData ||
+      post?.raceGameData ||
+      post?.isMatchReaction ||
+      postIdStr.startsWith('live_')
+    )
+    if (!isNormalFeedPost) {
+      return res.status(400).json({ error: 'Moment Capsule works only on normal feed posts' })
+    }
 
     const openAt = new Date(Date.now() + DURATIONS[duration])
+    const expiresAt = new Date(openAt.getTime() + CAPSULE_RETENTION_MS)
 
     const capsule = await Capsule.findOneAndUpdate(
       { postId, sealedBy: userId },
-      { openAt, opened: false, notified: false },
+      { openAt, opened: false, notified: false, expiresAt },
       { upsert: true, new: true }
     )
 
@@ -105,21 +121,38 @@ export const processDueCapsules = async () => {
 
     const ids = due.map(c => c._id)
 
-    // Mark as opened
-    await Capsule.updateMany({ _id: { $in: ids } }, { opened: true, notified: true })
-
-    // Send notifications
+    // Send notifications (database + realtime socket push)
+    const io = getIO()
     for (const capsule of due) {
       if (!capsule.postId) continue
       try {
-        await Notification.create({
-          to: capsule.sealedBy._id,
+        const created = await Notification.create({
+          user: capsule.sealedBy._id,
           from: capsule.sealedBy._id,
           type: 'capsule_opened',
           post: capsule.postId._id,
+          metadata: { capsuleOpenAt: capsule.openAt },
         })
+
+        const populated = await Notification.findById(created._id)
+          .populate('from', 'username name profilePic')
+          .populate({
+            path: 'post',
+            select: 'text img postedBy',
+            populate: { path: 'postedBy', select: 'username name' },
+          })
+          .lean()
+
+        const socketId = await getRecipientSockedId(capsule.sealedBy._id)
+        if (io && socketId && populated) {
+          io.to(socketId).emit('newNotification', populated)
+        }
       } catch (_) {}
     }
+
+    // Scale-first cleanup: remove delivered reminders immediately.
+    // This keeps Capsule collection bounded even with millions of users.
+    await Capsule.deleteMany({ _id: { $in: ids } })
   } catch (err) {
     console.error('processDueCapsules error:', err)
   }
