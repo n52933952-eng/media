@@ -132,16 +132,19 @@ const CardGamePage = () => {
     const cardExitHandledRef = useRef(false)
 
     // Recover active card room after refresh/reconnect (matches Chess behavior).
+    // Also handles the case where roomId is already set but we switched browsers
+    // (backend auto-delivers cardGameRecovery on every connect, so we always listen).
     useEffect(() => {
-        if (!socket || !user?._id || roomId) return
+        if (!socket || !user?._id) return
         let mounted = true
         const onRecovery = (payload) => {
             if (!mounted || !payload?.ok || !payload?.roomId) return
             localStorage.setItem('cardRoomId', payload.roomId)
-            setRoomId(payload.roomId)
+            if (payload.roomId !== roomId) setRoomId(payload.roomId)
         }
         socket.on('cardGameRecovery', onRecovery)
-        socket.emit('recoverCardGame')
+        // Only explicitly request if no roomId (same-browser refresh without auto-delivery)
+        if (!roomId) socket.emit('recoverCardGame')
         return () => {
             mounted = false
             socket.off('cardGameRecovery', onRecovery)

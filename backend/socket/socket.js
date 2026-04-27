@@ -1272,6 +1272,66 @@ export const initializeSocket = async (app) => {
                 } catch (e) {
                     console.error(`❌ [socket] Error delivering pending answer for ${connectUserId}:`, e.message)
                 }
+
+                // Auto-recover active race game on reconnect (mirrors pendingChessAccept pattern).
+                // Fired on every connect so switching browsers or refreshing during a race
+                // transparently re-joins the player to their in-progress room without needing
+                // the client to request recovery explicitly.
+                try {
+                    const activeRaceRoom = await getActiveRaceGame(connectUserId)
+                    if (activeRaceRoom) {
+                        const raceState = await getRaceGameState(activeRaceRoom).catch(() => null)
+                        if (raceState) {
+                            const rp1 = normalizeUserId(raceState.player1) || raceState.player1
+                            const rp2 = normalizeUserId(raceState.player2) || raceState.player2
+                            const rIsHost = rp1 === connectUserId
+                            const rOpponentId = rIsHost ? rp2 : rp1
+                            const sockNow = io.sockets.sockets.get(connectSid)
+                            if (sockNow) {
+                                sockNow.join(activeRaceRoom)
+                                io.to(connectSid).emit('raceGameRecovery', {
+                                    ok: true,
+                                    roomId: activeRaceRoom,
+                                    opponentId: rOpponentId,
+                                    isHost: rIsHost,
+                                })
+                                console.log(`🏎️ [socket] Auto-delivered race recovery to ${connectUserId} for room ${activeRaceRoom}`)
+                            }
+                        }
+                    }
+                } catch (e) {
+                    console.error(`❌ [socket] Error auto-recovering race for ${connectUserId}:`, e.message)
+                }
+
+                // Auto-recover active card game on reconnect (mirrors pendingChessAccept pattern).
+                // pendingCardAccept was already consumed above; if activeCardGame still exists
+                // then this is a reconnect to an ongoing game — re-deliver state so the Card
+                // page can rejoin the room without the user having to manually request recovery.
+                try {
+                    const activeCardRoom = await getActiveCardGame(connectUserId)
+                    if (activeCardRoom) {
+                        const cardState = await getCardGameState(activeCardRoom).catch(() => null)
+                        if (cardState) {
+                            const cp1 = normalizeUserId(cardState.player1 || cardState.players?.[0]?.id)
+                            const cp2 = normalizeUserId(cardState.player2 || cardState.players?.[1]?.id)
+                            const cOpponentId = cp1 === connectUserId ? cp2 : cp1
+                            const sockNow = io.sockets.sockets.get(connectSid)
+                            if (sockNow) {
+                                sockNow.join(activeCardRoom)
+                                const cardPayload = buildCardGameStatePayloadForViewer(cardState, activeCardRoom, connectUserId)
+                                io.to(connectSid).emit('cardGameRecovery', {
+                                    ok: true,
+                                    roomId: activeCardRoom,
+                                    opponentId: cOpponentId,
+                                })
+                                io.to(connectSid).emit('cardGameState', cardPayload)
+                                console.log(`🃏 [socket] Auto-delivered card recovery to ${connectUserId} for room ${activeCardRoom}`)
+                            }
+                        }
+                    }
+                } catch (e) {
+                    console.error(`❌ [socket] Error auto-recovering card for ${connectUserId}:`, e.message)
+                }
             }, 450)
         } else {
             console.warn("⚠️ [socket] User connected without valid userId:", userId)

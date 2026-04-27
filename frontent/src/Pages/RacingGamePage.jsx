@@ -136,6 +136,9 @@ export default function RacingGamePage() {
   const startSfxRef = useRef(null)
   const raceMusicRef = useRef(null)
   const raceRecoveryTriedRef = useRef(false)
+  /** Flips to true once roomIdRef is confirmed (from localStorage OR server recovery).
+   *  Used as a useEffect dependency so socket handlers are registered after recovery. */
+  const [socketRoomReady, setSocketRoomReady] = useState(() => !!localStorage.getItem('raceRoomId'))
 
   // ─── Fetch opponent profile ────────────────────────────────────────────────
   useEffect(() => {
@@ -154,6 +157,7 @@ export default function RacingGamePage() {
     isHostRef.current  = isHost
     myColorRef.current  = isHost ? 'blue' : 'red'
     oppColorRef.current = isHost ? 'red'  : 'blue'
+    if (roomId) setSocketRoomReady(true)
   }, [user])
 
   // Hard guard with recovery: try server-side active race restore first (Chess-like),
@@ -183,8 +187,19 @@ export default function RacingGamePage() {
           localStorage.setItem('raceRoomId', payload.roomId)
           if (typeof payload?.isHost === 'boolean') {
             localStorage.setItem('raceIsHost', payload.isHost ? 'true' : 'false')
+            isHostRef.current = payload.isHost
+            myColorRef.current  = payload.isHost ? 'blue' : 'red'
+            oppColorRef.current = payload.isHost ? 'red'  : 'blue'
           }
           roomIdRef.current = payload.roomId
+          // Re-join the socket room and mark room ready so the socket multiplayer
+          // useEffect re-registers all event handlers (ref changes don't trigger re-runs).
+          try {
+            if (socket?.connected) {
+              socket.emit('joinRaceRoom', { roomId: payload.roomId })
+            }
+          } catch (_) {}
+          setSocketRoomReady(true)
           return
         }
         navigate('/', { replace: true })
@@ -195,12 +210,13 @@ export default function RacingGamePage() {
       } else {
         socket.once('connect', startRecovery)
       }
+      // 45s timeout: gives enough time for slow asset loading AND backend grace (30s)
       const t = setTimeout(() => {
         if (!done) {
           done = true
           navigate('/', { replace: true })
         }
-      }, 12000)
+      }, 45000)
       return () => {
         clearTimeout(t)
         socket.off('connect', startRecovery)
@@ -449,7 +465,9 @@ export default function RacingGamePage() {
       socket.off('raceVoiceDeclined', onRaceVoiceDeclined)
       socket.off('raceVoiceEnded',    onRaceVoiceEnded)
     }
-  }, [socket, user?._id, exitRaceAndGoHome, callActive, voiceConnecting])
+  // socketRoomReady ensures this effect re-runs after server recovery sets roomIdRef
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [socket, user?._id, exitRaceAndGoHome, callActive, voiceConnecting, socketRoomReady])
 
   // If opponent vanishes mid-race (disconnect/network loss) and no updates arrive, end race locally.
   // This prevents one player staying in race while the other was sent home.
@@ -475,12 +493,14 @@ export default function RacingGamePage() {
   useEffect(() => {
     if (!socket || !user?._id || !roomIdRef.current) return
     if (loading) return
-    if (raceReadySentRef.current) return
     if (!socket.connected) return
     assetsReadyRef.current = true
+    // Re-send racePlayerReady whenever room becomes known (covers recovery after browser switch)
     raceReadySentRef.current = true
     socket.emit('racePlayerReady', { roomId: roomIdRef.current, userId: user._id })
-  }, [socket, user?._id, loading])
+  // socketRoomReady triggers re-send when room is recovered mid-loading
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [socket, user?._id, loading, socketRoomReady])
 
   // ─── Connection lost: leave race after grace (reconnect clears the timer) ───
   useEffect(() => {
