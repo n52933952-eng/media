@@ -130,6 +130,7 @@ const CardGamePage = () => {
     const prevBooksRef = useRef(0)
     const previousPathRef = useRef(null)
     const cardExitHandledRef = useRef(false)
+    const pageUnloadingRef = useRef(false)
 
     const endCardGameOnce = useCallback(() => {
         const activeRoom = localStorage.getItem('cardRoomId')
@@ -146,9 +147,10 @@ const CardGamePage = () => {
 
         const handlePopState = () => endCardGameOnce()
 
-        // Hard refresh / tab close / external navigation
+        // Hard refresh / tab close: do NOT end game (Chess-like behavior).
+        // Backend reconnect grace will keep the game alive.
         const handleBeforeUnload = () => {
-            endCardGameOnce()
+            pageUnloadingRef.current = true
         }
 
         window.addEventListener('popstate', handlePopState)
@@ -172,9 +174,10 @@ const CardGamePage = () => {
         }
     }, [location.pathname, endCardGameOnce])
 
-    // Unmount cleanup (catches logout / any unmount that isn't a page refresh)
+    // Unmount cleanup: end game only for app navigation/logout, not hard refresh.
     useEffect(() => {
         return () => {
+            if (pageUnloadingRef.current) return
             endCardGameOnce()
         }
     }, [endCardGameOnce])

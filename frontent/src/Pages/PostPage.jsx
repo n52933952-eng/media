@@ -700,8 +700,16 @@ if(!post) {
           as="video"
           src={post.img}
           controls
+          autoPlay
+          playsInline
+          muted={false}
           w="full"
           maxH="500px"
+          onLoadedMetadata={(e) => {
+            // Try to autoplay with sound on post detail page.
+            // Some browsers may still require prior user interaction.
+            e.currentTarget.play?.().catch(() => {})
+          }}
         />
           )
         }

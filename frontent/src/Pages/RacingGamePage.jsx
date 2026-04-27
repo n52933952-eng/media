@@ -129,6 +129,7 @@ export default function RacingGamePage() {
   const raceExitHandledRef = useRef(false)
   const exitRaceAndGoHomeRef = useRef(() => {})
   const raceEndSentRef = useRef(false)
+  const pageUnloadingRef = useRef(false)
   const assetsReadyRef = useRef(false)
   const raceReadySentRef = useRef(false)
   const bothPlayersReadyRef = useRef(false)
@@ -673,18 +674,10 @@ export default function RacingGamePage() {
         endRaceGameOnNavigate()
       }
     }
-    // Tab close or hard refresh — emit synchronously then let page unload
+    // Tab close / hard refresh: do NOT end race immediately (Chess-like behavior).
+    // Let backend disconnect grace decide; this preserves race on refresh.
     const onBeforeUnload = (e) => {
-      const roomId = localStorage.getItem('raceRoomId')
-      if (roomId && socket) {
-        const match = roomId.match(/^race_(.+?)_(.+?)_\d+$/)
-        if (match) {
-          socket.emit('raceGameEnd', { roomId, player1: match[1], player2: match[2] })
-        } else {
-          socket.emit('raceGameEnd', { roomId })
-        }
-        localStorage.removeItem('raceRoomId')
-      }
+      pageUnloadingRef.current = true
     }
     window.addEventListener('popstate', onPop)
     window.addEventListener('beforeunload', onBeforeUnload)
@@ -701,10 +694,10 @@ export default function RacingGamePage() {
     prevPathRef.current = location.pathname
   }, [location.pathname, endRaceGameOnNavigate])
 
-  // Safety: if this page unmounts (logout / auth redirect / app shell remount),
-  // end race once so both players are cleaned up server-side.
+  // Safety: on unmount end race for app navigation/logout, but skip hard refresh.
   useEffect(() => {
     return () => {
+      if (pageUnloadingRef.current) return
       if (raceEndSentRef.current) return
       const activeRoom = localStorage.getItem('raceRoomId')
       if (activeRoom && endRaceGameOnNavigate) {
