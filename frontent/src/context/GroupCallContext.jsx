@@ -207,13 +207,30 @@ export const GroupCallProvider = ({ children }) => {
       // If all left, room disconnect event fires
     };
 
-    socket.on('livekit:incomingGroupCall', onIncoming);
-    socket.on('livekit:groupCallEnded',    onEnded);
+    const onMembersBusy = ({ busyCount, totalOther }) => {
+      if (!busyCount) return
+      const all = busyCount >= totalOther
+      toast({
+        title: all ? 'All members are busy' : `${busyCount} member${busyCount > 1 ? 's' : ''} couldn't be reached`,
+        description: all
+          ? 'Everyone in this group is currently in a call or playing a game.'
+          : `${busyCount} member${busyCount > 1 ? 's are' : ' is'} busy (in a call or game) and won't receive the call.`,
+        status: 'warning',
+        duration: 5000,
+        isClosable: true,
+        position: 'top',
+      })
+    }
+
+    socket.on('livekit:incomingGroupCall',  onIncoming);
+    socket.on('livekit:groupCallEnded',     onEnded);
+    socket.on('livekit:groupMembersBusy',   onMembersBusy);
 
     return () => {
       stopRingtone();
-      socket.off('livekit:incomingGroupCall', onIncoming);
-      socket.off('livekit:groupCallEnded',    onEnded);
+      socket.off('livekit:incomingGroupCall',  onIncoming);
+      socket.off('livekit:groupCallEnded',     onEnded);
+      socket.off('livekit:groupMembersBusy',   onMembersBusy);
     };
   }, [socket]);
 

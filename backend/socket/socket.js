@@ -214,6 +214,26 @@ const isInCallFast = async (userId) => {
     }
 }
 
+/**
+ * Returns true if userId is currently busy: in a 1-to-1/group call OR playing chess/card/race.
+ * Used to skip ringing a member during a group call.
+ * NOTE: getActiveChessGame/Card/Race are declared further down in this file; this helper is only
+ *       called at runtime (not at module-init time), so forward-references are fine.
+ */
+const isUserBusyNow = async (userId) => {
+    const uid = normalizeUserId(userId)
+    if (!uid) return false
+    try {
+        if (await isInCallFast(uid)) return true
+        if (await getActiveChessGame(uid)) return true
+        if (await getActiveCardGame(uid))  return true
+        if (await getActiveRaceGame(uid))  return true
+        return false
+    } catch (_) {
+        return false
+    }
+}
+
 /** Busy / "in a call" for UI + gating: same Redis keys as `setInCall` / `clearInCall` (`inCall:<userId>`).
  *  Do NOT infer busy from `activeCall:*` alone — those rows can be orphaned if cleanup races; `inCall` is authoritative. */
 const getBusyUserIdsFromInCallKeys = async () => {
@@ -2319,8 +2339,18 @@ export const initializeSocket = async (app) => {
                     callType: callType || 'video',
                 }
 
+                const busyMemberIds = []   // collect so we can notify the caller
+
                 for (const memberId of otherIds) {
                     const uid = normalizeUserId(memberId) || String(memberId)
+
+                    // ── Skip members who are busy in a game or another call ──────────────
+                    if (await isUserBusyNow(uid)) {
+                        busyMemberIds.push(uid)
+                        console.log(`📞 [livekit:startGroupCall] Skipping busy member ${uid}`)
+                        continue
+                    }
+
                     // In-memory userSocketMap alone misses Redis-only rows (multi-instance / restart). Mirror livekit:callUser.
                     const receiverData = await getUserSocket(uid)
                     const liveReceiverSocketId = await resolveLiveSocketIdForUser(uid)
@@ -2371,6 +2401,15 @@ export const initializeSocket = async (app) => {
                             console.warn('⚠️ [livekit:startGroupCall] FCM error:', fcmErr.message)
                         }
                     }
+                }
+
+                // Tell the caller which members were busy so the UI can show a notice
+                if (busyMemberIds.length > 0) {
+                    socket.emit('livekit:groupMembersBusy', {
+                        conversationId,
+                        busyCount: busyMemberIds.length,
+                        totalOther: otherIds.length,
+                    })
                 }
                 const groupTimerKey = groupCallTimerKey({ roomName, conversationId })
                 if (groupTimerKey) {
