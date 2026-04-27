@@ -14,6 +14,8 @@ import NotificationRoute from './routes/notification.js'
 import ActivityRoute from './routes/activity.js'
 import CallRoute from './routes/call.js'
 import StoryRoute from './routes/story.js'
+import CapsuleRoute from './routes/capsule.js'
+import { processDueCapsules } from './controller/capsule.js'
 import { initializeSocket } from './socket/socket.js'
 import { initializeFootballCron } from './services/footballCron.js'
 import { initializeWeatherCron } from './services/weatherCron.js'
@@ -143,6 +145,7 @@ app.use("/api/notification",NotificationRoute)
 app.use("/api/activity",ActivityRoute)
 app.use("/api/call",CallRoute)
 app.use("/api/story",StoryRoute)
+app.use("/api/capsule",CapsuleRoute)
 
 // 404 handler for API routes (before static files and catch-all)
 app.use('/api/*', (req, res) => {
@@ -232,12 +235,16 @@ initializeSocket(app).then((result) => {
         
         // Initialize Chess Post Cleanup Cron Job
         initializeChessPostCleanup()
-        
+        //
         // Initialize Activity Cleanup Cron Job
         initializeActivityCleanup()
 
         // Expired stories: MongoDB + Cloudinary
         initializeStoryCleanup()
+
+        // Moment Capsule: notify users when their sealed capsules open (check every minute)
+        setInterval(processDueCapsules, 60 * 1000)
+        processDueCapsules() // run once immediately on startup
     })
 }).catch((error) => {
     console.error('❌ Failed to initialize Socket.IO:', error)

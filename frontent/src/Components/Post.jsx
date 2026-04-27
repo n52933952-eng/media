@@ -1,4 +1,4 @@
-import React,{useEffect,useState,useContext, useCallback, useMemo, memo, useRef} from 'react'
+﻿import React,{useEffect,useState,useContext, useCallback, useMemo, memo, useRef} from 'react'
 import{Link} from 'react-router-dom'
 import{Flex,Avatar,Box,Text,Image,Button, VStack, HStack, Grid, GridItem, SimpleGrid, Spinner, useColorModeValue, useDisclosure, Menu, MenuButton, MenuList, MenuItem, IconButton, Tooltip} from '@chakra-ui/react'
 import { HiOutlineDotsHorizontal } from "react-icons/hi";
@@ -20,6 +20,50 @@ import { normalizeDbMatchForFootballFeed, isFootballMatchLive } from '../utils/f
 const apiBaseUrl = () => (import.meta.env.PROD ? window.location.origin : 'http://localhost:5000')
 const CLOUDINARY_DELIVERY_QUALITY = (import.meta.env.VITE_CLOUDINARY_DELIVERY_QUALITY || 'eco').trim()
 const ENABLE_CLOUDINARY_DPR_AUTO = (import.meta.env.VITE_CLOUDINARY_IMAGE_DPR_AUTO || 'true') !== 'false'
+
+/** Small badge shown on a post if the current user has sealed it as a Moment Capsule */
+const CapsuleBadge = ({ postId }) => {
+  const [openAt, setOpenAt] = useState(null)
+  const base = apiBaseUrl()
+
+  useEffect(() => {
+    if (!postId) return
+    let alive = true
+    fetch(`${base}/api/capsule/status/${postId}`, { credentials: 'include' })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => { if (alive && data?.openAt) setOpenAt(new Date(data.openAt)) })
+      .catch(() => {})
+    return () => { alive = false }
+  }, [postId])
+
+  if (!openAt) return null
+
+  const diff = openAt - Date.now()
+  const label = diff <= 0
+    ? '⏳ Capsule opening soon'
+    : (() => {
+        const days = Math.floor(diff / 86400000)
+        const hours = Math.floor((diff % 86400000) / 3600000)
+        return days > 0 ? `⏳ Capsule opens in ${days}d ${hours}h` : `⏳ Capsule opens in ${hours}h`
+      })()
+
+  return (
+    <Box
+      display="inline-flex"
+      alignItems="center"
+      gap={1}
+      px={2}
+      py={0.5}
+      mb={2}
+      borderRadius="full"
+      bg="purple.900"
+      border="1px solid"
+      borderColor="purple.500"
+    >
+      <Text fontSize="xs" color="purple.300">{label}</Text>
+    </Box>
+  )
+}
 
 const Post = ({post: initialPost, postedBy, onDelete, visibleVideoOnly = false, autoPlayMedia}) => {
     
@@ -1059,6 +1103,8 @@ const showToast = useShowToast()
       </Flex>
     )}
     
+    {/* Moment Capsule badge */}
+    {post?._id && user && <CapsuleBadge postId={post._id} />}
      {/* Post text — hide for Football: copy is often stale (“no live matches”) while live cards come from API */}
      <Box>
        {!isFootballPost && (

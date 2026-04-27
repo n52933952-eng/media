@@ -13,11 +13,13 @@ import {
 	ModalHeader,
 	ModalOverlay,
 	Text,
+	Tooltip,
+	VStack,
 	useDisclosure,
 	useToast,
 } from "@chakra-ui/react";
 
-import{useState,useContext,useMemo} from 'react'
+import{useState,useContext,useMemo,useEffect} from 'react'
 import{UserContext} from '../context/UserContext'
 import{PostContext} from '../context/PostContext'
 import useShowToast from '../hooks/useShowToast.js'
@@ -48,6 +50,14 @@ const Actions = ({post}) => {
 		onOpen: onShareOpen,
 		onClose: onShareClose,
 	} = useDisclosure()
+	const {
+		isOpen: isCapsuleOpen,
+		onOpen: onCapsuleOpen,
+		onClose: onCapsuleClose,
+	} = useDisclosure()
+	const [capsuleLoading, setCapsuleLoading] = useState(false)
+	const [capsuleSealed, setCapsuleSealed] = useState(false)
+	const [capsuleOpenAt, setCapsuleOpenAt] = useState(null)
    
 	const[reply,setReply]=useState("")
 	const [conversations, setConversations] = useState([])
@@ -199,6 +209,78 @@ const Actions = ({post}) => {
 
 
 
+  // Fetch capsule status for this post when component mounts
+  useEffect(() => {
+	if (!user || !post?._id) return
+	const fetchStatus = async () => {
+		try {
+			const res = await fetch(`${baseUrl}/api/capsule/status/${post._id}`, { credentials: 'include' })
+			if (res.ok) {
+				const data = await res.json()
+				if (data && data.openAt) {
+					setCapsuleSealed(true)
+					setCapsuleOpenAt(new Date(data.openAt))
+				}
+			}
+		} catch (_) {}
+	}
+	fetchStatus()
+  }, [post?._id, user])
+
+  const handleSealCapsule = async (duration) => {
+	if (!user) return
+	setCapsuleLoading(true)
+	try {
+		const res = await fetch(`${baseUrl}/api/capsule/seal`, {
+			method: 'POST',
+			credentials: 'include',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ postId: post._id, duration }),
+		})
+		const data = await res.json()
+		if (!res.ok) throw new Error(data?.error || 'Failed to seal capsule')
+		setCapsuleSealed(true)
+		setCapsuleOpenAt(new Date(data.openAt))
+		showToast('Capsule sealed!', `You will be notified when it opens`, 'success')
+		onCapsuleClose()
+	} catch (e) {
+		showToast('Error', e.message || 'Could not seal capsule', 'error')
+	} finally {
+		setCapsuleLoading(false)
+	}
+  }
+
+  const handleUnsealCapsule = async () => {
+	if (!user) return
+	setCapsuleLoading(true)
+	try {
+		const res = await fetch(`${baseUrl}/api/capsule/unseal/${post._id}`, {
+			method: 'DELETE',
+			credentials: 'include',
+		})
+		if (!res.ok) throw new Error('Failed to remove capsule')
+		setCapsuleSealed(false)
+		setCapsuleOpenAt(null)
+		showToast('Capsule removed', '', 'info')
+		onCapsuleClose()
+	} catch (e) {
+		showToast('Error', e.message || 'Could not remove capsule', 'error')
+	} finally {
+		setCapsuleLoading(false)
+	}
+  }
+
+  const formatCapsuleCountdown = (openAt) => {
+	if (!openAt) return ''
+	const diff = openAt - Date.now()
+	if (diff <= 0) return 'Opening soon...'
+	const days = Math.floor(diff / (1000 * 60 * 60 * 24))
+	const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60))
+	if (days > 0) return `Opens in ${days}d ${hours}h`
+	const mins = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60))
+	return `Opens in ${hours}h ${mins}m`
+  }
+
   const handlereply = async() => {
 	if(!user) return
 	try{
@@ -316,8 +398,20 @@ return (
 					></path>
 				</svg>
 
-				<RepostSVG />
-				<ShareSVG onClick={openShareModal} disabled={!ENABLE_POST_SHARE_TO_CHAT} />
+			<Tooltip label={capsuleSealed ? formatCapsuleCountdown(capsuleOpenAt) : 'Seal as Moment Capsule'} placement="top" hasArrow>
+				<Box
+					as="button"
+					display="flex"
+					alignItems="center"
+					justifyContent="center"
+					onClick={(e) => { e.preventDefault(); e.stopPropagation(); if (user) onCapsuleOpen() }}
+					style={{ cursor: user ? 'pointer' : 'default', opacity: user ? 1 : 0.45 }}
+					title="Moment Capsule"
+				>
+					<CapsuleSVG sealed={capsuleSealed} />
+				</Box>
+			</Tooltip>
+			<ShareSVG onClick={openShareModal} disabled={!ENABLE_POST_SHARE_TO_CHAT} />
 			</Flex>
 
 			<Flex gap={2} alignItems={"center"}>
@@ -390,31 +484,90 @@ return (
 					</ModalFooter>
 				</ModalContent>
 			</Modal>
+		{/* Moment Capsule Modal */}
+		<Modal isOpen={isCapsuleOpen} onClose={onCapsuleClose} isCentered size="sm">
+			<ModalOverlay />
+			<ModalContent>
+				<ModalHeader fontSize="md">
+					{capsuleSealed ? '⏳ Moment Capsule' : '🕰️ Seal as Moment Capsule'}
+				</ModalHeader>
+				<ModalCloseButton />
+				<ModalBody pb={4}>
+					{capsuleSealed ? (
+						<VStack spacing={3} align="stretch">
+							<Text fontSize="sm" color="gray.500">
+								You sealed this post. {formatCapsuleCountdown(capsuleOpenAt)}.
+							</Text>
+							<Text fontSize="xs" color="gray.400">
+								You'll get a notification when it reopens so you can revisit it.
+							</Text>
+							<Button
+								colorScheme="red"
+								variant="outline"
+								size="sm"
+								isLoading={capsuleLoading}
+								onClick={handleUnsealCapsule}
+							>
+								Remove Capsule
+							</Button>
+						</VStack>
+					) : (
+						<VStack spacing={3} align="stretch">
+							<Text fontSize="sm" color="gray.500">
+								Seal this post as a Moment Capsule. You'll be notified when it reopens — like a message to your future self.
+							</Text>
+							<Text fontSize="xs" fontWeight="semibold">Choose when it opens:</Text>
+							{[
+								{ label: '7 days', value: '7d' },
+								{ label: '30 days', value: '30d' },
+								{ label: '1 year', value: '1y' },
+							].map(({ label, value }) => (
+								<Button
+									key={value}
+									variant="outline"
+									size="sm"
+									isLoading={capsuleLoading}
+									onClick={() => handleSealCapsule(value)}
+								>
+									🔒 Seal for {label}
+								</Button>
+							))}
+						</VStack>
+					)}
+				</ModalBody>
+				<ModalFooter pt={0}>
+					<Button variant="ghost" size="sm" onClick={onCapsuleClose}>Cancel</Button>
+				</ModalFooter>
+			</ModalContent>
+		</Modal>
+
 		</Flex>
 	);
 };
 
 export default Actions;
 
-const RepostSVG = () => {
-	return (
-		<svg
-			aria-label='Repost'
-			color='currentColor'
-			fill='currentColor'
-			height='20'
-			role='img'
-			viewBox='0 0 24 24'
-			width='20'
-		>
-			<title>Repost</title>
-			<path
-				fill=''
-				d='M19.998 9.497a1 1 0 0 0-1 1v4.228a3.274 3.274 0 0 1-3.27 3.27h-5.313l1.791-1.787a1 1 0 0 0-1.412-1.416L7.29 18.287a1.004 1.004 0 0 0-.294.707v.001c0 .023.012.042.013.065a.923.923 0 0 0 .281.643l3.502 3.504a1 1 0 0 0 1.414-1.414l-1.797-1.798h5.318a5.276 5.276 0 0 0 5.27-5.27v-4.228a1 1 0 0 0-1-1Zm-6.41-3.496-1.795 1.795a1 1 0 1 0 1.414 1.414l3.5-3.5a1.003 1.003 0 0 0 0-1.417l-3.5-3.5a1 1 0 0 0-1.414 1.414l1.794 1.794H8.27A5.277 5.277 0 0 0 3 9.271V13.5a1 1 0 0 0 2 0V9.271a3.275 3.275 0 0 1 3.271-3.27Z'
-			></path>
-		</svg>
-	);
-};
+const CapsuleSVG = ({ sealed = false }) => (
+	<svg
+		aria-label='Moment Capsule'
+		height='20'
+		width='20'
+		viewBox='0 0 24 24'
+		fill={sealed ? 'rgb(138, 93, 237)' : 'none'}
+		stroke={sealed ? 'rgb(138, 93, 237)' : 'currentColor'}
+		strokeWidth='2'
+		strokeLinecap='round'
+		strokeLinejoin='round'
+		style={{ transition: 'fill 0.2s, stroke 0.2s' }}
+	>
+		<title>Moment Capsule</title>
+		{/* hourglass shape */}
+		<path d='M5 3h14' />
+		<path d='M19 3c0 6-7 9-7 9s-7-3-7-9' />
+		<path d='M5 21h14' />
+		<path d='M5 21c0-6 7-9 7-9s7 3 7 9' />
+	</svg>
+);
 
 const ShareSVG = ({ onClick, disabled = false }) => {
 	return (
