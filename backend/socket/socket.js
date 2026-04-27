@@ -1297,7 +1297,17 @@ export const initializeSocket = async (app) => {
                                 })
                                 console.log(`🏎️ [socket] Auto-delivered race recovery to ${connectUserId} for room ${activeRaceRoom}`)
                             }
+                        } else {
+                            // Race state expired / deleted — pointer is orphaned; clean up so
+                            // the user can be challenged again and we deliver ok:false to
+                            // let the client clear its stale localStorage.
+                            await deleteActiveRaceGame(connectUserId).catch(() => {})
+                            console.log(`🧹 [socket] Cleaned orphan activeRaceGame for ${connectUserId}`)
+                            io.to(connectSid).emit('raceGameRecovery', { ok: false })
                         }
+                    } else {
+                        // No active race at all — tell client so it can clear stale localStorage.
+                        io.to(connectSid).emit('raceGameRecovery', { ok: false })
                     }
                 } catch (e) {
                     console.error(`❌ [socket] Error auto-recovering race for ${connectUserId}:`, e.message)
@@ -1327,7 +1337,14 @@ export const initializeSocket = async (app) => {
                                 io.to(connectSid).emit('cardGameState', cardPayload)
                                 console.log(`🃏 [socket] Auto-delivered card recovery to ${connectUserId} for room ${activeCardRoom}`)
                             }
+                        } else {
+                            // Card state gone — orphaned pointer; clean up.
+                            await deleteActiveCardGame(connectUserId).catch(() => {})
+                            console.log(`🧹 [socket] Cleaned orphan activeCardGame for ${connectUserId}`)
+                            io.to(connectSid).emit('cardGameRecovery', { ok: false })
                         }
+                    } else {
+                        io.to(connectSid).emit('cardGameRecovery', { ok: false })
                     }
                 } catch (e) {
                     console.error(`❌ [socket] Error auto-recovering card for ${connectUserId}:`, e.message)
@@ -1494,14 +1511,34 @@ export const initializeSocket = async (app) => {
             }
         }
 
-        /** Block game invites while in a call or already in chess/card (server-side; app also filters). */
+        /** Block game invites while in a call or already in chess/card (server-side; app also filters).
+         *  Also performs orphan-cleanup: if the active-game pointer exists in Redis but the game-state
+         *  record is gone (expired TTL / deleted), the pointer is stale → delete it and unblock. */
         const isBlockedForGameChallenge = async (userId) => {
             const uid = normalizeUserId(userId) || userId
             if (!uid) return true
             if (await isUserBusy(uid)) return true
             if (await getActiveChessGame(uid)) return true
-            if (await getActiveCardGame(uid)) return true
-            if (await hasActiveRaceGame(uid)) return true
+
+            // Card: verify game state still exists; clean up orphan pointer if not.
+            const cardRoom = await getActiveCardGame(uid)
+            if (cardRoom) {
+                const cardState = await getCardGameState(cardRoom).catch(() => null)
+                if (cardState) return true
+                // Stale pointer — clean up so the user can be challenged again
+                await deleteActiveCardGame(uid).catch(() => {})
+                console.log(`🧹 [gameChallenge] Cleaned orphan card game for ${uid}`)
+            }
+
+            // Race: same orphan-cleanup pattern.
+            const raceRoom = await getActiveRaceGame(uid)
+            if (raceRoom) {
+                const raceState = await getRaceGameState(raceRoom).catch(() => null)
+                if (raceState) return true
+                await deleteActiveRaceGame(uid).catch(() => {})
+                console.log(`🧹 [gameChallenge] Cleaned orphan race game for ${uid}`)
+            }
+
             return false
         }
 
@@ -3098,7 +3135,12 @@ export const initializeSocket = async (app) => {
                 const roomId = await getActiveRaceGame(uid)
                 if (!roomId) return socket.emit('raceGameRecovery', { ok: false })
                 const state = await getRaceGameState(roomId).catch(() => null)
-                if (!state) return socket.emit('raceGameRecovery', { ok: false })
+                if (!state) {
+                    // Game state expired — pointer is orphaned; clean up and tell client.
+                    await deleteActiveRaceGame(uid).catch(() => {})
+                    console.log(`🧹 [recoverRaceGame] Cleaned orphan activeRaceGame for ${uid}`)
+                    return socket.emit('raceGameRecovery', { ok: false })
+                }
                 const p1 = normalizeUserId(state.player1) || state.player1
                 const p2 = normalizeUserId(state.player2) || state.player2
                 const opponentId = p1 === uid ? p2 : p1
