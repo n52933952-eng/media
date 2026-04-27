@@ -3151,6 +3151,11 @@ export const initializeSocket = async (app) => {
                         ? state.readyPlayers.map((x) => normalizeUserId(x) || x)
                         : []
                     const bothReady = !!p1 && !!p2 && ready.includes(p1) && ready.includes(p2)
+                    // Include how many sockets are live in the room right now so the
+                    // frontend can determine allPlayersConnected without relying on
+                    // readyPlayers (which only fills in after asset-load).
+                    const roomSocketsNow = io.sockets.adapter.rooms.get(roomId)
+                    const socketCount = roomSocketsNow ? roomSocketsNow.size : 1
                     io.to(socket.id).emit('raceGameState', {
                         roomId,
                         player1: p1,
@@ -3158,6 +3163,7 @@ export const initializeSocket = async (app) => {
                         isHost: p1 === uid,
                         readyPlayers: ready,
                         bothReady,
+                        socketCount,
                         countdownStarted: !!state.countdownStarted,
                         startTime: state.startTime || null,
                         raceActualStartTime: state.raceActualStartTime || null,

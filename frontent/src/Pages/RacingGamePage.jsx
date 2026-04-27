@@ -370,8 +370,13 @@ export default function RacingGamePage() {
       }
     }
 
-    const onRaceReadyState = ({ bothReady }) => {
+    const onRaceReadyState = ({ bothReady, readyCount }) => {
       bothPlayersReadyRef.current = !!bothReady
+      // If readyCount >= 2, both players have definitely joined the room.
+      // Update allPlayersConnected so it's never stuck at false.
+      if ((readyCount ?? 0) >= 2 || bothReady) {
+        raceStateRef.current.allPlayersConnected = true
+      }
       setWaitingOpp(!(raceStateRef.current.allPlayersConnected && bothPlayersReadyRef.current))
       maybeStartCountdown()
     }
@@ -410,7 +415,7 @@ export default function RacingGamePage() {
     // Full race state catch-up on (re)join — mirrors chessGameState pattern.
     // Fired by server whenever joinRaceRoom is received so reconnecting players
     // know the current ready/countdown state without having to re-wait.
-    const onRaceGameState = ({ bothReady, countdownStarted, readyPlayers, raceActualStartTime }) => {
+    const onRaceGameState = ({ bothReady, countdownStarted, readyPlayers, raceActualStartTime, socketCount }) => {
       bothPlayersReadyRef.current = !!bothReady
       if (countdownStarted && !raceStateRef.current.countdownStarted) {
         // Race was already live before refresh.  If it started more than 5 s ago
@@ -425,9 +430,17 @@ export default function RacingGamePage() {
           if (!raceStateRef.current.raceStarted) startCountdown()
         }
       } else {
-        const hasBoth = Array.isArray(readyPlayers) && readyPlayers.length >= 2
-        raceStateRef.current.allPlayersConnected = hasBoth
-        setWaitingOpp(!(hasBoth && bothReady))
+        // Use socketCount (live sockets in room) as authoritative source for
+        // allPlayersConnected. readyPlayers only fills after asset-load, so using
+        // it here would overwrite the true allPlayersConnected set by onPlayerJoined.
+        const bothConnected = (socketCount != null ? socketCount >= 2 : null)
+          ?? (Array.isArray(readyPlayers) && readyPlayers.length >= 2)
+        // Never downgrade: once allPlayersConnected is true (set by onPlayerJoined),
+        // keep it true so onRaceReadyState can clear waitingOpp correctly.
+        if (bothConnected || !raceStateRef.current.allPlayersConnected) {
+          raceStateRef.current.allPlayersConnected = bothConnected
+        }
+        setWaitingOpp(!(raceStateRef.current.allPlayersConnected && bothReady))
         maybeStartCountdown()
       }
     }

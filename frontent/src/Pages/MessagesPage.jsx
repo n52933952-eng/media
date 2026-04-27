@@ -204,6 +204,27 @@ const MessagesPage = () => {
   const { startGroupCall, groupCallActive } = useContext(GroupCallContext) || {}
   const showToast = useShowToast()
 
+  // Pre-flight check for group calls: warn about busy members BEFORE connecting to LiveKit
+  const handleGroupCallStart = useCallback((type) => {
+    const participants = selectedConversation?.participants || []
+    const myId = idStr(user?._id)
+    const others = participants.filter(p => idStr(p?._id) !== myId)
+    if (others.length === 0) return
+    const busyOthers = others.filter(p => busyUsers?.has(idStr(p?._id)) || p?.inCall)
+    if (busyOthers.length === others.length) {
+      showToast('All members are busy', 'Everyone in this group is currently in a call or playing a game.', 'warning')
+      return
+    }
+    if (busyOthers.length > 0) {
+      showToast(
+        `${busyOthers.length} member${busyOthers.length > 1 ? 's are' : ' is'} busy`,
+        `${busyOthers.length} member${busyOthers.length > 1 ? 's are' : ' is'} busy and won't receive the call.`,
+        'warning'
+      )
+    }
+    startGroupCall?.(selectedConversation._id, type)
+  }, [selectedConversation, user?._id, busyUsers, startGroupCall, showToast])
+
   // State
   const [conversations, setConversations] = useState([])
   const [hasMoreConversations, setHasMoreConversations] = useState(false)
@@ -3726,7 +3747,7 @@ const MessagesPage = () => {
                   >
                     <MenuItem
                       icon={<FaVideo />}
-                      onClick={() => startGroupCall?.(selectedConversation._id, 'video')}
+                      onClick={() => handleGroupCallStart('video')}
                       bg={bgColor}
                       color={useColorModeValue('black', 'white')}
                       _hover={{ bg: useColorModeValue('green.50', 'green.900') }}
@@ -3736,7 +3757,7 @@ const MessagesPage = () => {
                     </MenuItem>
                     <MenuItem
                       icon={<FaPhone />}
-                      onClick={() => startGroupCall?.(selectedConversation._id, 'audio')}
+                      onClick={() => handleGroupCallStart('audio')}
                       bg={bgColor}
                       color={useColorModeValue('black', 'white')}
                       _hover={{ bg: useColorModeValue('green.50', 'green.900') }}
