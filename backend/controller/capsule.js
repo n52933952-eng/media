@@ -14,7 +14,7 @@ const DURATIONS = {
 /** POST /api/capsule/seal  — seal a post as a capsule */
 export const sealCapsule = async (req, res) => {
   try {
-    const { postId, duration } = req.body
+    const { postId, duration, clientNow } = req.body
     const userId = req.user._id
 
     if (!postId || !DURATIONS[duration]) {
@@ -37,7 +37,13 @@ export const sealCapsule = async (req, res) => {
       return res.status(400).json({ error: 'Moment Capsule works only on normal feed posts' })
     }
 
-    const openAt = new Date(Date.now() + DURATIONS[duration])
+    // Use client time if provided (helps when server clock drifts), but clamp to sane range.
+    const nowServer = Date.now()
+    const nowClient = Number(clientNow)
+    const useClientClock = Number.isFinite(nowClient) && Math.abs(nowClient - nowServer) <= 60 * 60 * 1000
+    const baseNow = useClientClock ? nowClient : nowServer
+
+    const openAt = new Date(baseNow + DURATIONS[duration])
     const expiresAt = new Date(openAt.getTime() + CAPSULE_RETENTION_MS)
 
     const capsule = await Capsule.findOneAndUpdate(
