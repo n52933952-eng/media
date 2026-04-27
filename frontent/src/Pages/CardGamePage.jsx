@@ -364,7 +364,7 @@ const CardGamePage = () => {
                 <Text fontSize="4xl" mb={4}>🃏</Text>
                 <Spinner size="xl" color="purple.500" mb={4} />
                 <Text fontSize="lg" color={mutedCol}>Waiting for the game to start…</Text>
-                <Button mt={6} size="sm" variant="outline" onClick={() => navigate('/home')}>Cancel</Button>
+                <Button mt={6} size="sm" variant="outline" colorScheme="red" onClick={() => { endCardGameOnce(); navigate('/home') }}>Cancel</Button>
             </Box>
         )
     }

@@ -22,8 +22,13 @@ const CardChallengeNotification = () => {
     if (!cardChallenge || !cardChallenge.isReceivingChallenge) return null
 
     const handleAccept = () => {
-        navigate(`/card/${cardChallenge.from}`)
-        setTimeout(() => acceptCardChallenge(), 100)
+        // IMPORTANT: call acceptCardChallenge() FIRST so localStorage.cardRoomId is set
+        // synchronously before CardGamePage mounts.  The old pattern (navigate → 100ms
+        // timeout → acceptCardChallenge) caused roomId to be empty on mount, leaving the
+        // accepter stuck on "Waiting for the game to start..." forever.
+        const fromId = cardChallenge.from  // capture before acceptCardChallenge clears state
+        acceptCardChallenge()
+        navigate(`/card/${fromId}`)
     }
 
     return (
