@@ -204,27 +204,6 @@ const MessagesPage = () => {
   const { startGroupCall, groupCallActive } = useContext(GroupCallContext) || {}
   const showToast = useShowToast()
 
-  // Pre-flight check for group calls: warn about busy members BEFORE connecting to LiveKit
-  const handleGroupCallStart = useCallback((type) => {
-    const participants = selectedConversation?.participants || []
-    const myId = idStr(user?._id)
-    const others = participants.filter(p => idStr(p?._id) !== myId)
-    if (others.length === 0) return
-    const busyOthers = others.filter(p => busyUsers?.has(idStr(p?._id)) || p?.inCall)
-    if (busyOthers.length === others.length) {
-      showToast('All members are busy', 'Everyone in this group is currently in a call or playing a game.', 'warning')
-      return
-    }
-    if (busyOthers.length > 0) {
-      showToast(
-        `${busyOthers.length} member${busyOthers.length > 1 ? 's are' : ' is'} busy`,
-        `${busyOthers.length} member${busyOthers.length > 1 ? 's are' : ' is'} busy and won't receive the call.`,
-        'warning'
-      )
-    }
-    startGroupCall?.(selectedConversation._id, type)
-  }, [selectedConversation, user?._id, busyUsers, startGroupCall, showToast])
-
   // State
   const [conversations, setConversations] = useState([])
   const [hasMoreConversations, setHasMoreConversations] = useState(false)
@@ -286,6 +265,27 @@ const MessagesPage = () => {
   const pointerStartPointRef = useRef({ x: 0, y: 0, active: false })
   const pointerDraggedRef = useRef(false)
   const lastPointerDragAtRef = useRef(0)
+
+  // Pre-flight check for group calls: warn about busy members BEFORE connecting to LiveKit
+  const handleGroupCallStart = useCallback((type) => {
+    const participants = selectedConversation?.participants || []
+    const myId = idStr(user?._id)
+    const others = participants.filter(p => idStr(p?._id) !== myId)
+    if (others.length === 0) return
+    const busyOthers = others.filter(p => busyUsers?.has(idStr(p?._id)) || p?.inCall)
+    if (busyOthers.length === others.length) {
+      showToast('All members are busy', 'Everyone in this group is currently in a call or playing a game.', 'warning')
+      return
+    }
+    if (busyOthers.length > 0) {
+      showToast(
+        `${busyOthers.length} member${busyOthers.length > 1 ? 's are' : ' is'} busy`,
+        `${busyOthers.length} member${busyOthers.length > 1 ? 's are' : ' is'} busy and won't receive the call.`,
+        'warning'
+      )
+    }
+    startGroupCall?.(selectedConversation._id, type)
+  }, [selectedConversation, user?._id, busyUsers, startGroupCall, showToast])
 
   // Theme colors - white for light mode, dark for dark mode
   const bgColor = useColorModeValue('white', '#101010')  // White in light mode, dark in dark mode
