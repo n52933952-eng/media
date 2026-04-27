@@ -18,9 +18,10 @@ const RaceChallenge = ({ compact = false }) => {
     const [loading,        setLoading]           = useState(false)
     const [busyUsers,      setBusyUsers]         = useState([])
     const [hasConnections, setHasConnections]    = useState(false)
-    const navigate    = useNavigate()
-    const showToast   = useShowToast()
-    const sentToRef   = useRef(null)
+    const navigate        = useNavigate()
+    const showToast       = useShowToast()
+    const sentToRef       = useRef(null)
+    const challengeTimerRef = useRef(null)
 
     const bgColor            = useColorModeValue('white', '#0f172a')
     const borderColor        = useColorModeValue('gray.200', '#1e3a5f')
@@ -110,6 +111,14 @@ const RaceChallenge = ({ compact = false }) => {
         }
     }
 
+    // Cancel any running no-response timer
+    const clearChallengeTimer = useCallback(() => {
+        if (challengeTimerRef.current) {
+            clearTimeout(challengeTimerRef.current)
+            challengeTimerRef.current = null
+        }
+    }, [])
+
     // ── Socket listeners ──────────────────────────────────────────────────────
     useEffect(() => {
         if (!socket) return
@@ -121,6 +130,7 @@ const RaceChallenge = ({ compact = false }) => {
             if (!data?.roomId) return
             const weChallenger = sentToRef.current && data.opponentId?.toString() === sentToRef.current.toString()
             if (weChallenger) {
+                clearChallengeTimer()
                 sentToRef.current = null
                 localStorage.setItem('raceRoomId', data.roomId)
                 showToast('Challenge Accepted! 🏎️', 'Starting race…', 'success')
@@ -128,13 +138,14 @@ const RaceChallenge = ({ compact = false }) => {
             }
         }
         const onDeclined = () => {
-            // Opponent declined — clear pending so a new challenge works correctly
+            clearChallengeTimer()
             sentToRef.current = null
             localStorage.removeItem('racePendingTo')
             showToast('Challenge Declined', 'Your opponent is not available right now.', 'warning')
         }
         const onBlocked = ({ game }) => {
             if (game !== 'race') return
+            clearChallengeTimer()
             sentToRef.current = null
             localStorage.removeItem('racePendingTo')
             showToast('Cannot Challenge', 'That player is currently busy in a game or call.', 'warning')
@@ -160,14 +171,15 @@ const RaceChallenge = ({ compact = false }) => {
             socket.off('acceptRaceChallenge', onAccepted)
             socket.off('raceDeclined', onDeclined)
             socket.off('gameChallengeBlocked', onBlocked)
+            clearChallengeTimer()
         }
-    }, [socket, navigate, showToast, user, fetchBusyGameUserIds])
+    }, [socket, navigate, showToast, user, fetchBusyGameUserIds, clearChallengeTimer])
 
     const handleOpenModal = () => { fetchAvailableUsers(); onOpen() }
 
     const handleChallenge = (opponent) => {
         if (!socket) { showToast('Error', 'Connection lost. Please refresh.', 'error'); return }
-        // Clear any stale pending from a previous challenge before sending a new one
+        clearChallengeTimer()
         sentToRef.current = opponent._id?.toString()
         localStorage.setItem('racePendingTo', opponent._id?.toString())
         socket.emit('raceChallenge', {
@@ -179,6 +191,14 @@ const RaceChallenge = ({ compact = false }) => {
         })
         showToast('Sent! 🏎️', `Race challenge sent to ${opponent.name}!`, 'success')
         onClose()
+        // Auto-clear after 30 s if no response (opponent offline, closed app, etc.)
+        challengeTimerRef.current = setTimeout(() => {
+            if (sentToRef.current) {
+                sentToRef.current = null
+                localStorage.removeItem('racePendingTo')
+                showToast('No Response', 'Opponent did not respond. You can try again.', 'warning')
+            }
+        }, 30000)
     }
 
     // ── UI ────────────────────────────────────────────────────────────────────
