@@ -4,6 +4,7 @@ import Notification from '../models/notification.js'
 import User from '../models/user.js'
 
 const DURATIONS = {
+  '1m': 60 * 1000,
   '7d': 7 * 24 * 60 * 60 * 1000,
   '30d': 30 * 24 * 60 * 60 * 1000,
   '1y': 365 * 24 * 60 * 60 * 1000,

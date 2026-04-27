@@ -488,18 +488,21 @@ return (
 		<Modal isOpen={isCapsuleOpen} onClose={onCapsuleClose} isCentered size="sm">
 			<ModalOverlay />
 			<ModalContent>
-				<ModalHeader fontSize="md">
-					{capsuleSealed ? '⏳ Moment Capsule' : '🕰️ Seal as Moment Capsule'}
+				<ModalHeader fontSize="md" pb={1}>
+					{capsuleSealed ? '💊 Your Moment Capsule' : '💊 Save as Moment Capsule'}
 				</ModalHeader>
 				<ModalCloseButton />
 				<ModalBody pb={4}>
 					{capsuleSealed ? (
 						<VStack spacing={3} align="stretch">
-							<Text fontSize="sm" color="gray.500">
-								You sealed this post. {formatCapsuleCountdown(capsuleOpenAt)}.
+							<Text fontSize="sm" color="gray.400">
+								You saved this post in a capsule.
 							</Text>
-							<Text fontSize="xs" color="gray.400">
-								You'll get a notification when it reopens so you can revisit it.
+							<Text fontSize="sm" fontWeight="semibold" color="purple.300">
+								{formatCapsuleCountdown(capsuleOpenAt)}
+							</Text>
+							<Text fontSize="xs" color="gray.500">
+								When it opens, you'll get a notification to come back and relive this moment. 🎁
 							</Text>
 							<Button
 								colorScheme="red"
@@ -508,28 +511,32 @@ return (
 								isLoading={capsuleLoading}
 								onClick={handleUnsealCapsule}
 							>
-								Remove Capsule
+								Cancel capsule
 							</Button>
 						</VStack>
 					) : (
 						<VStack spacing={3} align="stretch">
-							<Text fontSize="sm" color="gray.500">
-								Seal this post as a Moment Capsule. You'll be notified when it reopens — like a message to your future self.
+							<Text fontSize="sm" color="gray.400">
+								Save this post and we'll remind you to come back to it later — like a surprise from your past self. 🎁
 							</Text>
-							<Text fontSize="xs" fontWeight="semibold">Choose when it opens:</Text>
+							<Text fontSize="xs" fontWeight="semibold" color="gray.300">Remind me in:</Text>
 							{[
-								{ label: '7 days', value: '7d' },
-								{ label: '30 days', value: '30d' },
-								{ label: '1 year', value: '1y' },
-							].map(({ label, value }) => (
+								{ label: '1 minute', sublabel: 'Test it now', value: '1m' },
+								{ label: '7 days', sublabel: 'See you next week', value: '7d' },
+								{ label: '30 days', sublabel: 'A month from now', value: '30d' },
+								{ label: '1 year', sublabel: 'Future you will thank you', value: '1y' },
+							].map(({ label, sublabel, value }) => (
 								<Button
 									key={value}
 									variant="outline"
 									size="sm"
 									isLoading={capsuleLoading}
 									onClick={() => handleSealCapsule(value)}
+									justifyContent="space-between"
+									px={4}
 								>
-									🔒 Seal for {label}
+									<Text>⏳ {label}</Text>
+									<Text fontSize="xs" color="gray.500" fontWeight="normal">{sublabel}</Text>
 								</Button>
 							))}
 						</VStack>
@@ -553,19 +560,24 @@ const CapsuleSVG = ({ sealed = false }) => (
 		height='20'
 		width='20'
 		viewBox='0 0 24 24'
-		fill={sealed ? 'rgb(138, 93, 237)' : 'none'}
-		stroke={sealed ? 'rgb(138, 93, 237)' : 'currentColor'}
+		fill='none'
+		stroke={sealed ? 'rgb(167, 112, 255)' : 'currentColor'}
 		strokeWidth='2'
 		strokeLinecap='round'
 		strokeLinejoin='round'
-		style={{ transition: 'fill 0.2s, stroke 0.2s' }}
+		style={{ transition: 'stroke 0.25s' }}
 	>
 		<title>Moment Capsule</title>
-		{/* hourglass shape */}
-		<path d='M5 3h14' />
-		<path d='M19 3c0 6-7 9-7 9s-7-3-7-9' />
-		<path d='M5 21h14' />
-		<path d='M5 21c0-6 7-9 7-9s7 3 7 9' />
+		{/* pill / capsule shape */}
+		<rect x='3' y='8' width='18' height='8' rx='4' ry='4' />
+		{/* center divider */}
+		<line x1='12' y1='8' x2='12' y2='16' />
+		{/* left half filled when sealed */}
+		{sealed && (
+			<rect x='3' y='8' width='9' height='8' rx='4' ry='4' fill='rgb(167, 112, 255)' stroke='none' />
+		)}
+		{/* small clock dots inside right half */}
+		<circle cx='16' cy='12' r='0.5' fill={sealed ? 'rgb(167,112,255)' : 'currentColor'} stroke='none' />
 	</svg>
 );
 
