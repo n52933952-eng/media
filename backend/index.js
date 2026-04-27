@@ -242,8 +242,10 @@ initializeSocket(app).then((result) => {
         // Expired stories: MongoDB + Cloudinary
         initializeStoryCleanup()
 
-        // Moment Capsule: notify users when their sealed capsules open (check every minute)
-        setInterval(processDueCapsules, 60 * 1000)
+        // Moment Capsule: frequent due-check for accurate short reminders (1m/5m).
+        // Tunable via env; default 10s for near-real-time without heavy load.
+        const capsuleCheckMs = Number(process.env.CAPSULE_CHECK_INTERVAL_MS || 10 * 1000)
+        setInterval(processDueCapsules, Math.max(1000, capsuleCheckMs))
         processDueCapsules() // run once immediately on startup
     })
 }).catch((error) => {

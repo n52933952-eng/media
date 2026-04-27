@@ -59,6 +59,7 @@ const Actions = ({post}) => {
 	const [capsuleLoadingDuration, setCapsuleLoadingDuration] = useState(null)
 	const [capsuleSealed, setCapsuleSealed] = useState(false)
 	const [capsuleOpenAt, setCapsuleOpenAt] = useState(null)
+	const [capsuleSelectedLabel, setCapsuleSelectedLabel] = useState('')
    
 	const[reply,setReply]=useState("")
 	const [conversations, setConversations] = useState([])
@@ -233,6 +234,7 @@ const Actions = ({post}) => {
 				if (data && data.openAt) {
 					setCapsuleSealed(true)
 					setCapsuleOpenAt(new Date(data.openAt))
+					setCapsuleSelectedLabel(data.selectedLabel || '')
 				}
 			}
 		} catch (_) {}
@@ -254,6 +256,7 @@ const Actions = ({post}) => {
 		if (!res.ok) throw new Error(data?.error || 'Failed to seal capsule')
 		setCapsuleSealed(true)
 		setCapsuleOpenAt(new Date(data.openAt))
+		setCapsuleSelectedLabel(data.selectedLabel || '')
 		showToast('Capsule sealed!', `You will be notified when it opens`, 'success')
 		onCapsuleClose()
 	} catch (e) {
@@ -274,6 +277,7 @@ const Actions = ({post}) => {
 		if (!res.ok) throw new Error('Failed to remove capsule')
 		setCapsuleSealed(false)
 		setCapsuleOpenAt(null)
+		setCapsuleSelectedLabel('')
 		showToast('Capsule removed', '', 'info')
 		onCapsuleClose()
 	} catch (e) {
@@ -286,12 +290,13 @@ const Actions = ({post}) => {
   const formatCapsuleCountdown = (openAt) => {
 	if (!openAt) return ''
 	const diff = openAt - Date.now()
-	if (diff <= 0) return 'Opening soon...'
+	if (diff <= 0) return 'Opening now...'
 	const days = Math.floor(diff / (1000 * 60 * 60 * 24))
 	const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60))
-	if (days > 0) return `Opens in ${days}d ${hours}h`
 	const mins = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60))
-	return `Opens in ${hours}h ${mins}m`
+	if (days > 0) return `Opens in ${days}d ${hours}h`
+	if (hours > 0) return `Opens in ${hours}h ${mins}m`
+	return `Opens in ${Math.max(1, mins)}m`
   }
 
   const handlereply = async() => {
@@ -412,7 +417,7 @@ return (
 				</svg>
 
 			{isCapsuleEligiblePost && (
-				<Tooltip label={capsuleSealed ? formatCapsuleCountdown(capsuleOpenAt) : 'Remind me later'} placement="top" hasArrow>
+				<Tooltip label={capsuleSealed ? `Set: ${capsuleSelectedLabel || formatCapsuleCountdown(capsuleOpenAt)}` : 'Remind me later'} placement="top" hasArrow>
 					<Box
 						as="button"
 						display="flex"
@@ -515,7 +520,7 @@ return (
 								You saved this post in a capsule.
 							</Text>
 							<Text fontSize="sm" fontWeight="semibold" color="purple.300">
-								{formatCapsuleCountdown(capsuleOpenAt)}
+								{capsuleSelectedLabel ? `Selected: ${capsuleSelectedLabel}` : formatCapsuleCountdown(capsuleOpenAt)}
 							</Text>
 							<Text fontSize="xs" color="gray.500">
 								When it opens, you'll get a notification to come back and relive this moment. 🎁

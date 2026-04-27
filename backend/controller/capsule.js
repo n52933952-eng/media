@@ -10,6 +10,12 @@ const DURATIONS = {
   '1h': 60 * 60 * 1000,
   '3d': 3 * 24 * 60 * 60 * 1000,
 }
+const DURATION_LABELS = {
+  '1m': '1 minute',
+  '5m': '5 minutes',
+  '1h': '1 hour',
+  '3d': '3 days',
+}
 
 /** POST /api/capsule/seal  — seal a post as a capsule */
 export const sealCapsule = async (req, res) => {
@@ -48,7 +54,14 @@ export const sealCapsule = async (req, res) => {
 
     const capsule = await Capsule.findOneAndUpdate(
       { postId, sealedBy: userId },
-      { openAt, opened: false, notified: false, expiresAt },
+      {
+        openAt,
+        opened: false,
+        notified: false,
+        expiresAt,
+        selectedDuration: duration,
+        selectedLabel: DURATION_LABELS[duration],
+      },
       { upsert: true, new: true }
     )
 

@@ -16,6 +16,15 @@ const CapsuleSchema = new mongoose.Schema(
       type: Date,
       required: true,
     },
+    selectedDuration: {
+      type: String,
+      required: true,
+      enum: ['1m', '5m', '1h', '3d'],
+    },
+    selectedLabel: {
+      type: String,
+      required: true,
+    },
     opened: {
       type: Boolean,
       default: false,
