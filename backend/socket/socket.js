@@ -3006,6 +3006,25 @@ export const initializeSocket = async (app) => {
             io.to(roomId).emit('racePlayerJoined', { count })
         })
 
+        // Recover active race room after refresh/reconnect (Chess-like firmness).
+        socket.on('recoverRaceGame', async () => {
+            try {
+                const uid = normalizeUserId(socket.handshake.query.userId)
+                if (!uid) return socket.emit('raceGameRecovery', { ok: false })
+                const roomId = await getActiveRaceGame(uid)
+                if (!roomId) return socket.emit('raceGameRecovery', { ok: false })
+                const state = await getRaceGameState(roomId).catch(() => null)
+                if (!state) return socket.emit('raceGameRecovery', { ok: false })
+                const p1 = normalizeUserId(state.player1) || state.player1
+                const p2 = normalizeUserId(state.player2) || state.player2
+                const opponentId = p1 === uid ? p2 : p1
+                socket.join(roomId)
+                socket.emit('raceGameRecovery', { ok: true, roomId, opponentId, isHost: p1 === uid })
+            } catch (e) {
+                socket.emit('raceGameRecovery', { ok: false })
+            }
+        })
+
         // Explicit room leave (route navigation / cleanup) so stale room membership
         // cannot keep opponents "stuck in race" when someone goes Home.
         socket.on('leaveRaceRoom', ({ roomId }) => {
@@ -3409,6 +3428,41 @@ export const initializeSocket = async (app) => {
                 } else {
                     console.log(`⚠️ No game state found for room ${roomId}`)
                 }
+            }
+        })
+
+        // Recover active card room after refresh/reconnect (Chess-like firmness).
+        socket.on("recoverCardGame", async () => {
+            try {
+                const uid = normalizeUserId(socket.handshake.query.userId)
+                if (!uid) return socket.emit('cardGameRecovery', { ok: false })
+                const roomId = await getActiveCardGame(uid)
+                if (!roomId) return socket.emit('cardGameRecovery', { ok: false })
+                socket.join(roomId)
+
+                const gameState = await getCardGameState(roomId).catch(() => null)
+                let opponentId = null
+                if (gameState?.players?.length) {
+                    const p1 = normalizeUserId(gameState.players[0]?.userId) || gameState.players[0]?.userId
+                    const p2 = normalizeUserId(gameState.players[1]?.userId) || gameState.players[1]?.userId
+                    opponentId = p1 === uid ? p2 : p1
+                } else {
+                    const m = roomId.match(/^card_(.+?)_(.+?)_\d+$/)
+                    if (m) {
+                        const p1 = normalizeUserId(m[1]) || m[1]
+                        const p2 = normalizeUserId(m[2]) || m[2]
+                        opponentId = p1 === uid ? p2 : p1
+                    }
+                }
+
+                socket.emit('cardGameRecovery', { ok: true, roomId, opponentId })
+
+                if (gameState) {
+                    const payload = buildCardGameStatePayloadForViewer(gameState, roomId, uid)
+                    io.to(socket.id).emit('cardGameState', payload)
+                }
+            } catch (e) {
+                socket.emit('cardGameRecovery', { ok: false })
             }
         })
 

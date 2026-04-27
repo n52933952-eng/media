@@ -135,6 +135,7 @@ export default function RacingGamePage() {
   const bothPlayersReadyRef = useRef(false)
   const startSfxRef = useRef(null)
   const raceMusicRef = useRef(null)
+  const raceRecoveryTriedRef = useRef(false)
 
   // ─── Fetch opponent profile ────────────────────────────────────────────────
   useEffect(() => {
@@ -155,16 +156,45 @@ export default function RacingGamePage() {
     oppColorRef.current = isHost ? 'red'  : 'blue'
   }, [user])
 
-  // Hard guard: race route must have an active race room id.
-  // After refresh/unload we intentionally clear `raceRoomId`; without this guard
-  // the page can rebuild a local-only scene and look like it "returned to game".
+  // Hard guard with recovery: try server-side active race restore first (Chess-like),
+  // then fallback to home if no active race exists.
   useEffect(() => {
     if (!user?._id) return
     const roomId = localStorage.getItem('raceRoomId')
     if (!roomId) {
-      navigate('/', { replace: true })
+      if (!socket || raceRecoveryTriedRef.current) {
+        navigate('/', { replace: true })
+        return
+      }
+      raceRecoveryTriedRef.current = true
+      let done = false
+      const onRecovered = (payload) => {
+        if (done) return
+        done = true
+        if (payload?.ok && payload?.roomId) {
+          localStorage.setItem('raceRoomId', payload.roomId)
+          if (typeof payload?.isHost === 'boolean') {
+            localStorage.setItem('raceIsHost', payload.isHost ? 'true' : 'false')
+          }
+          roomIdRef.current = payload.roomId
+          return
+        }
+        navigate('/', { replace: true })
+      }
+      socket.on('raceGameRecovery', onRecovered)
+      socket.emit('recoverRaceGame')
+      const t = setTimeout(() => {
+        if (!done) {
+          done = true
+          navigate('/', { replace: true })
+        }
+      }, 2500)
+      return () => {
+        clearTimeout(t)
+        socket.off('raceGameRecovery', onRecovered)
+      }
     }
-  }, [user?._id, navigate])
+  }, [user?._id, navigate, socket])
 
   /** End race locally, notify server, clear storage, go home — safe if socket is dead */
   const exitRaceAndGoHome = useCallback(() => {

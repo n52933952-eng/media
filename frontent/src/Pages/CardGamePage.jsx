@@ -98,7 +98,7 @@ const CardGamePage = () => {
     const { socket, endCardGameOnNavigate } = useContext(SocketContext)
     const { followPost, setFollowPost } = useContext(PostContext)
 
-    const roomId = localStorage.getItem('cardRoomId')
+    const [roomId, setRoomId] = useState(() => localStorage.getItem('cardRoomId') || '')
 
     const bgPage = useColorModeValue('#f7f7fb', '#0d0d14')
     const bgCard = useColorModeValue('white', '#1a1a2e')
@@ -130,6 +130,23 @@ const CardGamePage = () => {
     const prevBooksRef = useRef(0)
     const previousPathRef = useRef(null)
     const cardExitHandledRef = useRef(false)
+
+    // Recover active card room after refresh/reconnect (matches Chess behavior).
+    useEffect(() => {
+        if (!socket || !user?._id || roomId) return
+        let mounted = true
+        const onRecovery = (payload) => {
+            if (!mounted || !payload?.ok || !payload?.roomId) return
+            localStorage.setItem('cardRoomId', payload.roomId)
+            setRoomId(payload.roomId)
+        }
+        socket.on('cardGameRecovery', onRecovery)
+        socket.emit('recoverCardGame')
+        return () => {
+            mounted = false
+            socket.off('cardGameRecovery', onRecovery)
+        }
+    }, [socket, user?._id, roomId])
     const pageUnloadingRef = useRef(false)
 
     const endCardGameOnce = useCallback(() => {
