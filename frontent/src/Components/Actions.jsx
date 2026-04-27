@@ -250,7 +250,7 @@ const Actions = ({post}) => {
 			method: 'POST',
 			credentials: 'include',
 			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ postId: post._id, duration, clientNow: Date.now() }),
+			body: JSON.stringify({ postId: post._id, duration }),
 		})
 		const data = await res.json()
 		if (!res.ok) throw new Error(data?.error || 'Failed to seal capsule')
