@@ -520,6 +520,24 @@ return (
 							<Text fontSize="xs" color="gray.500">
 								When it opens, you'll get a notification to come back and relive this moment. 🎁
 							</Text>
+							<Text fontSize="xs" fontWeight="semibold" color="gray.300">Change reminder to:</Text>
+							{[
+								{ label: '1 minute', value: '1m' },
+								{ label: '5 minutes', value: '5m' },
+								{ label: '1 hour', value: '1h' },
+								{ label: '3 days', value: '3d' },
+							].map(({ label, value }) => (
+								<Button
+									key={`sealed-${value}`}
+									variant="outline"
+									size="sm"
+									isLoading={capsuleLoadingDuration === value}
+									isDisabled={!!capsuleLoadingDuration || capsuleLoading}
+									onClick={() => handleSealCapsule(value)}
+								>
+									⏳ {label}
+								</Button>
+							))}
 							<Button
 								colorScheme="red"
 								variant="outline"
