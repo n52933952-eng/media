@@ -3003,7 +3003,13 @@ export const initializeSocket = async (app) => {
             if (recipientData?.socketId) {
                 io.to(recipientData.socketId).emit('raceChallenge', { from: fromId, fromName, fromUsername, fromProfilePic })
             } else {
-                console.warn(`⚠️ [raceChallenge] No socket for ${toId}`)
+                // Recipient is offline — immediately decline so the sender's UI unblocks
+                // instead of waiting in limbo for an accept/decline that never comes.
+                console.warn(`⚠️ [raceChallenge] ${toId} offline — auto-declining for ${fromId}`)
+                const senderSock = await getUserSocket(fromId)
+                if (senderSock?.socketId) {
+                    io.to(senderSock.socketId).emit('raceDeclined')
+                }
             }
         })
 
@@ -3342,7 +3348,12 @@ export const initializeSocket = async (app) => {
                     fromProfilePic
                 })
             } else {
-                console.warn(`⚠️ [cardChallenge] No socket for recipient ${toId} — challenge not delivered`)
+                // Recipient is offline — immediately decline so the sender's UI unblocks
+                console.warn(`⚠️ [cardChallenge] ${toId} offline — auto-declining for ${fromId}`)
+                const senderSock = await getUserSocket(fromId)
+                if (senderSock?.socketId) {
+                    io.to(senderSock.socketId).emit('cardDeclined')
+                }
             }
         })
 

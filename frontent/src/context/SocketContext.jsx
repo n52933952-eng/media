@@ -1236,6 +1236,35 @@ export const SocketContextProvider = ({ children }) => {
     };
   }, [socket]);
 
+  // ── Stale localStorage cleanup on reconnect ──────────────────────────────
+  // The backend auto-delivers raceGameRecovery / cardGameRecovery on every
+  // socket connect. When ok=false there is no active game in Redis, meaning
+  // any raceRoomId / cardRoomId still sitting in localStorage is stale.
+  // Clearing it here prevents the auto-decline bug: when a stale key exists,
+  // handleRaceChallenge / handleCardChallenge wrongly auto-declines the next
+  // incoming challenge as if the user were still in a game.
+  useEffect(() => {
+    if (!socket) return
+    const onRaceRecovery = ({ ok }) => {
+      if (!ok) {
+        localStorage.removeItem('raceRoomId')
+        localStorage.removeItem('raceIsHost')
+        localStorage.removeItem('myPlayerId')
+      }
+    }
+    const onCardRecovery = ({ ok }) => {
+      if (!ok) {
+        localStorage.removeItem('cardRoomId')
+      }
+    }
+    socket.on('raceGameRecovery', onRaceRecovery)
+    socket.on('cardGameRecovery', onCardRecovery)
+    return () => {
+      socket.off('raceGameRecovery', onRaceRecovery)
+      socket.off('cardGameRecovery', onCardRecovery)
+    }
+  }, [socket])
+
   const acceptCardChallenge = () => {
     if (!socket || !cardChallenge) return;
 
