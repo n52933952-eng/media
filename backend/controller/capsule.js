@@ -5,9 +5,8 @@ import User from '../models/user.js'
 
 const DURATIONS = {
   '1m': 60 * 1000,
-  '7d': 7 * 24 * 60 * 60 * 1000,
-  '30d': 30 * 24 * 60 * 60 * 1000,
-  '1y': 365 * 24 * 60 * 60 * 1000,
+  '3d': 3 * 24 * 60 * 60 * 1000,
+  '1w': 7 * 24 * 60 * 60 * 1000,
 }
 
 /** POST /api/capsule/seal  — seal a post as a capsule */
@@ -17,7 +16,7 @@ export const sealCapsule = async (req, res) => {
     const userId = req.user._id
 
     if (!postId || !DURATIONS[duration]) {
-      return res.status(400).json({ error: 'postId and duration (7d/30d/1y) required' })
+      return res.status(400).json({ error: 'postId and duration (1m/3d/1w) required' })
     }
 
     const post = await Post.findById(postId).lean()

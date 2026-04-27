@@ -56,6 +56,7 @@ const Actions = ({post}) => {
 		onClose: onCapsuleClose,
 	} = useDisclosure()
 	const [capsuleLoading, setCapsuleLoading] = useState(false)
+	const [capsuleLoadingDuration, setCapsuleLoadingDuration] = useState(null)
 	const [capsuleSealed, setCapsuleSealed] = useState(false)
 	const [capsuleOpenAt, setCapsuleOpenAt] = useState(null)
    
@@ -229,7 +230,7 @@ const Actions = ({post}) => {
 
   const handleSealCapsule = async (duration) => {
 	if (!user) return
-	setCapsuleLoading(true)
+	setCapsuleLoadingDuration(duration)
 	try {
 		const res = await fetch(`${baseUrl}/api/capsule/seal`, {
 			method: 'POST',
@@ -246,7 +247,7 @@ const Actions = ({post}) => {
 	} catch (e) {
 		showToast('Error', e.message || 'Could not seal capsule', 'error')
 	} finally {
-		setCapsuleLoading(false)
+		setCapsuleLoadingDuration(null)
 	}
   }
 
@@ -521,22 +522,19 @@ return (
 							</Text>
 							<Text fontSize="xs" fontWeight="semibold" color="gray.300">Remind me in:</Text>
 							{[
-								{ label: '1 minute', sublabel: 'Test it now', value: '1m' },
-								{ label: '7 days', sublabel: 'See you next week', value: '7d' },
-								{ label: '30 days', sublabel: 'A month from now', value: '30d' },
-								{ label: '1 year', sublabel: 'Future you will thank you', value: '1y' },
-							].map(({ label, sublabel, value }) => (
+								{ label: '1 minute', value: '1m' },
+								{ label: '3 days', value: '3d' },
+								{ label: '1 week', value: '1w' },
+							].map(({ label, value }) => (
 								<Button
 									key={value}
 									variant="outline"
 									size="sm"
-									isLoading={capsuleLoading}
+									isLoading={capsuleLoadingDuration === value}
+									isDisabled={!!capsuleLoadingDuration}
 									onClick={() => handleSealCapsule(value)}
-									justifyContent="space-between"
-									px={4}
 								>
-									<Text>⏳ {label}</Text>
-									<Text fontSize="xs" color="gray.500" fontWeight="normal">{sublabel}</Text>
+									⏳ {label}
 								</Button>
 							))}
 						</VStack>
