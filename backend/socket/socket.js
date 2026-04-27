@@ -4076,7 +4076,7 @@ export const initializeSocket = async (app) => {
                     await deleteActiveRaceGame(disconnectedUserId).catch(() => {})
                     await deleteRaceGameState(raceRoomId).catch(() => {})
                     try { io.in(raceRoomId).socketsLeave(raceRoomId) } catch (_) {}
-                }, 10000)
+                }, 30000)
             }
 
             // Handle card game disconnection (same pattern as chess)

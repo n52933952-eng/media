@@ -162,12 +162,20 @@ export default function RacingGamePage() {
     if (!user?._id) return
     const roomId = localStorage.getItem('raceRoomId')
     if (!roomId) {
+      // Wait for socket availability/connection before deciding recovery failed.
       if (!socket || raceRecoveryTriedRef.current) {
-        navigate('/', { replace: true })
         return
       }
       raceRecoveryTriedRef.current = true
       let done = false
+      let recoveryStarted = false
+
+      const startRecovery = () => {
+        if (recoveryStarted || done) return
+        recoveryStarted = true
+        socket.emit('recoverRaceGame')
+      }
+
       const onRecovered = (payload) => {
         if (done) return
         done = true
@@ -182,15 +190,20 @@ export default function RacingGamePage() {
         navigate('/', { replace: true })
       }
       socket.on('raceGameRecovery', onRecovered)
-      socket.emit('recoverRaceGame')
+      if (socket.connected) {
+        startRecovery()
+      } else {
+        socket.once('connect', startRecovery)
+      }
       const t = setTimeout(() => {
         if (!done) {
           done = true
           navigate('/', { replace: true })
         }
-      }, 2500)
+      }, 12000)
       return () => {
         clearTimeout(t)
+        socket.off('connect', startRecovery)
         socket.off('raceGameRecovery', onRecovered)
       }
     }
