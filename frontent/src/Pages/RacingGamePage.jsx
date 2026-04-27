@@ -895,7 +895,13 @@ export default function RacingGamePage() {
     // ── Loading manager ────────────────────────────────────────────────────
     const lm = new THREE.LoadingManager()
     lm.onProgress = (_, loaded, total) => setLoadingPct(Math.round(loaded/total*100))
-    lm.onLoad = () => setLoading(false)
+    lm.onLoad = () => {
+      setLoading(false)
+      // Final snap after ALL assets are loaded — guarantees car is on the start line
+      // even when gate and car models loaded in different order (race condition fix).
+      // A short delay lets the render loop settle after setLoading(false).
+      setTimeout(() => { snapPlayerToStartLine() }, 100)
+    }
     window.loadingManager = lm
 
     // ── Globals for game modules ───────────────────────────────────────────
@@ -927,7 +933,14 @@ export default function RacingGamePage() {
       if (!g0) return
       g0.updateMatrixWorld(true)
       g0.getWorldPosition(gateData.currentGatePosition)
-      g0.getWorldQuaternion(gateData.currentGateQuaternion)
+
+      // Get the gate's full world rotation, then strip pitch (X) and roll (Z) so the
+      // car ALWAYS spawns perfectly level regardless of track banking or slope.
+      // Only the yaw (Y) is kept so cars face the correct direction down the track.
+      const fullQuat = new THREE.Quaternion()
+      g0.getWorldQuaternion(fullQuat)
+      const euler = new THREE.Euler().setFromQuaternion(fullQuat, 'YXZ')
+      gateData.currentGateQuaternion.setFromEuler(new THREE.Euler(0, euler.y, 0, 'YXZ'))
     }
 
     const snapPlayerToStartLine = () => {
@@ -1092,9 +1105,9 @@ export default function RacingGamePage() {
     setCountdown(val)
     const id = setInterval(() => {
       val--
-      if (val > 0) {
+      if (val > 1) {
         setCountdown(val)
-      } else if (val === 0) {
+      } else if (val === 1) {
         setCountdown('GO!')
       } else {
         clearInterval(id)
