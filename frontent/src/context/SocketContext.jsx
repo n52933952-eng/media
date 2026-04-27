@@ -503,6 +503,36 @@ export const SocketContextProvider = ({ children }) => {
     };
   }, [socket]);
 
+  // ── Game-busy → block calls from chat ───────────────────────────────────
+  // userBusyChess/Card/Race are broadcast to ALL clients when a game starts.
+  // Wire them into the same busyUsers Set so the chat call button sees them.
+  // userAvailableChess/Card/Race are emitted when the game ends → unblock.
+  useEffect(() => {
+    if (!socket) return
+    const addBusy = ({ userId }) => {
+      if (!userId) return
+      setBusyUsers(prev => { const s = new Set(prev); s.add(userIdToStr(userId)); return s })
+    }
+    const removeBusy = ({ userId }) => {
+      if (!userId) return
+      setBusyUsers(prev => { const s = new Set(prev); s.delete(userIdToStr(userId)); return s })
+    }
+    socket.on('userBusyChess',      addBusy)
+    socket.on('userBusyCard',       addBusy)
+    socket.on('userBusyRace',       addBusy)
+    socket.on('userAvailableChess', removeBusy)
+    socket.on('userAvailableCard',  removeBusy)
+    socket.on('userAvailableRace',  removeBusy)
+    return () => {
+      socket.off('userBusyChess',      addBusy)
+      socket.off('userBusyCard',       addBusy)
+      socket.off('userBusyRace',       addBusy)
+      socket.off('userAvailableChess', removeBusy)
+      socket.off('userAvailableCard',  removeBusy)
+      socket.off('userAvailableRace',  removeBusy)
+    }
+  }, [socket])
+
   // Handle callBusyError - when trying to call a busy user
   useEffect(() => {
     if (!socket) return;

@@ -2768,7 +2768,7 @@ const MessagesPage = () => {
                 {!selectedConversation.isGroup && (busyUsers?.has(selectedConversation.participants[0]?._id) || selectedConversation.participants[0]?.inCall) && (
                   <>
                     <Text fontSize={{ base: "2xs", md: "xs" }} color="gray.500">•</Text>
-                    <Badge colorScheme="red" fontSize={{ base: "2xs", md: "xs" }} px={2} py={0.5} borderRadius="full">In a call</Badge>
+                    <Badge colorScheme="orange" fontSize={{ base: "2xs", md: "xs" }} px={2} py={0.5} borderRadius="full">Busy</Badge>
                   </>
                 )}
               </Flex>
@@ -3770,7 +3770,7 @@ const MessagesPage = () => {
                   flexShrink={0}
                   title={
                     busyUsers?.has(idStr(selectedConversation?.participants[0]?._id)) || selectedConversation?.participants[0]?.inCall
-                      ? "User is currently in a call"
+                      ? "User is busy (in a call or game)"
                       : "Start call"
                   }
                 />
@@ -3792,7 +3792,7 @@ const MessagesPage = () => {
                       ) || selectedConversation?.participants?.[0]
                       if (!recipient) return
                       if (busyUsers?.has(idStr(recipient._id)) || recipient?.inCall) {
-                        showToast('Error', 'User is currently in a call', 'error')
+                        showToast('Busy', 'User is busy right now. Please try again later.', 'warning')
                         return
                       }
                       startCall(recipient, 'video')
@@ -3827,7 +3827,7 @@ const MessagesPage = () => {
                       ) || selectedConversation?.participants?.[0]
                       if (!recipient) return
                       if (busyUsers?.has(idStr(recipient._id)) || recipient?.inCall) {
-                        showToast('Error', 'User is currently in a call', 'error')
+                        showToast('Busy', 'User is busy right now. Please try again later.', 'warning')
                         return
                       }
                       startCall(recipient, 'audio')
