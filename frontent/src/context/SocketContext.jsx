@@ -1205,6 +1205,15 @@ export const SocketContextProvider = ({ children }) => {
     if (!socket) return;
 
     const handleCardChallenge = (data) => {
+      // Ignore challenge if already in any active game
+      if (
+        localStorage.getItem('cardRoomId') ||
+        localStorage.getItem('raceRoomId') ||
+        localStorage.getItem('chessRoomId')
+      ) {
+        socket.emit('declineCardChallenge', { from: user?._id, to: data.from })
+        return
+      }
       setCardChallenge({
         from: data.from,
         fromName: data.fromName,
@@ -1264,6 +1273,15 @@ export const SocketContextProvider = ({ children }) => {
     if (!socket) return;
 
     const handleRaceChallenge = (data) => {
+      // Ignore challenge if already in any active game
+      if (
+        localStorage.getItem('raceRoomId') ||
+        localStorage.getItem('cardRoomId') ||
+        localStorage.getItem('chessRoomId')
+      ) {
+        socket.emit('declineRaceChallenge', { from: user?._id, to: data.from })
+        return
+      }
       setRaceChallenge({
         from: data.from,
         fromName: data.fromName,

@@ -150,8 +150,6 @@ const CardGamePage = () => {
             socket.off('cardGameRecovery', onRecovery)
         }
     }, [socket, user?._id, roomId])
-    const pageUnloadingRef = useRef(false)
-
     const endCardGameOnce = useCallback(() => {
         const activeRoom = localStorage.getItem('cardRoomId')
         if (!activeRoom || !endCardGameOnNavigate || cardExitHandledRef.current) return
@@ -159,48 +157,49 @@ const CardGamePage = () => {
         endCardGameOnNavigate()
     }, [endCardGameOnNavigate])
 
-    // Browser back button guard
+    // beforeunload: do NOTHING — mirrors Chess pattern exactly.
+    // Backend 10s grace + auto cardGameRecovery handles reconnect on refresh / tab close.
     useEffect(() => {
-        if (previousPathRef.current === null) {
-            previousPathRef.current = location.pathname
-        }
-
-        const handlePopState = () => endCardGameOnce()
-
-        // Hard refresh / tab close: do NOT end game (Chess-like behavior).
-        // Backend reconnect grace will keep the game alive.
-        const handleBeforeUnload = () => {
-            pageUnloadingRef.current = true
-        }
-
-        window.addEventListener('popstate', handlePopState)
+        const handleBeforeUnload = () => {}
         window.addEventListener('beforeunload', handleBeforeUnload)
+        return () => window.removeEventListener('beforeunload', handleBeforeUnload)
+    }, [])
 
-        // React Router navigation away from card page
+    // Browser back/forward button: end game (same as Chess popstate handler)
+    useEffect(() => {
+        const handlePopState = () => endCardGameOnce()
+        window.addEventListener('popstate', handlePopState)
+        return () => window.removeEventListener('popstate', handlePopState)
+    }, [endCardGameOnce])
+
+    // React Router path change: if we left the card route, end game
+    useEffect(() => {
+        if (previousPathRef.current === null) previousPathRef.current = location.pathname
         const currentPath = location.pathname
         const previousPath = previousPathRef.current
         const isCardPage = currentPath.startsWith('/card/')
         const wasOnCardPage = previousPath && previousPath.startsWith('/card/')
-
-        if (wasOnCardPage && !isCardPage && previousPath !== currentPath) {
-            endCardGameOnce()
-        }
-
+        if (wasOnCardPage && !isCardPage && previousPath !== currentPath) endCardGameOnce()
         previousPathRef.current = currentPath
-
-        return () => {
-            window.removeEventListener('popstate', handlePopState)
-            window.removeEventListener('beforeunload', handleBeforeUnload)
-        }
     }, [location.pathname, endCardGameOnce])
 
-    // Unmount cleanup: end game only for app navigation/logout, not hard refresh.
+    // Unmount guard — mirrors Chess 50ms URL check pattern:
+    //  • Hard refresh: URL is still /card/... after 50ms → skip ✓
+    //  • Tab close: setTimeout never fires → skip ✓
+    //  • SPA navigation away: URL changes before 50ms → end game ✓
     useEffect(() => {
         return () => {
-            if (pageUnloadingRef.current) return
-            endCardGameOnce()
+            const activeRoom = localStorage.getItem('cardRoomId')
+            if (activeRoom && endCardGameOnNavigate) {
+                setTimeout(() => {
+                    const stillOnCardPage = window.location.pathname.startsWith('/card/')
+                    if (!stillOnCardPage) {
+                        endCardGameOnNavigate()
+                    }
+                }, 50)
+            }
         }
-    }, [endCardGameOnce])
+    }, [endCardGameOnNavigate])
 
     // Fetch opponent profile
     useEffect(() => {

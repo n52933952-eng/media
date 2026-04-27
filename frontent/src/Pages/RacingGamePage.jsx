@@ -132,8 +132,6 @@ export default function RacingGamePage() {
   /** Prevents double teardown / navigate when disconnect + opponentLeft both fire */
   const raceExitHandledRef = useRef(false)
   const exitRaceAndGoHomeRef = useRef(() => {})
-  const raceEndSentRef = useRef(false)
-  const pageUnloadingRef = useRef(false)
   const assetsReadyRef = useRef(false)
   const raceReadySentRef = useRef(false)
   const bothPlayersReadyRef = useRef(false)
@@ -378,6 +376,24 @@ export default function RacingGamePage() {
       maybeStartCountdown()
     }
 
+    // Full race state catch-up on (re)join — mirrors chessGameState pattern.
+    // Fired by server whenever joinRaceRoom is received so reconnecting players
+    // know the current ready/countdown state without having to re-negotiate.
+    const onRaceGameState = ({ bothReady, countdownStarted, readyPlayers }) => {
+      bothPlayersReadyRef.current = !!bothReady
+      if (countdownStarted && !raceStateRef.current.countdownStarted) {
+        raceStateRef.current.countdownStarted = true
+        raceStateRef.current.allPlayersConnected = true
+        setWaitingOpp(false)
+        if (!raceStateRef.current.raceStarted) startCountdown()
+      } else {
+        const hasBoth = Array.isArray(readyPlayers) && readyPlayers.length >= 2
+        raceStateRef.current.allPlayersConnected = hasBoth
+        setWaitingOpp(!(hasBoth && bothReady))
+        maybeStartCountdown()
+      }
+    }
+
     const onRaceVoiceInvite = ({ roomId, from, callerName, callerProfilePic }) => {
       const myId = userIdToStr(user?._id)
       const currentRoom = roomIdRef.current
@@ -468,6 +484,7 @@ export default function RacingGamePage() {
     socket.on('raceOpponentReconnecting', onOpponentReconnecting)
     socket.on('raceOpponentRejoined',    onOpponentRejoined)
     socket.on('raceReadyState',          onRaceReadyState)
+    socket.on('raceGameState',           onRaceGameState)
     socket.on('raceVoiceInvite',         onRaceVoiceInvite)
     socket.on('raceVoiceAccepted',       onRaceVoiceAccepted)
     socket.on('raceVoiceDeclined',       onRaceVoiceDeclined)
@@ -482,6 +499,7 @@ export default function RacingGamePage() {
       socket.off('raceOpponentReconnecting', onOpponentReconnecting)
       socket.off('raceOpponentRejoined',    onOpponentRejoined)
       socket.off('raceReadyState',          onRaceReadyState)
+      socket.off('raceGameState',           onRaceGameState)
       socket.off('raceVoiceInvite',         onRaceVoiceInvite)
       socket.off('raceVoiceAccepted',       onRaceVoiceAccepted)
       socket.off('raceVoiceDeclined',       onRaceVoiceDeclined)
@@ -754,27 +772,29 @@ export default function RacingGamePage() {
     return () => clearInterval(id)
   }, [socket, user?._id])
 
-  // ─── Navigation guard ───────────────────────────────────────────────────────
+  // ─── Navigation guard (mirrors Chess pattern exactly) ───────────────────────
+  // beforeunload: do NOTHING — let backend disconnect grace + auto-recovery handle it.
+  // This is the same as Chess: on hard refresh or tab close, the game survives.
   useEffect(() => {
-    // Browser back/forward button (SPA navigation)
+    const handleBeforeUnload = () => {
+      // Intentionally empty — backend 30s grace + auto raceGameRecovery handles reconnect
+    }
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload)
+  }, [])
+
+  // Browser back/forward button: end game (same as Chess popstate handler)
+  useEffect(() => {
     const onPop = () => {
       if (localStorage.getItem('raceRoomId') && endRaceGameOnNavigate) {
         endRaceGameOnNavigate()
       }
     }
-    // Tab close / hard refresh: do NOT end race immediately (Chess-like behavior).
-    // Let backend disconnect grace decide; this preserves race on refresh.
-    const onBeforeUnload = (e) => {
-      pageUnloadingRef.current = true
-    }
     window.addEventListener('popstate', onPop)
-    window.addEventListener('beforeunload', onBeforeUnload)
-    return () => {
-      window.removeEventListener('popstate', onPop)
-      window.removeEventListener('beforeunload', onBeforeUnload)
-    }
-  }, [endRaceGameOnNavigate, socket])
+    return () => window.removeEventListener('popstate', onPop)
+  }, [endRaceGameOnNavigate])
 
+  // React Router path change: if we left the race route, end game
   useEffect(() => {
     if (location.pathname !== prevPathRef.current && !location.pathname.startsWith('/race/')) {
       if (localStorage.getItem('raceRoomId') && endRaceGameOnNavigate) endRaceGameOnNavigate()
@@ -782,15 +802,21 @@ export default function RacingGamePage() {
     prevPathRef.current = location.pathname
   }, [location.pathname, endRaceGameOnNavigate])
 
-  // Safety: on unmount end race for app navigation/logout, but skip hard refresh.
+  // Unmount guard — mirrors Chess 50ms URL check pattern:
+  //  • Hard refresh (F5): component unmounts, 50ms fires, URL is still /race/... → skip ✓
+  //  • Tab close: component unmounts, setTimeout never fires (browser torn down) → skip ✓
+  //  • SPA navigation (Home/Profile/Messages): URL changes before 50ms → end game ✓
+  //  • Logout: URL changes to / → end game ✓
   useEffect(() => {
     return () => {
-      if (pageUnloadingRef.current) return
-      if (raceEndSentRef.current) return
       const activeRoom = localStorage.getItem('raceRoomId')
       if (activeRoom && endRaceGameOnNavigate) {
-        raceEndSentRef.current = true
-        endRaceGameOnNavigate()
+        setTimeout(() => {
+          const stillOnRacePage = window.location.pathname.startsWith('/race/')
+          if (!stillOnRacePage) {
+            endRaceGameOnNavigate()
+          }
+        }, 50)
       }
     }
   }, [endRaceGameOnNavigate])

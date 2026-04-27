@@ -3052,10 +3052,9 @@ export const initializeSocket = async (app) => {
             }
         })
 
-        // Join a race room — called by the game component when it mounts
-        // (the React app's main socket already joined via acceptRaceChallenge, but the
-        //  game page re-joins to guarantee membership and signal readiness)
-        socket.on('joinRaceRoom', ({ roomId }) => {
+        // Join a race room — mirrors joinChessRoom: always re-joins and sends back state.
+        // Called on mount, reconnect, and after recovery so the player always lands in the room.
+        socket.on('joinRaceRoom', async ({ roomId }) => {
             if (!roomId) return
             socket.join(roomId)
             console.log(`🏎️ Socket ${socket.id} joined race room ${roomId}`)
@@ -3064,6 +3063,30 @@ export const initializeSocket = async (app) => {
             const count = roomSockets ? roomSockets.size : 0
             // Notify everyone in the room (including sender) how many have joined
             io.to(roomId).emit('racePlayerJoined', { count })
+            // Always send back current race state (like joinChessRoom → chessGameState).
+            // Lets rejoining player know ready status without re-waiting.
+            try {
+                const state = await getRaceGameState(roomId).catch(() => null)
+                if (state) {
+                    const p1 = normalizeUserId(state.player1) || state.player1
+                    const p2 = normalizeUserId(state.player2) || state.player2
+                    const uid = normalizeUserId(socket.handshake.query.userId)
+                    const ready = Array.isArray(state.readyPlayers)
+                        ? state.readyPlayers.map((x) => normalizeUserId(x) || x)
+                        : []
+                    const bothReady = !!p1 && !!p2 && ready.includes(p1) && ready.includes(p2)
+                    io.to(socket.id).emit('raceGameState', {
+                        roomId,
+                        player1: p1,
+                        player2: p2,
+                        isHost: p1 === uid,
+                        readyPlayers: ready,
+                        bothReady,
+                        countdownStarted: !!state.countdownStarted,
+                        startTime: state.startTime || null,
+                    })
+                }
+            } catch (_) {}
         })
 
         // Recover active race room after refresh/reconnect (Chess-like firmness).
