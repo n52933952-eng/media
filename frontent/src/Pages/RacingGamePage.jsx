@@ -38,9 +38,10 @@ const RACE_DISCONNECT_GRACE_MS = 12000
 const RACE_WAIT_OPPONENT_MS = 120000
 /** Hard disconnect timeout before force exit (ms) */
 const RACE_HARD_DISCONNECT_EXIT_MS = 45000
-/** If opponent stops sending position updates during live race, end for both (ms)
- *  Keep this generous: browsers may pause timers during media permission/call toggles. */
-const RACE_OPPONENT_SILENCE_MS = 25000
+/** If opponent stops sending position updates during live race, end for both (ms).
+ *  75s — well beyond the backend's 30s disconnect grace + time for browser reconnect.
+ *  Primary protection is the raceOpponentReconnecting event which pauses this timer. */
+const RACE_OPPONENT_SILENCE_MS = 75000
 
 /** Match SocketContext / backend: ids may be ObjectId or string */
 function userIdToStr(id) {
@@ -81,6 +82,9 @@ export default function RacingGamePage() {
   /** Drives React re-renders when the race clock starts (avoid relying on raceStateRef in JSX). */
   const [raceLive,      setRaceLive]      = useState(false)
   const [reconnecting,  setReconnecting]  = useState(false)
+  /** True while the server is holding a 30-second grace for the opponent to come back.
+   *  Suppresses the client-side silence timer so we don't end the race prematurely. */
+  const [oppReconnecting, setOppReconnecting] = useState(false)
 
   // ── Three.js / physics refs ─────────────────────────────────────────────────
   const containerRef   = useRef(null)
@@ -435,6 +439,7 @@ export default function RacingGamePage() {
 
     const onOpponentLeft = () => {
       // Opponent quit or server ended the room — clear everything and go home (no stuck overlay)
+      setOppReconnecting(false)
       try {
         setLoading(false)
         setLoadingPhase('assets')
@@ -442,44 +447,64 @@ export default function RacingGamePage() {
       exitRaceAndGoHome()
     }
 
-    socket.on('racePlayerJoined',  onPlayerJoined)
-    socket.on('raceCountdownStart', onCountdownStart)
-    socket.on('raceOpponentPos',   onOpponentPos)
-    socket.on('raceResult',        onRaceResult)
-    socket.on('raceOpponentLeft',  onOpponentLeft)
-    socket.on('raceReadyState',    onRaceReadyState)
-    socket.on('raceVoiceInvite',   onRaceVoiceInvite)
-    socket.on('raceVoiceAccepted', onRaceVoiceAccepted)
-    socket.on('raceVoiceDeclined', onRaceVoiceDeclined)
-    socket.on('raceVoiceEnded',    onRaceVoiceEnded)
+    // Opponent's socket dropped — backend is holding a 30s grace for them.
+    // Suppress our silence timer so we don't end the race ourselves.
+    const onOpponentReconnecting = () => {
+      setOppReconnecting(true)
+      lastOpponentPosAtRef.current = Date.now() // reset silence clock
+    }
+
+    // Opponent came back within the grace window — resume race normally.
+    const onOpponentRejoined = () => {
+      setOppReconnecting(false)
+      lastOpponentPosAtRef.current = Date.now() // reset silence clock so it doesn't fire immediately
+    }
+
+    socket.on('racePlayerJoined',        onPlayerJoined)
+    socket.on('raceCountdownStart',      onCountdownStart)
+    socket.on('raceOpponentPos',         onOpponentPos)
+    socket.on('raceResult',              onRaceResult)
+    socket.on('raceOpponentLeft',        onOpponentLeft)
+    socket.on('raceOpponentReconnecting', onOpponentReconnecting)
+    socket.on('raceOpponentRejoined',    onOpponentRejoined)
+    socket.on('raceReadyState',          onRaceReadyState)
+    socket.on('raceVoiceInvite',         onRaceVoiceInvite)
+    socket.on('raceVoiceAccepted',       onRaceVoiceAccepted)
+    socket.on('raceVoiceDeclined',       onRaceVoiceDeclined)
+    socket.on('raceVoiceEnded',          onRaceVoiceEnded)
 
     return () => {
-      socket.off('racePlayerJoined',  onPlayerJoined)
-      socket.off('raceCountdownStart', onCountdownStart)
-      socket.off('raceOpponentPos',   onOpponentPos)
-      socket.off('raceResult',        onRaceResult)
-      socket.off('raceOpponentLeft',  onOpponentLeft)
-      socket.off('raceReadyState',    onRaceReadyState)
-      socket.off('raceVoiceInvite',   onRaceVoiceInvite)
-      socket.off('raceVoiceAccepted', onRaceVoiceAccepted)
-      socket.off('raceVoiceDeclined', onRaceVoiceDeclined)
-      socket.off('raceVoiceEnded',    onRaceVoiceEnded)
+      socket.off('racePlayerJoined',        onPlayerJoined)
+      socket.off('raceCountdownStart',      onCountdownStart)
+      socket.off('raceOpponentPos',         onOpponentPos)
+      socket.off('raceResult',              onRaceResult)
+      socket.off('raceOpponentLeft',        onOpponentLeft)
+      socket.off('raceOpponentReconnecting', onOpponentReconnecting)
+      socket.off('raceOpponentRejoined',    onOpponentRejoined)
+      socket.off('raceReadyState',          onRaceReadyState)
+      socket.off('raceVoiceInvite',         onRaceVoiceInvite)
+      socket.off('raceVoiceAccepted',       onRaceVoiceAccepted)
+      socket.off('raceVoiceDeclined',       onRaceVoiceDeclined)
+      socket.off('raceVoiceEnded',          onRaceVoiceEnded)
     }
   // socketRoomReady ensures this effect re-runs after server recovery sets roomIdRef
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [socket, user?._id, exitRaceAndGoHome, callActive, voiceConnecting, socketRoomReady])
 
   // If opponent vanishes mid-race (disconnect/network loss) and no updates arrive, end race locally.
-  // This prevents one player staying in race while the other was sent home.
+  // Suppressed while oppReconnecting=true (server is holding a 30s grace for them).
   useEffect(() => {
     if (loading || waitingOpp || !raceLive || raceFinished || raceExitHandledRef.current) return
     // Never end the race due to silence while voice is connecting/active.
     if (callActive || voiceConnecting || raceVoicePending) return
     if (!socket?.connected) return
+    // Suppressed: server notified us opponent is reconnecting — wait for raceOpponentLeft/Rejoined.
+    if (oppReconnecting) return
     const id = setInterval(() => {
       if (raceExitHandledRef.current) return
       if (callActive || voiceConnecting || raceVoicePending) return
       if (!socket?.connected) return
+      if (oppReconnecting) return
       const last = lastOpponentPosAtRef.current || 0
       if (!last) return
       if (Date.now() - last > RACE_OPPONENT_SILENCE_MS) {
@@ -487,7 +512,7 @@ export default function RacingGamePage() {
       }
     }, 1000)
     return () => clearInterval(id)
-  }, [loading, waitingOpp, raceLive, raceFinished, callActive, voiceConnecting, raceVoicePending, socket?.connected])
+  }, [loading, waitingOpp, raceLive, raceFinished, callActive, voiceConnecting, raceVoicePending, socket?.connected, oppReconnecting])
 
   // Declare this client "ready" only after race assets are fully loaded.
   useEffect(() => {
@@ -1553,6 +1578,28 @@ export default function RacingGamePage() {
           fontSize:'12px',
         }}>
           Reconnecting...
+        </div>
+      )}
+
+      {!loading && oppReconnecting && (
+        <div style={{
+          position:'fixed',
+          top:`${RACE_TOP_OFFSET_PX + 84}px`,
+          left:'20px',
+          zIndex:1001,
+          background:'rgba(0,0,0,0.72)',
+          border:'1px solid rgba(255,200,0,0.35)',
+          borderRadius:'10px',
+          padding:'8px 14px',
+          color:'#fbbf24',
+          fontFamily:'Poppins,sans-serif',
+          fontSize:'12px',
+          display:'flex',
+          alignItems:'center',
+          gap:'8px',
+        }}>
+          <span style={{ fontSize:'15px' }}>🔄</span>
+          Opponent reconnecting — please wait...
         </div>
       )}
 

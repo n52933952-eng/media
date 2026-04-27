@@ -4085,6 +4085,37 @@ export const initializeSocket = async (app) => {
             if (disconnectedUserId && await hasActiveRaceGame(disconnectedUserId)) {
                 const raceRoomId = await getActiveRaceGame(disconnectedUserId)
                 console.log(`🏎️ User ${disconnectedUserId} disconnected during race: ${raceRoomId}`)
+
+                // --- Immediately tell the OPPONENT their partner is reconnecting ----------
+                // This prevents the opponent's 25-second client-side silence timer from
+                // calling exitRaceAndGoHome() before the 30-second grace expires.
+                const raceStateNow = await getRaceGameState(raceRoomId).catch(() => null)
+                let immediateOtherPlayerId = null
+                if (raceStateNow) {
+                    const ip1 = normalizeUserId(raceStateNow.player1) || raceStateNow.player1
+                    const ip2 = normalizeUserId(raceStateNow.player2) || raceStateNow.player2
+                    const dNorm0 = normalizeUserId(disconnectedUserId) || disconnectedUserId
+                    immediateOtherPlayerId = ip1 === dNorm0 ? ip2 : ip1
+                }
+                if (!immediateOtherPlayerId && raceRoomId && typeof raceRoomId === 'string') {
+                    const im = raceRoomId.match(/^race_(.+?)_(.+?)_\d+$/)
+                    if (im) {
+                        const ip1 = normalizeUserId(im[1]) || im[1]
+                        const ip2 = normalizeUserId(im[2]) || im[2]
+                        const dNorm0 = normalizeUserId(disconnectedUserId) || disconnectedUserId
+                        immediateOtherPlayerId = ip1 === dNorm0 ? ip2 : ip1
+                    }
+                }
+                if (immediateOtherPlayerId) {
+                    const otherDataNow = await getUserSocket(immediateOtherPlayerId).catch(() => null)
+                    if (otherDataNow?.socketId) {
+                        io.to(otherDataNow.socketId).emit('raceOpponentReconnecting')
+                    }
+                    // Also broadcast to anyone in the socket room (e.g. spectators)
+                    if (raceRoomId) io.to(raceRoomId).emit('raceOpponentReconnecting')
+                }
+                // --------------------------------------------------------------------------
+
                 setTimeout(async () => {
                     const stillInRace = await hasActiveRaceGame(disconnectedUserId)
                     const reconnected = await getUserSocket(disconnectedUserId)
@@ -4099,6 +4130,14 @@ export const initializeSocket = async (app) => {
                             }
                         } catch (_) {}
                         console.log(`✅ Racer ${disconnectedUserId} reconnected with active race state — race continues!`)
+                        // Notify opponent that their partner is back so they can resume the race
+                        if (immediateOtherPlayerId) {
+                            const otherDataBack = await getUserSocket(immediateOtherPlayerId).catch(() => null)
+                            if (otherDataBack?.socketId) {
+                                io.to(otherDataBack.socketId).emit('raceOpponentRejoined')
+                            }
+                        }
+                        if (raceRoomId) io.to(raceRoomId).emit('raceOpponentRejoined')
                         return
                     }
                     console.log(`❌ Racer ${disconnectedUserId} did not reconnect — ending race`)
