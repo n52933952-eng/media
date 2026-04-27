@@ -376,16 +376,54 @@ export default function RacingGamePage() {
       maybeStartCountdown()
     }
 
+    // Skip countdown and go live immediately — used when recovering a race that was
+    // already in progress (raceActualStartTime received from server confirms this).
+    // Restores the race timer from elapsed time so the clock is accurate.
+    const goLiveImmediate = (raceActualStartTime) => {
+      raceStateRef.current.countdownStarted = true
+      raceStateRef.current.raceStarted = true
+      raceStateRef.current.allPlayersConnected = true
+      setWaitingOpp(false)
+      setCountdown(null)
+      setRaceLive(true)
+      // Restore timer from the actual race start time so it's continuous
+      if (timerRef.current) clearInterval(timerRef.current)
+      const base = raceActualStartTime || Date.now()
+      startTimeRef.current = base
+      timerRef.current = setInterval(() => {
+        const elapsed = Math.floor((Date.now() - startTimeRef.current) / 1000)
+        const m = String(Math.floor(elapsed / 60)).padStart(2, '0')
+        const s = String(elapsed % 60).padStart(2, '0')
+        setRaceTime(`${m}:${s}`)
+      }, 1000)
+      // Restart music immediately (was lost on page reload)
+      try {
+        if (!raceMusicRef.current) {
+          raceMusicRef.current = new Audio(raceMusicFile || raceLoopMusic)
+          raceMusicRef.current.loop = true
+          raceMusicRef.current.volume = callActive ? 0.06 : 0.4
+        }
+        raceMusicRef.current.play().catch(() => {})
+      } catch (_) { /* ignore */ }
+    }
+
     // Full race state catch-up on (re)join — mirrors chessGameState pattern.
     // Fired by server whenever joinRaceRoom is received so reconnecting players
-    // know the current ready/countdown state without having to re-negotiate.
-    const onRaceGameState = ({ bothReady, countdownStarted, readyPlayers }) => {
+    // know the current ready/countdown state without having to re-wait.
+    const onRaceGameState = ({ bothReady, countdownStarted, readyPlayers, raceActualStartTime }) => {
       bothPlayersReadyRef.current = !!bothReady
       if (countdownStarted && !raceStateRef.current.countdownStarted) {
-        raceStateRef.current.countdownStarted = true
-        raceStateRef.current.allPlayersConnected = true
-        setWaitingOpp(false)
-        if (!raceStateRef.current.raceStarted) startCountdown()
+        // Race was already live before refresh.  If it started more than 5 s ago
+        // skip the countdown replay and go live immediately so the player can drive.
+        const elapsed = raceActualStartTime ? Date.now() - raceActualStartTime : 0
+        if (elapsed > 5000) {
+          goLiveImmediate(raceActualStartTime)
+        } else {
+          raceStateRef.current.countdownStarted = true
+          raceStateRef.current.allPlayersConnected = true
+          setWaitingOpp(false)
+          if (!raceStateRef.current.raceStarted) startCountdown()
+        }
       } else {
         const hasBoth = Array.isArray(readyPlayers) && readyPlayers.length >= 2
         raceStateRef.current.allPlayersConnected = hasBoth
@@ -474,6 +512,12 @@ export default function RacingGamePage() {
     const onOpponentRejoined = () => {
       setOppReconnecting(false)
       lastOpponentPosAtRef.current = Date.now() // reset silence clock so it doesn't fire immediately
+      // Browser may have paused or ducked audio during the disconnect; resume it.
+      try {
+        if (raceMusicRef.current && raceMusicRef.current.paused && raceStateRef.current.raceStarted) {
+          raceMusicRef.current.play().catch(() => {})
+        }
+      } catch (_) { /* ignore */ }
     }
 
     socket.on('racePlayerJoined',        onPlayerJoined)

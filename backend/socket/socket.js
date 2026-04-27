@@ -3084,6 +3084,7 @@ export const initializeSocket = async (app) => {
                         bothReady,
                         countdownStarted: !!state.countdownStarted,
                         startTime: state.startTime || null,
+                        raceActualStartTime: state.raceActualStartTime || null,
                     })
                 }
             } catch (_) {}
@@ -3148,9 +3149,19 @@ export const initializeSocket = async (app) => {
         })
 
         // Host signals countdown start — relay to the rest of the room (guest)
-        socket.on('raceCountdownStart', ({ roomId }) => {
+        // Also persist countdownStarted + actual start time so rejoining players
+        // know the race is already live and can skip the countdown replay.
+        socket.on('raceCountdownStart', async ({ roomId }) => {
             if (!roomId) return
             socket.to(roomId).emit('raceCountdownStart')
+            try {
+                const state = await getRaceGameState(roomId).catch(() => null)
+                if (state && !state.countdownStarted) {
+                    state.countdownStarted = true
+                    state.raceActualStartTime = Date.now()
+                    await setRaceGameState(roomId, state).catch(() => {})
+                }
+            } catch (_) {}
         })
 
         // Race voice invite flow (separate from global call UI):
