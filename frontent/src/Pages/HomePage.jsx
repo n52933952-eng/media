@@ -521,7 +521,7 @@ const HomePage = () => {
             {followPost.map((post) =>
               post.isLive
                 ? <LivePostCard key={post._id} post={post} />
-                : <Post key={post._id} post={post} postedBy={post.postedBy} visibleVideoOnly />
+                : <Post key={post._id} post={post} postedBy={post.postedBy} visibleVideoOnly showFeedExtras />
             )}
             
             {/* Infinite scroll trigger element */}

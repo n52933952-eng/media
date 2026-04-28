@@ -362,6 +362,7 @@ if(!user && loading){
                       post={post} 
                       postedBy={post.postedBy}
                       visibleVideoOnly
+                      showFeedExtras={false}
                       onDelete={(postId) => {
                         // Remove post from local state immediately
                         setPosts(prev => prev.filter(p => p._id !== postId))

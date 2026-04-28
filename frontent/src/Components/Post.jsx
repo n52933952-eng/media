@@ -21,7 +21,7 @@ const apiBaseUrl = () => (import.meta.env.PROD ? window.location.origin : 'http:
 const CLOUDINARY_DELIVERY_QUALITY = (import.meta.env.VITE_CLOUDINARY_DELIVERY_QUALITY || 'eco').trim()
 const ENABLE_CLOUDINARY_DPR_AUTO = (import.meta.env.VITE_CLOUDINARY_IMAGE_DPR_AUTO || 'true') !== 'false'
 
-const Post = ({post: initialPost, postedBy, onDelete, visibleVideoOnly = false, autoPlayMedia}) => {
+const Post = ({post: initialPost, postedBy, onDelete, visibleVideoOnly = false, autoPlayMedia, showFeedExtras = true}) => {
     
   // Local state for this specific post (used when not in feed context)
   const [localPost, setLocalPost] = useState(initialPost)
@@ -1342,7 +1342,7 @@ const showToast = useShowToast()
   
   
   <Flex gap={2} my={1} align="center" flexWrap="wrap">
-    <Actions post={post} showFeedExtras={!visibleVideoOnly} />
+    <Actions post={post} showFeedExtras={showFeedExtras} />
     
     {/* Edit Post Button - Show for:
         1. Post owner (for both regular and collaborative posts)
