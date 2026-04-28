@@ -4241,17 +4241,15 @@ const MessagesPage = () => {
               )}
 
               <Divider mb={4} />
-              {!iAmAdmin && (
-                <Button
-                  colorScheme="red"
-                  variant="outline"
-                  w="100%"
-                  mb={2}
-                  onClick={() => handleLeaveGroup(selectedConversation._id)}
-                >
-                  Leave Group
-                </Button>
-              )}
+              <Button
+                colorScheme="red"
+                variant="outline"
+                w="100%"
+                mb={2}
+                onClick={() => handleLeaveGroup(selectedConversation._id)}
+              >
+                Leave Group
+              </Button>
               {iAmAdmin && (
                 <Button
                   colorScheme="red"

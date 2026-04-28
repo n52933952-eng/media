@@ -27,7 +27,7 @@ import useShowToast from '../hooks/useShowToast.js'
 
 
 
-const Actions = ({post}) => {
+const Actions = ({ post, showFeedExtras = true }) => {
 	
 
 	const{user}=useContext(UserContext)
@@ -131,7 +131,7 @@ const Actions = ({post}) => {
   }
 
   const fetchConversations = async () => {
-	if (!ENABLE_POST_SHARE_TO_CHAT || !user) return
+	if (!showFeedExtras || !ENABLE_POST_SHARE_TO_CHAT || !user) return
 	setLoadingConversations(true)
 	try {
 		const res = await fetch(`${baseUrl}/api/message/conversations?limit=30`, {
@@ -152,6 +152,7 @@ const Actions = ({post}) => {
   }
 
   const openShareModal = () => {
+	if (!showFeedExtras) return
 	if (!ENABLE_POST_SHARE_TO_CHAT) {
 		showToast('Info', 'Sharing is disabled right now', 'info')
 		return
@@ -225,7 +226,7 @@ const Actions = ({post}) => {
 
   // Fetch capsule status for this post when component mounts
   useEffect(() => {
-	if (!user || !post?._id || !isCapsuleEligiblePost) return
+	if (!showFeedExtras || !user || !post?._id || !isCapsuleEligiblePost) return
 	const fetchStatus = async () => {
 		try {
 			const res = await fetch(`${baseUrl}/api/capsule/status/${post._id}`, { credentials: 'include' })
@@ -240,7 +241,7 @@ const Actions = ({post}) => {
 		} catch (_) {}
 	}
 	fetchStatus()
-  }, [post?._id, user, isCapsuleEligiblePost])
+  }, [post?._id, user, isCapsuleEligiblePost, showFeedExtras])
 
   const handleSealCapsule = async (duration) => {
 	if (!user) return
@@ -416,7 +417,7 @@ return (
 					></path>
 				</svg>
 
-			{isCapsuleEligiblePost && (
+			{showFeedExtras && isCapsuleEligiblePost && (
 				<Tooltip label={capsuleSealed ? `Set: ${capsuleSelectedLabel || formatCapsuleCountdown(capsuleOpenAt)}` : 'Remind me later'} placement="top" hasArrow>
 					<Box
 						as="button"
@@ -431,7 +432,9 @@ return (
 					</Box>
 				</Tooltip>
 			)}
-			<ShareSVG onClick={openShareModal} disabled={!ENABLE_POST_SHARE_TO_CHAT} />
+			{showFeedExtras && (
+				<ShareSVG onClick={openShareModal} disabled={!ENABLE_POST_SHARE_TO_CHAT} />
+			)}
 			</Flex>
 
 			<Flex gap={2} alignItems={"center"}>
@@ -505,7 +508,7 @@ return (
 				</ModalContent>
 			</Modal>
 		{/* Moment Capsule Modal */}
-		{isCapsuleEligiblePost && (
+		{showFeedExtras && isCapsuleEligiblePost && (
 		<Modal isOpen={isCapsuleOpen} onClose={onCapsuleClose} isCentered size="sm">
 			<ModalOverlay />
 			<ModalContent>

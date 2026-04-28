@@ -1342,7 +1342,7 @@ const showToast = useShowToast()
   
   
   <Flex gap={2} my={1} align="center" flexWrap="wrap">
-    <Actions post={post}/>
+    <Actions post={post} showFeedExtras={!visibleVideoOnly} />
     
     {/* Edit Post Button - Show for:
         1. Post owner (for both regular and collaborative posts)

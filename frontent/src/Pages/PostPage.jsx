@@ -723,7 +723,7 @@ if(!post) {
        
      
      <Flex my={3} gap={3}>
-        <Actions post={post}/>
+        <Actions post={post} showFeedExtras={false} />
       </Flex>
       
 
