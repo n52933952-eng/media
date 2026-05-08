@@ -108,6 +108,31 @@ mongoose.connect(process.env.MONGO, {
     process.exit(1) // Exit if database connection fails
 })
 
+
+
+
+app.get('/child-safety', (req, res) => {
+    res.send(`
+      <html>
+      <head><title>Child Safety - PlaySocial</title></head>
+      <body style="font-family:sans-serif;max-width:800px;margin:40px auto;padding:20px;background:#0a0a0f;color:white">
+      <h1>Child Safety Standards</h1>
+      <p>PlaySocial has zero tolerance for child sexual abuse and exploitation (CSAE).</p>
+      <h2>Prohibited Content</h2>
+      <p>Any content that exploits or harms minors is strictly forbidden and will result in immediate account termination and reporting to authorities.</p>
+      <h2>Reporting</h2>
+      <p>Report child safety concerns to: n52933952@gmail.com</p>
+      </body>
+      </html>
+    `);
+  });
+
+
+
+
+
+
+
 // Health check endpoint for load balancer
 app.get('/health', async (req, res) => {
     try {
@@ -178,6 +203,22 @@ app.get('*', (req, res) => {
     }
     res.sendFile(path.join(__dirname, '../frontent/dist/index.html'))
 })
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 // Initialize Socket.IO with the Express app (async - waits for Redis adapter setup)
 // Start server using the HTTP server from Socket.IO
@@ -252,3 +293,6 @@ initializeSocket(app).then((result) => {
     console.error('❌ Failed to initialize Socket.IO:', error)
     process.exit(1)
 })
+
+
+
