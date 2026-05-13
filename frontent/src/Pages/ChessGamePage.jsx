@@ -1,7 +1,23 @@
 import React, { useState, useMemo, useCallback, useEffect, useContext, useRef } from 'react'
 import { Chessboard } from 'react-chessboard'
 import { Chess } from 'chess.js'
-import { Box, Heading, Text, Flex, VStack, HStack, Avatar, useColorModeValue, Button } from '@chakra-ui/react'
+import {
+    Box,
+    Heading,
+    Text,
+    Flex,
+    HStack,
+    Avatar,
+    useColorModeValue,
+    Button,
+    Modal,
+    ModalOverlay,
+    ModalContent,
+    ModalHeader,
+    ModalBody,
+    ModalCloseButton,
+    SimpleGrid,
+} from '@chakra-ui/react'
 import { useParams, useNavigate, useSearchParams, useLocation } from 'react-router-dom'
 import { UserContext } from '../context/UserContext'
 import { SocketContext } from '../context/SocketContext'
@@ -10,8 +26,18 @@ import useShowToast from '../hooks/useShowToast'
 // Import sounds
 import moveSound from '../assets/p.mp3'
 import captureSound from '../assets/k.mp3'
-import checkSound from '../assets/c.mp3'
+import inCheckSound from '../assets/king.mp3'
+import checkmateSound from '../assets/c.mp3'
 import gameStartSound from '../assets/start.mp3'
+import {
+    CHESS_BOARD_THEMES,
+    DEFAULT_CHESS_BOARD_THEME_ID,
+    BOARD_THEME_STORAGE_KEY,
+    getBoardThemeById,
+} from '../utils/chessThemes'
+
+/** Delay before showing the Game Over overlay (matches mobile). */
+const GAME_OVER_OVERLAY_DELAY_MS = 4000
 
 const ChessGamePage = () => {
     const { opponentId } = useParams()
@@ -52,7 +78,25 @@ const ChessGamePage = () => {
         return localStorage.getItem("gameLive") === "true"
     })
     const [showGameOverBox, setShowGameOverBox] = useState(false)
+    /** After delay — same pattern as mobile (`gameOver` + overlay visibility). */
+    const [gameOverOverlayVisible, setGameOverOverlayVisible] = useState(false)
+    const gameOverOverlayTimeoutRef = useRef(null)
+    const [isGameOver, setIsGameOver] = useState(false)
     const [over, setOver] = useState('')
+    const [moveHistory, setMoveHistory] = useState([])
+    const [reviewMode, setReviewMode] = useState(false)
+    const [reviewIndex, setReviewIndex] = useState(0)
+    const [boardThemeId, setBoardThemeId] = useState(() => {
+        try {
+            const s = localStorage.getItem(BOARD_THEME_STORAGE_KEY)
+            if (s && CHESS_BOARD_THEMES.some((t) => t.id === s)) return s
+        } catch {
+            void 0
+        }
+        return DEFAULT_CHESS_BOARD_THEME_ID
+    })
+    const [themePickerOpen, setThemePickerOpen] = useState(false)
+    const userPickedBoardThemeRef = useRef(false)
     // Initialize captured pieces from localStorage (like madechess)
     const [capturedWhite, setCapturedWhite] = useState(() => {
         const saved = localStorage.getItem("capturedWhite")
@@ -78,6 +122,34 @@ const ChessGamePage = () => {
     const bgColor = useColorModeValue('gray.50', '#101010')
     const cardBg = useColorModeValue('white', '#1a1a1a')
     const textColor = useColorModeValue('gray.800', 'white')
+    const boardTheme = getBoardThemeById(boardThemeId)
+
+    const clearGameOverOverlayDelay = useCallback(() => {
+        if (gameOverOverlayTimeoutRef.current != null) {
+            clearTimeout(gameOverOverlayTimeoutRef.current)
+            gameOverOverlayTimeoutRef.current = null
+        }
+    }, [])
+
+    const scheduleGameOverOverlayDelay = useCallback(() => {
+        clearGameOverOverlayDelay()
+        setGameOverOverlayVisible(false)
+        gameOverOverlayTimeoutRef.current = setTimeout(() => {
+            gameOverOverlayTimeoutRef.current = null
+            setGameOverOverlayVisible(true)
+        }, GAME_OVER_OVERLAY_DELAY_MS)
+    }, [clearGameOverOverlayDelay])
+
+    const selectBoardTheme = useCallback((id) => {
+        userPickedBoardThemeRef.current = true
+        setBoardThemeId(id)
+        setThemePickerOpen(false)
+        try {
+            localStorage.setItem(BOARD_THEME_STORAGE_KEY, id)
+        } catch {
+            void 0
+        }
+    }, [])
 
     // Create Chess instance
     const chess = useMemo(() => new Chess(), [])
@@ -313,14 +385,20 @@ const ChessGamePage = () => {
     useEffect(() => {
         sounds.current.move = new Audio(moveSound)
         sounds.current.capture = new Audio(captureSound)
-        sounds.current.check = new Audio(checkSound)
+        sounds.current.inCheck = new Audio(inCheckSound)
+        sounds.current.checkmate = new Audio(checkmateSound)
         sounds.current.gameStart = new Audio(gameStartSound)
-        
+
         sounds.current.move.load()
         sounds.current.capture.load()
-        sounds.current.check.load()
+        sounds.current.inCheck.load()
+        sounds.current.checkmate.load()
         sounds.current.gameStart.load()
-    }, [])
+
+        return () => {
+            clearGameOverOverlayDelay()
+        }
+    }, [clearGameOverOverlayDelay])
 
     const playSound = (type) => {
         const sound = sounds.current[type]
@@ -331,6 +409,27 @@ const ChessGamePage = () => {
             })
         }
     }
+
+    const enterReview = useCallback(() => {
+        setReviewIndex(moveHistory.length)
+        setReviewMode(true)
+    }, [moveHistory.length])
+
+    const exitReview = useCallback(() => {
+        setReviewMode(false)
+    }, [])
+
+    const reviewStep = useCallback(
+        (delta) => {
+            const next = Math.max(0, Math.min(reviewIndex + delta, moveHistory.length))
+            if (next === reviewIndex) return
+            setReviewIndex(next)
+        },
+        [reviewIndex, moveHistory.length],
+    )
+
+    const reviewJumpToStart = useCallback(() => setReviewIndex(0), [])
+    const reviewJumpToEnd = useCallback(() => setReviewIndex(moveHistory.length), [moveHistory.length])
 
     // Fetch opponent info - only fetch once on mount and when page becomes visible
     // No need to poll API since users can't update profile while in active game
@@ -412,9 +511,16 @@ const ChessGamePage = () => {
                     }
                 }
 
-                // Play appropriate sound
-                if (chess.inCheck()) {
-                    playSound('check')
+                setMoveHistory((prev) => [
+                    ...prev,
+                    { from: result.from, to: result.to, promotion: result.promotion },
+                ])
+
+                // Checkmate uses c.mp3; normal check uses king.mp3 (same as mobile).
+                if (chess.isCheckmate()) {
+                    playSound('checkmate')
+                } else if (chess.inCheck()) {
+                    playSound('inCheck')
                 } else if (result.captured) {
                     playSound('capture')
                 } else {
@@ -423,6 +529,7 @@ const ChessGamePage = () => {
 
                 // Check game over
                 if (chess.isGameOver()) {
+                    setIsGameOver(true)
                     if (chess.isCheckmate()) {
                         const winner = chess.turn() === 'w' ? 'Black' : 'White'
                         setOver(`Checkmate! ${winner} wins!`)
@@ -432,7 +539,8 @@ const ChessGamePage = () => {
                         setOver('Game Over')
                     }
                     setShowGameOverBox(true)
-                    
+                    scheduleGameOverOverlayDelay()
+
                     // Notify backend that game ended - marks both players as available
                     if (socket && roomId && opponentId && user?._id) {
                         const gameEndReason = chess.isCheckmate() ? 'checkmate' : chess.isDraw() ? 'draw' : 'game_over'
@@ -446,19 +554,13 @@ const ChessGamePage = () => {
                             console.log('♟️ Game ended - notifying backend:', { roomId, player1: user._id, player2: opponentId, reason: gameEndReason })
                         }
                     }
-                    
-                    setTimeout(() => {
-                        if (handleGameEndRef.current) {
-                            handleGameEndRef.current()
-                        }
-                    }, 10000)
                 }
             }
             return result
-        } catch (e) {
+        } catch {
             return null
         }
-    }, [chess])
+    }, [chess, socket, roomId, opponentId, user?._id, scheduleGameOverOverlayDelay])
 
     // Socket: Accept chess challenge and handle spectator mode
     useEffect(() => {
@@ -531,6 +633,13 @@ const ChessGamePage = () => {
             localStorage.removeItem("capturedBlack")
             setCapturedWhite([])
             setCapturedBlack([])
+            setMoveHistory([])
+            setReviewMode(false)
+            setReviewIndex(0)
+            setIsGameOver(false)
+            setShowGameOverBox(false)
+            clearGameOverOverlayDelay()
+            setGameOverOverlayVisible(false)
             
             // Set roomId - required for making moves
             console.log('🎯 [ChessGamePage] Setting roomId:', data.roomId)
@@ -623,16 +732,10 @@ const ChessGamePage = () => {
 
         socket.on('opponentResigned', () => {
             showToast('Victory! 🏆', 'Your opponent resigned', 'success')
+            setIsGameOver(true)
             setOver('Your opponent resigned. You win!')
             setShowGameOverBox(true)
-            
-            // Cleanup is already handled by backend via chessGameCleanup event
-            // But we also call handleGameEnd to navigate
-            setTimeout(() => {
-                if (handleGameEndRef.current) {
-                    handleGameEndRef.current()
-                }
-            }, 5000)
+            scheduleGameOverOverlayDelay()
         })
 
         socket.on('chessGameCanceled', () => {
@@ -685,13 +788,10 @@ const ChessGamePage = () => {
         // Listen for when opponent leaves the game
         socket.on('opponentLeftGame', () => {
             showToast('Opponent Left', 'Your opponent left the game', 'info')
+            setIsGameOver(true)
             setOver('Your opponent left the game.')
             setShowGameOverBox(true)
-            
-            // Navigate to home after a short delay
-            setTimeout(() => {
-                handleGameEnd()
-            }, 3000)
+            scheduleGameOverOverlayDelay()
         })
 
         // Listen for game state (for spectator catch-up when joining/rejoining)
@@ -867,13 +967,10 @@ const ChessGamePage = () => {
             }
             
             showToast('Game Ended', message, 'info')
+            setIsGameOver(true)
             setOver(message)
             setShowGameOverBox(true)
-            
-            // Navigate to home after a short delay
-            setTimeout(() => {
-                navigate('/home')
-            }, 3000)
+            scheduleGameOverOverlayDelay()
         })
 
         return () => {
@@ -888,7 +985,7 @@ const ChessGamePage = () => {
             socket.off('chessGameState')
             socket.off('chessGameEnded')
         }
-    }, [socket, navigate, showToast, makeAMove, user?._id, chess, isSpectator, roomId, gameLive])
+    }, [socket, navigate, showToast, makeAMove, user?._id, chess, isSpectator, roomId, gameLive, scheduleGameOverOverlayDelay, clearGameOverOverlayDelay])
 
     function onDrop(sourceSquare, targetSquare) {
         // SPECTATORS CANNOT MAKE MOVES
@@ -897,6 +994,12 @@ const ChessGamePage = () => {
                 console.log('👁️ [ChessGamePage] Spectator attempted to make a move - blocked')
             }
             showToast('Spectator Mode', 'You are viewing this game. Only players can make moves.', 'info')
+            return false
+        }
+        if (reviewMode) {
+            return false
+        }
+        if (isGameOver) {
             return false
         }
         
@@ -1036,6 +1139,12 @@ const ChessGamePage = () => {
         setFen(chess.fen())
         setOver('')
         setShowGameOverBox(false)
+        setGameOverOverlayVisible(false)
+        clearGameOverOverlayDelay()
+        setIsGameOver(false)
+        setMoveHistory([])
+        setReviewMode(false)
+        setReviewIndex(0)
         setCapturedWhite([])
         setCapturedBlack([])
         setGameLive(false)
@@ -1043,7 +1152,7 @@ const ChessGamePage = () => {
         
         // Navigate to home
         navigate('/home')
-    }, [chess, navigate, socket, roomId, opponentId, user?._id, gameLive])
+    }, [chess, navigate, socket, roomId, opponentId, user?._id, gameLive, clearGameOverOverlayDelay])
 
     const handleResign = () => {
         if (!socket) return
@@ -1063,7 +1172,7 @@ const ChessGamePage = () => {
     // Handle page unload (browser close/refresh) - DON'T cancel game on refresh
     // Only cleanup if user explicitly navigates away (not page refresh)
     useEffect(() => {
-        const handleBeforeUnload = (e) => {
+        const handleBeforeUnload = () => {
             // On page refresh/close, DON'T cleanup - let the game continue
             // The backend will handle reconnection when socket reconnects
             if (import.meta.env.DEV) {
@@ -1086,7 +1195,7 @@ const ChessGamePage = () => {
             previousPathRef.current = location.pathname
         }
         
-        const handlePopState = (e) => {
+        const handlePopState = () => {
             // Check if game is live
             const gameLive = localStorage.getItem('gameLive') === 'true'
             if (gameLive && endChessGameOnNavigate) {
@@ -1157,6 +1266,27 @@ const ChessGamePage = () => {
         return unicodeMap[type]?.[color] || ''
     }
 
+    const { boardPosition, capW, capB } = useMemo(() => {
+        if (!reviewMode) {
+            return { boardPosition: fen, capW: capturedWhite, capB: capturedBlack }
+        }
+        const replay = new Chess()
+        const cw = []
+        const cb = []
+        for (let i = 0; i < reviewIndex && i < moveHistory.length; i++) {
+            try {
+                const m = replay.move(moveHistory[i])
+                if (m && m.captured) {
+                    if (m.color === 'w') cb.push(m.captured)
+                    else cw.push(m.captured)
+                }
+            } catch {
+                break
+            }
+        }
+        return { boardPosition: replay.fen(), capW: cw, capB: cb }
+    }, [reviewMode, reviewIndex, moveHistory, fen, capturedWhite, capturedBlack])
+
     return (
         <Box bg={bgColor} minH="100vh" py={2}>
             <Flex justify="center" align="start" px={4} direction={{ base: 'column', md: 'row' }} gap={3}>
@@ -1194,8 +1324,8 @@ const ChessGamePage = () => {
                                         White ⚪
                                     </Text>
                                     <Flex wrap="wrap" justify="center" gap={1} minH="60px">
-                                        {capturedWhite.length > 0 ? (
-                                            capturedWhite.map((p, i) => (
+                                        {capW.length > 0 ? (
+                                            capW.map((p, i) => (
                                                 <Text key={i} fontSize="2xl">
                                                     {getPieceUnicode(p, 'white')}
                                                 </Text>
@@ -1222,8 +1352,8 @@ const ChessGamePage = () => {
                                         Black ⚫
                                     </Text>
                                     <Flex wrap="wrap" justify="center" gap={1} minH="60px">
-                                        {capturedBlack.length > 0 ? (
-                                            capturedBlack.map((p, i) => (
+                                        {capB.length > 0 ? (
+                                            capB.map((p, i) => (
                                                 <Text key={i} fontSize="2xl">
                                                     {getPieceUnicode(p, 'black')}
                                                 </Text>
@@ -1255,8 +1385,8 @@ const ChessGamePage = () => {
                                     <Flex wrap="wrap" justify="center" gap={1} minH="60px">
                                         {/* If user is white, opponent is black - show pieces black captured (white pieces) = capturedWhite */}
                                         {/* If user is black, opponent is white - show pieces white captured (black pieces) = capturedBlack */}
-                                        {(storedOrientation === 'white' ? capturedWhite : capturedBlack).length > 0 ? (
-                                            (storedOrientation === 'white' ? capturedWhite : capturedBlack).map((p, i) => (
+                                        {(storedOrientation === 'white' ? capW : capB).length > 0 ? (
+                                            (storedOrientation === 'white' ? capW : capB).map((p, i) => (
                                                 <Text key={i} fontSize="2xl">
                                                     {getPieceUnicode(p, storedOrientation === 'white' ? 'white' : 'black')}
                                                 </Text>
@@ -1286,8 +1416,8 @@ const ChessGamePage = () => {
                                     <Flex wrap="wrap" justify="center" gap={1} minH="60px">
                                         {/* If user is white, show pieces white captured (black pieces) = capturedBlack */}
                                         {/* If user is black, show pieces black captured (white pieces) = capturedWhite */}
-                                        {(storedOrientation === 'white' ? capturedBlack : capturedWhite).length > 0 ? (
-                                            (storedOrientation === 'white' ? capturedBlack : capturedWhite).map((p, i) => (
+                                        {(storedOrientation === 'white' ? capB : capW).length > 0 ? (
+                                            (storedOrientation === 'white' ? capB : capW).map((p, i) => (
                                                 <Text key={i} fontSize="2xl">
                                                     {getPieceUnicode(p, storedOrientation === 'white' ? 'black' : 'white')}
                                                 </Text>
@@ -1314,41 +1444,75 @@ const ChessGamePage = () => {
                     w="fit-content"
                     order={{ base: 1, md: 2 }}
                 >
-                    <Heading size="md" mb={1} color="#5a3e2b" textAlign="center">
-                        ♟️ Chess Match
-                    </Heading>
+                    <Flex justify="space-between" align="center" mb={1} gap={2} flexWrap="wrap">
+                        <Heading size="md" color="#5a3e2b" textAlign="left" flex="1" minW="120px">
+                            ♟️ Chess Match
+                        </Heading>
+                        <Button size="xs" variant="outline" colorScheme="yellow" onClick={() => setThemePickerOpen(true)}>
+                            🎨 Board theme
+                        </Button>
+                    </Flex>
+                    {reviewMode && (
+                        <Text fontSize="xs" textAlign="center" mb={1} color="orange.400" fontWeight="bold">
+                            Review mode — use arrows below the board
+                        </Text>
+                    )}
                     {isSpectator ? (
                         <Text fontSize="xs" textAlign="center" mb={1.5} color="#5a3e2b" fontWeight="bold">
                             👁️ Spectator Mode - Watching Live Game
                         </Text>
-                    ) : gameLive && storedOrientation && (
+                    ) : gameLive && storedOrientation && !reviewMode ? (
                         <Text fontSize="xs" textAlign="center" mb={1.5} color="#5a3e2b" fontWeight="bold">
                             You are playing as: {storedOrientation === 'white' ? '⚪ White' : '⚫ Black'}
                             {chess.turn() === storedOrientation[0] ? ' (Your turn!)' : ' (Waiting...)'}
                         </Text>
-                    )}
+                    ) : null}
 
                     <Box w="400px" h="400px">
                         {/* Render board directly like madechess - no conditional rendering */}
                         {/* Madechess line 323-339: Just renders Chessboard with boardOrientation={storedOrientation} */}
                         {/* Key includes orientation to force remount when it changes - CRITICAL for react-chessboard */}
                         <Chessboard
-                            key={`chess-board-${storedOrientation}`}
-                            position={fen}
-                            onPieceDrop={onDrop}
+                            key={`chess-board-${storedOrientation}-${boardThemeId}-${reviewMode ? reviewIndex : 'live'}`}
+                            position={boardPosition}
+                            onPieceDrop={reviewMode || isGameOver ? () => false : onDrop}
                             boardOrientation={storedOrientation}
                             boardWidth={400}
                             animationDuration={250}
+                            arePiecesDraggable={!isSpectator && !reviewMode && !isGameOver}
                             customDarkSquareStyle={{
-                                backgroundColor: '#b58863'
+                                backgroundColor: boardTheme.dark,
                             }}
                             customLightSquareStyle={{
-                                backgroundColor: '#f0d9b5'
+                                backgroundColor: boardTheme.light,
                             }}
                         />
                     </Box>
 
-                    {showGameOverBox && (
+                    {reviewMode && (
+                        <HStack justify="center" mt={2} spacing={2} flexWrap="wrap">
+                            <Button size="xs" onClick={reviewJumpToStart} isDisabled={reviewIndex === 0}>
+                                |◀
+                            </Button>
+                            <Button size="xs" onClick={() => reviewStep(-1)} isDisabled={reviewIndex === 0}>
+                                ◀
+                            </Button>
+                            <Text fontSize="xs" minW="72px" textAlign="center" color={textColor}>
+                                {reviewIndex} / {moveHistory.length}
+                            </Text>
+                            <Button size="xs" onClick={() => reviewStep(1)} isDisabled={reviewIndex >= moveHistory.length}>
+                                ▶
+                            </Button>
+                            <Button size="xs" onClick={reviewJumpToEnd} isDisabled={reviewIndex >= moveHistory.length}>
+                                ▶|
+                            </Button>
+                            <Button size="xs" colorScheme="blue" onClick={exitReview}>
+                                Exit review
+                            </Button>
+                        </HStack>
+                    )}
+
+                    {showGameOverBox && gameOverOverlayVisible && !reviewMode && (
                         <Flex
                             position="absolute"
                             top="50%"
@@ -1363,14 +1527,28 @@ const ChessGamePage = () => {
                             alignItems="center"
                             justifyContent="center"
                             boxShadow="2xl"
+                            minW="260px"
                         >
-                            <Heading size="md" mb={2}>Game Over</Heading>
-                            <Text fontSize="lg">{over}</Text>
-                            <Text fontSize="sm" mt={2}>Returning to home in 10 seconds...</Text>
+                            <Heading size="md" mb={2}>
+                                Game Over
+                            </Heading>
+                            <Text fontSize="lg" textAlign="center">
+                                {over}
+                            </Text>
+                            <HStack mt={4} spacing={3} flexWrap="wrap" justify="center">
+                                {moveHistory.length > 0 && (
+                                    <Button colorScheme="blue" size="sm" onClick={enterReview}>
+                                        Review game
+                                    </Button>
+                                )}
+                                <Button colorScheme="gray" size="sm" onClick={handleGameEnd}>
+                                    Back to home
+                                </Button>
+                            </HStack>
                         </Flex>
                     )}
 
-                    {gameLive && !isSpectator && (
+                    {gameLive && !isSpectator && !reviewMode && !isGameOver && (
                         <Flex justify="center" mt={2}>
                             <Button
                                 colorScheme="red"
@@ -1383,6 +1561,56 @@ const ChessGamePage = () => {
                     )}
                 </Box>
             </Flex>
+
+            <Modal isOpen={themePickerOpen} onClose={() => setThemePickerOpen(false)} size="lg" isCentered>
+                <ModalOverlay />
+                <ModalContent bg={cardBg}>
+                    <ModalHeader color={textColor}>Board theme</ModalHeader>
+                    <ModalCloseButton />
+                    <ModalBody pb={6}>
+                        <SimpleGrid columns={{ base: 2, md: 3 }} spacing={3}>
+                            {CHESS_BOARD_THEMES.map((t) => {
+                                const selected = t.id === boardThemeId
+                                return (
+                                    <Button
+                                        key={t.id}
+                                        variant={selected ? 'solid' : 'outline'}
+                                        colorScheme={selected ? 'blue' : 'gray'}
+                                        flexDirection="column"
+                                        h="auto"
+                                        py={3}
+                                        onClick={() => selectBoardTheme(t.id)}
+                                    >
+                                        <Flex
+                                            mb={2}
+                                            borderRadius="md"
+                                            overflow="hidden"
+                                            w="72px"
+                                            h="72px"
+                                            borderWidth={selected ? 2 : 1}
+                                            borderColor={selected ? 'blue.400' : 'gray.500'}
+                                            flexDirection="column"
+                                        >
+                                            {[0, 1, 2, 3].map((r) => (
+                                                <Flex key={r} w="100%" flex="1">
+                                                    {[0, 1, 2, 3].map((c) => (
+                                                        <Box
+                                                            key={c}
+                                                            flex="1"
+                                                            bg={(r + c) % 2 === 0 ? t.light : t.dark}
+                                                        />
+                                                    ))}
+                                                </Flex>
+                                            ))}
+                                        </Flex>
+                                        <Text fontSize="sm">{t.nameEn}</Text>
+                                    </Button>
+                                )
+                            })}
+                        </SimpleGrid>
+                    </ModalBody>
+                </ModalContent>
+            </Modal>
         </Box>
     )
 }
