@@ -907,12 +907,15 @@ export const searchUsers = async(req, res) => {
         // Using explicit $and to avoid MongoDB ambiguity when the same field
         // appears both inside $or and at the root level
         const searchRegex = new RegExp(query.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i')
-        const users = await User.find({
-            $and: [
-                { $or: [{ username: searchRegex }, { name: searchRegex }] },
-                { username: { $nin: systemAccounts } }
-            ]
-        })
+        const searchAnd = [
+            { $or: [{ username: searchRegex }, { name: searchRegex }] },
+            { username: { $nin: systemAccounts } },
+        ]
+        // Never return the logged-in user (mobile + web user search)
+        if (req.user?._id) {
+            searchAnd.push({ _id: { $ne: req.user._id } })
+        }
+        const users = await User.find({ $and: searchAnd })
         // Include followers for legacy-only follow rows (same dual-read as getUserProfile)
         .select('username name profilePic bio followers')
         .limit(20)
