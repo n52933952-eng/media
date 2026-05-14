@@ -151,13 +151,16 @@ const UserHeader = ({ users, activeTab, setActiveTab, onUserFollowed, postsCount
 
         const data = await res.json()
         console.log(data)
-        if(data.error){
-          showToast("Error",data.error,"error")
+        if (data.error) {
+          showToast('Error', data.error, 'error')
+          return
         }
-      
-        
-          
-        
+
+        if (!res.ok) {
+          showToast('Error', 'Request failed', 'error')
+          return
+        }
+
          if(following){
            showToast("Success",`unfollowed ${users.name}`,"success")
            setLocalFollowersCount(prev => Math.max(0, prev - 1))
@@ -172,11 +175,21 @@ const UserHeader = ({ users, activeTab, setActiveTab, onUserFollowed, postsCount
          }
 
            if(data.current){
-            setUser(data.current)
-            localStorage.setItem("userInfo",JSON.stringify(data.current))
+            setUser((prev) => {
+              const cur = data.current
+              const merged = { ...(prev || {}), ...cur, _id: cur._id || cur.id || prev?._id }
+              try {
+                localStorage.setItem('userInfo', JSON.stringify(merged))
+              } catch {
+                void 0
+              }
+              return merged
+            })
            }
       
-         setFollowing(!following)
+         if (data.action === 'follow') setFollowing(true)
+         else if (data.action === 'unfollow') setFollowing(false)
+         else setFollowing(!following)
        
        
         }

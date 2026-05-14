@@ -60,6 +60,10 @@ const SuggestedUser = ({ user, onFollowed, onUserFollowed, onPatchFollowState })
         showToast('Error', data.error, 'error')
         return
       }
+      if (!res.ok) {
+        showToast('Error', 'Request failed', 'error')
+        return
+      }
 
       const nextFollowing = !followed
       onPatchFollowState?.(user._id, nextFollowing)
@@ -67,9 +71,16 @@ const SuggestedUser = ({ user, onFollowed, onUserFollowed, onPatchFollowState })
       // Update current user's following list and localStorage
       // Backend returns { action: "follow"/"unfollow", current: updatedUser, target: targetUser }
       if (setUser && data.current) {
-        // Use the updated user from backend response (most reliable)
-        setUser(data.current)
-        localStorage.setItem("userInfo", JSON.stringify(data.current))
+        setUser((prev) => {
+          const cur = data.current
+          const merged = { ...(prev || {}), ...cur, _id: cur._id || cur.id || prev?._id }
+          try {
+            localStorage.setItem('userInfo', JSON.stringify(merged))
+          } catch {
+            void 0
+          }
+          return merged
+        })
       } else if (setUser) {
         // Fallback: update manually if backend didn't return updated user
         setUser(prev => {
