@@ -882,14 +882,25 @@ export const getUserProfile = async(req,res) => {
 }
 
 
-// NEW: Search users for mention suggestions (like @username autocomplete)
+// User search (web + mobile): min length + prefix match so short queries do not scan the whole collection.
+const USER_SEARCH_MIN_LEN = 2
+const USER_SEARCH_MAX_LEN = 48
+
 export const searchUsers = async(req, res) => {
     try {
         const { search, q } = req.query  // Support both 'search' and 'q' params
         const query = search || q
 
-        if (!query || query.trim() === "") {
-            return res.status(200).json([])  // Return empty array if no search term
+        if (!query || typeof query !== 'string') {
+            return res.status(200).json([])
+        }
+
+        const trimmed = query.trim()
+        if (trimmed === '' || trimmed.length < USER_SEARCH_MIN_LEN) {
+            return res.status(200).json([])
+        }
+        if (trimmed.length > USER_SEARCH_MAX_LEN) {
+            return res.status(200).json([])
         }
 
         // System + live channel accounts + legacy removed channels (still in DB) — hide from @ search
@@ -903,12 +914,12 @@ export const searchUsers = async(req, res) => {
             ...LEGACY_LIVE_CHANNEL_USERNAMES
         ]
 
-        // Enhanced search: matches username OR name (case-insensitive, partial match)
-        // Using explicit $and to avoid MongoDB ambiguity when the same field
-        // appears both inside $or and at the root level
-        const searchRegex = new RegExp(query.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i')
+        // Prefix-only match on username and display name (case-insensitive).
+        // Substring match on a single letter scanned almost the whole collection and could not use a normal index well.
+        const escaped = trimmed.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+        const prefixRegex = new RegExp(`^${escaped}`, 'i')
         const searchAnd = [
-            { $or: [{ username: searchRegex }, { name: searchRegex }] },
+            { $or: [{ username: prefixRegex }, { name: prefixRegex }] },
             { username: { $nin: systemAccounts } },
         ]
         // Never return the logged-in user (mobile + web user search)
