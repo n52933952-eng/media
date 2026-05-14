@@ -1,4 +1,4 @@
-import React,{useState,useEffect,useContext,useCallback} from 'react'
+import React,{useState,useEffect,useContext,useCallback,useRef} from 'react'
 import UserHeader from '../Components/UserHeader'
 import UserPost from '../Components/UserPost'
 import{useParams} from 'react-router-dom'
@@ -154,8 +154,11 @@ const UserPage = () => {
      }
    }, [setFollowPost])
    
-   const fetchUser = async() => {
-       setLoading(true)
+   const profileRefetchTimerRef = useRef(null)
+
+   const fetchUser = useCallback(async (opts = {}) => {
+       const silent = opts.silent === true
+       if (!silent) setLoading(true)
       try{
      const res = await fetch(`${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/user/getUserPro/${username}`,{
        credentials: "include",
@@ -173,14 +176,46 @@ const UserPage = () => {
       catch(error){
         console.log(error)
       }finally{
-        setLoading(false)
+        if (!silent) setLoading(false)
       }
-    }
+    }, [username, showToast])
 
 
    useEffect(() => {
     fetchUser()
-   },[username,showToast])
+   }, [fetchUser])
+
+   // After following on mobile (or another tab), refetch this profile when the tab is focused
+   // so `isFollowedByMe` matches the server (UserHeader syncs from `users`).
+   useEffect(() => {
+     if (!username) return undefined
+
+     const run = () => {
+       if (document.visibilityState !== 'visible') return
+       if (profileRefetchTimerRef.current) {
+         clearTimeout(profileRefetchTimerRef.current)
+       }
+       profileRefetchTimerRef.current = window.setTimeout(() => {
+         profileRefetchTimerRef.current = null
+         fetchUser({ silent: true })
+       }, 400)
+     }
+
+     document.addEventListener('visibilitychange', run)
+     window.addEventListener('focus', run)
+     window.addEventListener('pageshow', run)
+     queueMicrotask(run)
+
+     return () => {
+       document.removeEventListener('visibilitychange', run)
+       window.removeEventListener('focus', run)
+       window.removeEventListener('pageshow', run)
+       if (profileRefetchTimerRef.current) {
+         clearTimeout(profileRefetchTimerRef.current)
+         profileRefetchTimerRef.current = null
+       }
+     }
+   }, [fetchUser, username])
   
 
 

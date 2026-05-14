@@ -33,12 +33,13 @@ const UserHeader = ({ users, activeTab, setActiveTab, onUserFollowed, postsCount
   
   const showToast=useShowToast()
   
-  // Sync follow state and counts when viewing a different user profile
+  // Sync follow state and counts when viewing a different user profile (or same profile refetched,
+  // e.g. followed on mobile — isFollowedByMe can flip without count changes).
   useEffect(() => {
     setFollowing(users?.isFollowedByMe ?? users?.followers?.includes(currentUser?._id) ?? false)
     setLocalFollowersCount(users?.followersCount ?? users?.followers?.length ?? 0)
     setLocalFollowingCount(users?.followingCount ?? users?.following?.length ?? 0)
-  }, [users?._id, users?.followersCount, users?.followingCount, currentUser?._id])
+  }, [users?._id, users?.followersCount, users?.followingCount, users?.isFollowedByMe, currentUser?._id])
 
   // Update instagramUrl when users prop changes
   useEffect(() => {
