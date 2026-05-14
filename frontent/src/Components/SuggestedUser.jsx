@@ -1,4 +1,4 @@
-import React, { useState, useContext, useMemo } from 'react'
+import React, { useState, useContext, useMemo, useEffect } from 'react'
 import { Avatar, Box, Button, Flex, Text } from '@chakra-ui/react'
 import { Link } from 'react-router-dom'
 import { UserContext } from '../context/UserContext'
@@ -10,25 +10,28 @@ const SuggestedUser = ({ user, onFollowed, onUserFollowed, onPatchFollowState })
 
   const [updating, setUpdating] = useState(false)
 
-  /** Stable key so we recompute when /me merges a new following[] after mobile follow */
+  /** Stable key so we resync when /me merges a new following[] after follow elsewhere */
   const followingFingerprint = useMemo(() => {
     const list = currentUser?.following
     if (!Array.isArray(list) || list.length === 0) return ''
     return [...list].map((f) => (f?.toString?.() ?? String(f))).filter(Boolean).sort().join(',')
   }, [currentUser?.following])
 
-  /**
-   * Show Unfollow if either the server row says so OR your session following[] contains them
-   * (covers: followed on mobile → web /me refreshed; search row still loading isFollowedByMe).
-   */
-  const followed = useMemo(() => {
-    const uid = user?._id?.toString?.() ?? String(user?._id ?? '')
+  const uid = user?._id?.toString?.() ?? String(user?._id ?? '')
+  const derivedFollowed = useMemo(() => {
     const inSession =
       currentUser?.following?.some((id) => (id?.toString?.() ?? String(id)) === uid) ?? false
     const api = user?.isFollowedByMe
     const fromApi = typeof api === 'boolean' ? api : false
     return Boolean(fromApi || inSession)
-  }, [user?._id, user?.isFollowedByMe, followingFingerprint, currentUser?._id])
+  }, [uid, user?.isFollowedByMe, followingFingerprint, currentUser?._id])
+
+  const [following, setFollowing] = useState(derivedFollowed)
+  useEffect(() => {
+    setFollowing(derivedFollowed)
+  }, [derivedFollowed])
+
+  const followed = following
 
   const handleFollow = async () => {
     if (!currentUser) {
@@ -54,18 +57,21 @@ const SuggestedUser = ({ user, onFollowed, onUserFollowed, onPatchFollowState })
         }
       )
 
-      const data = await res.json()
+      let data = {}
+      try {
+        data = await res.json()
+      } catch {
+        showToast('Error', 'Invalid response', 'error')
+        return
+      }
 
       if (data.error) {
         showToast('Error', data.error, 'error')
         return
       }
-      if (!res.ok) {
-        showToast('Error', 'Request failed', 'error')
-        return
-      }
 
-      const nextFollowing = !followed
+      const wasFollowing = followed
+      const nextFollowing = !wasFollowing
       onPatchFollowState?.(user._id, nextFollowing)
       
       // Update current user's following list and localStorage
@@ -86,7 +92,7 @@ const SuggestedUser = ({ user, onFollowed, onUserFollowed, onPatchFollowState })
         setUser(prev => {
           const updated = {
             ...prev,
-            following: followed
+            following: wasFollowing
               ? prev.following.filter(id => id.toString() !== user._id.toString())
               : [...(prev.following || []), user._id]
           }
@@ -95,19 +101,22 @@ const SuggestedUser = ({ user, onFollowed, onUserFollowed, onPatchFollowState })
         })
       }
 
+      // Always flip local button so UI updates even if context merge lags
+      setFollowing(nextFollowing)
+
       // Notify parent component to remove this user from suggestions when followed
-      if (!followed && onFollowed) {
+      if (!wasFollowing && onFollowed) {
         onFollowed(user._id)
       }
 
       // Fetch user's posts immediately when followed (for feed update)
-      if (!followed && onUserFollowed) {
+      if (!wasFollowing && onUserFollowed) {
         onUserFollowed(user._id)
       }
 
       showToast(
         'Success',
-        followed ? `Unfollowed ${user.name || user.username}` : `Following ${user.name || user.username}`,
+        wasFollowing ? `Unfollowed ${user.name || user.username}` : `Following ${user.name || user.username}`,
         'success'
       )
     } catch (error) {

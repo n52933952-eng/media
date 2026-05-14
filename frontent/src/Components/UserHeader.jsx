@@ -150,14 +150,8 @@ const UserHeader = ({ users, activeTab, setActiveTab, onUserFollowed, postsCount
 
 
         const data = await res.json()
-        console.log(data)
         if (data.error) {
           showToast('Error', data.error, 'error')
-          return
-        }
-
-        if (!res.ok) {
-          showToast('Error', 'Request failed', 'error')
           return
         }
 
@@ -187,9 +181,11 @@ const UserHeader = ({ users, activeTab, setActiveTab, onUserFollowed, postsCount
             })
            }
       
-         if (data.action === 'follow') setFollowing(true)
-         else if (data.action === 'unfollow') setFollowing(false)
-         else setFollowing(!following)
+         setFollowing((prev) => {
+           if (data.action === 'follow') return true
+           if (data.action === 'unfollow') return false
+           return !prev
+         })
        
        
         }

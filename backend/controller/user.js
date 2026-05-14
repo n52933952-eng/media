@@ -59,42 +59,6 @@ async function safeCloudinaryDestroyPublicId(publicId, resourceType = 'image') {
   }
 }
 
-/**
- * Canonical follow graph from `Follow` (same source as isFollowedByMe / suggested exclusions).
- * Keeps `User.following` / `User.followers` drift from affecting `/me` and mobile session after web follow.
- * Does NOT change suggestion/search algorithms — only the arrays returned on session refresh.
- */
-const FOLLOW_GRAPH_QUERY_LIMIT = 5000
-async function getFollowGraphArraysFromCollection(userId) {
-  if (!userId) {
-    return { following: [], followers: [] }
-  }
-  const [followingDocs, followerDocs] = await Promise.all([
-    Follow.find({ followerId: userId }).select('followeeId').limit(FOLLOW_GRAPH_QUERY_LIMIT).lean(),
-    Follow.find({ followeeId: userId }).select('followerId').limit(FOLLOW_GRAPH_QUERY_LIMIT).lean(),
-  ])
-  return {
-    following: (followingDocs || []).map((d) => d.followeeId).filter(Boolean),
-    followers: (followerDocs || []).map((d) => d.followerId).filter(Boolean),
-  }
-}
-
-/** Plain object for `FollowAndUnfollow` + clients: `following` / `followers` match `Follow` (same as getMe). */
-async function serializeSessionUserAfterFollowMutation(userId) {
-  const doc = await User.findById(userId).select('-password')
-  if (!doc) return null
-  const o = doc.toObject ? doc.toObject({ virtuals: true }) : { ...doc }
-  delete o.password
-  try {
-    const g = await getFollowGraphArraysFromCollection(userId)
-    o.following = g.following
-    o.followers = g.followers
-  } catch (e) {
-    console.error('[FollowAndUnfollow] session user graph merge failed:', e?.message || e)
-  }
-  return o
-}
-
 
 
 
@@ -160,22 +124,12 @@ export const LoginUser = async(req,res) => {
    
       GenerateToken(user._id,res)
 
-      let following = user.following || []
-      let followers = user.followers || []
-      try {
-        const g = await getFollowGraphArraysFromCollection(user._id)
-        if (Array.isArray(g.following)) following = g.following
-        if (Array.isArray(g.followers)) followers = g.followers
-      } catch (e) {
-        console.error('LoginUser: follow graph from Follow collection failed:', e?.message || e)
-      }
-
       res.status(200).json({_id:user._id,username:user.username,name:user.name,email:user.email,
         bio:user.bio,
         profilePic:user.profilePic,
         country:user.country,
-        followers,
-               following
+        followers:user.followers,
+               following:user.following
       })
      
 
@@ -236,15 +190,6 @@ export const GoogleLogin = async (req, res) => {
     }
 
     GenerateToken(user._id, res)
-    let following = user.following || []
-    let followers = user.followers || []
-    try {
-      const g = await getFollowGraphArraysFromCollection(user._id)
-      if (Array.isArray(g.following)) following = g.following
-      if (Array.isArray(g.followers)) followers = g.followers
-    } catch (e) {
-      console.error('GoogleLogin: follow graph from Follow collection failed:', e?.message || e)
-    }
     res.status(200).json({
       _id: user._id,
       username: user.username,
@@ -253,8 +198,8 @@ export const GoogleLogin = async (req, res) => {
       bio: user.bio,
       profilePic: user.profilePic,
       country: user.country,
-      followers,
-      following,
+      followers: user.followers,
+      following: user.following,
     })
   } catch (error) {
     console.error('GoogleLogin error:', error)
@@ -269,15 +214,6 @@ export const getMe = async (req, res) => {
     if (!user) {
       return res.status(404).json({ error: 'User not found' })
     }
-    let following = user.following || []
-    let followers = user.followers || []
-    try {
-      const fromFollow = await getFollowGraphArraysFromCollection(req.user._id)
-      if (Array.isArray(fromFollow.following)) following = fromFollow.following
-      if (Array.isArray(fromFollow.followers)) followers = fromFollow.followers
-    } catch (e) {
-      console.error('getMe: follow graph from Follow collection failed, using User document arrays:', e?.message || e)
-    }
     res.status(200).json({
       _id: user._id,
       username: user.username,
@@ -287,8 +223,8 @@ export const getMe = async (req, res) => {
       profilePic: user.profilePic,
       country: user.country,
       instagram: user.instagram,
-      followers,
-      following,
+      followers: user.followers || [],
+      following: user.following || [],
     })
   } catch (error) {
     console.error('getMe error:', error)
@@ -382,10 +318,10 @@ export const FollowAndUnfollow = async(req,res) => {
                }
            }
           
-           const currentPayload = await serializeSessionUserAfterFollowMutation(req.user._id)
-           const targetUser = await User.findById(id).select('-password').lean()
+           const updatecurrent = await User.findById(req.user._id)
+           const targetUser = await User.findById(id)
 
-           res.status(200).json({action:"unfollow",current:currentPayload,target:targetUser})
+           res.status(200).json({action:"unfollow",current:updatecurrent,target:targetUser})
 
          }else{
             await User.findByIdAndUpdate(req.user._id,{$push:{following:id}})
@@ -457,8 +393,8 @@ export const FollowAndUnfollow = async(req,res) => {
             // Feed already filters by following list, so user will see Football posts in feed.
             // Frontend triggers post creation when following Football (in SuggestedChannels.jsx)
           
-            const currentPayload = await serializeSessionUserAfterFollowMutation(req.user._id)
-            const targetUser = await User.findById(id).select('-password').lean()
+            const updatecurrent = await User.findById(req.user._id)
+            const targetUser = await User.findById(id)
 
             // Create notification for the user being followed
             const { createNotification } = await import('./notification.js')
@@ -474,7 +410,7 @@ export const FollowAndUnfollow = async(req,res) => {
                 console.error('Error creating activity:', err)
             })
 
-           res.status(200).json({action:"follow",current:currentPayload,target:targetUser})
+           res.status(200).json({action:"follow",current:updatecurrent,target:targetUser})
          }
           
   
