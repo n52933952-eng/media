@@ -391,6 +391,15 @@ export const SocketContextProvider = ({ children }) => {
       window.dispatchEvent(new CustomEvent('storyStripChanged', { detail: data }));
     });
 
+    /** Feed chess cards: flip Live → Ended without full refresh (same event name as mobile CHESS_GAME_FEED_UI_ENDED). */
+    newSocket?.on('chessGameEnded', (data) => {
+      const rid = data?.roomId;
+      if (rid == null) return;
+      const s = String(rid).trim();
+      if (!s) return;
+      window.dispatchEvent(new CustomEvent('chessGameFeedUiEnded', { detail: { roomId: s } }));
+    });
+
     return () => {
       newSocket?.off('unreadCountUpdate');
       newSocket?.off('newMessage');
@@ -399,6 +408,7 @@ export const SocketContextProvider = ({ children }) => {
       newSocket?.off('footballMatchUpdate');
       newSocket?.off('footballPageUpdate');
       newSocket?.off('storyStripChanged');
+      newSocket?.off('chessGameEnded');
       newSocket.close();
     };
   }, [user?._id]);

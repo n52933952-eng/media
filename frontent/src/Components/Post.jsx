@@ -159,7 +159,31 @@ const showToast = useShowToast()
   
   // Hide entire chess post immediately if user canceled their game (local state only)
   const [hideChessPost, setHideChessPost] = useState(false)
-  
+  /** Socket `chessGameEnded` → window `chessGameFeedUiEnded`: flip badge without refresh (parity with mobile). */
+  const [chessFeedEndedLocally, setChessFeedEndedLocally] = useState(false)
+
+  useEffect(() => {
+    setChessFeedEndedLocally(false)
+    if (!isChessPost || !post?.chessGameData) return
+    let roomId = ''
+    try {
+      const d = JSON.parse(post.chessGameData)
+      roomId = d?.roomId != null ? String(d.roomId).trim() : ''
+    } catch {
+      return
+    }
+    if (!roomId) return
+
+    const onEnded = (ev) => {
+      const rid = ev?.detail?.roomId
+      if (rid != null && String(rid).trim() === roomId) {
+        setChessFeedEndedLocally(true)
+      }
+    }
+    window.addEventListener('chessGameFeedUiEnded', onEnded)
+    return () => window.removeEventListener('chessGameFeedUiEnded', onEnded)
+  }, [isChessPost, post?._id, post?.chessGameData])
+
   useEffect(() => {
     if (!isChessPost || !user?._id) return
     
@@ -1172,9 +1196,20 @@ const showToast = useShowToast()
             </Text>
           </VStack>
         </Flex>
-        <Text fontSize="xs" color="green.500" fontWeight="semibold">
-          Live
-        </Text>
+        {(() => {
+          const status = chessGameData?.gameStatus
+          const serverEnded = !(status === 'active' || status == null)
+          const showEnded = chessFeedEndedLocally || serverEnded
+          return (
+            <Text
+              fontSize="xs"
+              fontWeight="semibold"
+              color={showEnded ? secondaryTextColor : 'green.500'}
+            >
+              {showEnded ? 'Ended' : 'Live'}
+            </Text>
+          )
+        })()}
       </Flex>
       
       <Flex align="center" justify="space-around" gap={4} onClick={(e) => e.stopPropagation()}>

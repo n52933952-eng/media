@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useCallback, useEffect, useContext, useRef } from 'react'
 import { Chessboard } from 'react-chessboard'
 import { Chess } from 'chess.js'
+import { motion, LayoutGroup } from 'framer-motion'
 import {
     Box,
     Heading,
@@ -17,6 +18,11 @@ import {
     ModalBody,
     ModalCloseButton,
     SimpleGrid,
+    Tabs,
+    TabList,
+    Tab,
+    TabPanels,
+    TabPanel,
 } from '@chakra-ui/react'
 import { useParams, useNavigate, useSearchParams, useLocation } from 'react-router-dom'
 import { UserContext } from '../context/UserContext'
@@ -35,9 +41,18 @@ import {
     BOARD_THEME_STORAGE_KEY,
     getBoardThemeById,
 } from '../utils/chessThemes'
+import {
+    CHESS_PIECE_SETS,
+    DEFAULT_CHESS_PIECE_SET_ID,
+    PIECE_SET_STORAGE_KEY,
+    lichessPieceSvgUrl,
+} from '../utils/chessPieceSets'
 
 /** Delay before showing the Game Over overlay (matches mobile). */
 const GAME_OVER_OVERLAY_DELAY_MS = 4000
+
+/** Piece slide duration in review mode (react-chessboard); live play stays snappier. */
+const REVIEW_BOARD_ANIM_MS = 520
 
 const ChessGamePage = () => {
     const { opponentId } = useParams()
@@ -97,6 +112,15 @@ const ChessGamePage = () => {
     })
     const [themePickerOpen, setThemePickerOpen] = useState(false)
     const userPickedBoardThemeRef = useRef(false)
+    const [pieceSetId, setPieceSetId] = useState(() => {
+        try {
+            const s = localStorage.getItem(PIECE_SET_STORAGE_KEY)
+            if (s && CHESS_PIECE_SETS.some((p) => p.id === s)) return s
+        } catch {
+            void 0
+        }
+        return DEFAULT_CHESS_PIECE_SET_ID
+    })
     // Initialize captured pieces from localStorage (like madechess)
     const [capturedWhite, setCapturedWhite] = useState(() => {
         const saved = localStorage.getItem("capturedWhite")
@@ -124,6 +148,33 @@ const ChessGamePage = () => {
     const textColor = useColorModeValue('gray.800', 'white')
     const boardTheme = getBoardThemeById(boardThemeId)
 
+    const customPieces = useMemo(() => {
+        const safe = CHESS_PIECE_SETS.some((s) => s.id === pieceSetId)
+            ? pieceSetId
+            : DEFAULT_CHESS_PIECE_SET_ID
+        const codes = ['wP', 'wN', 'wB', 'wR', 'wQ', 'wK', 'bP', 'bN', 'bB', 'bR', 'bQ', 'bK']
+        const out = {}
+        for (const code of codes) {
+            const src = lichessPieceSvgUrl(safe, code)
+            out[code] = ({ squareWidth }) => (
+                <img
+                    src={src}
+                    width={squareWidth}
+                    height={squareWidth}
+                    alt=""
+                    draggable={false}
+                    style={{
+                        display: 'block',
+                        userSelect: 'none',
+                        pointerEvents: 'none',
+                        objectFit: 'contain',
+                    }}
+                />
+            )
+        }
+        return out
+    }, [pieceSetId])
+
     const clearGameOverOverlayDelay = useCallback(() => {
         if (gameOverOverlayTimeoutRef.current != null) {
             clearTimeout(gameOverOverlayTimeoutRef.current)
@@ -146,6 +197,16 @@ const ChessGamePage = () => {
         setThemePickerOpen(false)
         try {
             localStorage.setItem(BOARD_THEME_STORAGE_KEY, id)
+        } catch {
+            void 0
+        }
+    }, [])
+
+    const selectPieceSet = useCallback((id) => {
+        setPieceSetId(id)
+        setThemePickerOpen(false)
+        try {
+            localStorage.setItem(PIECE_SET_STORAGE_KEY, id)
         } catch {
             void 0
         }
@@ -414,10 +475,9 @@ const ChessGamePage = () => {
     }
 
     const enterReview = useCallback(() => {
-        if (isSpectator) return
         setReviewIndex(moveHistory.length)
         setReviewMode(true)
-    }, [moveHistory.length, isSpectator])
+    }, [moveHistory.length])
 
     const exitReview = useCallback(() => {
         setReviewMode(false)
@@ -515,12 +575,11 @@ const ChessGamePage = () => {
                     }
                 }
 
-                if (!isSpectator) {
-                    setMoveHistory((prev) => [
-                        ...prev,
-                        { from: result.from, to: result.to, promotion: result.promotion },
-                    ])
-                }
+                // Same as mobile: spectators also append moves so “Review game” works after watching.
+                setMoveHistory((prev) => [
+                    ...prev,
+                    { from: result.from, to: result.to, promotion: result.promotion },
+                ])
 
                 // Checkmate uses c.mp3; normal check uses king.mp3 (same as mobile).
                 if (chess.isCheckmate()) {
@@ -737,9 +796,14 @@ const ChessGamePage = () => {
         })
 
         socket.on('opponentResigned', () => {
-            showToast('Victory! 🏆', 'Your opponent resigned', 'success')
+            if (isSpectator) {
+                showToast('Game ended', 'A player resigned', 'info')
+                setOver('A player resigned.')
+            } else {
+                showToast('Victory! 🏆', 'Your opponent resigned', 'success')
+                setOver('Your opponent resigned. You win!')
+            }
             setIsGameOver(true)
-            setOver('Your opponent resigned. You win!')
             setShowGameOverBox(true)
             scheduleGameOverOverlayDelay()
         })
@@ -768,6 +832,15 @@ const ChessGamePage = () => {
         socket.on('chessGameCleanup', () => {
             console.log('🎯 [ChessGamePage] Received chessGameCleanup event - clearing chess state')
             console.log('🎯 [ChessGamePage] Before cleanup - localStorage chessOrientation:', localStorage.getItem("chessOrientation"))
+
+            // Spectators: same as mobile — show Game Over overlay, do not tear down the board.
+            if (isSpectator) {
+                setIsGameOver(true)
+                setOver('Game ended.')
+                setShowGameOverBox(true)
+                scheduleGameOverOverlayDelay()
+                return
+            }
             
             // Clear localStorage for both users
             localStorage.removeItem('chessOrientation')
@@ -793,9 +866,14 @@ const ChessGamePage = () => {
 
         // Listen for when opponent leaves the game
         socket.on('opponentLeftGame', () => {
-            showToast('Opponent Left', 'Your opponent left the game', 'info')
+            if (isSpectator) {
+                showToast('Game ended', 'A player left the game', 'info')
+                setOver('A player left the game.')
+            } else {
+                showToast('Opponent Left', 'Your opponent left the game', 'info')
+                setOver('Your opponent left the game.')
+            }
             setIsGameOver(true)
-            setOver('Your opponent left the game.')
             setShowGameOverBox(true)
             scheduleGameOverOverlayDelay()
         })
@@ -958,22 +1036,7 @@ const ChessGamePage = () => {
                 message = 'One of the players disconnected. The game has ended.'
             }
             
-            // Clear localStorage for spectators when game ends
-            // This prevents old game state from showing when joining a new game
-            if (isSpectator) {
-                console.log('👁️ [ChessGamePage] Spectator game ended - clearing localStorage')
-                localStorage.removeItem('chessFEN')
-                localStorage.removeItem('capturedWhite')
-                localStorage.removeItem('capturedBlack')
-                // Reset chess board state
-                chess.reset()
-                setFen(chess.fen())
-                setCapturedWhite([])
-                setCapturedBlack([])
-                setMoveHistory([])
-                setReviewMode(false)
-                setReviewIndex(0)
-            }
+            // Match mobile: keep final position and moveHistory so spectators can use “Review game”.
             
             showToast('Game Ended', message, 'info')
             setIsGameOver(true)
@@ -1275,6 +1338,22 @@ const ChessGamePage = () => {
         return unicodeMap[type]?.[color] || ''
     }
 
+    /** SAN labels for review scrubber (same order as moveHistory). */
+    const reviewMoveSans = useMemo(() => {
+        const replay = new Chess()
+        const out = []
+        for (let i = 0; i < moveHistory.length; i++) {
+            try {
+                const r = replay.move(moveHistory[i])
+                if (r) out.push(r.san)
+                else break
+            } catch {
+                break
+            }
+        }
+        return out
+    }, [moveHistory])
+
     const { boardPosition, capW, capB } = useMemo(() => {
         if (!reviewMode) {
             return { boardPosition: fen, capW: capturedWhite, capB: capturedBlack }
@@ -1458,17 +1537,25 @@ const ChessGamePage = () => {
                             ♟️ Chess Match
                         </Heading>
                         <Button size="xs" variant="outline" colorScheme="yellow" onClick={() => setThemePickerOpen(true)}>
-                            🎨 Board theme
+                            🎨 Board &amp; pieces
                         </Button>
                     </Flex>
-                    {reviewMode && !isSpectator && (
-                        <Text fontSize="xs" textAlign="center" mb={1} color="orange.400" fontWeight="bold">
-                            Review mode — use arrows below the board
-                        </Text>
+                    {reviewMode && (
+                        <motion.div
+                            initial={{ opacity: 0, y: -6 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            transition={{ duration: 0.22, ease: 'easeOut' }}
+                        >
+                            <Text fontSize="xs" textAlign="center" mb={1} color="orange.400" fontWeight="bold">
+                                Review mode — pieces animate between positions; scrub moves below
+                            </Text>
+                        </motion.div>
                     )}
                     {isSpectator ? (
                         <Text fontSize="xs" textAlign="center" mb={1.5} color="#5a3e2b" fontWeight="bold">
-                            👁️ Spectator Mode - Watching Live Game
+                            {gameLive && !reviewMode && !isGameOver
+                                ? `👁️ Watching — ${chess.turn() === 'w' ? 'White to move' : 'Black to move'}`
+                                : '👁️ Spectator mode'}
                         </Text>
                     ) : gameLive && storedOrientation && !reviewMode ? (
                         <Text fontSize="xs" textAlign="center" mb={1.5} color="#5a3e2b" fontWeight="bold">
@@ -1491,13 +1578,14 @@ const ChessGamePage = () => {
                         {/* Madechess line 323-339: Just renders Chessboard with boardOrientation={storedOrientation} */}
                         {/* Key includes orientation to force remount when it changes - CRITICAL for react-chessboard */}
                         <Chessboard
-                            key={`chess-board-${storedOrientation}-${boardThemeId}-${reviewMode ? reviewIndex : 'live'}`}
+                            key={`chess-board-${storedOrientation}-${boardThemeId}-${pieceSetId}-${reviewMode ? 'review' : 'live'}`}
                             position={boardPosition}
                             onPieceDrop={reviewMode || isGameOver ? () => false : onDrop}
                             boardOrientation={storedOrientation}
                             boardWidth={400}
-                            animationDuration={250}
+                            animationDuration={reviewMode ? REVIEW_BOARD_ANIM_MS : 250}
                             arePiecesDraggable={!isSpectator && !reviewMode && !isGameOver}
+                            customPieces={customPieces}
                             customDarkSquareStyle={{
                                 backgroundColor: boardTheme.dark,
                             }}
@@ -1507,27 +1595,94 @@ const ChessGamePage = () => {
                         />
                     </Box>
 
-                    {reviewMode && !isSpectator && (
-                        <HStack justify="center" mt={2} spacing={2} flexWrap="wrap">
-                            <Button size="xs" onClick={reviewJumpToStart} isDisabled={reviewIndex === 0}>
-                                |◀
-                            </Button>
-                            <Button size="xs" onClick={() => reviewStep(-1)} isDisabled={reviewIndex === 0}>
-                                ◀
-                            </Button>
-                            <Text fontSize="xs" minW="72px" textAlign="center" color={textColor}>
-                                {reviewIndex} / {moveHistory.length}
-                            </Text>
-                            <Button size="xs" onClick={() => reviewStep(1)} isDisabled={reviewIndex >= moveHistory.length}>
-                                ▶
-                            </Button>
-                            <Button size="xs" onClick={reviewJumpToEnd} isDisabled={reviewIndex >= moveHistory.length}>
-                                ▶|
-                            </Button>
-                            <Button size="xs" colorScheme="blue" onClick={exitReview}>
-                                Exit review
-                            </Button>
-                        </HStack>
+                    {reviewMode && (
+                        <motion.div
+                            initial={{ opacity: 0, y: 8 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            transition={{ duration: 0.25, ease: 'easeOut' }}
+                            style={{ width: '100%', maxWidth: '400px' }}
+                        >
+                            <HStack justify="center" mt={2} spacing={2} flexWrap="wrap">
+                                <Button size="xs" onClick={reviewJumpToStart} isDisabled={reviewIndex === 0}>
+                                    |◀
+                                </Button>
+                                <Button size="xs" onClick={() => reviewStep(-1)} isDisabled={reviewIndex === 0}>
+                                    ◀
+                                </Button>
+                                <Text fontSize="xs" minW="72px" textAlign="center" color={textColor}>
+                                    {reviewIndex} / {moveHistory.length}
+                                </Text>
+                                <Button size="xs" onClick={() => reviewStep(1)} isDisabled={reviewIndex >= moveHistory.length}>
+                                    ▶
+                                </Button>
+                                <Button size="xs" onClick={reviewJumpToEnd} isDisabled={reviewIndex >= moveHistory.length}>
+                                    ▶|
+                                </Button>
+                                <Button size="xs" colorScheme="blue" onClick={exitReview}>
+                                    Exit review
+                                </Button>
+                            </HStack>
+                            {reviewMoveSans.length > 0 && (
+                                <Box mt={3} overflowX="auto" pb={1} sx={{ WebkitOverflowScrolling: 'touch' }}>
+                                    <LayoutGroup id="chess-review-moves">
+                                        <HStack spacing={1} align="center" minW="min-content" px={0.5}>
+                                            <motion.div layout whileTap={{ scale: 0.96 }}>
+                                                <Button
+                                                    size="xs"
+                                                    variant={reviewIndex === 0 ? 'solid' : 'ghost'}
+                                                    colorScheme={reviewIndex === 0 ? 'orange' : 'gray'}
+                                                    onClick={() => setReviewIndex(0)}
+                                                    flexShrink={0}
+                                                >
+                                                    Start
+                                                </Button>
+                                            </motion.div>
+                                            {reviewMoveSans.map((san, i) => {
+                                                const afterPly = i + 1
+                                                const active = reviewIndex === afterPly
+                                                return (
+                                                    <motion.div
+                                                        key={`${san}-${i}`}
+                                                        layout
+                                                        transition={{ type: 'spring', stiffness: 420, damping: 28 }}
+                                                        whileHover={{ scale: 1.06 }}
+                                                        whileTap={{ scale: 0.94 }}
+                                                        style={{ position: 'relative', flexShrink: 0 }}
+                                                    >
+                                                        {active && (
+                                                            <motion.span
+                                                                layoutId="reviewSanCursor"
+                                                                style={{
+                                                                    position: 'absolute',
+                                                                    inset: '-3px',
+                                                                    borderRadius: '8px',
+                                                                    border: '2px solid',
+                                                                    borderColor: 'var(--chakra-colors-orange-400)',
+                                                                    pointerEvents: 'none',
+                                                                    zIndex: 0,
+                                                                }}
+                                                                transition={{ type: 'spring', stiffness: 380, damping: 30 }}
+                                                            />
+                                                        )}
+                                                        <Button
+                                                            size="xs"
+                                                            variant={active ? 'solid' : 'ghost'}
+                                                            colorScheme={active ? 'orange' : 'gray'}
+                                                            onClick={() => setReviewIndex(afterPly)}
+                                                            position="relative"
+                                                            zIndex={1}
+                                                            fontWeight={active ? 'bold' : 'normal'}
+                                                        >
+                                                            {san}
+                                                        </Button>
+                                                    </motion.div>
+                                                )
+                                            })}
+                                        </HStack>
+                                    </LayoutGroup>
+                                </Box>
+                            )}
+                        </motion.div>
                     )}
 
                     {showGameOverBox && gameOverOverlayVisible && !reviewMode && (
@@ -1554,7 +1709,7 @@ const ChessGamePage = () => {
                                 {over}
                             </Text>
                             <HStack mt={4} spacing={3} flexWrap="wrap" justify="center">
-                                {!isSpectator && moveHistory.length > 0 && (
+                                {moveHistory.length > 0 && (
                                     <Button colorScheme="blue" size="sm" onClick={enterReview}>
                                         Review game
                                     </Button>
@@ -1583,49 +1738,112 @@ const ChessGamePage = () => {
             <Modal isOpen={themePickerOpen} onClose={() => setThemePickerOpen(false)} size="lg" isCentered>
                 <ModalOverlay />
                 <ModalContent bg={cardBg}>
-                    <ModalHeader color={textColor}>Board theme</ModalHeader>
+                    <ModalHeader color={textColor}>Board &amp; pieces</ModalHeader>
                     <ModalCloseButton />
                     <ModalBody pb={6}>
-                        <SimpleGrid columns={{ base: 2, md: 3 }} spacing={3}>
-                            {CHESS_BOARD_THEMES.map((t) => {
-                                const selected = t.id === boardThemeId
-                                return (
-                                    <Button
-                                        key={t.id}
-                                        variant={selected ? 'solid' : 'outline'}
-                                        colorScheme={selected ? 'blue' : 'gray'}
-                                        flexDirection="column"
-                                        h="auto"
-                                        py={3}
-                                        onClick={() => selectBoardTheme(t.id)}
-                                    >
-                                        <Flex
-                                            mb={2}
-                                            borderRadius="md"
-                                            overflow="hidden"
-                                            w="72px"
-                                            h="72px"
-                                            borderWidth={selected ? 2 : 1}
-                                            borderColor={selected ? 'blue.400' : 'gray.500'}
-                                            flexDirection="column"
-                                        >
-                                            {[0, 1, 2, 3].map((r) => (
-                                                <Flex key={r} w="100%" flex="1">
-                                                    {[0, 1, 2, 3].map((c) => (
-                                                        <Box
-                                                            key={c}
-                                                            flex="1"
-                                                            bg={(r + c) % 2 === 0 ? t.light : t.dark}
+                        <Tabs variant="soft-rounded" colorScheme="yellow" isLazy>
+                            <TabList mb={3} flexWrap="wrap" gap={1}>
+                                <Tab>Square colors</Tab>
+                                <Tab>Piece style</Tab>
+                            </TabList>
+                            <TabPanels>
+                                <TabPanel px={0}>
+                                    <SimpleGrid columns={{ base: 2, md: 3 }} spacing={3}>
+                                        {CHESS_BOARD_THEMES.map((t) => {
+                                            const selected = t.id === boardThemeId
+                                            return (
+                                                <Button
+                                                    key={t.id}
+                                                    variant={selected ? 'solid' : 'outline'}
+                                                    colorScheme={selected ? 'blue' : 'gray'}
+                                                    flexDirection="column"
+                                                    h="auto"
+                                                    py={3}
+                                                    onClick={() => selectBoardTheme(t.id)}
+                                                >
+                                                    <Flex
+                                                        mb={2}
+                                                        borderRadius="md"
+                                                        overflow="hidden"
+                                                        w="72px"
+                                                        h="72px"
+                                                        borderWidth={selected ? 2 : 1}
+                                                        borderColor={selected ? 'blue.400' : 'gray.500'}
+                                                        flexDirection="column"
+                                                    >
+                                                        {[0, 1, 2, 3].map((r) => (
+                                                            <Flex key={r} w="100%" flex="1">
+                                                                {[0, 1, 2, 3].map((c) => (
+                                                                    <Box
+                                                                        key={c}
+                                                                        flex="1"
+                                                                        bg={(r + c) % 2 === 0 ? t.light : t.dark}
+                                                                    />
+                                                                ))}
+                                                            </Flex>
+                                                        ))}
+                                                    </Flex>
+                                                    <Text fontSize="sm">{t.nameEn}</Text>
+                                                </Button>
+                                            )
+                                        })}
+                                    </SimpleGrid>
+                                </TabPanel>
+                                <TabPanel px={0}>
+                                    <SimpleGrid columns={{ base: 2, md: 3 }} spacing={3}>
+                                        {CHESS_PIECE_SETS.map((p) => {
+                                            const selected = p.id === pieceSetId
+                                            const preview = lichessPieceSvgUrl(p.id, 'wN')
+                                            return (
+                                                <Button
+                                                    key={p.id}
+                                                    variant={selected ? 'solid' : 'outline'}
+                                                    colorScheme={selected ? 'blue' : 'gray'}
+                                                    flexDirection="column"
+                                                    h="auto"
+                                                    py={3}
+                                                    onClick={() => selectPieceSet(p.id)}
+                                                >
+                                                    <Box
+                                                        mb={2}
+                                                        borderRadius="md"
+                                                        w="72px"
+                                                        h="72px"
+                                                        borderWidth={selected ? 2 : 1}
+                                                        borderColor={selected ? 'blue.400' : 'gray.500'}
+                                                        bg="#F0D9B5"
+                                                        display="flex"
+                                                        alignItems="center"
+                                                        justifyContent="center"
+                                                        dir="ltr"
+                                                        sx={{ direction: 'ltr' }}
+                                                    >
+                                                        <img
+                                                            src={preview}
+                                                            alt=""
+                                                            width={56}
+                                                            height={56}
+                                                            draggable={false}
+                                                            style={{
+                                                                objectFit: 'contain',
+                                                                display: 'block',
+                                                                pointerEvents: 'none',
+                                                            }}
                                                         />
-                                                    ))}
-                                                </Flex>
-                                            ))}
-                                        </Flex>
-                                        <Text fontSize="sm">{t.nameEn}</Text>
-                                    </Button>
-                                )
-                            })}
-                        </SimpleGrid>
+                                                    </Box>
+                                                    <Text fontSize="sm" fontWeight="600">
+                                                        {p.nameEn}
+                                                    </Text>
+                                                    <Text fontSize="xs" color="gray.500">
+                                                        {p.nameAr}
+                                                    </Text>
+                                                </Button>
+                                            )
+                                        })}
+                                    </SimpleGrid>
+                                </TabPanel>
+                            </TabPanels>
+                        </Tabs>
                     </ModalBody>
                 </ModalContent>
             </Modal>
