@@ -1,3 +1,7 @@
+/* Reserve scrollbar width so opening Chakra modals (body scroll lock) does not shift the layout sideways. */
+html {
+	scrollbar-gutter: stable;
+}
 
 .icon-container {
 	border-radius: 50%;

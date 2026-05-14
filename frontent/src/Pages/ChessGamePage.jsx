@@ -114,6 +114,7 @@ const ChessGamePage = () => {
     /** Modal tabs: 0 = square colors, 1 = piece style (for scroll-into-view on open). */
     const [themeModalTabIndex, setThemeModalTabIndex] = useState(0)
     const selectedPieceSetItemRef = useRef(null)
+    const selectedBoardThemeItemRef = useRef(null)
     const userPickedBoardThemeRef = useRef(false)
     const [pieceSetId, setPieceSetId] = useState(() => {
         try {
@@ -197,7 +198,6 @@ const ChessGamePage = () => {
     const selectBoardTheme = useCallback((id) => {
         userPickedBoardThemeRef.current = true
         setBoardThemeId(id)
-        setThemePickerOpen(false)
         try {
             localStorage.setItem(BOARD_THEME_STORAGE_KEY, id)
         } catch {
@@ -207,7 +207,6 @@ const ChessGamePage = () => {
 
     const selectPieceSet = useCallback((id) => {
         setPieceSetId(id)
-        setThemePickerOpen(false)
         try {
             localStorage.setItem(PIECE_SET_STORAGE_KEY, id)
         } catch {
@@ -215,20 +214,23 @@ const ChessGamePage = () => {
         }
     }, [])
 
-    /** Keep the selected piece card visible inside the modal (bottom rows were clipped). */
+    /** Keep the selected theme/piece row in view; both tabs use a scroll region (square colors was clipping). */
     useEffect(() => {
-        if (!themePickerOpen || themeModalTabIndex !== 1) return
+        if (!themePickerOpen) return
         const id = window.setTimeout(() => {
-            const el = selectedPieceSetItemRef.current
+            const el =
+                themeModalTabIndex === 1
+                    ? selectedPieceSetItemRef.current
+                    : selectedBoardThemeItemRef.current
             if (!el || typeof el.scrollIntoView !== 'function') return
             try {
-                el.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'smooth' })
+                el.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' })
             } catch {
                 el.scrollIntoView(true)
             }
         }, 80)
         return () => window.clearTimeout(id)
-    }, [themePickerOpen, themeModalTabIndex, pieceSetId])
+    }, [themePickerOpen, themeModalTabIndex, pieceSetId, boardThemeId])
 
     // Create Chess instance
     const chess = useMemo(() => new Chess(), [])
@@ -1620,7 +1622,7 @@ const ChessGamePage = () => {
                         {/* Madechess line 323-339: Just renders Chessboard with boardOrientation={storedOrientation} */}
                         {/* Key includes orientation to force remount when it changes - CRITICAL for react-chessboard */}
                         <Chessboard
-                            key={`chess-board-${storedOrientation}-${boardThemeId}-${pieceSetId}-${reviewMode ? 'review' : 'live'}`}
+                            key={`chess-board-${storedOrientation}-${reviewMode ? 'review' : 'live'}`}
                             position={boardPosition}
                             onPieceDrop={reviewMode || isGameOver ? () => false : onDrop}
                             boardOrientation={storedOrientation}
@@ -1785,31 +1787,47 @@ const ChessGamePage = () => {
                 }}
                 size="lg"
                 isCentered
+                motionPreset="none"
             >
                 <ModalOverlay />
-                <ModalContent bg={cardBg} maxH="90vh" overflow="hidden">
-                    <ModalHeader color={textColor}>Board &amp; pieces</ModalHeader>
+                <ModalContent bg={cardBg} maxH="90vh" overflow="hidden" display="flex" flexDirection="column">
+                    <ModalHeader color={textColor} flexShrink={0}>
+                        Board &amp; pieces
+                    </ModalHeader>
                     <ModalCloseButton />
-                    <ModalBody pb={6} overflow="hidden">
+                    <ModalBody pb={6} pt={0} overflow="hidden" display="flex" flexDirection="column" flex="1" minH={0}>
                         <Tabs
                             variant="soft-rounded"
                             colorScheme="yellow"
                             isLazy
                             index={themeModalTabIndex}
                             onChange={setThemeModalTabIndex}
+                            display="flex"
+                            flexDirection="column"
+                            flex="1"
+                            minH={0}
                         >
-                            <TabList mb={3} flexWrap="wrap" gap={1}>
+                            <TabList mb={3} flexWrap="wrap" gap={1} flexShrink={0}>
                                 <Tab>Square colors</Tab>
                                 <Tab>Piece style</Tab>
                             </TabList>
-                            <TabPanels>
-                                <TabPanel px={0}>
+                            <TabPanels flex="1" minH={0}>
+                                <TabPanel px={0} display="flex" flexDirection="column" minH={0}>
+                                    <Box
+                                        maxH="min(52vh, 440px)"
+                                        overflowY="auto"
+                                        overflowX="hidden"
+                                        pr={1}
+                                        pb={6}
+                                        sx={{ WebkitOverflowScrolling: 'touch' }}
+                                    >
                                     <SimpleGrid columns={{ base: 2, md: 3 }} spacing={3}>
                                         {CHESS_BOARD_THEMES.map((t) => {
                                             const selected = t.id === boardThemeId
                                             return (
                                                 <Button
                                                     key={t.id}
+                                                    ref={selected ? selectedBoardThemeItemRef : undefined}
                                                     variant={selected ? 'solid' : 'outline'}
                                                     colorScheme={selected ? 'blue' : 'gray'}
                                                     flexDirection="column"
@@ -1844,13 +1862,15 @@ const ChessGamePage = () => {
                                             )
                                         })}
                                     </SimpleGrid>
+                                    </Box>
                                 </TabPanel>
-                                <TabPanel px={0}>
+                                <TabPanel px={0} display="flex" flexDirection="column" minH={0}>
                                     <Box
                                         maxH="min(52vh, 440px)"
                                         overflowY="auto"
                                         overflowX="hidden"
                                         pr={1}
+                                        pb={6}
                                         sx={{ WebkitOverflowScrolling: 'touch' }}
                                     >
                                         <SimpleGrid columns={{ base: 2, md: 3 }} spacing={3}>
