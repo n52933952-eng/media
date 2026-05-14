@@ -882,9 +882,11 @@ export const getUserProfile = async(req,res) => {
 }
 
 
-// User search (web + mobile): min length + prefix match so short queries do not scan the whole collection.
-const USER_SEARCH_MIN_LEN = 2
+// User search (web + mobile): prefix match. One letter = username-only + small cap (index-friendly).
+// Two+ letters = username or display name prefix, slightly larger cap.
 const USER_SEARCH_MAX_LEN = 48
+const USER_SEARCH_SINGLE_CHAR_LIMIT = 15
+const USER_SEARCH_MULTI_CHAR_LIMIT = 20
 
 export const searchUsers = async(req, res) => {
     try {
@@ -896,7 +898,7 @@ export const searchUsers = async(req, res) => {
         }
 
         const trimmed = query.trim()
-        if (trimmed === '' || trimmed.length < USER_SEARCH_MIN_LEN) {
+        if (trimmed === '') {
             return res.status(200).json([])
         }
         if (trimmed.length > USER_SEARCH_MAX_LEN) {
@@ -914,14 +916,26 @@ export const searchUsers = async(req, res) => {
             ...LEGACY_LIVE_CHANNEL_USERNAMES
         ]
 
-        // Prefix-only match on username and display name (case-insensitive).
-        // Substring match on a single letter scanned almost the whole collection and could not use a normal index well.
         const escaped = trimmed.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
         const prefixRegex = new RegExp(`^${escaped}`, 'i')
-        const searchAnd = [
-            { $or: [{ username: prefixRegex }, { name: prefixRegex }] },
-            { username: { $nin: systemAccounts } },
-        ]
+
+        // One character: only usernames starting with that letter — bounded limit, uses username index.
+        // (Matching `name` on a single letter is too wide without a dedicated text index.)
+        let searchAnd
+        let resultLimit
+        if (trimmed.length === 1) {
+            searchAnd = [
+                { username: prefixRegex },
+                { username: { $nin: systemAccounts } },
+            ]
+            resultLimit = USER_SEARCH_SINGLE_CHAR_LIMIT
+        } else {
+            searchAnd = [
+                { $or: [{ username: prefixRegex }, { name: prefixRegex }] },
+                { username: { $nin: systemAccounts } },
+            ]
+            resultLimit = USER_SEARCH_MULTI_CHAR_LIMIT
+        }
         // Never return the logged-in user (mobile + web user search)
         if (req.user?._id) {
             searchAnd.push({ _id: { $ne: req.user._id } })
@@ -929,7 +943,7 @@ export const searchUsers = async(req, res) => {
         const users = await User.find({ $and: searchAnd })
         // Include followers for legacy-only follow rows (same dual-read as getUserProfile)
         .select('username name profilePic bio followers')
-        .limit(20)
+        .limit(resultLimit)
 
         // Attach isFollowedByMe per result: Follow collection first, then legacy followers[] on target user
         const viewerId = req.user?._id
