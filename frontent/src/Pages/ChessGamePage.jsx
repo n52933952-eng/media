@@ -1477,7 +1477,16 @@ const ChessGamePage = () => {
                         </Text>
                     ) : null}
 
-                    <Box w="400px" h="400px">
+                    <Box
+                        w="400px"
+                        h="400px"
+                        dir="ltr"
+                        sx={{
+                            direction: 'ltr',
+                            unicodeBidi: 'isolate',
+                        }}
+                    >
+                        {/* LTR: same a→h geometry for all languages (Arabic RTL was mirroring the grid). */}
                         {/* Render board directly like madechess - no conditional rendering */}
                         {/* Madechess line 323-339: Just renders Chessboard with boardOrientation={storedOrientation} */}
                         {/* Key includes orientation to force remount when it changes - CRITICAL for react-chessboard */}
