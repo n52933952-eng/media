@@ -111,6 +111,9 @@ const ChessGamePage = () => {
         return DEFAULT_CHESS_BOARD_THEME_ID
     })
     const [themePickerOpen, setThemePickerOpen] = useState(false)
+    /** Modal tabs: 0 = square colors, 1 = piece style (for scroll-into-view on open). */
+    const [themeModalTabIndex, setThemeModalTabIndex] = useState(0)
+    const selectedPieceSetItemRef = useRef(null)
     const userPickedBoardThemeRef = useRef(false)
     const [pieceSetId, setPieceSetId] = useState(() => {
         try {
@@ -211,6 +214,21 @@ const ChessGamePage = () => {
             void 0
         }
     }, [])
+
+    /** Keep the selected piece card visible inside the modal (bottom rows were clipped). */
+    useEffect(() => {
+        if (!themePickerOpen || themeModalTabIndex !== 1) return
+        const id = window.setTimeout(() => {
+            const el = selectedPieceSetItemRef.current
+            if (!el || typeof el.scrollIntoView !== 'function') return
+            try {
+                el.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'smooth' })
+            } catch {
+                el.scrollIntoView(true)
+            }
+        }, 80)
+        return () => window.clearTimeout(id)
+    }, [themePickerOpen, themeModalTabIndex, pieceSetId])
 
     // Create Chess instance
     const chess = useMemo(() => new Chess(), [])
@@ -1222,9 +1240,15 @@ const ChessGamePage = () => {
         setGameLive(false)
         setOrientation(null)
         
+        // Same event name as mobile `CHESS_GAME_FEED_UI_ENDED` — your feed flips Live → Ended when you leave (socket may not echo to you).
+        if (roomId && !isSpectator) {
+            const s = String(roomId).trim()
+            if (s) window.dispatchEvent(new CustomEvent('chessGameFeedUiEnded', { detail: { roomId: s } }))
+        }
+
         // Navigate to home
         navigate('/home')
-    }, [chess, navigate, socket, roomId, opponentId, user?._id, gameLive, clearGameOverOverlayDelay])
+    }, [chess, navigate, socket, roomId, opponentId, user?._id, gameLive, clearGameOverOverlayDelay, isSpectator])
 
     const handleResign = () => {
         if (!socket) return
@@ -1240,6 +1264,16 @@ const ChessGamePage = () => {
     useEffect(() => {
         handleGameEndRef.current = handleGameEnd
     }, [handleGameEnd])
+
+    /** When leaving the chess route for any reason, flip your feed card (same as mobile `beforeRemove`). */
+    useEffect(() => {
+        return () => {
+            if (!isSpectator && roomId) {
+                const s = String(roomId).trim()
+                if (s) window.dispatchEvent(new CustomEvent('chessGameFeedUiEnded', { detail: { roomId: s } }))
+            }
+        }
+    }, [isSpectator, roomId])
 
     // Handle page unload (browser close/refresh) - DON'T cancel game on refresh
     // Only cleanup if user explicitly navigates away (not page refresh)
@@ -1536,7 +1570,15 @@ const ChessGamePage = () => {
                         <Heading size="md" color="#5a3e2b" textAlign="left" flex="1" minW="120px">
                             ♟️ Chess Match
                         </Heading>
-                        <Button size="xs" variant="outline" colorScheme="yellow" onClick={() => setThemePickerOpen(true)}>
+                        <Button
+                            size="xs"
+                            variant="outline"
+                            colorScheme="yellow"
+                            onClick={() => {
+                                setThemeModalTabIndex(0)
+                                setThemePickerOpen(true)
+                            }}
+                        >
                             🎨 Board &amp; pieces
                         </Button>
                     </Flex>
@@ -1735,13 +1777,27 @@ const ChessGamePage = () => {
                 </Box>
             </Flex>
 
-            <Modal isOpen={themePickerOpen} onClose={() => setThemePickerOpen(false)} size="lg" isCentered>
+            <Modal
+                isOpen={themePickerOpen}
+                onClose={() => {
+                    setThemeModalTabIndex(0)
+                    setThemePickerOpen(false)
+                }}
+                size="lg"
+                isCentered
+            >
                 <ModalOverlay />
-                <ModalContent bg={cardBg}>
+                <ModalContent bg={cardBg} maxH="90vh" overflow="hidden">
                     <ModalHeader color={textColor}>Board &amp; pieces</ModalHeader>
                     <ModalCloseButton />
-                    <ModalBody pb={6}>
-                        <Tabs variant="soft-rounded" colorScheme="yellow" isLazy>
+                    <ModalBody pb={6} overflow="hidden">
+                        <Tabs
+                            variant="soft-rounded"
+                            colorScheme="yellow"
+                            isLazy
+                            index={themeModalTabIndex}
+                            onChange={setThemeModalTabIndex}
+                        >
                             <TabList mb={3} flexWrap="wrap" gap={1}>
                                 <Tab>Square colors</Tab>
                                 <Tab>Piece style</Tab>
@@ -1790,13 +1846,21 @@ const ChessGamePage = () => {
                                     </SimpleGrid>
                                 </TabPanel>
                                 <TabPanel px={0}>
-                                    <SimpleGrid columns={{ base: 2, md: 3 }} spacing={3}>
+                                    <Box
+                                        maxH="min(52vh, 440px)"
+                                        overflowY="auto"
+                                        overflowX="hidden"
+                                        pr={1}
+                                        sx={{ WebkitOverflowScrolling: 'touch' }}
+                                    >
+                                        <SimpleGrid columns={{ base: 2, md: 3 }} spacing={3}>
                                         {CHESS_PIECE_SETS.map((p) => {
                                             const selected = p.id === pieceSetId
                                             const preview = lichessPieceSvgUrl(p.id, 'wN')
                                             return (
                                                 <Button
                                                     key={p.id}
+                                                    ref={selected ? selectedPieceSetItemRef : undefined}
                                                     variant={selected ? 'solid' : 'outline'}
                                                     colorScheme={selected ? 'blue' : 'gray'}
                                                     flexDirection="column"
@@ -1840,7 +1904,8 @@ const ChessGamePage = () => {
                                                 </Button>
                                             )
                                         })}
-                                    </SimpleGrid>
+                                        </SimpleGrid>
+                                    </Box>
                                 </TabPanel>
                             </TabPanels>
                         </Tabs>
