@@ -206,6 +206,9 @@ const ChessGamePage = () => {
             setFen(chess.fen())
             setCapturedWhite([])
             setCapturedBlack([])
+            setMoveHistory([])
+            setReviewMode(false)
+            setReviewIndex(0)
             
             console.log('👁️ [ChessGamePage] Spectator mode activated - roomId:', urlRoomId)
             console.log('👁️ [ChessGamePage] Waiting for game state from backend...')
@@ -411,9 +414,10 @@ const ChessGamePage = () => {
     }
 
     const enterReview = useCallback(() => {
+        if (isSpectator) return
         setReviewIndex(moveHistory.length)
         setReviewMode(true)
-    }, [moveHistory.length])
+    }, [moveHistory.length, isSpectator])
 
     const exitReview = useCallback(() => {
         setReviewMode(false)
@@ -511,10 +515,12 @@ const ChessGamePage = () => {
                     }
                 }
 
-                setMoveHistory((prev) => [
-                    ...prev,
-                    { from: result.from, to: result.to, promotion: result.promotion },
-                ])
+                if (!isSpectator) {
+                    setMoveHistory((prev) => [
+                        ...prev,
+                        { from: result.from, to: result.to, promotion: result.promotion },
+                    ])
+                }
 
                 // Checkmate uses c.mp3; normal check uses king.mp3 (same as mobile).
                 if (chess.isCheckmate()) {
@@ -541,8 +547,8 @@ const ChessGamePage = () => {
                     setShowGameOverBox(true)
                     scheduleGameOverOverlayDelay()
 
-                    // Notify backend that game ended - marks both players as available
-                    if (socket && roomId && opponentId && user?._id) {
+                    // Only players notify backend; spectators must not emit chessGameEnd.
+                    if (!isSpectator && socket && roomId && opponentId && user?._id) {
                         const gameEndReason = chess.isCheckmate() ? 'checkmate' : chess.isDraw() ? 'draw' : 'game_over'
                         socket.emit('chessGameEnd', {
                             roomId,
@@ -560,7 +566,7 @@ const ChessGamePage = () => {
         } catch {
             return null
         }
-    }, [chess, socket, roomId, opponentId, user?._id, scheduleGameOverOverlayDelay])
+    }, [chess, socket, roomId, opponentId, user?._id, scheduleGameOverOverlayDelay, isSpectator])
 
     // Socket: Accept chess challenge and handle spectator mode
     useEffect(() => {
@@ -964,6 +970,9 @@ const ChessGamePage = () => {
                 setFen(chess.fen())
                 setCapturedWhite([])
                 setCapturedBlack([])
+                setMoveHistory([])
+                setReviewMode(false)
+                setReviewIndex(0)
             }
             
             showToast('Game Ended', message, 'info')
@@ -1452,7 +1461,7 @@ const ChessGamePage = () => {
                             🎨 Board theme
                         </Button>
                     </Flex>
-                    {reviewMode && (
+                    {reviewMode && !isSpectator && (
                         <Text fontSize="xs" textAlign="center" mb={1} color="orange.400" fontWeight="bold">
                             Review mode — use arrows below the board
                         </Text>
@@ -1489,7 +1498,7 @@ const ChessGamePage = () => {
                         />
                     </Box>
 
-                    {reviewMode && (
+                    {reviewMode && !isSpectator && (
                         <HStack justify="center" mt={2} spacing={2} flexWrap="wrap">
                             <Button size="xs" onClick={reviewJumpToStart} isDisabled={reviewIndex === 0}>
                                 |◀
@@ -1530,13 +1539,13 @@ const ChessGamePage = () => {
                             minW="260px"
                         >
                             <Heading size="md" mb={2}>
-                                Game Over
+                                {isSpectator ? 'Game ended' : 'Game Over'}
                             </Heading>
                             <Text fontSize="lg" textAlign="center">
                                 {over}
                             </Text>
                             <HStack mt={4} spacing={3} flexWrap="wrap" justify="center">
-                                {moveHistory.length > 0 && (
+                                {!isSpectator && moveHistory.length > 0 && (
                                     <Button colorScheme="blue" size="sm" onClick={enterReview}>
                                         Review game
                                     </Button>
