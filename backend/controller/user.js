@@ -59,6 +59,26 @@ async function safeCloudinaryDestroyPublicId(publicId, resourceType = 'image') {
   }
 }
 
+/**
+ * Canonical follow graph from `Follow` (same source as isFollowedByMe / suggested exclusions).
+ * Keeps `User.following` / `User.followers` drift from affecting `/me` and mobile session after web follow.
+ * Does NOT change suggestion/search algorithms — only the arrays returned on session refresh.
+ */
+const FOLLOW_GRAPH_QUERY_LIMIT = 5000
+async function getFollowGraphArraysFromCollection(userId) {
+  if (!userId) {
+    return { following: [], followers: [] }
+  }
+  const [followingDocs, followerDocs] = await Promise.all([
+    Follow.find({ followerId: userId }).select('followeeId').limit(FOLLOW_GRAPH_QUERY_LIMIT).lean(),
+    Follow.find({ followeeId: userId }).select('followerId').limit(FOLLOW_GRAPH_QUERY_LIMIT).lean(),
+  ])
+  return {
+    following: (followingDocs || []).map((d) => d.followeeId).filter(Boolean),
+    followers: (followerDocs || []).map((d) => d.followerId).filter(Boolean),
+  }
+}
+
 
 
 
@@ -214,6 +234,15 @@ export const getMe = async (req, res) => {
     if (!user) {
       return res.status(404).json({ error: 'User not found' })
     }
+    let following = user.following || []
+    let followers = user.followers || []
+    try {
+      const fromFollow = await getFollowGraphArraysFromCollection(req.user._id)
+      if (Array.isArray(fromFollow.following)) following = fromFollow.following
+      if (Array.isArray(fromFollow.followers)) followers = fromFollow.followers
+    } catch (e) {
+      console.error('getMe: follow graph from Follow collection failed, using User document arrays:', e?.message || e)
+    }
     res.status(200).json({
       _id: user._id,
       username: user.username,
@@ -223,8 +252,8 @@ export const getMe = async (req, res) => {
       profilePic: user.profilePic,
       country: user.country,
       instagram: user.instagram,
-      followers: user.followers || [],
-      following: user.following || [],
+      followers,
+      following,
     })
   } catch (error) {
     console.error('getMe error:', error)
@@ -913,10 +942,11 @@ export const searchUsers = async(req, res) => {
                 { username: { $nin: systemAccounts } }
             ]
         })
-        .select('username name profilePic bio')
+        // Include followers for legacy-only follow rows (same dual-read as getUserProfile)
+        .select('username name profilePic bio followers')
         .limit(20)
 
-        // Attach isFollowedByMe per result using Follow collection (accurate, not stale)
+        // Attach isFollowedByMe per result: Follow collection first, then legacy followers[] on target user
         const viewerId = req.user?._id
         let followedSet = new Set()
         if (viewerId && users.length > 0) {
@@ -927,10 +957,22 @@ export const searchUsers = async(req, res) => {
             followDocs.forEach(d => followedSet.add(d.followeeId.toString()))
         }
 
-        const result = users.map(u => ({
-            ...u.toObject(),
-            isFollowedByMe: followedSet.has(u._id.toString())
-        }))
+        const vid = viewerId ? viewerId.toString() : ''
+        const result = users.map((u) => {
+            const uo = u.toObject ? u.toObject() : { ...u }
+            const legacyFollowers = Array.isArray(uo.followers) ? uo.followers : []
+            let isFollowedByMe = followedSet.has(u._id.toString())
+            if (viewerId && !isFollowedByMe && legacyFollowers.length > 0 && vid) {
+                isFollowedByMe = legacyFollowers.some((id) => (id?.toString?.() ?? String(id)) === vid)
+            }
+            const { followers: _omitFollowers, following: _omitFollowing, ...rest } = uo
+            return {
+                ...rest,
+                followers: [],
+                following: [],
+                isFollowedByMe,
+            }
+        })
 
         res.status(200).json(result)
     }

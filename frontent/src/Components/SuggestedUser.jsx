@@ -1,22 +1,34 @@
-import React, { useState, useContext } from 'react'
-import { Avatar, Box, Button, Flex, Text, useToast } from '@chakra-ui/react'
+import React, { useState, useContext, useMemo } from 'react'
+import { Avatar, Box, Button, Flex, Text } from '@chakra-ui/react'
 import { Link } from 'react-router-dom'
 import { UserContext } from '../context/UserContext'
 import useShowToast from '../hooks/useShowToast'
 
-const SuggestedUser = ({ user, onFollowed, onUserFollowed }) => {
-  const toast = useToast()
+const SuggestedUser = ({ user, onFollowed, onUserFollowed, onPatchFollowState }) => {
   const showToast = useShowToast()
   const { user: currentUser, setUser } = useContext(UserContext)
-  
-  // Prefer isFollowedByMe from API (accurate, checked against Follow collection)
-  // Fall back to stale local following array only if API didn't return isFollowedByMe
-  const [following, setFollowing] = useState(
-    user?.isFollowedByMe ??
-    currentUser?.following?.some(id => id?.toString() === user._id?.toString()) ??
-    false
-  )
+
   const [updating, setUpdating] = useState(false)
+
+  /** Stable key so we recompute when /me merges a new following[] after mobile follow */
+  const followingFingerprint = useMemo(() => {
+    const list = currentUser?.following
+    if (!Array.isArray(list) || list.length === 0) return ''
+    return [...list].map((f) => (f?.toString?.() ?? String(f))).filter(Boolean).sort().join(',')
+  }, [currentUser?.following])
+
+  /**
+   * Show Unfollow if either the server row says so OR your session following[] contains them
+   * (covers: followed on mobile → web /me refreshed; search row still loading isFollowedByMe).
+   */
+  const followed = useMemo(() => {
+    const uid = user?._id?.toString?.() ?? String(user?._id ?? '')
+    const inSession =
+      currentUser?.following?.some((id) => (id?.toString?.() ?? String(id)) === uid) ?? false
+    const api = user?.isFollowedByMe
+    const fromApi = typeof api === 'boolean' ? api : false
+    return Boolean(fromApi || inSession)
+  }, [user?._id, user?.isFollowedByMe, followingFingerprint, currentUser?._id])
 
   const handleFollow = async () => {
     if (!currentUser) {
@@ -49,8 +61,8 @@ const SuggestedUser = ({ user, onFollowed, onUserFollowed }) => {
         return
       }
 
-      // Update local state
-      setFollowing(!following)
+      const nextFollowing = !followed
+      onPatchFollowState?.(user._id, nextFollowing)
       
       // Update current user's following list and localStorage
       // Backend returns { action: "follow"/"unfollow", current: updatedUser, target: targetUser }
@@ -63,9 +75,9 @@ const SuggestedUser = ({ user, onFollowed, onUserFollowed }) => {
         setUser(prev => {
           const updated = {
             ...prev,
-            following: following 
+            following: followed
               ? prev.following.filter(id => id.toString() !== user._id.toString())
-              : [...prev.following, user._id]
+              : [...(prev.following || []), user._id]
           }
           localStorage.setItem("userInfo", JSON.stringify(updated))
           return updated
@@ -73,18 +85,18 @@ const SuggestedUser = ({ user, onFollowed, onUserFollowed }) => {
       }
 
       // Notify parent component to remove this user from suggestions when followed
-      if (!following && onFollowed) {
+      if (!followed && onFollowed) {
         onFollowed(user._id)
       }
 
       // Fetch user's posts immediately when followed (for feed update)
-      if (!following && onUserFollowed) {
+      if (!followed && onUserFollowed) {
         onUserFollowed(user._id)
       }
 
       showToast(
         'Success',
-        following ? `Unfollowed ${user.name || user.username}` : `Following ${user.name || user.username}`,
+        followed ? `Unfollowed ${user.name || user.username}` : `Following ${user.name || user.username}`,
         'success'
       )
     } catch (error) {
@@ -118,15 +130,15 @@ const SuggestedUser = ({ user, onFollowed, onUserFollowed }) => {
 
       <Button
         size="sm"
-        colorScheme={following ? 'gray' : 'blue'}
-        variant={following ? 'outline' : 'solid'}
+        colorScheme={followed ? 'gray' : 'blue'}
+        variant={followed ? 'outline' : 'solid'}
         onClick={handleFollow}
         isLoading={updating}
         isDisabled={updating}
         flexShrink={0}
         transition="all 0.2s ease"
       >
-        {following ? 'Unfollow' : 'Follow'}
+        {followed ? 'Unfollow' : 'Follow'}
       </Button>
     </Flex>
   )

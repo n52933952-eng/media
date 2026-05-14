@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useContext, useCallback } from 'react'
+import React, { useState, useEffect, useContext, useCallback, useRef } from 'react'
 import { Box, Flex, Text, Input, InputGroup, InputLeftElement, Spinner, IconButton, Tooltip, useColorModeValue } from '@chakra-ui/react'
 import { SearchIcon, RepeatIcon } from '@chakra-ui/icons'
 import SuggestedUser from './SuggestedUser'
@@ -13,6 +13,7 @@ const SuggestedUsers = ({ onUserFollowed }) => {
   const [searchResults, setSearchResults] = useState([])
   const [searchLoading, setSearchLoading] = useState(false)
   const [suggestedRefreshing, setSuggestedRefreshing] = useState(false)
+  const searchRefetchTimerRef = useRef(null)
 
   const bgColor = useColorModeValue('white', '#1a1a1a')
   const borderColor = useColorModeValue('gray.200', '#2d2d2d')
@@ -81,7 +82,7 @@ const SuggestedUsers = ({ onUserFollowed }) => {
   }, [user?._id])
 
   // Search users
-  const handleSearch = async (query) => {
+  const handleSearch = useCallback(async (query) => {
     setSearchQuery(query)
 
     if (query.trim().length === 0) {
@@ -107,7 +108,36 @@ const SuggestedUsers = ({ onUserFollowed }) => {
     } finally {
       setSearchLoading(false)
     }
-  }
+  }, [])
+
+  // Re-run active search when tab regains focus (follow/unfollow on mobile or another tab)
+  useEffect(() => {
+    const q = searchQuery.trim()
+    if (!q) return undefined
+
+    const run = () => {
+      if (document.visibilityState !== 'visible') return
+      if (searchRefetchTimerRef.current) clearTimeout(searchRefetchTimerRef.current)
+      searchRefetchTimerRef.current = window.setTimeout(() => {
+        searchRefetchTimerRef.current = null
+        handleSearch(q)
+      }, 400)
+    }
+
+    document.addEventListener('visibilitychange', run)
+    window.addEventListener('focus', run)
+    window.addEventListener('pageshow', run)
+
+    return () => {
+      document.removeEventListener('visibilitychange', run)
+      window.removeEventListener('focus', run)
+      window.removeEventListener('pageshow', run)
+      if (searchRefetchTimerRef.current) {
+        clearTimeout(searchRefetchTimerRef.current)
+        searchRefetchTimerRef.current = null
+      }
+    }
+  }, [searchQuery, handleSearch])
 
   useEffect(() => {
     if (user?._id) {
@@ -125,6 +155,15 @@ const SuggestedUsers = ({ onUserFollowed }) => {
     // Also remove from search results if it's there
     setSearchResults(prev => prev.filter(u => u._id !== followedUserId))
   }
+
+  /** Keep search row `isFollowedByMe` in sync after follow/unfollow on web (stale API + session mismatch). */
+  const patchSearchUserFollowFlag = useCallback((userId, isFollowedByMe) => {
+    const idStr = userId?.toString?.() ?? String(userId ?? '')
+    if (!idStr) return
+    setSearchResults((prev) =>
+      prev.map((u) => ((u._id?.toString?.() ?? String(u._id)) === idStr ? { ...u, isFollowedByMe } : u)),
+    )
+  }, [])
 
   // REMOVED: Auto-refresh on following change - causes page refresh and jumping
   // The handleUserFollowed function above already removes the user immediately
@@ -222,6 +261,7 @@ const SuggestedUsers = ({ onUserFollowed }) => {
                       user={searchUser}
                       onFollowed={handleUserFollowed}
                       onUserFollowed={onUserFollowed}
+                      onPatchFollowState={patchSearchUserFollowFlag}
                     />
                   ))}
               </Flex>
@@ -279,6 +319,7 @@ const SuggestedUsers = ({ onUserFollowed }) => {
                     user={suggestedUser}
                     onFollowed={handleUserFollowed}
                     onUserFollowed={onUserFollowed}
+                    onPatchFollowState={patchSearchUserFollowFlag}
                   />
                 ))}
               </Flex>
