@@ -11,6 +11,7 @@ import {
     Avatar,
     useColorModeValue,
     Button,
+    IconButton,
     Modal,
     ModalOverlay,
     ModalContent,
@@ -18,11 +19,7 @@ import {
     ModalBody,
     ModalCloseButton,
     SimpleGrid,
-    Tabs,
-    TabList,
-    Tab,
-    TabPanels,
-    TabPanel,
+    useBreakpointValue,
 } from '@chakra-ui/react'
 import { useParams, useNavigate, useSearchParams, useLocation } from 'react-router-dom'
 import { UserContext } from '../context/UserContext'
@@ -110,9 +107,9 @@ const ChessGamePage = () => {
         }
         return DEFAULT_CHESS_BOARD_THEME_ID
     })
-    const [themePickerOpen, setThemePickerOpen] = useState(false)
-    /** Modal tabs: 0 = square colors, 1 = piece style (for scroll-into-view on open). */
-    const [themeModalTabIndex, setThemeModalTabIndex] = useState(0)
+    /** Wide screens: side panel beside board. Narrow: modal. */
+    const [appearancePanel, setAppearancePanel] = useState(null)
+    const isLgUp = useBreakpointValue({ base: false, lg: true }) ?? false
     const selectedPieceSetItemRef = useRef(null)
     const selectedBoardThemeItemRef = useRef(null)
     const userPickedBoardThemeRef = useRef(false)
@@ -214,12 +211,16 @@ const ChessGamePage = () => {
         }
     }, [])
 
-    /** Keep the selected theme/piece row in view; both tabs use a scroll region (square colors was clipping). */
+    const toggleAppearancePanel = useCallback((panel) => {
+        setAppearancePanel((prev) => (prev === panel ? null : panel))
+    }, [])
+
+    /** Keep the selected theme/piece row in view inside the scroll region. */
     useEffect(() => {
-        if (!themePickerOpen) return
+        if (!appearancePanel) return
         const id = window.setTimeout(() => {
             const el =
-                themeModalTabIndex === 1
+                appearancePanel === 'pieces'
                     ? selectedPieceSetItemRef.current
                     : selectedBoardThemeItemRef.current
             if (!el || typeof el.scrollIntoView !== 'function') return
@@ -230,7 +231,7 @@ const ChessGamePage = () => {
             }
         }, 80)
         return () => window.clearTimeout(id)
-    }, [themePickerOpen, themeModalTabIndex, pieceSetId, boardThemeId])
+    }, [appearancePanel, pieceSetId, boardThemeId])
 
     // Create Chess instance
     const chess = useMemo(() => new Chess(), [])
@@ -1411,6 +1412,120 @@ const ChessGamePage = () => {
         return { boardPosition: replay.fen(), capW: cw, capB: cb }
     }, [reviewMode, reviewIndex, moveHistory, fen, capturedWhite, capturedBlack])
 
+    const appearanceScrollProps = {
+        maxH: { base: 'min(52vh, 440px)', lg: 'min(72vh, 520px)' },
+        overflowY: 'auto',
+        overflowX: 'hidden',
+        pr: 1,
+        pb: 2,
+        sx: { WebkitOverflowScrolling: 'touch' },
+    }
+
+    const boardThemePickerGrid = (
+        <Box {...appearanceScrollProps}>
+            <SimpleGrid columns={{ base: 2, md: 3, lg: 2 }} spacing={3}>
+                {CHESS_BOARD_THEMES.map((t) => {
+                    const selected = t.id === boardThemeId
+                    return (
+                        <Button
+                            key={t.id}
+                            ref={selected ? selectedBoardThemeItemRef : undefined}
+                            variant={selected ? 'solid' : 'outline'}
+                            colorScheme={selected ? 'blue' : 'gray'}
+                            flexDirection="column"
+                            h="auto"
+                            py={3}
+                            onClick={() => selectBoardTheme(t.id)}
+                        >
+                            <Flex
+                                mb={2}
+                                borderRadius="md"
+                                overflow="hidden"
+                                w="72px"
+                                h="72px"
+                                borderWidth={selected ? 2 : 1}
+                                borderColor={selected ? 'blue.400' : 'gray.500'}
+                                flexDirection="column"
+                            >
+                                {[0, 1, 2, 3].map((r) => (
+                                    <Flex key={r} w="100%" flex="1">
+                                        {[0, 1, 2, 3].map((c) => (
+                                            <Box
+                                                key={c}
+                                                flex="1"
+                                                bg={(r + c) % 2 === 0 ? t.light : t.dark}
+                                            />
+                                        ))}
+                                    </Flex>
+                                ))}
+                            </Flex>
+                            <Text fontSize="sm">{t.nameEn}</Text>
+                        </Button>
+                    )
+                })}
+            </SimpleGrid>
+        </Box>
+    )
+
+    const pieceSetPickerGrid = (
+        <Box {...appearanceScrollProps}>
+            <SimpleGrid columns={{ base: 2, md: 3, lg: 2 }} spacing={3}>
+                {CHESS_PIECE_SETS.map((p) => {
+                    const selected = p.id === pieceSetId
+                    const preview = lichessPieceSvgUrl(p.id, 'wN')
+                    return (
+                        <Button
+                            key={p.id}
+                            ref={selected ? selectedPieceSetItemRef : undefined}
+                            variant={selected ? 'solid' : 'outline'}
+                            colorScheme={selected ? 'blue' : 'gray'}
+                            flexDirection="column"
+                            h="auto"
+                            py={3}
+                            onClick={() => selectPieceSet(p.id)}
+                        >
+                            <Box
+                                mb={2}
+                                borderRadius="md"
+                                w="72px"
+                                h="72px"
+                                borderWidth={selected ? 2 : 1}
+                                borderColor={selected ? 'blue.400' : 'gray.500'}
+                                bg="#F0D9B5"
+                                display="flex"
+                                alignItems="center"
+                                justifyContent="center"
+                                dir="ltr"
+                                sx={{ direction: 'ltr' }}
+                            >
+                                <img
+                                    src={preview}
+                                    alt=""
+                                    width={56}
+                                    height={56}
+                                    draggable={false}
+                                    style={{
+                                        objectFit: 'contain',
+                                        display: 'block',
+                                        pointerEvents: 'none',
+                                    }}
+                                />
+                            </Box>
+                            <Text fontSize="sm" fontWeight="600">
+                                {p.nameEn}
+                            </Text>
+                            <Text fontSize="xs" color="gray.500">
+                                {p.nameAr}
+                            </Text>
+                        </Button>
+                    )
+                })}
+            </SimpleGrid>
+        </Box>
+    )
+
+    const pieceStyleIconSrc = lichessPieceSvgUrl(pieceSetId, 'wN')
+
     return (
         <Box bg={bgColor} minH="100vh" py={2}>
             <Flex justify="center" align="start" px={4} direction={{ base: 'column', md: 'row' }} gap={3}>
@@ -1556,7 +1671,16 @@ const ChessGamePage = () => {
                     </Box>
                 )}
 
-                {/* Chess Board - Center */}
+                {/* Chess board + appearance panel (wide screens use free space beside board) */}
+                <Flex
+                    order={{ base: 1, md: 2 }}
+                    direction={{ base: 'column', lg: 'row' }}
+                    align="start"
+                    gap={4}
+                    flex="1"
+                    justify="center"
+                    maxW="100%"
+                >
                 <Box
                     bg={cardBg}
                     p={3}
@@ -1566,23 +1690,41 @@ const ChessGamePage = () => {
                     borderColor="#a67c52"
                     position="relative"
                     w="fit-content"
-                    order={{ base: 1, md: 2 }}
+                    flexShrink={0}
                 >
                     <Flex justify="space-between" align="center" mb={1} gap={2} flexWrap="wrap">
                         <Heading size="md" color="#5a3e2b" textAlign="left" flex="1" minW="120px">
                             ♟️ Chess Match
                         </Heading>
-                        <Button
-                            size="xs"
-                            variant="outline"
-                            colorScheme="yellow"
-                            onClick={() => {
-                                setThemeModalTabIndex(0)
-                                setThemePickerOpen(true)
-                            }}
-                        >
-                            🎨 Board &amp; pieces
-                        </Button>
+                        <HStack spacing={1} flexShrink={0}>
+                            <IconButton
+                                aria-label="Square colors"
+                                size="sm"
+                                variant={appearancePanel === 'board' ? 'solid' : 'outline'}
+                                colorScheme="yellow"
+                                onClick={() => toggleAppearancePanel('board')}
+                                icon={<Text fontSize="md" lineHeight={1}>🎨</Text>}
+                            />
+                            <IconButton
+                                aria-label="Piece style"
+                                size="sm"
+                                variant={appearancePanel === 'pieces' ? 'solid' : 'outline'}
+                                colorScheme="yellow"
+                                onClick={() => toggleAppearancePanel('pieces')}
+                                icon={
+                                    <Box as="span" w="20px" h="20px" display="flex" alignItems="center" justifyContent="center">
+                                        <img
+                                            src={pieceStyleIconSrc}
+                                            alt=""
+                                            width={20}
+                                            height={20}
+                                            draggable={false}
+                                            style={{ objectFit: 'contain', display: 'block', pointerEvents: 'none' }}
+                                        />
+                                    </Box>
+                                }
+                            />
+                        </HStack>
                     </Flex>
                     {reviewMode && (
                         <motion.div
@@ -1777,14 +1919,46 @@ const ChessGamePage = () => {
                         </Flex>
                     )}
                 </Box>
+
+                {appearancePanel && isLgUp && (
+                    <Box
+                        bg={cardBg}
+                        p={4}
+                        borderRadius="xl"
+                        boxShadow="dark-lg"
+                        border="2px solid"
+                        borderColor="#a67c52"
+                        w={{ lg: '300px', xl: '340px' }}
+                        flexShrink={0}
+                        alignSelf="stretch"
+                        display="flex"
+                        flexDirection="column"
+                        minH="400px"
+                    >
+                        <Flex justify="space-between" align="center" mb={2} gap={2}>
+                            <Heading size="sm" color={textColor}>
+                                {appearancePanel === 'board' ? 'Square colors' : 'Piece style'}
+                            </Heading>
+                            <IconButton
+                                aria-label="Close appearance panel"
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => setAppearancePanel(null)}
+                                icon={<Text fontSize="lg" lineHeight={1}>×</Text>}
+                            />
+                        </Flex>
+                        <Text fontSize="xs" color="gray.500" mb={3}>
+                            Tap an option to preview on the board
+                        </Text>
+                        {appearancePanel === 'board' ? boardThemePickerGrid : pieceSetPickerGrid}
+                    </Box>
+                )}
+                </Flex>
             </Flex>
 
             <Modal
-                isOpen={themePickerOpen}
-                onClose={() => {
-                    setThemeModalTabIndex(0)
-                    setThemePickerOpen(false)
-                }}
+                isOpen={Boolean(appearancePanel) && !isLgUp}
+                onClose={() => setAppearancePanel(null)}
                 size="lg"
                 isCentered
                 motionPreset="none"
@@ -1792,143 +1966,14 @@ const ChessGamePage = () => {
                 <ModalOverlay />
                 <ModalContent bg={cardBg} maxH="90vh" overflow="hidden" display="flex" flexDirection="column">
                     <ModalHeader color={textColor} flexShrink={0}>
-                        Board &amp; pieces
+                        {appearancePanel === 'pieces' ? 'Piece style' : 'Square colors'}
                     </ModalHeader>
                     <ModalCloseButton />
                     <ModalBody pb={6} pt={0} overflow="hidden" display="flex" flexDirection="column" flex="1" minH={0}>
-                        <Tabs
-                            variant="soft-rounded"
-                            colorScheme="yellow"
-                            isLazy
-                            index={themeModalTabIndex}
-                            onChange={setThemeModalTabIndex}
-                            display="flex"
-                            flexDirection="column"
-                            flex="1"
-                            minH={0}
-                        >
-                            <TabList mb={3} flexWrap="wrap" gap={1} flexShrink={0}>
-                                <Tab>Square colors</Tab>
-                                <Tab>Piece style</Tab>
-                            </TabList>
-                            <TabPanels flex="1" minH={0}>
-                                <TabPanel px={0} display="flex" flexDirection="column" minH={0}>
-                                    <Box
-                                        maxH="min(52vh, 440px)"
-                                        overflowY="auto"
-                                        overflowX="hidden"
-                                        pr={1}
-                                        pb={6}
-                                        sx={{ WebkitOverflowScrolling: 'touch' }}
-                                    >
-                                    <SimpleGrid columns={{ base: 2, md: 3 }} spacing={3}>
-                                        {CHESS_BOARD_THEMES.map((t) => {
-                                            const selected = t.id === boardThemeId
-                                            return (
-                                                <Button
-                                                    key={t.id}
-                                                    ref={selected ? selectedBoardThemeItemRef : undefined}
-                                                    variant={selected ? 'solid' : 'outline'}
-                                                    colorScheme={selected ? 'blue' : 'gray'}
-                                                    flexDirection="column"
-                                                    h="auto"
-                                                    py={3}
-                                                    onClick={() => selectBoardTheme(t.id)}
-                                                >
-                                                    <Flex
-                                                        mb={2}
-                                                        borderRadius="md"
-                                                        overflow="hidden"
-                                                        w="72px"
-                                                        h="72px"
-                                                        borderWidth={selected ? 2 : 1}
-                                                        borderColor={selected ? 'blue.400' : 'gray.500'}
-                                                        flexDirection="column"
-                                                    >
-                                                        {[0, 1, 2, 3].map((r) => (
-                                                            <Flex key={r} w="100%" flex="1">
-                                                                {[0, 1, 2, 3].map((c) => (
-                                                                    <Box
-                                                                        key={c}
-                                                                        flex="1"
-                                                                        bg={(r + c) % 2 === 0 ? t.light : t.dark}
-                                                                    />
-                                                                ))}
-                                                            </Flex>
-                                                        ))}
-                                                    </Flex>
-                                                    <Text fontSize="sm">{t.nameEn}</Text>
-                                                </Button>
-                                            )
-                                        })}
-                                    </SimpleGrid>
-                                    </Box>
-                                </TabPanel>
-                                <TabPanel px={0} display="flex" flexDirection="column" minH={0}>
-                                    <Box
-                                        maxH="min(52vh, 440px)"
-                                        overflowY="auto"
-                                        overflowX="hidden"
-                                        pr={1}
-                                        pb={6}
-                                        sx={{ WebkitOverflowScrolling: 'touch' }}
-                                    >
-                                        <SimpleGrid columns={{ base: 2, md: 3 }} spacing={3}>
-                                        {CHESS_PIECE_SETS.map((p) => {
-                                            const selected = p.id === pieceSetId
-                                            const preview = lichessPieceSvgUrl(p.id, 'wN')
-                                            return (
-                                                <Button
-                                                    key={p.id}
-                                                    ref={selected ? selectedPieceSetItemRef : undefined}
-                                                    variant={selected ? 'solid' : 'outline'}
-                                                    colorScheme={selected ? 'blue' : 'gray'}
-                                                    flexDirection="column"
-                                                    h="auto"
-                                                    py={3}
-                                                    onClick={() => selectPieceSet(p.id)}
-                                                >
-                                                    <Box
-                                                        mb={2}
-                                                        borderRadius="md"
-                                                        w="72px"
-                                                        h="72px"
-                                                        borderWidth={selected ? 2 : 1}
-                                                        borderColor={selected ? 'blue.400' : 'gray.500'}
-                                                        bg="#F0D9B5"
-                                                        display="flex"
-                                                        alignItems="center"
-                                                        justifyContent="center"
-                                                        dir="ltr"
-                                                        sx={{ direction: 'ltr' }}
-                                                    >
-                                                        <img
-                                                            src={preview}
-                                                            alt=""
-                                                            width={56}
-                                                            height={56}
-                                                            draggable={false}
-                                                            style={{
-                                                                objectFit: 'contain',
-                                                                display: 'block',
-                                                                pointerEvents: 'none',
-                                                            }}
-                                                        />
-                                                    </Box>
-                                                    <Text fontSize="sm" fontWeight="600">
-                                                        {p.nameEn}
-                                                    </Text>
-                                                    <Text fontSize="xs" color="gray.500">
-                                                        {p.nameAr}
-                                                    </Text>
-                                                </Button>
-                                            )
-                                        })}
-                                        </SimpleGrid>
-                                    </Box>
-                                </TabPanel>
-                            </TabPanels>
-                        </Tabs>
+                        <Text fontSize="xs" color="gray.500" mb={3} flexShrink={0}>
+                            Tap an option to preview on the board
+                        </Text>
+                        {appearancePanel === 'board' ? boardThemePickerGrid : pieceSetPickerGrid}
                     </ModalBody>
                 </ModalContent>
             </Modal>
