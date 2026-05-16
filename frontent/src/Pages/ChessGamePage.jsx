@@ -1526,6 +1526,40 @@ const ChessGamePage = () => {
 
     const pieceStyleIconSrc = lichessPieceSvgUrl(pieceSetId, 'wN')
 
+    const appearanceIconButtons = (
+        <HStack spacing={2}>
+            <IconButton
+                aria-label="Square colors"
+                size="md"
+                variant={appearancePanel === 'board' ? 'solid' : 'outline'}
+                colorScheme="yellow"
+                borderColor="#a67c52"
+                onClick={() => toggleAppearancePanel('board')}
+                icon={<Text fontSize="lg" lineHeight={1}>🎨</Text>}
+            />
+            <IconButton
+                aria-label="Piece style"
+                size="md"
+                variant={appearancePanel === 'pieces' ? 'solid' : 'outline'}
+                colorScheme="yellow"
+                borderColor="#a67c52"
+                onClick={() => toggleAppearancePanel('pieces')}
+                icon={
+                    <Box as="span" w="22px" h="22px" display="flex" alignItems="center" justifyContent="center">
+                        <img
+                            src={pieceStyleIconSrc}
+                            alt=""
+                            width={22}
+                            height={22}
+                            draggable={false}
+                            style={{ objectFit: 'contain', display: 'block', pointerEvents: 'none' }}
+                        />
+                    </Box>
+                }
+            />
+        </HStack>
+    )
+
     return (
         <Box bg={bgColor} minH="100vh" py={2}>
             <Flex justify="center" align="start" px={4} direction={{ base: 'column', md: 'row' }} gap={3}>
@@ -1671,15 +1705,13 @@ const ChessGamePage = () => {
                     </Box>
                 )}
 
-                {/* Chess board + appearance panel (wide screens use free space beside board) */}
-                <Flex
+                {/* Board slot is fixed width; appearance panel is absolute so nothing else moves */}
+                <Box
                     order={{ base: 1, md: 2 }}
-                    direction={{ base: 'column', lg: 'row' }}
-                    align="start"
-                    gap={4}
-                    flex="1"
-                    justify="center"
-                    maxW="100%"
+                    position="relative"
+                    w="fit-content"
+                    mx={{ md: 'auto' }}
+                    flexShrink={0}
                 >
                 <Box
                     bg={cardBg}
@@ -1688,44 +1720,14 @@ const ChessGamePage = () => {
                     boxShadow="dark-lg"
                     border="6px solid"
                     borderColor="#a67c52"
-                    position="relative"
                     w="fit-content"
-                    flexShrink={0}
                 >
-                    <Flex justify="space-between" align="center" mb={1} gap={2} flexWrap="wrap">
-                        <Heading size="md" color="#5a3e2b" textAlign="left" flex="1" minW="120px">
-                            ♟️ Chess Match
-                        </Heading>
-                        <HStack spacing={1} flexShrink={0}>
-                            <IconButton
-                                aria-label="Square colors"
-                                size="sm"
-                                variant={appearancePanel === 'board' ? 'solid' : 'outline'}
-                                colorScheme="yellow"
-                                onClick={() => toggleAppearancePanel('board')}
-                                icon={<Text fontSize="md" lineHeight={1}>🎨</Text>}
-                            />
-                            <IconButton
-                                aria-label="Piece style"
-                                size="sm"
-                                variant={appearancePanel === 'pieces' ? 'solid' : 'outline'}
-                                colorScheme="yellow"
-                                onClick={() => toggleAppearancePanel('pieces')}
-                                icon={
-                                    <Box as="span" w="20px" h="20px" display="flex" alignItems="center" justifyContent="center">
-                                        <img
-                                            src={pieceStyleIconSrc}
-                                            alt=""
-                                            width={20}
-                                            height={20}
-                                            draggable={false}
-                                            style={{ objectFit: 'contain', display: 'block', pointerEvents: 'none' }}
-                                        />
-                                    </Box>
-                                }
-                            />
-                        </HStack>
-                    </Flex>
+                    <Heading size="md" color="#5a3e2b" textAlign="center" mb={1}>
+                        ♟️ Chess Match
+                    </Heading>
+                    <Box display={{ base: 'flex', lg: 'none' }} justify="center" mb={2}>
+                        {appearanceIconButtons}
+                    </Box>
                     {reviewMode && (
                         <motion.div
                             initial={{ opacity: 0, y: -6 }}
@@ -1920,40 +1922,55 @@ const ChessGamePage = () => {
                     )}
                 </Box>
 
-                {appearancePanel && isLgUp && (
-                    <Box
-                        bg={cardBg}
-                        p={4}
-                        borderRadius="xl"
-                        boxShadow="dark-lg"
-                        border="2px solid"
-                        borderColor="#a67c52"
-                        w={{ lg: '300px', xl: '340px' }}
-                        flexShrink={0}
-                        alignSelf="stretch"
-                        display="flex"
-                        flexDirection="column"
-                        minH="400px"
-                    >
-                        <Flex justify="space-between" align="center" mb={2} gap={2}>
-                            <Heading size="sm" color={textColor}>
-                                {appearancePanel === 'board' ? 'Square colors' : 'Piece style'}
-                            </Heading>
-                            <IconButton
-                                aria-label="Close appearance panel"
-                                size="sm"
-                                variant="ghost"
-                                onClick={() => setAppearancePanel(null)}
-                                icon={<Text fontSize="lg" lineHeight={1}>×</Text>}
-                            />
-                        </Flex>
-                        <Text fontSize="xs" color="gray.500" mb={3}>
-                            Tap an option to preview on the board
-                        </Text>
-                        {appearancePanel === 'board' ? boardThemePickerGrid : pieceSetPickerGrid}
-                    </Box>
-                )}
-                </Flex>
+                <Box
+                    display={{ base: 'none', lg: 'flex' }}
+                    position="absolute"
+                    top={0}
+                    left="100%"
+                    ml={4}
+                    zIndex={25}
+                    flexDirection="column"
+                    alignItems="flex-start"
+                    gap={3}
+                    maxW={{ lg: '360px', xl: '400px' }}
+                >
+                    {appearanceIconButtons}
+                    {appearancePanel && (
+                        <Box
+                            bg={cardBg}
+                            p={4}
+                            borderRadius="xl"
+                            boxShadow="2xl"
+                            border="2px solid"
+                            borderColor="#a67c52"
+                            w={{ lg: '300px', xl: '340px' }}
+                            maxH="calc(100vh - 120px)"
+                            display="flex"
+                            flexDirection="column"
+                            overflow="hidden"
+                        >
+                            <Flex justify="space-between" align="center" mb={2} gap={2} flexShrink={0}>
+                                <Heading size="sm" color={textColor}>
+                                    {appearancePanel === 'board' ? 'Square colors' : 'Piece style'}
+                                </Heading>
+                                <IconButton
+                                    aria-label="Close appearance panel"
+                                    size="sm"
+                                    variant="ghost"
+                                    onClick={() => setAppearancePanel(null)}
+                                    icon={<Text fontSize="lg" lineHeight={1}>×</Text>}
+                                />
+                            </Flex>
+                            <Text fontSize="xs" color="gray.500" mb={3} flexShrink={0}>
+                                Tap an option to preview on the board
+                            </Text>
+                            <Box flex="1" minH={0} overflow="hidden">
+                                {appearancePanel === 'board' ? boardThemePickerGrid : pieceSetPickerGrid}
+                            </Box>
+                        </Box>
+                    )}
+                </Box>
+                </Box>
             </Flex>
 
             <Modal
