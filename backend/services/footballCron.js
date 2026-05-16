@@ -18,6 +18,7 @@ import {
     FINISHED_STATUS_SHORT,
     isStaleLiveMatchRow,
     reconcileStaleLiveMatches,
+    enrichMatchForClient,
 } from './footballStatuses.js'
 
 /** Find a row in feed `footballData` JSON: prefer fixtureId, then normalized team names. */
@@ -733,9 +734,9 @@ export const emitFootballPageUpdate = async () => {
         }
         
         const data = {
-            live: liveMatches,
-            upcoming: upcomingMatches,
-            finished: finishedMatches,
+            live: liveMatches.map(enrichMatchForClient),
+            upcoming: upcomingMatches.map(enrichMatchForClient),
+            finished: finishedMatches.map(enrichMatchForClient),
             updatedAt: new Date()
         }
         

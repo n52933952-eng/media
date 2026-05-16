@@ -24,6 +24,7 @@ import { UserContext } from '../context/UserContext'
 import { SocketContext } from '../context/SocketContext'
 import useShowToast from '../hooks/useShowToast'
 import FootballIcon from '../Components/FootballIcon'
+import { getMatchDisplayStatus } from '../utils/footballMatchStatus'
 
 const FootballPage = () => {
     const { user } = useContext(UserContext)
@@ -231,7 +232,9 @@ const FootballPage = () => {
     }
     
     // Render match card
-    const MatchCard = ({ match, showStatus = true }) => (
+    const MatchCard = ({ match, showStatus = true }) => {
+        const display = getMatchDisplayStatus(match)
+        return (
         <Box
             bg={bgColor}
             borderRadius="lg"
@@ -250,19 +253,29 @@ const FootballPage = () => {
                 <Text fontSize="sm" color={secondaryTextColor} fontWeight="medium">
                     {match.league?.name}
                 </Text>
-                {showStatus && match.fixture?.status?.short === '1H' && (
+                {showStatus && display.kind === 'live' && (
                     <Badge ml="auto" colorScheme="red" fontSize="xs">
-                        🔴 LIVE {match.fixture?.status?.elapsed}'
+                        🔴 LIVE{display.elapsed != null ? ` ${display.elapsed}'` : ''}
                     </Badge>
                 )}
-                {showStatus && match.fixture?.status?.short === '2H' && (
-                    <Badge ml="auto" colorScheme="red" fontSize="xs">
-                        🔴 LIVE {match.fixture?.status?.elapsed}'
+                {showStatus && display.kind === 'finished' && (
+                    <Badge ml="auto" colorScheme="gray" fontSize="xs">
+                        FINISHED
                     </Badge>
                 )}
-                {showStatus && match.fixture?.status?.short === 'HT' && (
+                {showStatus && display.kind === 'halftime' && (
                     <Badge ml="auto" colorScheme="orange" fontSize="xs">
                         HALF TIME
+                    </Badge>
+                )}
+                {showStatus && display.kind === 'extratime' && (
+                    <Badge ml="auto" colorScheme="orange" fontSize="xs">
+                        {display.label}
+                    </Badge>
+                )}
+                {showStatus && display.kind === 'penalties' && (
+                    <Badge ml="auto" colorScheme="purple" fontSize="xs">
+                        {display.label}
                     </Badge>
                 )}
             </Flex>
@@ -314,7 +327,7 @@ const FootballPage = () => {
             </Grid>
             
             {/* Scorers, Cards, Substitutions - ONLY for finished matches */}
-            {match.fixture?.status?.short === 'FT' && match.events && match.events.length > 0 && (
+            {(match.fixture?.status?.short === 'FT' || display.kind === 'finished') && match.events && match.events.length > 0 && (
                 <Box mt={4} pt={4} borderTop="1px solid" borderColor={borderColor}>
                     <Text fontSize="xs" color={secondaryTextColor} mb={2} fontWeight="semibold">
                         MATCH EVENTS
@@ -381,7 +394,7 @@ const FootballPage = () => {
                 </Box>
             )}
         </Box>
-    )
+    )}
     
     return (
         <Container maxW="800px" py={6}>

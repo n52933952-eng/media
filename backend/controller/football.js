@@ -8,6 +8,7 @@ import {
     FINISHED_STATUS_SHORT,
     isStaleLiveMatchRow,
     reconcileStaleLiveMatches,
+    enrichMatchForClient,
 } from '../services/footballStatuses.js'
 
 // football-data.org API configuration
@@ -548,6 +549,8 @@ export const getMatches = async (req, res) => {
         }
         
         console.log('⚽ [getMatches] Found matches:', matches.length)
+
+        matches = matches.map((m) => enrichMatchForClient(m))
         
         // For finished matches: Fetch timeline data (scorers, cards, substitutions) if not already fetched
         if (status === 'finished') {
