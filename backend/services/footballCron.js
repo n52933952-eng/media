@@ -13,6 +13,12 @@ import {
     setCachedMatchDetails,
     getCacheStats,
 } from './footballCache.js'
+import {
+    LIVE_STATUS_SHORT,
+    FINISHED_STATUS_SHORT,
+    isStaleLiveMatchRow,
+    reconcileStaleLiveMatches,
+} from './footballStatuses.js'
 
 /** Find a row in feed `footballData` JSON: prefer fixtureId, then normalized team names. */
 const findFeedMatchIndex = (matchDataArray, fixtureIdNum, updatedMatch) => {
@@ -433,10 +439,15 @@ const fetchAndUpdateLiveMatches = async () => {
             console.log('⚽ [fetchAndUpdateLiveMatches] Fetching live matches...')
         }
         
-        // Get date range for today
+        // Reconcile first: no API cost — fixes rows stuck LIVE after full time
+        await reconcileStaleLiveMatches(Match)
+
+        // Get date range for today (UTC calendar day)
         const now = new Date()
-        const todayStart = new Date(now.setHours(0, 0, 0, 0))
-        const todayEnd = new Date(now.setHours(23, 59, 59, 999))
+        const todayStart = new Date(now)
+        todayStart.setUTCHours(0, 0, 0, 0)
+        const todayEnd = new Date(now)
+        todayEnd.setUTCHours(23, 59, 59, 999)
         
         // IMPROVED: Detect finished matches by comparing database with /matches?status=LIVE response
         // This is much more efficient than checking each match individually!
@@ -466,9 +477,7 @@ const fetchAndUpdateLiveMatches = async () => {
                 // Try to use database matches as fallback
                 const dbMatches = await Match.find({
                     'fixture.date': { $gte: todayStart, $lte: todayEnd },
-                    'fixture.status.short': {
-                        $in: ['1H', '2H', 'HT', 'ET', 'P', 'BT', 'LIVE', 'IN_PLAY', 'PAUSED'],
-                    },
+                    'fixture.status.short': { $in: LIVE_STATUS_SHORT },
                 }).limit(10)
                 
                 if (dbMatches.length > 0) {
@@ -476,6 +485,8 @@ const fetchAndUpdateLiveMatches = async () => {
                     // Database matches are already in our format, just use them directly
                     result = { success: true, data: dbMatches }
                 } else {
+                    await reconcileStaleLiveMatches(Match)
+                    await emitFootballPageUpdate()
                     return
                 }
             }
@@ -484,8 +495,9 @@ const fetchAndUpdateLiveMatches = async () => {
                 if (isDev) {
                     console.log('📭 No live matches found in API')
                 }
-                // Check if we need to update feed post (remove finished matches)
+                await reconcileStaleLiveMatches(Match)
                 await updateFeedPostWhenMatchesFinish()
+                await emitFootballPageUpdate()
                 return
             }
             
@@ -535,7 +547,7 @@ const fetchAndUpdateLiveMatches = async () => {
 
         const previouslyLiveMatches = await Match.find({
             'fixture.date': { $gte: todayStart, $lte: todayEnd },
-            'fixture.status.short': { $in: ['1H', '2H', 'HT', 'ET', 'P', 'BT', 'LIVE', 'IN_PLAY', 'PAUSED'] },
+            'fixture.status.short': { $in: LIVE_STATUS_SHORT },
         })
 
         // Only trust "not in LIVE list ⇒ FT" when we have a non-empty authoritative live set from this tick
@@ -634,11 +646,11 @@ const fetchAndUpdateLiveMatches = async () => {
             }
         }
         
+        await reconcileStaleLiveMatches(Match)
+
         // Update feed post (removes finished matches from post)
-        // This uses database comparison, not API calls
         await updateFeedPostWhenMatchesFinish()
-        
-        // Emit real-time update to Football page (live, upcoming, finished matches)
+
         await emitFootballPageUpdate()
         
     } catch (error) {
@@ -671,13 +683,15 @@ export const emitFootballPageUpdate = async () => {
         const todayEnd = new Date(todayStart)
         todayEnd.setHours(23, 59, 59, 999)
         
-        const liveMatches = await Match.find({
-            'fixture.status.short': { $in: ['1H', '2H', 'HT', 'ET', 'P', 'LIVE', 'IN_PLAY', 'PAUSED'] },
-            'fixture.date': { $gte: todayStart, $lt: todayEnd }
+        const liveMatchesRaw = await Match.find({
+            'fixture.status.short': { $in: LIVE_STATUS_SHORT },
+            'fixture.date': { $gte: todayStart, $lt: todayEnd },
         })
         .sort({ 'fixture.date': -1 })
         .limit(50)
         .lean()
+
+        const liveMatches = liveMatchesRaw.filter((m) => !isStaleLiveMatchRow(m))
         
         // Fetch upcoming matches (next 7 days)
         const nextWeek = new Date()
@@ -694,8 +708,8 @@ export const emitFootballPageUpdate = async () => {
         const threeDaysAgo = new Date()
         threeDaysAgo.setDate(threeDaysAgo.getDate() - 3)
         const finishedMatches = await Match.find({
-            'fixture.status.short': { $in: ['FT', 'FINISHED'] },
-            'fixture.date': { $gte: threeDaysAgo, $lt: new Date() }
+            'fixture.status.short': { $in: FINISHED_STATUS_SHORT },
+            'fixture.date': { $gte: threeDaysAgo, $lt: new Date() },
         })
         .sort({ 'fixture.date': -1 })
         .limit(50)
@@ -852,20 +866,8 @@ const cleanupOldFootballMatches = async () => {
         cutoff.setUTCDate(cutoff.getUTCDate() - retentionDays)
         cutoff.setUTCHours(0, 0, 0, 0)
 
-        const finishedStatuses = [
-            'FT',
-            'FINISHED',
-            'AET',
-            'PEN',
-            'CANC',
-            'POSTP',
-            'SUSP',
-            'AWD',
-            'WO',
-        ]
-
         const finishedRes = await Match.deleteMany({
-            'fixture.status.short': { $in: finishedStatuses },
+            'fixture.status.short': { $in: FINISHED_STATUS_SHORT },
             'fixture.date': { $exists: true, $lt: cutoff },
         })
 

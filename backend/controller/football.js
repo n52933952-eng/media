@@ -3,6 +3,12 @@ import User from '../models/user.js'
 import Post from '../models/post.js'
 import Follow from '../models/follow.js'
 import { getIO, getUserSocketMap, getAllUserSockets } from '../socket/socket.js'
+import {
+    LIVE_STATUS_SHORT,
+    FINISHED_STATUS_SHORT,
+    isStaleLiveMatchRow,
+    reconcileStaleLiveMatches,
+} from '../services/footballStatuses.js'
 
 // football-data.org API configuration
 // API token from www.football-data.org
@@ -458,13 +464,10 @@ export const getMatches = async (req, res) => {
         // Map our query status to database status codes (compatible with both old and new API formats)
         if (status) {
             if (status === 'live') {
-                // Live matches: 1H, 2H, HT, ET, P (First Half, Second Half, Half Time, Extra Time, Penalties)
-                // Also include LIVE, IN_PLAY, PAUSED from football-data.org
-                query['fixture.status.short'] = { $in: ['1H', '2H', 'HT', 'ET', 'P', 'LIVE', 'IN_PLAY', 'PAUSED'] }
+                query['fixture.status.short'] = { $in: LIVE_STATUS_SHORT }
                 console.log('⚽ [getMatches] Filtering for LIVE matches')
             } else if (status === 'finished') {
-                // Finished matches: FT (Full Time), also handle FINISHED from football-data.org
-                query['fixture.status.short'] = { $in: ['FT', 'FINISHED'] }
+                query['fixture.status.short'] = { $in: FINISHED_STATUS_SHORT }
                 console.log('⚽ [getMatches] Filtering for FINISHED matches')
             } else if (status === 'upcoming') {
                 // Upcoming matches: NS (Not Started), also handle SCHEDULED from football-data.org
@@ -533,6 +536,16 @@ export const getMatches = async (req, res) => {
         let matches = await Match.find(query)
             .sort({ 'fixture.date': sortOrder })
             .limit(50)
+
+        if (status === 'live' && matches.length > 0) {
+            const stale = matches.filter((m) => isStaleLiveMatchRow(m))
+            if (stale.length > 0) {
+                reconcileStaleLiveMatches(Match).catch((e) =>
+                    console.error('⚽ [getMatches] reconcileStaleLive:', e.message),
+                )
+                matches = matches.filter((m) => !isStaleLiveMatchRow(m))
+            }
+        }
         
         console.log('⚽ [getMatches] Found matches:', matches.length)
         

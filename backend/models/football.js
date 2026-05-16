@@ -90,6 +90,7 @@ const MatchSchema = mongoose.Schema({
 // Note: fixtureId already has index from unique: true, so we don't duplicate it
 MatchSchema.index({ 'fixture.date': -1 })
 MatchSchema.index({ 'fixture.status.short': 1 })
+MatchSchema.index({ 'fixture.status.short': 1, 'fixture.date': 1 })
 MatchSchema.index({ 'league.id': 1 })
 
 // League/Competition Schema (for standings, info)
