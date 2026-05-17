@@ -1406,38 +1406,36 @@ const ChessGamePage = () => {
         as: 'button',
         type: 'button',
         w: '100%',
-        p: 2,
-        borderRadius: 'xl',
+        p: 1.5,
+        borderRadius: 'lg',
         borderWidth: '2px',
         borderColor: selected ? '#D4A853' : 'whiteAlpha.200',
         bg: selected ? 'rgba(212, 168, 83, 0.14)' : 'whiteAlpha.50',
         cursor: 'pointer',
-        transition: 'border-color 0.15s, background 0.15s, transform 0.15s',
+        transition: 'border-color 0.15s, background 0.15s',
         _hover: {
             borderColor: '#a67c52',
             bg: 'whiteAlpha.120',
-            transform: 'translateY(-1px)',
         },
-        _active: { transform: 'translateY(0)' },
-        boxShadow: selected ? '0 0 12px rgba(212, 168, 83, 0.25)' : 'none',
+        boxShadow: selected ? '0 0 8px rgba(212, 168, 83, 0.2)' : 'none',
     })
 
     const appearanceScrollArea = (children) => (
         <Box
             ref={appearanceScrollRef}
             flex="1"
-            minH={{ base: '300px', lg: '380px' }}
-            maxH={{ base: 'min(60vh, 520px)', lg: 'min(calc(100vh - 200px), 580px)' }}
+            minH={0}
+            maxH={{ base: 'min(50vh, 400px)', lg: '260px' }}
             overflowY="auto"
             overflowX="hidden"
             px={0.5}
-            py={1}
+            py={0.5}
             sx={{
                 WebkitOverflowScrolling: 'touch',
                 scrollbarGutter: 'stable',
-                '&::-webkit-scrollbar': { width: '7px' },
+                '&::-webkit-scrollbar': { width: '5px' },
                 '&::-webkit-scrollbar-thumb': {
-                    bg: 'whiteAlpha.350',
+                    bg: 'whiteAlpha.300',
                     borderRadius: 'full',
                 },
                 '&::-webkit-scrollbar-track': { bg: 'transparent' },
@@ -1448,7 +1446,7 @@ const ChessGamePage = () => {
     )
 
     const boardThemePickerGrid = appearanceScrollArea(
-        <SimpleGrid columns={{ base: 2, sm: 3, lg: 2 }} spacing={2.5}>
+        <SimpleGrid columns={{ base: 2, sm: 3, lg: 3 }} spacing={2}>
             {CHESS_BOARD_THEMES.map((t) => {
                 const selected = t.id === boardThemeId
                 return (
@@ -1459,15 +1457,15 @@ const ChessGamePage = () => {
                     >
                         <Flex
                             mx="auto"
-                            mb={2}
-                            borderRadius="lg"
+                            mb={1}
+                            borderRadius="md"
                             overflow="hidden"
-                            w="64px"
-                            h="64px"
+                            w="44px"
+                            h="44px"
                             borderWidth="1px"
                             borderColor="blackAlpha.300"
                             flexDirection="column"
-                            boxShadow="md"
+                            boxShadow="sm"
                         >
                             {[0, 1, 2, 3].map((r) => (
                                 <Flex key={r} w="100%" flex="1">
@@ -1481,14 +1479,9 @@ const ChessGamePage = () => {
                                 </Flex>
                             ))}
                         </Flex>
-                        <Text fontSize="sm" fontWeight={selected ? 'bold' : 'medium'} color={textColor} noOfLines={1}>
+                        <Text fontSize="xs" fontWeight={selected ? 'bold' : 'medium'} color={textColor} noOfLines={1}>
                             {t.nameEn}
                         </Text>
-                        {selected && (
-                            <Text fontSize="2xs" color="#D4A853" mt={0.5}>
-                                Active
-                            </Text>
-                        )}
                     </Box>
                 )
             })}
@@ -1496,7 +1489,7 @@ const ChessGamePage = () => {
     )
 
     const pieceSetPickerGrid = appearanceScrollArea(
-        <SimpleGrid columns={{ base: 2, sm: 3, lg: 2 }} spacing={2.5}>
+        <SimpleGrid columns={{ base: 2, sm: 3, lg: 3 }} spacing={2}>
             {CHESS_PIECE_SETS.map((p) => {
                 const selected = p.id === pieceSetId
                 const preview = lichessPieceSvgUrl(p.id, 'wN')
@@ -1508,10 +1501,10 @@ const ChessGamePage = () => {
                     >
                         <Box
                             mx="auto"
-                            mb={2}
-                            borderRadius="lg"
-                            w="64px"
-                            h="64px"
+                            mb={1}
+                            borderRadius="md"
+                            w="44px"
+                            h="44px"
                             borderWidth="1px"
                             borderColor="blackAlpha.300"
                             bg={boardTheme.light}
@@ -1519,14 +1512,14 @@ const ChessGamePage = () => {
                             alignItems="center"
                             justifyContent="center"
                             dir="ltr"
-                            boxShadow="md"
+                            boxShadow="sm"
                             sx={{ direction: 'ltr' }}
                         >
                             <img
                                 src={preview}
                                 alt=""
-                                width={48}
-                                height={48}
+                                width={34}
+                                height={34}
                                 draggable={false}
                                 style={{
                                     objectFit: 'contain',
@@ -1535,17 +1528,12 @@ const ChessGamePage = () => {
                                 }}
                             />
                         </Box>
-                        <Text fontSize="sm" fontWeight={selected ? 'bold' : 'medium'} color={textColor} noOfLines={1}>
+                        <Text fontSize="xs" fontWeight={selected ? 'bold' : 'medium'} color={textColor} noOfLines={1}>
                             {p.nameEn}
                         </Text>
-                        <Text fontSize="2xs" color="gray.500" noOfLines={1}>
+                        <Text fontSize="xs" color="gray.500" noOfLines={1} display={{ base: 'block', lg: 'none' }}>
                             {p.nameAr}
                         </Text>
-                        {selected && (
-                            <Text fontSize="2xs" color="#D4A853" mt={0.5}>
-                                Active
-                            </Text>
-                        )}
                     </Box>
                 )
             })}
@@ -1557,8 +1545,8 @@ const ChessGamePage = () => {
 
     const appearancePanelBody = (
         <>
-            <Text fontSize="xs" color="gray.400" mb={3} flexShrink={0}>
-                Scroll to browse · tap to preview on the board
+            <Text fontSize="xs" color="gray.500" mb={2} flexShrink={0} lineHeight="short">
+                Tap to preview · scroll for more
             </Text>
             {appearancePanel === 'board' ? boardThemePickerGrid : pieceSetPickerGrid}
         </>
@@ -1567,30 +1555,30 @@ const ChessGamePage = () => {
     const pieceStyleIconSrc = lichessPieceSvgUrl(pieceSetId, 'wN')
 
     const appearanceIconButtons = (
-        <HStack spacing={2}>
+        <HStack spacing={1.5}>
             <IconButton
                 aria-label="Square colors"
-                size="md"
+                size="sm"
                 variant={appearancePanel === 'board' ? 'solid' : 'outline'}
                 colorScheme="yellow"
                 borderColor="#a67c52"
                 onClick={() => toggleAppearancePanel('board')}
-                icon={<Text fontSize="lg" lineHeight={1}>🎨</Text>}
+                icon={<Text fontSize="md" lineHeight={1}>🎨</Text>}
             />
             <IconButton
                 aria-label="Piece style"
-                size="md"
+                size="sm"
                 variant={appearancePanel === 'pieces' ? 'solid' : 'outline'}
                 colorScheme="yellow"
                 borderColor="#a67c52"
                 onClick={() => toggleAppearancePanel('pieces')}
                 icon={
-                    <Box as="span" w="22px" h="22px" display="flex" alignItems="center" justifyContent="center">
+                    <Box as="span" w="18px" h="18px" display="flex" alignItems="center" justifyContent="center">
                         <img
                             src={pieceStyleIconSrc}
                             alt=""
-                            width={22}
-                            height={22}
+                            width={18}
+                            height={18}
                             draggable={false}
                             style={{ objectFit: 'contain', display: 'block', pointerEvents: 'none' }}
                         />
@@ -1602,7 +1590,14 @@ const ChessGamePage = () => {
 
     return (
         <Box bg={bgColor} minH="100vh" py={2}>
-            <Flex justify="center" align="start" px={4} direction={{ base: 'column', md: 'row' }} gap={3}>
+            <Flex
+                justify="center"
+                align="start"
+                px={{ base: 4, lg: 6 }}
+                pr={{ base: 4, lg: 10 }}
+                direction={{ base: 'column', md: 'row' }}
+                gap={3}
+            >
                 {/* Captured Pieces Panel - Left Side */}
                 {gameLive && (
                     <Box
@@ -1965,53 +1960,57 @@ const ChessGamePage = () => {
                 <Box
                     display={{ base: 'none', lg: 'flex' }}
                     position="absolute"
-                    top={0}
+                    top={2}
                     left="100%"
-                    ml={4}
+                    ml={3}
+                    mr={6}
                     zIndex={25}
                     flexDirection="column"
                     alignItems="flex-start"
-                    gap={3}
-                    maxW={{ lg: '360px', xl: '400px' }}
+                    gap={2}
+                    maxW="248px"
+                    maxH="calc(100% - 8px)"
                 >
                     {appearanceIconButtons}
                     {appearancePanel && (
                         <Box
                             bg={cardBg}
-                            borderRadius="2xl"
-                            boxShadow="2xl"
+                            borderRadius="xl"
+                            boxShadow="xl"
                             border="2px solid"
                             borderColor="#a67c52"
-                            w={{ lg: '320px', xl: '360px' }}
-                            maxH="calc(100vh - 80px)"
+                            w="248px"
+                            maxH="min(400px, calc(100vh - 140px))"
                             display="flex"
                             flexDirection="column"
                             overflow="hidden"
                         >
-                            <Box
-                                px={4}
-                                pt={4}
-                                pb={3}
+                            <Flex
+                                px={3}
+                                py={2}
                                 borderBottomWidth="1px"
                                 borderColor="whiteAlpha.100"
                                 bg="blackAlpha.200"
                                 flexShrink={0}
+                                justify="space-between"
+                                align="center"
+                                gap={1}
                             >
-                                <Flex justify="space-between" align="center" gap={2}>
-                                    <Heading size="sm" color={textColor} letterSpacing="wide">
-                                        {appearancePanelTitle}
-                                    </Heading>
-                                    <IconButton
-                                        aria-label="Close appearance panel"
-                                        size="sm"
-                                        variant="ghost"
-                                        color={textColor}
-                                        onClick={() => setAppearancePanel(null)}
-                                        icon={<Text fontSize="xl" lineHeight={1}>×</Text>}
-                                    />
-                                </Flex>
-                            </Box>
-                            <Box px={4} py={3} flex="1" minH={0} display="flex" flexDirection="column" overflow="hidden">
+                                <Text fontSize="sm" fontWeight="bold" color={textColor}>
+                                    {appearancePanelTitle}
+                                </Text>
+                                <IconButton
+                                    aria-label="Close appearance panel"
+                                    size="xs"
+                                    variant="ghost"
+                                    color={textColor}
+                                    minW={6}
+                                    h={6}
+                                    onClick={() => setAppearancePanel(null)}
+                                    icon={<Text fontSize="lg" lineHeight={1}>×</Text>}
+                                />
+                            </Flex>
+                            <Box px={3} py={2} flex="1" minH={0} display="flex" flexDirection="column" overflow="hidden">
                                 {appearancePanelBody}
                             </Box>
                         </Box>
@@ -2023,7 +2022,7 @@ const ChessGamePage = () => {
             <Modal
                 isOpen={Boolean(appearancePanel) && !isLgUp}
                 onClose={() => setAppearancePanel(null)}
-                size="xl"
+                size="md"
                 isCentered
                 motionPreset="none"
                 scrollBehavior="inside"
@@ -2031,28 +2030,32 @@ const ChessGamePage = () => {
                 <ModalOverlay bg="blackAlpha.700" />
                 <ModalContent
                     bg={cardBg}
-                    maxH="92vh"
+                    maxH="78vh"
                     overflow="hidden"
                     display="flex"
                     flexDirection="column"
-                    borderRadius="2xl"
+                    borderRadius="xl"
                     border="2px solid"
                     borderColor="#a67c52"
+                    mx={3}
                 >
                     <ModalHeader
                         color={textColor}
                         flexShrink={0}
+                        py={3}
+                        fontSize="md"
                         borderBottomWidth="1px"
                         borderColor="whiteAlpha.100"
                         bg="blackAlpha.200"
-                        borderTopRadius="2xl"
+                        borderTopRadius="xl"
                     >
                         {appearancePanelTitle}
                     </ModalHeader>
-                    <ModalCloseButton color={textColor} />
+                    <ModalCloseButton color={textColor} size="sm" top={3} />
                     <ModalBody
-                        pb={6}
-                        pt={3}
+                        pb={4}
+                        pt={2}
+                        px={3}
                         overflow="hidden"
                         display="flex"
                         flexDirection="column"
