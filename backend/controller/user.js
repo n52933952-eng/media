@@ -18,6 +18,28 @@ import { LIVE_CHANNELS } from '../config/channels.js'
 import * as redisService from '../services/redis.js'
 import { getIO, getUserSelfRoomId } from '../socket/socket.js'
 
+/** Source of truth for follow graph (web + mobile). Falls back to User arrays if Follow rows missing. */
+async function getFollowGraphIdsForUser(userId) {
+  const uid = userId
+  const cap = 500
+  const [followingDocs, followerDocs] = await Promise.all([
+    Follow.find({ followerId: uid }).select('followeeId').sort({ createdAt: -1 }).limit(cap).lean(),
+    Follow.find({ followeeId: uid }).select('followerId').sort({ createdAt: -1 }).limit(cap).lean(),
+  ])
+  let following = followingDocs.map((d) => d.followeeId).filter(Boolean)
+  let followers = followerDocs.map((d) => d.followerId).filter(Boolean)
+  if (following.length === 0 || followers.length === 0) {
+    const legacy = await User.findById(uid).select('following followers').lean()
+    if (following.length === 0 && Array.isArray(legacy?.following) && legacy.following.length > 0) {
+      following = legacy.following
+    }
+    if (followers.length === 0 && Array.isArray(legacy?.followers) && legacy.followers.length > 0) {
+      followers = legacy.followers
+    }
+  }
+  return { following, followers }
+}
+
 function extractCloudinaryPublicId(url) {
   try {
     if (!url || typeof url !== 'string') return ''
@@ -207,13 +229,14 @@ export const GoogleLogin = async (req, res) => {
   }
 }
 
-/** Current session user with following/followers (same shape as login). Used by web refetch after mobile changes. */
+/** Current session user with following/followers (same shape as login). Used by web/mobile refetch. */
 export const getMe = async (req, res) => {
   try {
     const user = await User.findById(req.user._id).select('-password')
     if (!user) {
       return res.status(404).json({ error: 'User not found' })
     }
+    const { following, followers } = await getFollowGraphIdsForUser(req.user._id)
     res.status(200).json({
       _id: user._id,
       username: user.username,
@@ -223,8 +246,8 @@ export const getMe = async (req, res) => {
       profilePic: user.profilePic,
       country: user.country,
       instagram: user.instagram,
-      followers: user.followers || [],
-      following: user.following || [],
+      followers,
+      following,
     })
   } catch (error) {
     console.error('getMe error:', error)
