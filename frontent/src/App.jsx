@@ -121,35 +121,35 @@ const AppContent = () => {
       {/* Global Racing Challenge Notification - shows on all pages */}
       {user && <RacingChallengeNotification />}
       
-      {/* Hide site header during race — fullscreen landscape game */}
-      {!isRacePage && (
-        <>
-          <Box
-            position="fixed"
-            top={0}
-            left={0}
-            right={0}
-            zIndex={100}
-            bg={
-              isScrolled
-                ? colorMode === 'dark'
-                  ? 'rgba(16,16,16,0.92)'
-                  : 'rgba(255,255,255,0.92)'
-                : colorMode === 'dark'
-                  ? '#101010'
-                  : 'white'
-            }
-            backdropFilter={isScrolled ? 'blur(12px)' : 'none'}
-            boxShadow={isScrolled ? '0 1px 14px rgba(0,0,0,0.18)' : 'none'}
-            transition="background 0.25s ease, box-shadow 0.25s ease"
-          >
-            <Container maxW={headerMaxW} px={{ base: 4, md: 6 }} position="relative">
-              <Header/>
-            </Container>
-          </Box>
-          <Box h="72px" />
-        </>
-      )}
+      {/* Fixed header — visible on race too (home / messages / leave game) */}
+      <Box
+        position="fixed"
+        top={0}
+        left={0}
+        right={0}
+        zIndex={isRacePage ? 1100 : 100}
+        bg={
+          isRacePage
+            ? colorMode === 'dark'
+              ? 'rgba(16,16,16,0.96)'
+              : 'rgba(255,255,255,0.96)'
+            : isScrolled
+              ? colorMode === 'dark'
+                ? 'rgba(16,16,16,0.92)'
+                : 'rgba(255,255,255,0.92)'
+              : colorMode === 'dark'
+                ? '#101010'
+                : 'white'
+        }
+        backdropFilter={isScrolled || isRacePage ? 'blur(12px)' : 'none'}
+        boxShadow={isScrolled || isRacePage ? '0 1px 14px rgba(0,0,0,0.18)' : 'none'}
+        transition="background 0.25s ease, box-shadow 0.25s ease"
+      >
+        <Container maxW={headerMaxW} px={{ base: 4, md: 6 }} position="relative">
+          <Header/>
+        </Container>
+      </Box>
+      <Box h="72px" />
       
       
       {/* Content: full-bleed messages / race; centered column for the rest */}
@@ -173,11 +173,11 @@ const AppContent = () => {
       ) : isRacePage ? (
         <Box
           position="fixed"
-          top={0}
+          top="72px"
           left="0"
           right="0"
           bottom="0"
-          h={{ base: '100dvh', md: '100vh' }}
+          h={{ base: 'calc(100dvh - 72px)', md: 'calc(100vh - 72px)' }}
           w="100%"
           maxW="100%"
           m={0}

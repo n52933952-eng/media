@@ -1565,7 +1565,7 @@ export default function RacingGamePage() {
     disconnectRaceVoice()
   }, [raceFinished, disconnectRaceVoice])
 
-  const raceHudTop = mobileControls ? 12 : RACE_TOP_OFFSET_PX
+  const raceHudTop = RACE_TOP_OFFSET_PX
 
   // ─── Render ─────────────────────────────────────────────────────────────────
   return (
@@ -1710,7 +1710,7 @@ export default function RacingGamePage() {
       {/* HUD — top left: player names + gate progress (below fixed app header) */}
       {!loading && (
         <div style={{
-          position:'fixed', top:`${raceHudTop}px`, left: mobileControls ? '56px' : '20px', zIndex:1000,
+          position:'fixed', top:`${raceHudTop}px`, left:'20px', zIndex:1000,
           background:'rgba(0,0,0,0.55)', backdropFilter:'blur(8px)',
           borderRadius:'10px', padding:'12px 18px', color:'#fff',
           fontFamily:'Poppins,sans-serif', minWidth:'200px',
@@ -1841,7 +1841,7 @@ export default function RacingGamePage() {
           flexDirection:'column',
           gap:'10px',
           ...(mobileControls
-            ? { top: '12px', right: '12px', left: 'auto', bottom: 'auto', maxWidth: 'none' }
+            ? { top: `${raceHudTop}px`, right: '12px', left: 'auto', bottom: 'auto', maxWidth: 'none' }
             : { bottom: '20px', left: '20px', right: '220px', maxWidth: 420 }),
         }}>
           {!mobileControls && (
@@ -2062,12 +2062,12 @@ export default function RacingGamePage() {
       )}
 
       {/* Leave button (offset so it does not overlap call + mute) */}
-      {!loading && (
+      {/* Desktop: in-game leave. Mobile: use header Home (ends race via endRaceGameOnNavigate). */}
+      {!loading && !mobileControls && (
         <button onClick={handleLeave} title="Leave race" style={{
           position:'fixed',
-          top: mobileControls ? '12px' : 'auto',
-          bottom: mobileControls ? 'auto' : '20px',
-          left: mobileControls ? '12px' : '200px',
+          bottom:'20px',
+          left:'200px',
           zIndex:1002,
           width:44, height:44, borderRadius:'50%',
           background:'#ff0080', border:'2px solid #b30059',
