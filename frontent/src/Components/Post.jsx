@@ -1705,7 +1705,8 @@ const showToast = useShowToast()
   }
 
   return (
-    <Link 
+    <Link
+      data-post-id={post._id}
       to={`/${postedBy?.username}/post/${post._id}`}
       onClick={(e) => {
         // Check if clicked element should prevent navigation

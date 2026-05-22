@@ -492,8 +492,9 @@ const HomePage = () => {
       </Box>
 
       {/* Main Feed - Center */}
-      <Box 
-        flex={{ base: 1, lg: '0 0 50%' }} 
+      <Box
+        id="home-feed-anchor"
+        flex={{ base: 1, lg: '0 0 50%' }}
         w={{ base: '100%', lg: 'auto' }}
         minW={0}
         maxW={{ base: '100%', lg: '50%' }}

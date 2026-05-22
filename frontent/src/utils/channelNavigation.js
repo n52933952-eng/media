@@ -51,3 +51,20 @@ export async function fetchLatestChannelPostId(channelUsername) {
   }
   return null
 }
+
+/** Scroll mobile home feed into view; optionally center a specific post card. */
+export function scrollToHomeFeed(postId) {
+  const run = () => {
+    if (postId) {
+      const postEl = document.querySelector(`[data-post-id="${postId}"]`)
+      if (postEl) {
+        postEl.scrollIntoView({ behavior: 'smooth', block: 'center' })
+        return
+      }
+    }
+    document.getElementById('home-feed-anchor')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+  requestAnimationFrame(() => {
+    setTimeout(run, 350)
+  })
+}
