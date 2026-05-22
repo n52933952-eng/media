@@ -7,6 +7,7 @@ import{UserContext} from '../context/UserContext'
 import {Link} from 'react-router-dom'
 import useShowToast from '../hooks/useShowToast.js'
 import FollowListModal from './FollowListModal'
+import { followPostHeaders } from '../utils/followRequest.js'
 
 const UserHeader = ({ users, activeTab, setActiveTab, onUserFollowed, postsCount = 0, onProfileRefresh }) => {
    
@@ -143,9 +144,7 @@ const UserHeader = ({ users, activeTab, setActiveTab, onUserFollowed, postsCount
          credentials:"include",
          method:"POST",
          
-         headers:{
-          "Content-Type" : "application/json"
-         }
+         headers: followPostHeaders
         })
 
 

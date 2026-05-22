@@ -18,6 +18,7 @@ import { Link } from 'react-router-dom'
 import { UserContext } from '../context/UserContext'
 import useShowToast from '../hooks/useShowToast'
 import API_BASE_URL from '../config/api'
+import { followPostHeaders } from '../utils/followRequest.js'
 
 const PAGE_SIZE = 12
 
@@ -146,7 +147,7 @@ const FollowListModal = ({
       const res = await fetch(`${baseUrl}/api/user/follow/${targetId}`, {
         method: 'POST',
         credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
+        headers: followPostHeaders,
       })
       const data = await res.json()
       if (data.error) {

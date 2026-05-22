@@ -3,6 +3,7 @@ import { Avatar, Box, Button, Flex, Text } from '@chakra-ui/react'
 import { Link } from 'react-router-dom'
 import { UserContext } from '../context/UserContext'
 import useShowToast from '../hooks/useShowToast'
+import { followPostHeaders } from '../utils/followRequest.js'
 
 const SuggestedUser = ({ user, onFollowed, onUserFollowed, onPatchFollowState }) => {
   const showToast = useShowToast()
@@ -51,9 +52,7 @@ const SuggestedUser = ({ user, onFollowed, onUserFollowed, onPatchFollowState })
         {
           credentials: 'include',
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
+          headers: followPostHeaders,
         }
       )
 

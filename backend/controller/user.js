@@ -419,11 +419,25 @@ export const FollowAndUnfollow = async(req,res) => {
             const updatecurrent = await User.findById(req.user._id)
             const targetUser = await User.findById(id)
 
-            // Create notification for the user being followed
+            // Create notification for the user being followed (in-app + FCM when offline)
             const { createNotification } = await import('./notification.js')
-            createNotification(id, 'follow', req.user._id).catch(err => {
-                console.error('Error creating follow notification:', err)
-            })
+            const { getFollowClientType, sendWebFollowEmailToUser } = await import('../services/emailNotifications.js')
+            const followClientType = getFollowClientType(req)
+            ;(async () => {
+                try {
+                    const result = await createNotification(id, 'follow', req.user._id)
+                    // Web only: email when followee was not on-site (no live socket) — mobile keeps push only
+                    if (
+                        followClientType === 'web' &&
+                        result &&
+                        result.deliveredInApp !== true
+                    ) {
+                        await sendWebFollowEmailToUser(id, req.user._id)
+                    }
+                } catch (err) {
+                    console.error('Error creating follow notification:', err)
+                }
+            })()
             
             // Create activity for activity feed
             const { createActivity } = await import('./activity.js')

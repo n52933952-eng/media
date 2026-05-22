@@ -63,7 +63,7 @@ export const createNotification = async (userId, type, fromUserId, options = {})
     try {
         // Don't notify user if they're notifying themselves
         if (userId.toString() === fromUserId.toString()) {
-            return null
+            return { notification: null, deliveredInApp: false }
         }
 
         // Create new notification
@@ -122,7 +122,7 @@ export const createNotification = async (userId, type, fromUserId, options = {})
 
         // Push (FCM): only when not delivered in-app — avoids duplicate banner while user is in the app
         if (deliveredInApp) {
-            return notification
+            return { notification, deliveredInApp: true }
         }
 
         try {
@@ -130,7 +130,7 @@ export const createNotification = async (userId, type, fromUserId, options = {})
             const fromUser = await User.findById(fromUserId).select('username name profilePic')
             if (!fromUser) {
                 console.log(`⚠️ [createNotification] From user not found: ${fromUserId}`)
-                return notification
+                return { notification, deliveredInApp: false }
             }
 
             const fromUserName = fromUser.name || fromUser.username || 'Someone'
@@ -200,10 +200,10 @@ export const createNotification = async (userId, type, fromUserId, options = {})
             console.error(`❌ [createNotification] Error sending FCM push notification:`, pushError)
         }
 
-        return notification
+        return { notification, deliveredInApp: false }
     } catch (error) {
         console.error('Error creating notification:', error)
-        return null
+        return { notification: null, deliveredInApp: false }
     }
 }
 
