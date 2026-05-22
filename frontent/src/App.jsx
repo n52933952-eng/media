@@ -88,8 +88,8 @@ const AppContent = () => {
   const isChessGamePage = /^\/chess\/[^/]+/.test(location.pathname)
   const isCardGamePage = /^\/card\/[^/]+/.test(location.pathname)
   const isGamePlayPage = isRacePage || isChessGamePage || isCardGamePage
-  // Header stays in the original centered column on all pages (including home).
-  const headerMaxW = isMessagesPage || isGamePlayPage ? '100%' : '620px'
+  // Header always uses the original centered column (messages, race, home, etc.).
+  const headerMaxW = '620px'
 
   const contentMaxW = isHomePage
     ? '1400px'

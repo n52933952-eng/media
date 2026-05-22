@@ -85,6 +85,9 @@ export default function RacingGamePage() {
   /** True while the server is holding a 30-second grace for the opponent to come back.
    *  Suppresses the client-side silence timer so we don't end the race prematurely. */
   const [oppReconnecting, setOppReconnecting] = useState(false)
+  const [mobileControls, setMobileControls] = useState(
+    () => typeof window !== 'undefined' && window.matchMedia('(max-width: 991px)').matches
+  )
 
   // ── Three.js / physics refs ─────────────────────────────────────────────────
   const containerRef   = useRef(null)
@@ -784,6 +787,34 @@ export default function RacingGamePage() {
     if (!music) return
     music.volume = callActive ? 0.06 : 0.4
   }, [callActive])
+
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 991px)')
+    const onChange = () => setMobileControls(mq.matches)
+    onChange()
+    mq.addEventListener('change', onChange)
+    return () => mq.removeEventListener('change', onChange)
+  }, [])
+
+  const setDriveKey = useCallback((key, pressed) => {
+    if (keyStateRef.current[key] !== undefined) keyStateRef.current[key] = pressed
+  }, [])
+
+  const touchBtn = (key, label, extra = {}) => ({
+    onPointerDown: (e) => {
+      e.preventDefault()
+      e.stopPropagation()
+      setDriveKey(key, true)
+    },
+    onPointerUp: (e) => {
+      e.preventDefault()
+      setDriveKey(key, false)
+    },
+    onPointerLeave: () => setDriveKey(key, false),
+    onPointerCancel: () => setDriveKey(key, false),
+    ...extra,
+    children: label,
+  })
 
   // ─── Keyboard controls ──────────────────────────────────────────────────────
   useEffect(() => {
@@ -1878,10 +1909,83 @@ export default function RacingGamePage() {
         </div>
       )}
 
+      {/* Mobile touch driving controls */}
+      {!loading && raceLive && mobileControls && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 1001,
+            pointerEvents: 'none',
+            touchAction: 'none',
+          }}
+        >
+          <div style={{
+            position: 'absolute',
+            left: 12,
+            bottom: 16,
+            display: 'flex',
+            gap: 10,
+            pointerEvents: 'auto',
+          }}>
+            <button
+              type="button"
+              aria-label="Steer left"
+              style={{
+                width: 56, height: 56, borderRadius: 12, border: '2px solid rgba(255,255,255,0.35)',
+                background: 'rgba(0,0,0,0.55)', color: '#fff', fontSize: 22, fontWeight: 700,
+                touchAction: 'none', userSelect: 'none',
+              }}
+              {...touchBtn('a', '◀')}
+            />
+            <button
+              type="button"
+              aria-label="Steer right"
+              style={{
+                width: 56, height: 56, borderRadius: 12, border: '2px solid rgba(255,255,255,0.35)',
+                background: 'rgba(0,0,0,0.55)', color: '#fff', fontSize: 22, fontWeight: 700,
+                touchAction: 'none', userSelect: 'none',
+              }}
+              {...touchBtn('d', '▶')}
+            />
+          </div>
+          <div style={{
+            position: 'absolute',
+            right: 12,
+            bottom: 16,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 10,
+            pointerEvents: 'auto',
+          }}>
+            <button
+              type="button"
+              aria-label="Brake"
+              style={{
+                width: 52, height: 44, borderRadius: 10, border: '2px solid rgba(255,255,255,0.25)',
+                background: 'rgba(80,80,80,0.75)', color: '#fff', fontSize: 13, fontWeight: 700,
+                touchAction: 'none', userSelect: 'none',
+              }}
+              {...touchBtn('s', 'BRAKE')}
+            />
+            <button
+              type="button"
+              aria-label="Accelerate"
+              style={{
+                width: 72, height: 72, borderRadius: '50%', border: '3px solid #b30059',
+                background: '#ff0080', color: '#fff', fontSize: 14, fontWeight: 800,
+                boxShadow: '0 4px 0 #b30059', touchAction: 'none', userSelect: 'none',
+              }}
+              {...touchBtn('w', 'GAS')}
+            />
+          </div>
+        </div>
+      )}
+
       {/* Leave button (offset so it does not overlap call + mute) */}
       {!loading && (
         <button onClick={handleLeave} title="Leave race" style={{
-          position:'fixed', bottom:'20px', left:'200px', zIndex:1000,
+          position:'fixed', bottom: mobileControls ? '100px' : '20px', left: mobileControls ? '12px' : '200px', zIndex:1000,
           width:44, height:44, borderRadius:'50%',
           background:'#ff0080', border:'2px solid #b30059',
           boxShadow:'0 3px 0 #b30059', color:'#fff', fontSize:'18px',
@@ -1889,8 +1993,8 @@ export default function RacingGamePage() {
         }}>🚪</button>
       )}
 
-      {/* Controls hint */}
-      {!loading && raceLive && (
+      {/* Controls hint (desktop only) */}
+      {!loading && raceLive && !mobileControls && (
         <div style={{
           position:'fixed', bottom:'20px', right:'220px', zIndex:1000,
           color:'rgba(255,255,255,0.4)', fontFamily:'Poppins,sans-serif', fontSize:'12px',

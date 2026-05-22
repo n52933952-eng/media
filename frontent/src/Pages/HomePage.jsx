@@ -475,6 +475,9 @@ const HomePage = () => {
     <Box w="100%" maxW="100%" overflow="hidden">
       <Box display={{ base: 'block', lg: 'none' }} px={{ base: 3, md: 4 }}>
         <MobileHomePanel />
+        <Box mt={3} mb={4}>
+          <SuggestedUsers onUserFollowed={fetchUserPosts} embedded />
+        </Box>
       </Box>
 
     <Flex gap={{ base: 3, md: 6 }} alignItems="flex-start" flexDirection={{ base: 'column', md: 'row' }} w="100%">
@@ -570,10 +573,6 @@ const HomePage = () => {
       </Box>
     </Flex>
 
-      {/* Mobile: discover people below feed (desktop uses right sidebar) */}
-      <Box display={{ base: 'block', md: 'none' }} mt={4} w="100%" px={{ base: 3, md: 0 }}>
-        <SuggestedUsers onUserFollowed={fetchUserPosts} embedded />
-      </Box>
     </Box>
   )
 }
