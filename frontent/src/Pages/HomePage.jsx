@@ -472,8 +472,10 @@ const HomePage = () => {
   const textColor = useColorModeValue('gray.600', 'gray.400')
 
   return (
-    <Box w="100%" maxW="100%">
-      <MobileHomePanel />
+    <Box w="100%" maxW="100%" overflow="hidden">
+      <Box display={{ base: 'block', lg: 'none' }} px={{ base: 3, md: 4 }}>
+        <MobileHomePanel />
+      </Box>
 
     <Flex gap={{ base: 3, md: 6 }} alignItems="flex-start" flexDirection={{ base: 'column', md: 'row' }} w="100%">
       {/* Suggested Channels & News - Left Side */}
@@ -489,9 +491,14 @@ const HomePage = () => {
       {/* Main Feed - Center */}
       <Box 
         flex={{ base: 1, lg: '0 0 50%' }} 
+        w={{ base: '100%', lg: 'auto' }}
+        minW={0}
         maxW={{ base: '100%', lg: '50%' }}
+        px={{ base: 0, md: 0 }}
       >
-        <StoryStrip />
+        <Box px={{ base: 3, md: 0 }} w="100%">
+          <StoryStrip />
+        </Box>
 
         {/* Error state */}
         {error && !loading && (
@@ -564,7 +571,7 @@ const HomePage = () => {
     </Flex>
 
       {/* Mobile: discover people below feed (desktop uses right sidebar) */}
-      <Box display={{ base: 'block', md: 'none' }} mt={4} w="100%">
+      <Box display={{ base: 'block', md: 'none' }} mt={4} w="100%" px={{ base: 3, md: 0 }}>
         <SuggestedUsers onUserFollowed={fetchUserPosts} embedded />
       </Box>
     </Box>

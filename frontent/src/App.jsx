@@ -12,7 +12,6 @@ import Login from './Pages/Login'
 import SignUp from './Pages/SignUp'
 import{UserContext} from './context/UserContext'
 import HomePage from './Pages/HomePage'
-import LogOutButton from './Components/LogOutButton'
 import UpdateProfile from './Pages/UpdatProile'
 import CreatePost from './Components/CreatePost'
 import MessagesPage from './Pages/MessagesPage'
@@ -89,13 +88,8 @@ const AppContent = () => {
   const isChessGamePage = /^\/chess\/[^/]+/.test(location.pathname)
   const isCardGamePage = /^\/card\/[^/]+/.test(location.pathname)
   const isGamePlayPage = isRacePage || isChessGamePage || isCardGamePage
-  const hideFloatingLogout = isMessagesPage || isGamePlayPage
-
-  const headerMaxW = isHomePage
-    ? '1400px'
-    : isMessagesPage || isGamePlayPage
-      ? '100%'
-      : '620px'
+  // Header stays in the original centered column on all pages (including home).
+  const headerMaxW = isMessagesPage || isGamePlayPage ? '100%' : '620px'
 
   const contentMaxW = isHomePage
     ? '1400px'
@@ -147,15 +141,13 @@ const AppContent = () => {
         boxShadow={isScrolled ? '0 1px 14px rgba(0,0,0,0.18)' : 'none'}
         transition="background 0.25s ease, box-shadow 0.25s ease"
       >
-        <Container maxW={headerMaxW} px={{ base: 3, md: 6 }} position="relative">
+        <Container maxW={headerMaxW} px={{ base: 4, md: 6 }} position="relative">
           <Header/>
         </Container>
       </Box>
       {/* Spacer to push page content below the fixed header (~72px = py-4 top+bottom + icon height) */}
       <Box h="72px" />
       
-      {/* Logout button - always visible, fixed position */}
-      {user && !hideFloatingLogout && <LogOutButton/>}
       
       {/* Content: full-bleed messages / race; centered column for the rest */}
       {isMessagesPage ? (
@@ -205,7 +197,7 @@ const AppContent = () => {
         <>
           {/* HomePage needs wider container for 3-column layout (Football | Feed | Suggested Users) */}
           {isHomePage ? (
-            <Container maxW="1400px" px={{ base: 3, md: 6, lg: 8 }}>
+            <Container maxW="1400px" px={{ base: 0, md: 6, lg: 8 }} w="100%">
               <Routes>
                 <Route path="/home" element={user ? <HomePage/> : <Navigate to="/" />} />
               </Routes>

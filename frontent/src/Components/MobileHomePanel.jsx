@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom'
 import ChessChallenge from './ChessChallenge'
 import CardChallenge from './CardChallenge'
 import RaceChallenge from './RaceChallenge'
+import MobileChannelsStrip from './MobileChannelsStrip'
 
 /** Games + explore shortcuts — visible on phones only; desktop keeps left sidebar. */
 const MobileHomePanel = () => {
@@ -48,10 +49,11 @@ const MobileHomePanel = () => {
         <Button size="sm" flexShrink={0} colorScheme="blue" variant="outline" onClick={() => navigate('/weather')}>
           🌤️ Weather
         </Button>
-        <Button size="sm" flexShrink={0} variant="outline" onClick={() => navigate('/news')}>
-          📰 News
-        </Button>
       </HStack>
+
+      <Box mt={4}>
+        <MobileChannelsStrip />
+      </Box>
     </Box>
   )
 }

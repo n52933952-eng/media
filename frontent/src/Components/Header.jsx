@@ -1,6 +1,8 @@
 import React,{useContext,useState,useEffect} from 'react'
 
-import{Image,useColorMode,Flex,Box,Badge,Avatar,Text} from '@chakra-ui/react'
+import{Image,useColorMode,Flex,Box,Badge,Avatar,Text,Button} from '@chakra-ui/react'
+import { IoIosLogOut } from 'react-icons/io'
+import useShowToast from '../hooks/useShowToast.js'
 import { TiHomeOutline } from "react-icons/ti";
 import { FaRegMessage } from "react-icons/fa6";
 import { IoNotificationsOutline } from "react-icons/io5";
@@ -14,9 +16,42 @@ const Header = () => {
   
   const{colorMode,toggleColorMode}=useColorMode()
 
-   const{user}=useContext(UserContext)
+   const{user,setUser}=useContext(UserContext)
    const {socket, totalUnreadCount, notificationCount, endChessGameOnNavigate, endCardGameOnNavigate, endRaceGameOnNavigate} = useContext(SocketContext) || {}
    const navigate = useNavigate()
+   const showToast = useShowToast()
+
+   const handleLogout = async () => {
+     try {
+       if (endChessGameOnNavigate) endChessGameOnNavigate()
+
+       const res = await fetch(
+         `${import.meta.env.PROD ? window.location.origin : 'http://localhost:5000'}/api/user/logout`,
+         {
+           method: 'POST',
+           credentials: 'include',
+           headers: { 'Content-Type': 'application/json' },
+         }
+       )
+       const data = await res.json()
+       if (data.error) {
+         showToast('Error', data.error, 'error')
+         return
+       }
+
+       localStorage.removeItem('chessOrientation')
+       localStorage.removeItem('gameLive')
+       localStorage.removeItem('chessRoomId')
+       localStorage.removeItem('chessFEN')
+       localStorage.removeItem('capturedWhite')
+       localStorage.removeItem('capturedBlack')
+       localStorage.removeItem('userInfo')
+       setUser(null)
+       navigate('/', { replace: true })
+     } catch (error) {
+       console.log(error)
+     }
+   }
 
    // End any active game before navigating away
    const handleNavigation = (path, e) => {
@@ -39,9 +74,8 @@ const Header = () => {
      <Flex 
        justifyContent="space-between"
        alignItems="center"
-       py={{ base: 2, md: 4 }}
-       px={{ base: 1, md: 4 }}
-       gap={{ base: 1, md: 0 }}
+       py="4"
+       px="4"
        w="100%"
      >
         
@@ -78,7 +112,7 @@ const Header = () => {
 
 
       {user && (
-        <Flex gap={{ base: 2, md: 4 }} alignItems="center" flexShrink={0}>
+        <Flex gap={4} alignItems="center" flexShrink={0}>
           <Flex display={{ base: 'none', sm: 'flex' }} alignItems="center" gap={2} fontSize="10px" color="gray.500">
             <Text as={Link} to="/privacy" _hover={{ color: 'blue.400' }}>
               Privacy
@@ -183,6 +217,10 @@ const Header = () => {
               style={{ width: '26px', height: '26px', minWidth: '26px', display: 'block' }}
             />
           </Box>
+
+          <Button size="sm" onClick={handleLogout} aria-label="Log out" flexShrink={0}>
+            <IoIosLogOut size={22} />
+          </Button>
         </Flex>
       )}
 

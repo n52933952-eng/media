@@ -845,7 +845,7 @@ const showToast = useShowToast()
   }
   
   const postContent = (
-    <Flex gap={3}  mb="4" py={5}>
+    <Flex gap={3} mb="4" py={5} w="100%" maxW="100%" px={{ base: 3, md: 0 }}>
         
         
         <Flex flexDirection="column" alignItems="center">
