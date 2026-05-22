@@ -19,6 +19,7 @@ import {
     ModalBody,
     ModalCloseButton,
     SimpleGrid,
+    Grid,
     useBreakpointValue,
 } from '@chakra-ui/react'
 import { useParams, useNavigate, useSearchParams, useLocation } from 'react-router-dom'
@@ -1554,6 +1555,48 @@ const ChessGamePage = () => {
 
     const pieceStyleIconSrc = lichessPieceSvgUrl(pieceSetId, 'wN')
 
+    /** Fixed-height player row so captured pieces / usernames never shift the board column. */
+    const renderPlayerPanel = ({
+        profilePic,
+        displayName,
+        colorLabel,
+        capturedList,
+        unicodeColor,
+    }) => (
+        <Box flex="1" display="flex" flexDirection="column" justifyContent="flex-start" minH={{ base: '120px', md: '168px' }}>
+            <Flex justify="center" mb={2} h="32px" alignItems="center" flexShrink={0}>
+                <Avatar src={profilePic} name={displayName || 'Player'} size="sm" />
+            </Flex>
+            <Text
+                fontSize="xs"
+                textAlign="center"
+                color={textColor}
+                mb={2}
+                fontWeight="bold"
+                minH="1.25rem"
+                noOfLines={1}
+            >
+                {displayName || '\u00A0'}
+            </Text>
+            <Text fontSize="xs" textAlign="center" color="gray.500" mb={2} minH="1rem" flexShrink={0}>
+                {colorLabel}
+            </Text>
+            <Flex wrap="wrap" justify="center" alignItems="center" alignContent="flex-start" gap={1} minH="60px" flex="1">
+                {capturedList.length > 0 ? (
+                    capturedList.map((p, i) => (
+                        <Text key={i} fontSize="2xl" lineHeight={1}>
+                            {getPieceUnicode(p, unicodeColor)}
+                        </Text>
+                    ))
+                ) : (
+                    <Text fontSize="xs" color="gray.500">
+                        No pieces
+                    </Text>
+                )}
+            </Flex>
+        </Box>
+    )
+
     const appearanceIconButtons = (
         <HStack spacing={1.5}>
             <IconButton
@@ -1588,165 +1631,92 @@ const ChessGamePage = () => {
         </HStack>
     )
 
+    const statusLineText = isSpectator
+        ? gameLive && !reviewMode && !isGameOver
+            ? `👁️ Watching — ${chess.turn() === 'w' ? 'White to move' : 'Black to move'}`
+            : '👁️ Spectator mode'
+        : gameLive && storedOrientation && !reviewMode
+          ? `You are playing as: ${storedOrientation === 'white' ? '⚪ White' : '⚫ Black'}${chess.turn() === storedOrientation[0] ? ' (Your turn!)' : ' (Waiting...)'}`
+          : storedOrientation
+            ? `Waiting to start — ${storedOrientation === 'white' ? '⚪ White' : '⚫ Black'}`
+            : 'Waiting for opponent…'
+
     return (
         <Box bg={bgColor} minH="100vh" py={2}>
-            <Flex
-                justify="center"
-                align="start"
+            <Grid
+                templateColumns={{ base: '1fr', md: '200px auto' }}
+                templateAreas={{ base: '"board" "sidebar"', md: '"sidebar board"' }}
+                justifyContent="center"
+                alignItems="start"
+                columnGap={3}
+                rowGap={3}
                 px={{ base: 4, lg: 6 }}
                 pr={{ base: 4, lg: 10 }}
-                direction={{ base: 'column', md: 'row' }}
-                gap={3}
+                maxW="100%"
+                mx="auto"
+                w="fit-content"
             >
-                {/* Captured Pieces Panel - Left Side */}
-                {gameLive && (
-                    <Box
-                        bg={cardBg}
-                        p={4}
-                        borderRadius="md"
-                        boxShadow="md"
-                        w={{ base: '100%', md: '200px' }}
-                        minH={{ base: 'auto', md: '400px' }}
-                        maxW={{ base: '100%', md: '200px' }}
-                        display="flex"
-                        flexDirection="column"
-                        justifyContent="space-between"
-                        order={{ base: 2, md: 1 }}
-                        flexShrink={0}
-                    >
-                        {isSpectator ? (
-                            <>
-                                {/* Top: Player 1 (WHITE/Challenger) */}
-                                <Box>
-                                    <Flex justify="center" mb={2}>
-                                        <Avatar
-                                            src={player1?.profilePic}
-                                            name={player1?.name || player1?.username}
-                                            size="sm"
-                                        />
-                                    </Flex>
-                                    <Text fontSize="xs" textAlign="center" color={textColor} mb={2} fontWeight="bold">
-                                        {player1?.username || 'Loading...'}
-                                    </Text>
-                                    <Text fontSize="xs" textAlign="center" color="gray.500" mb={2}>
-                                        White ⚪
-                                    </Text>
-                                    <Flex wrap="wrap" justify="center" gap={1} minH="60px">
-                                        {capW.length > 0 ? (
-                                            capW.map((p, i) => (
-                                                <Text key={i} fontSize="2xl">
-                                                    {getPieceUnicode(p, 'white')}
-                                                </Text>
-                                            ))
-                                        ) : (
-                                            <Text fontSize="xs" color="gray.500">No pieces</Text>
-                                        )}
-                                    </Flex>
-                                </Box>
-
-                                {/* Bottom: Player 2 (BLACK/Accepter) */}
-                                <Box>
-                                    <Flex justify="center" mb={2}>
-                                        <Avatar
-                                            src={player2?.profilePic}
-                                            name={player2?.name || player2?.username}
-                                            size="sm"
-                                        />
-                                    </Flex>
-                                    <Text fontSize="xs" textAlign="center" color={textColor} mb={2} fontWeight="bold">
-                                        {player2?.username || 'Loading...'}
-                                    </Text>
-                                    <Text fontSize="xs" textAlign="center" color="gray.500" mb={2}>
-                                        Black ⚫
-                                    </Text>
-                                    <Flex wrap="wrap" justify="center" gap={1} minH="60px">
-                                        {capB.length > 0 ? (
-                                            capB.map((p, i) => (
-                                                <Text key={i} fontSize="2xl">
-                                                    {getPieceUnicode(p, 'black')}
-                                                </Text>
-                                            ))
-                                        ) : (
-                                            <Text fontSize="xs" color="gray.500">No pieces</Text>
-                                        )}
-                                    </Flex>
-                                </Box>
-                            </>
-                        ) : (
-                            <>
-                                {/* Top: Opponent */}
-                                <Box>
-                                    <Flex justify="center" mb={2}>
-                                        <Avatar
-                                            src={opponent?.profilePic}
-                                            name={opponent?.name}
-                                            size="sm"
-                                        />
-                                    </Flex>
-                                    <Text fontSize="xs" textAlign="center" color={textColor} mb={2} fontWeight="bold">
-                                        {opponent?.username}
-                                    </Text>
-                                    <Text fontSize="xs" textAlign="center" color="gray.500" mb={2}>
-                                        {/* Opponent is always the opposite color of user */}
-                                        {storedOrientation === 'white' ? 'Black ⚫' : 'White ⚪'}
-                                    </Text>
-                                    <Flex wrap="wrap" justify="center" gap={1} minH="60px">
-                                        {/* If user is white, opponent is black - show pieces black captured (white pieces) = capturedWhite */}
-                                        {/* If user is black, opponent is white - show pieces white captured (black pieces) = capturedBlack */}
-                                        {(storedOrientation === 'white' ? capW : capB).length > 0 ? (
-                                            (storedOrientation === 'white' ? capW : capB).map((p, i) => (
-                                                <Text key={i} fontSize="2xl">
-                                                    {getPieceUnicode(p, storedOrientation === 'white' ? 'white' : 'black')}
-                                                </Text>
-                                            ))
-                                        ) : (
-                                            <Text fontSize="xs" color="gray.500">No pieces</Text>
-                                        )}
-                                    </Flex>
-                                </Box>
-
-                                {/* Bottom: You */}
-                                <Box>
-                                    <Flex justify="center" mb={2}>
-                                        <Avatar
-                                            src={user?.profilePic}
-                                            name={user?.name}
-                                            size="sm"
-                                        />
-                                    </Flex>
-                                    <Text fontSize="xs" textAlign="center" color={textColor} mb={2} fontWeight="bold">
-                                        {user?.username} (You)
-                                    </Text>
-                                    <Text fontSize="xs" textAlign="center" color="gray.500" mb={2}>
-                                        {/* User's color is always storedOrientation */}
-                                        {storedOrientation === 'white' ? 'White ⚪' : 'Black ⚫'}
-                                    </Text>
-                                    <Flex wrap="wrap" justify="center" gap={1} minH="60px">
-                                        {/* If user is white, show pieces white captured (black pieces) = capturedBlack */}
-                                        {/* If user is black, show pieces black captured (white pieces) = capturedWhite */}
-                                        {(storedOrientation === 'white' ? capB : capW).length > 0 ? (
-                                            (storedOrientation === 'white' ? capB : capW).map((p, i) => (
-                                                <Text key={i} fontSize="2xl">
-                                                    {getPieceUnicode(p, storedOrientation === 'white' ? 'black' : 'white')}
-                                                </Text>
-                                            ))
-                                        ) : (
-                                            <Text fontSize="xs" color="gray.500">No pieces</Text>
-                                        )}
-                                    </Flex>
-                                </Box>
-                            </>
-                        )}
-                    </Box>
-                )}
+                {/* Captured pieces — always mounted so the board column never jumps when gameLive flips */}
+                <Box
+                    gridArea="sidebar"
+                    bg={cardBg}
+                    p={4}
+                    borderRadius="md"
+                    boxShadow="md"
+                    w={{ base: '100%', md: '200px' }}
+                    minH={{ base: '280px', md: '468px' }}
+                    maxW={{ base: '100%', md: '200px' }}
+                    display="flex"
+                    flexDirection="column"
+                    justifyContent="space-between"
+                    flexShrink={0}
+                    alignSelf="stretch"
+                >
+                    {isSpectator ? (
+                        <>
+                            {renderPlayerPanel({
+                                profilePic: player1?.profilePic,
+                                displayName: player1?.username || 'Loading…',
+                                colorLabel: 'White ⚪',
+                                capturedList: capW,
+                                unicodeColor: 'white',
+                            })}
+                            {renderPlayerPanel({
+                                profilePic: player2?.profilePic,
+                                displayName: player2?.username || 'Loading…',
+                                colorLabel: 'Black ⚫',
+                                capturedList: capB,
+                                unicodeColor: 'black',
+                            })}
+                        </>
+                    ) : (
+                        <>
+                            {renderPlayerPanel({
+                                profilePic: opponent?.profilePic,
+                                displayName: opponent?.username || '…',
+                                colorLabel: storedOrientation === 'white' ? 'Black ⚫' : 'White ⚪',
+                                capturedList: storedOrientation === 'white' ? capW : capB,
+                                unicodeColor: storedOrientation === 'white' ? 'white' : 'black',
+                            })}
+                            {renderPlayerPanel({
+                                profilePic: user?.profilePic,
+                                displayName: user?.username ? `${user.username} (You)` : 'You',
+                                colorLabel: storedOrientation === 'white' ? 'White ⚪' : 'Black ⚫',
+                                capturedList: storedOrientation === 'white' ? capB : capW,
+                                unicodeColor: storedOrientation === 'white' ? 'black' : 'white',
+                            })}
+                        </>
+                    )}
+                </Box>
 
                 {/* Board slot is fixed width; appearance panel is absolute so nothing else moves */}
                 <Box
-                    order={{ base: 1, md: 2 }}
+                    gridArea="board"
                     position="relative"
                     w="fit-content"
-                    mx={{ md: 'auto' }}
+                    mx={{ base: 'auto', md: 0 }}
                     flexShrink={0}
+                    justifySelf={{ base: 'center', md: 'start' }}
                 >
                 <Box
                     bg={cardBg}
@@ -1774,18 +1744,18 @@ const ChessGamePage = () => {
                             </Text>
                         </motion.div>
                     )}
-                    {isSpectator ? (
-                        <Text fontSize="xs" textAlign="center" mb={1.5} color="#5a3e2b" fontWeight="bold">
-                            {gameLive && !reviewMode && !isGameOver
-                                ? `👁️ Watching — ${chess.turn() === 'w' ? 'White to move' : 'Black to move'}`
-                                : '👁️ Spectator mode'}
+                    <Box minH="1.5rem" mb={1.5} display="flex" alignItems="center" justifyContent="center">
+                        <Text
+                            fontSize="xs"
+                            textAlign="center"
+                            color="#5a3e2b"
+                            fontWeight="bold"
+                            noOfLines={2}
+                            lineHeight="short"
+                        >
+                            {statusLineText}
                         </Text>
-                    ) : gameLive && storedOrientation && !reviewMode ? (
-                        <Text fontSize="xs" textAlign="center" mb={1.5} color="#5a3e2b" fontWeight="bold">
-                            You are playing as: {storedOrientation === 'white' ? '⚪ White' : '⚫ Black'}
-                            {chess.turn() === storedOrientation[0] ? ' (Your turn!)' : ' (Waiting...)'}
-                        </Text>
-                    ) : null}
+                    </Box>
 
                     <Box
                         w="400px"
@@ -1944,12 +1914,16 @@ const ChessGamePage = () => {
                         </Flex>
                     )}
 
-                    {gameLive && !isSpectator && !reviewMode && !isGameOver && (
-                        <Flex justify="center" mt={2}>
+                    {!isSpectator && !reviewMode && (
+                        <Flex justify="center" mt={2} minH="32px" alignItems="center">
                             <Button
                                 colorScheme="red"
                                 size="sm"
                                 onClick={handleResign}
+                                visibility={gameLive && !isGameOver ? 'visible' : 'hidden'}
+                                pointerEvents={gameLive && !isGameOver ? 'auto' : 'none'}
+                                aria-hidden={!(gameLive && !isGameOver)}
+                                tabIndex={gameLive && !isGameOver ? 0 : -1}
                             >
                                 Resign
                             </Button>
@@ -2017,7 +1991,7 @@ const ChessGamePage = () => {
                     )}
                 </Box>
                 </Box>
-            </Flex>
+            </Grid>
 
             <Modal
                 isOpen={Boolean(appearancePanel) && !isLgUp}
