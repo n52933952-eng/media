@@ -61,9 +61,9 @@ const LogOutButton = () => {
    
      <Button  
        position="fixed" 
-       top="20px" 
-       right="30px" 
-       size="sm" 
+       top={{ base: '14px', md: '20px' }}
+       right={{ base: '10px', md: '30px' }}
+       size={{ base: 'xs', md: 'sm' }}
        onClick={handleLogout}
        zIndex={1001}
      >

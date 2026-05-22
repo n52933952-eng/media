@@ -2451,6 +2451,56 @@ const MessagesPage = () => {
               borderRadius="full"
             />
           </InputGroup>
+
+          {/* Mobile: online friends (desktop uses right sidebar) */}
+          <Box display={{ base: 'block', lg: 'none' }} mt={4}>
+            <Text fontSize="sm" fontWeight="bold" mb={2} color={useColorModeValue('black', 'white')}>
+              Online Friends
+            </Text>
+            <HStack spacing={3} overflowX="auto" pb={1} sx={{ WebkitOverflowScrolling: 'touch' }}>
+              {followedUsers
+                .reduce((acc, u) => {
+                  const userId = idStr(u?._id)
+                  if (!userId || acc.some((x) => idStr(x?._id) === userId)) return acc
+                  acc.push(u)
+                  return acc
+                }, [])
+                .filter((u) => isUserInOnlineList(onlineUser, u._id))
+                .map((friend) => (
+                  <VStack
+                    key={friend._id}
+                    spacing={1}
+                    minW="56px"
+                    cursor="pointer"
+                    onClick={() => startConversation(friend._id)}
+                    flexShrink={0}
+                  >
+                    <Box position="relative">
+                      <Avatar
+                        size="sm"
+                        src={friend.profilePic}
+                        name={friend.name || friend.username || 'User'}
+                        bg={useColorModeValue('blue.500', 'blue.600')}
+                      />
+                      <Box
+                        position="absolute"
+                        bottom={0}
+                        right={0}
+                        w={2.5}
+                        h={2.5}
+                        bg="green.500"
+                        borderRadius="full"
+                        border="2px solid"
+                        borderColor={bgColor}
+                      />
+                    </Box>
+                    <Text fontSize="2xs" noOfLines={1} maxW="56px" textAlign="center">
+                      {friend.username}
+                    </Text>
+                  </VStack>
+                ))}
+            </HStack>
+          </Box>
         </Box>
 
         <Box 

@@ -39,8 +39,10 @@ const Header = () => {
      <Flex 
        justifyContent="space-between"
        alignItems="center"
-       py="4"
-       px="4"
+       py={{ base: 2, md: 4 }}
+       px={{ base: 1, md: 4 }}
+       gap={{ base: 1, md: 0 }}
+       w="100%"
      >
         
        
@@ -76,7 +78,7 @@ const Header = () => {
 
 
       {user && (
-        <Flex gap={4} alignItems="center">
+        <Flex gap={{ base: 2, md: 4 }} alignItems="center" flexShrink={0}>
           <Flex display={{ base: 'none', sm: 'flex' }} alignItems="center" gap={2} fontSize="10px" color="gray.500">
             <Text as={Link} to="/privacy" _hover={{ color: 'blue.400' }}>
               Privacy

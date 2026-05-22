@@ -395,7 +395,7 @@ const CardGamePage = () => {
                 </HStack>
             </Flex>
 
-            <Box maxW="640px" mx="auto" px={4} pt={4}>
+            <Box maxW={{ base: '100%', md: '640px' }} mx="auto" px={{ base: 2, md: 4 }} pt={4} w="100%">
                 {/* Score bar */}
                 <Grid templateColumns="1fr 1fr" gap={3} mb={4}>
                     {[

@@ -11,6 +11,7 @@ import SuggestedUsers from '../Components/SuggestedUsers'
 import SuggestedChannels from '../Components/SuggestedChannels'
 import ActivityFeed from '../Components/ActivityFeed'
 import StoryStrip from '../Components/StoryStrip'
+import MobileHomePanel from '../Components/MobileHomePanel'
 
 
 
@@ -471,7 +472,10 @@ const HomePage = () => {
   const textColor = useColorModeValue('gray.600', 'gray.400')
 
   return (
-    <Flex gap={6} alignItems="flex-start">
+    <Box w="100%" maxW="100%">
+      <MobileHomePanel />
+
+    <Flex gap={{ base: 3, md: 6 }} alignItems="flex-start" flexDirection={{ base: 'column', md: 'row' }} w="100%">
       {/* Suggested Channels & News - Left Side */}
       <Box 
         flex={{ base: '0', lg: '0 0 22%' }} 
@@ -558,6 +562,12 @@ const HomePage = () => {
         <SuggestedUsers onUserFollowed={fetchUserPosts} />
       </Box>
     </Flex>
+
+      {/* Mobile: discover people below feed (desktop uses right sidebar) */}
+      <Box display={{ base: 'block', md: 'none' }} mt={4} w="100%">
+        <SuggestedUsers onUserFollowed={fetchUserPosts} embedded />
+      </Box>
+    </Box>
   )
 }
 

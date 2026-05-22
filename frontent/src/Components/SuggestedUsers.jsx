@@ -4,7 +4,7 @@ import { SearchIcon, RepeatIcon } from '@chakra-ui/icons'
 import SuggestedUser from './SuggestedUser'
 import { UserContext } from '../context/UserContext'
 
-const SuggestedUsers = ({ onUserFollowed }) => {
+const SuggestedUsers = ({ onUserFollowed, embedded = false }) => {
   const { user } = useContext(UserContext)
   const [loading, setLoading] = useState(true)
   const [suggestedUsers, setSuggestedUsers] = useState([])
@@ -207,16 +207,17 @@ const SuggestedUsers = ({ onUserFollowed }) => {
 
   return (
     <Box
-      position="sticky"
-      top="440px"
+      position={embedded ? 'relative' : 'sticky'}
+      top={embedded ? undefined : '440px'}
       bg={bgColor}
-      minH="400px"
+      minH={embedded ? 'auto' : '400px'}
       borderRadius="md"
       p={4}
       border="1px solid"
       borderColor={borderColor}
-      maxW="280px"
-      ml="auto"
+      maxW={embedded ? '100%' : '280px'}
+      w={embedded ? '100%' : undefined}
+      ml={embedded ? 0 : 'auto'}
       transition="all 0.2s ease"
       willChange="auto"
     >

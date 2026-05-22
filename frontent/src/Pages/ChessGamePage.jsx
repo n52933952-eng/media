@@ -61,6 +61,21 @@ const ChessGamePage = () => {
     const { user, orientation, setOrientation } = useContext(UserContext)
     const showToast = useShowToast()
 
+    const [boardWidth, setBoardWidth] = useState(320)
+    useEffect(() => {
+        const update = () => {
+            const max = 400
+            const min = 260
+            const sidePadding = 48
+            setBoardWidth(
+                Math.min(max, Math.max(min, document.documentElement.clientWidth - sidePadding))
+            )
+        }
+        update()
+        window.addEventListener('resize', update)
+        return () => window.removeEventListener('resize', update)
+    }, [])
+
     const [opponent, setOpponent] = useState(null)
     const [roomId, setRoomId] = useState(null)
     const [isSpectator, setIsSpectator] = useState(false)
@@ -1758,8 +1773,9 @@ const ChessGamePage = () => {
                     </Box>
 
                     <Box
-                        w="400px"
-                        h="400px"
+                        w={`${boardWidth}px`}
+                        h={`${boardWidth}px`}
+                        maxW="100%"
                         dir="ltr"
                         sx={{
                             direction: 'ltr',
@@ -1775,7 +1791,7 @@ const ChessGamePage = () => {
                             position={boardPosition}
                             onPieceDrop={reviewMode || isGameOver ? () => false : onDrop}
                             boardOrientation={storedOrientation}
-                            boardWidth={400}
+                            boardWidth={boardWidth}
                             animationDuration={reviewMode ? REVIEW_BOARD_ANIM_MS : 250}
                             arePiecesDraggable={!isSpectator && !reviewMode && !isGameOver}
                             customPieces={customPieces}
@@ -1793,7 +1809,7 @@ const ChessGamePage = () => {
                             initial={{ opacity: 0, y: 8 }}
                             animate={{ opacity: 1, y: 0 }}
                             transition={{ duration: 0.25, ease: 'easeOut' }}
-                            style={{ width: '100%', maxWidth: '400px' }}
+                            style={{ width: '100%', maxWidth: `${boardWidth}px` }}
                         >
                             <HStack justify="center" mt={2} spacing={2} flexWrap="wrap">
                                 <Button size="xs" onClick={reviewJumpToStart} isDisabled={reviewIndex === 0}>

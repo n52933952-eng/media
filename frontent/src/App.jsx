@@ -86,6 +86,22 @@ const AppContent = () => {
   const isHomePage = location.pathname === "/home"
   const isMessagesPage = location.pathname === "/messages"
   const isRacePage = location.pathname.startsWith("/race/")
+  const isChessGamePage = /^\/chess\/[^/]+/.test(location.pathname)
+  const isCardGamePage = /^\/card\/[^/]+/.test(location.pathname)
+  const isGamePlayPage = isRacePage || isChessGamePage || isCardGamePage
+  const hideFloatingLogout = isMessagesPage || isGamePlayPage
+
+  const headerMaxW = isHomePage
+    ? '1400px'
+    : isMessagesPage || isGamePlayPage
+      ? '100%'
+      : '620px'
+
+  const contentMaxW = isHomePage
+    ? '1400px'
+    : isChessGamePage || isCardGamePage
+      ? { base: '100%', md: '900px', lg: '1100px' }
+      : '620px'
   // Check if current path is a user page (e.g., /username, but not /username/post/123 or other routes)
   const pathParts = location.pathname.split('/').filter(Boolean)
   const isUserPage = pathParts.length === 1 &&
@@ -131,7 +147,7 @@ const AppContent = () => {
         boxShadow={isScrolled ? '0 1px 14px rgba(0,0,0,0.18)' : 'none'}
         transition="background 0.25s ease, box-shadow 0.25s ease"
       >
-        <Container maxW="620px" px={{ base: 4, md: 6 }} position="relative">
+        <Container maxW={headerMaxW} px={{ base: 3, md: 6 }} position="relative">
           <Header/>
         </Container>
       </Box>
@@ -139,16 +155,16 @@ const AppContent = () => {
       <Box h="72px" />
       
       {/* Logout button - always visible, fixed position */}
-      {user && <LogOutButton/>}
+      {user && !hideFloatingLogout && <LogOutButton/>}
       
       {/* Content: full-bleed messages / race; centered column for the rest */}
       {isMessagesPage ? (
         <>
           <Box 
             w="100%"
-            h="calc(100vh - 80px)"
+            h="calc(100vh - 72px)"
             position="fixed"
-            top="80px"
+            top="72px"
             left="0"
             right="0"
             bg={useColorModeValue('white', '#101010')}
@@ -189,13 +205,13 @@ const AppContent = () => {
         <>
           {/* HomePage needs wider container for 3-column layout (Football | Feed | Suggested Users) */}
           {isHomePage ? (
-            <Container maxW="1400px" px={{ base: 4, md: 6, lg: 8 }}>
+            <Container maxW="1400px" px={{ base: 3, md: 6, lg: 8 }}>
               <Routes>
                 <Route path="/home" element={user ? <HomePage/> : <Navigate to="/" />} />
               </Routes>
             </Container>
           ) : (
-            <Container maxW="620px" px={{ base: 4, md: 6 }}>
+            <Container maxW={contentMaxW} px={{ base: isChessGamePage || isCardGamePage ? 2 : 3, md: 6 }}>
               <Routes>
                 <Route path="/welcome" element={<WelcomePage />} />
                 <Route path="/about" element={<AboutPage />} />
