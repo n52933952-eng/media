@@ -148,6 +148,7 @@ const FollowListModal = ({
         method: 'POST',
         credentials: 'include',
         headers: followPostHeaders,
+        body: JSON.stringify({ clientType: 'web' }),
       })
       const data = await res.json()
       if (data.error) {

@@ -53,6 +53,7 @@ const SuggestedUser = ({ user, onFollowed, onUserFollowed, onPatchFollowState })
           credentials: 'include',
           method: 'POST',
           headers: followPostHeaders,
+          body: JSON.stringify({ clientType: 'web' }),
         }
       )
 

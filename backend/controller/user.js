@@ -426,16 +426,18 @@ export const FollowAndUnfollow = async(req,res) => {
             ;(async () => {
                 try {
                     const result = await createNotification(id, 'follow', req.user._id)
-                    // Web only: email when followee was not on-site (no live socket) — mobile keeps push only
-                    if (
-                        followClientType === 'web' &&
-                        result &&
-                        result.deliveredInApp !== true
-                    ) {
-                        await sendWebFollowEmailToUser(id, req.user._id)
+                    const deliveredInApp = result?.deliveredInApp === true
+                    console.log(`👤 [follow] client=${followClientType} followee=${id} deliveredInApp=${deliveredInApp}`)
+
+                    // Web: always try email (Gmail). Mobile: push/in-app only.
+                    if (followClientType === 'web') {
+                        const emailResult = await sendWebFollowEmailToUser(id, req.user._id)
+                        console.log(`📧 [follow] email result:`, emailResult)
+                    } else {
+                        console.log(`📧 [follow] skip email (client=${followClientType}, use mobile push)`)
                     }
                 } catch (err) {
-                    console.error('Error creating follow notification:', err)
+                    console.error('❌ [follow] notification/email error:', err)
                 }
             })()
             

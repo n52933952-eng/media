@@ -74,12 +74,37 @@ function getTransporter() {
 }
 
 function getAppOrigin() {
-    const raw =
+    let raw =
         process.env.FRONTEND_URL ||
         process.env.APP_URL ||
         process.env.FRONTEND_URL_PROD ||
         'http://localhost:5173'
-    return String(raw).replace(/\/$/, '')
+    raw = String(raw).trim().replace(/\/$/, '')
+    if (raw && !/^https?:\/\//i.test(raw)) {
+        raw = `https://${raw}`
+    }
+    return raw
+}
+
+/** Call once at server start — shows in Render logs whether follow emails can send. */
+export async function logEmailTransportStatus() {
+    const cfg = getSmtpConfig()
+    if (!cfg) {
+        console.warn('⚠️ [email] SMTP not configured — follow emails disabled (set SMTP_USER + SMTP_PASS on the API service)')
+        return
+    }
+    try {
+        const t = nodemailer.createTransport({
+            host: cfg.host,
+            port: cfg.port,
+            secure: cfg.secure,
+            auth: { user: cfg.user, pass: cfg.pass },
+        })
+        await t.verify()
+        console.log(`✅ [email] SMTP ready (${cfg.host}:${cfg.port}, from ${cfg.from})`)
+    } catch (e) {
+        console.error('❌ [email] SMTP verify failed — check SMTP_USER / SMTP_PASS (App Password):', e?.message || e)
+    }
 }
 
 /** Initial letter for avatar circle when no profile photo. */

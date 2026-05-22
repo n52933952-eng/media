@@ -144,7 +144,8 @@ const UserHeader = ({ users, activeTab, setActiveTab, onUserFollowed, postsCount
          credentials:"include",
          method:"POST",
          
-         headers: followPostHeaders
+         headers: followPostHeaders,
+         body: JSON.stringify({ clientType: 'web' }),
         })
 
 

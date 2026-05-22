@@ -24,6 +24,7 @@ import { initializeActivityCleanup } from './services/activityCleanup.js'
 import { initializeStoryCleanup } from './services/storyCleanup.js'
 import { initRedis, isRedisAvailable } from './services/redis.js'
 import { initializeFCM, getFCMStatus } from './services/fcmNotifications.js'
+import { logEmailTransportStatus } from './services/emailNotifications.js'
 import path from 'path'
 import { fileURLToPath } from 'url'
 
@@ -84,6 +85,8 @@ mongoose.connect(process.env.MONGO, {
     
     // Initialize Redis after MongoDB connection
     await initRedis()
+
+    await logEmailTransportStatus()
     
     // Initialize Firebase Cloud Messaging for call notifications
     console.log('🔥 [Index] About to initialize FCM...');
