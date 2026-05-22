@@ -455,7 +455,7 @@ return (
 					<ModalCloseButton />
 					<ModalBody pb={6}>
 						<FormControl>
-							<Input placeholder="اكتب تعليق"
+							<Input placeholder="Write comment"
 							 value={reply}
 							 onChange={(e) => setReply(e.target.value)}
 							/>
