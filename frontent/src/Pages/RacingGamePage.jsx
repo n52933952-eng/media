@@ -1313,14 +1313,22 @@ export default function RacingGamePage() {
   const initMinimap = () => {
     const host = containerRef.current
     if (!host) return
+    const compact = window.matchMedia('(max-width: 991px)').matches
+    const size = compact ? 72 : 160
     const canvas = document.createElement('canvas')
     canvas.id = 'race-minimap'
-    canvas.width  = 160; canvas.height = 160
+    canvas.width = size
+    canvas.height = size
     Object.assign(canvas.style, {
-      position: 'absolute', bottom: '240px', right: '20px',
-      width: '160px', height: '160px',
-      background: 'rgba(0,0,0,0.5)', borderRadius: '50%',
-      boxShadow: '0 0 10px rgba(0,0,0,0.7)', zIndex: '1000',
+      position: 'absolute',
+      bottom: compact ? '92px' : '240px',
+      right: compact ? '92px' : '20px',
+      width: `${size}px`,
+      height: `${size}px`,
+      background: 'rgba(0,0,0,0.5)',
+      borderRadius: '50%',
+      boxShadow: '0 0 10px rgba(0,0,0,0.7)',
+      zIndex: '1000',
       pointerEvents: 'none',
     })
     host.appendChild(canvas)
@@ -1332,7 +1340,11 @@ export default function RacingGamePage() {
     const car = carModelRef.current
     if (!mm || !car) return
     const { ctx } = mm
-    const S = 160; const CX = S/2; const CY = S/2; const SCALE = 0.3
+    const S = mm.canvas.width || 160
+    const CX = S / 2
+    const CY = S / 2
+    const SCALE = 0.3
+    const dotR = S <= 80 ? 3 : 6
     ctx.clearRect(0, 0, S, S)
     // Circle clip
     ctx.save()
@@ -1343,14 +1355,14 @@ export default function RacingGamePage() {
     const px = CX + car.position.x * SCALE
     const py = CY - car.position.z * SCALE
     ctx.fillStyle = myColorRef.current === 'blue' ? '#4dc9ff' : '#ff4444'
-    ctx.beginPath(); ctx.arc(px, py, 6, 0, Math.PI*2); ctx.fill()
+    ctx.beginPath(); ctx.arc(px, py, dotR, 0, Math.PI * 2); ctx.fill()
     // Draw opponent dot
     const opp = oppModelRef.current
     if (opp && opp.visible) {
       const ox = CX + opp.position.x * SCALE
       const oy = CY - opp.position.z * SCALE
       ctx.fillStyle = oppColorRef.current === 'blue' ? '#4dc9ff' : '#ff4444'
-      ctx.beginPath(); ctx.arc(ox, oy, 6, 0, Math.PI*2); ctx.fill()
+      ctx.beginPath(); ctx.arc(ox, oy, dotR, 0, Math.PI * 2); ctx.fill()
     }
     ctx.restore()
   }
@@ -1692,22 +1704,52 @@ export default function RacingGamePage() {
       {/* HUD — top left: player names + gate progress (below fixed app header) */}
       {!loading && (
         <div style={{
-          position:'fixed', top:`${raceHudTop}px`, left:'20px', zIndex:1000,
+          position:'fixed', top:`${raceHudTop}px`, left: mobileControls ? '8px' : '20px', zIndex:1000,
           background:'rgba(0,0,0,0.55)', backdropFilter:'blur(8px)',
-          borderRadius:'10px', padding:'12px 18px', color:'#fff',
-          fontFamily:'Poppins,sans-serif', minWidth:'200px',
+          borderRadius: mobileControls ? '6px' : '10px',
+          padding: mobileControls ? '6px 10px' : '12px 18px',
+          color:'#fff',
+          fontFamily:'Poppins,sans-serif',
+          minWidth: mobileControls ? '0' : '200px',
+          maxWidth: mobileControls ? '148px' : undefined,
+          fontSize: mobileControls ? '11px' : undefined,
           boxShadow:'0 0 20px rgba(0,0,0,0.5)',
         }}>
-          <div style={{ fontSize:'11px', opacity:.5, marginBottom:'6px', letterSpacing:'2px' }}>LEADERBOARD</div>
-          <div style={{ display:'flex', alignItems:'center', gap:'10px', marginBottom:'6px' }}>
-            <div style={{ width:12, height:12, borderRadius:'50%', background: myColorRef.current==='blue' ? '#4dc9ff' : '#ff4444' }} />
-            <span style={{ fontWeight:700, flex:1 }}>You</span>
-            <span style={{ opacity:.7 }}>Gate {myGate}</span>
+          <div style={{
+            fontSize: mobileControls ? '8px' : '11px',
+            opacity:.5,
+            marginBottom: mobileControls ? '4px' : '6px',
+            letterSpacing: mobileControls ? '1px' : '2px',
+          }}>LEADERBOARD</div>
+          <div style={{ display:'flex', alignItems:'center', gap: mobileControls ? '6px' : '10px', marginBottom: mobileControls ? '3px' : '6px' }}>
+            <div style={{
+              width: mobileControls ? 8 : 12,
+              height: mobileControls ? 8 : 12,
+              borderRadius:'50%',
+              background: myColorRef.current==='blue' ? '#4dc9ff' : '#ff4444',
+              flexShrink: 0,
+            }} />
+            <span style={{ fontWeight:700, flex:1, fontSize: mobileControls ? '11px' : undefined }}>You</span>
+            <span style={{ opacity:.7, fontSize: mobileControls ? '10px' : undefined }}>G{myGate}</span>
           </div>
-          <div style={{ display:'flex', alignItems:'center', gap:'10px' }}>
-            <div style={{ width:12, height:12, borderRadius:'50%', background: oppColorRef.current==='blue' ? '#4dc9ff' : '#ff4444' }} />
-            <span style={{ flex:1, opacity:.8 }}>{opponent?.name || opponent?.username || 'Opponent'}</span>
-            <span style={{ opacity:.7 }}>Gate {oppGate}</span>
+          <div style={{ display:'flex', alignItems:'center', gap: mobileControls ? '6px' : '10px' }}>
+            <div style={{
+              width: mobileControls ? 8 : 12,
+              height: mobileControls ? 8 : 12,
+              borderRadius:'50%',
+              background: oppColorRef.current==='blue' ? '#4dc9ff' : '#ff4444',
+              flexShrink: 0,
+            }} />
+            <span style={{
+              flex:1,
+              opacity:.8,
+              fontSize: mobileControls ? '10px' : undefined,
+              overflow:'hidden',
+              textOverflow:'ellipsis',
+              whiteSpace:'nowrap',
+              maxWidth: mobileControls ? '72px' : undefined,
+            }}>{opponent?.name || opponent?.username || 'Opponent'}</span>
+            <span style={{ opacity:.7, fontSize: mobileControls ? '10px' : undefined }}>G{oppGate}</span>
           </div>
         </div>
       )}
@@ -1715,16 +1757,16 @@ export default function RacingGamePage() {
       {!loading && reconnecting && (
         <div style={{
           position:'fixed',
-          top:`${raceHudTop + 84}px`,
-          left:'20px',
+          top:`${raceHudTop + (mobileControls ? 50 : 84)}px`,
+          left: mobileControls ? '8px' : '20px',
           zIndex:1001,
           background:'rgba(0,0,0,0.62)',
           border:'1px solid rgba(255,255,255,0.2)',
           borderRadius:'10px',
-          padding:'8px 12px',
+          padding: mobileControls ? '5px 8px' : '8px 12px',
           color:'#fde68a',
           fontFamily:'Poppins,sans-serif',
-          fontSize:'12px',
+          fontSize: mobileControls ? '10px' : '12px',
         }}>
           Reconnecting...
         </div>
@@ -1733,16 +1775,16 @@ export default function RacingGamePage() {
       {!loading && oppReconnecting && (
         <div style={{
           position:'fixed',
-          top:`${raceHudTop + 84}px`,
-          left:'20px',
+          top:`${raceHudTop + (mobileControls ? 50 : 84)}px`,
+          left: mobileControls ? '8px' : '20px',
           zIndex:1001,
           background:'rgba(0,0,0,0.72)',
           border:'1px solid rgba(255,200,0,0.35)',
           borderRadius:'10px',
-          padding:'8px 14px',
+          padding: mobileControls ? '5px 8px' : '8px 14px',
           color:'#fbbf24',
           fontFamily:'Poppins,sans-serif',
-          fontSize:'12px',
+          fontSize: mobileControls ? '10px' : '12px',
           display:'flex',
           alignItems:'center',
           gap:'8px',
@@ -1757,10 +1799,16 @@ export default function RacingGamePage() {
         <div style={{
           position:'fixed', top:`${raceHudTop}px`, left:'50%', transform:'translateX(-50%)',
           background:'rgba(0,0,0,0.55)', backdropFilter:'blur(8px)',
-          borderRadius:'10px', padding:'10px 24px', color:'#fff',
-          fontFamily:'Poppins,sans-serif', fontSize:'28px', fontWeight:700,
-          zIndex:1000, textShadow:'0 0 10px rgba(255,255,255,0.4)',
+          borderRadius: mobileControls ? '6px' : '10px',
+          padding: mobileControls ? '4px 12px' : '10px 24px',
+          color:'#fff',
+          fontFamily:'Poppins,sans-serif',
+          fontSize: mobileControls ? '16px' : '28px',
+          fontWeight:700,
+          zIndex:1000,
+          textShadow:'0 0 10px rgba(255,255,255,0.4)',
           boxShadow:'0 0 20px rgba(0,0,0,0.5)',
+          lineHeight: 1.1,
         }}>
           {raceTime}
         </div>
@@ -1770,15 +1818,16 @@ export default function RacingGamePage() {
       {!loading && (
         <div id="racing-ui" style={{
           position:'fixed',
-          bottom: mobileControls ? '24px' : '30px',
-          right: mobileControls ? '108px' : '30px',
+          bottom: mobileControls ? '20px' : '30px',
+          right: mobileControls ? '78px' : '30px',
           zIndex:1000,
           pointerEvents:'none', userSelect:'none',
         }}>
-          <div style={{ width: mobileControls ? '120px' : '160px' }}>
+          <div style={{ width: mobileControls ? '72px' : '160px' }}>
             <div style={{
               position:'relative', borderRadius:'50%',
-              background:'rgba(0,0,0,0.55)', padding:'16px',
+              background:'rgba(0,0,0,0.55)',
+              padding: mobileControls ? '6px' : '16px',
               boxShadow:'0 0 20px rgba(0,0,0,0.5)', backdropFilter:'blur(8px)',
             }}>
               <div style={{
@@ -1801,13 +1850,20 @@ export default function RacingGamePage() {
                 }} />
               </div>
               <div className="race-speed-value" style={{
-                fontFamily:'Poppins,sans-serif', fontSize:'36px', fontWeight:700,
-                color:'#fff', marginTop:'8px', textAlign:'center',
+                fontFamily:'Poppins,sans-serif',
+                fontSize: mobileControls ? '18px' : '36px',
+                fontWeight:700,
+                color:'#fff',
+                marginTop: mobileControls ? '2px' : '8px',
+                textAlign:'center',
                 textShadow:'0 0 10px rgba(255,255,255,0.5)',
+                lineHeight: 1,
               }}>0</div>
               <div style={{
-                fontFamily:'Poppins,sans-serif', fontSize:'12px',
-                color:'#aaa', textAlign:'center',
+                fontFamily:'Poppins,sans-serif',
+                fontSize: mobileControls ? '9px' : '12px',
+                color:'#aaa',
+                textAlign:'center',
               }}>KPH</div>
             </div>
           </div>
@@ -1860,9 +1916,11 @@ export default function RacingGamePage() {
           )}
           <div style={{ display:'flex', gap:'10px', alignItems:'center' }}>
             <button onClick={handleCallOpp} title={callActive ? 'End race voice' : 'Start race voice'} style={{
-              width:52, height:52, borderRadius:'50%', border:'none', cursor:'pointer',
+              width: mobileControls ? 40 : 52,
+              height: mobileControls ? 40 : 52,
+              borderRadius:'50%', border:'none', cursor:'pointer',
               background: !canUseRaceVoice ? '#6b7280' : (callActive ? '#ef4444' : (raceVoicePending ? '#f59e0b' : '#22c55e')),
-              color:'#fff', fontSize:'22px', display:'flex', alignItems:'center', justifyContent:'center',
+              color:'#fff', fontSize: mobileControls ? '18px' : '22px', display:'flex', alignItems:'center', justifyContent:'center',
               boxShadow:'0 4px 0 rgba(0,0,0,0.4)', fontFamily:'sans-serif',
               opacity: canUseRaceVoice ? 1 : 0.7,
             }}>
@@ -1885,9 +1943,11 @@ export default function RacingGamePage() {
             )}
             {callActive && (
               <button onClick={handleMute} title={muted ? 'Unmute mic' : 'Mute mic'} style={{
-                width:52, height:52, borderRadius:'50%', border:'none', cursor:'pointer',
+                width: mobileControls ? 40 : 52,
+                height: mobileControls ? 40 : 52,
+                borderRadius:'50%', border:'none', cursor:'pointer',
                 background: muted ? '#6b7280' : '#3b82f6',
-                color:'#fff', fontSize:'20px', display:'flex', alignItems:'center', justifyContent:'center',
+                color:'#fff', fontSize: mobileControls ? '16px' : '20px', display:'flex', alignItems:'center', justifyContent:'center',
                 boxShadow:'0 4px 0 rgba(0,0,0,0.4)',
               }}>
                 {muted ? '🔇' : '🎙️'}
@@ -1983,18 +2043,18 @@ export default function RacingGamePage() {
         >
           <div style={{
             position: 'absolute',
-            left: 20,
-            bottom: 24,
+            left: 12,
+            bottom: 16,
             display: 'flex',
-            gap: 12,
+            gap: 8,
             pointerEvents: 'auto',
           }}>
             <button
               type="button"
               aria-label="Steer left"
               style={{
-                width: 56, height: 56, borderRadius: 12, border: '2px solid rgba(255,255,255,0.35)',
-                background: 'rgba(0,0,0,0.55)', color: '#fff', fontSize: 22, fontWeight: 700,
+                width: 44, height: 44, borderRadius: 10, border: '2px solid rgba(255,255,255,0.35)',
+                background: 'rgba(0,0,0,0.55)', color: '#fff', fontSize: 18, fontWeight: 700,
                 touchAction: 'none', userSelect: 'none',
               }}
               {...touchBtn('a', '◀')}
@@ -2003,8 +2063,8 @@ export default function RacingGamePage() {
               type="button"
               aria-label="Steer right"
               style={{
-                width: 56, height: 56, borderRadius: 12, border: '2px solid rgba(255,255,255,0.35)',
-                background: 'rgba(0,0,0,0.55)', color: '#fff', fontSize: 22, fontWeight: 700,
+                width: 44, height: 44, borderRadius: 10, border: '2px solid rgba(255,255,255,0.35)',
+                background: 'rgba(0,0,0,0.55)', color: '#fff', fontSize: 18, fontWeight: 700,
                 touchAction: 'none', userSelect: 'none',
               }}
               {...touchBtn('d', '▶')}
@@ -2012,19 +2072,19 @@ export default function RacingGamePage() {
           </div>
           <div style={{
             position: 'absolute',
-            right: 20,
-            bottom: 24,
+            right: 12,
+            bottom: 16,
             display: 'flex',
             flexDirection: 'column',
-            gap: 10,
+            gap: 6,
             pointerEvents: 'auto',
           }}>
             <button
               type="button"
               aria-label="Brake"
               style={{
-                width: 52, height: 44, borderRadius: 10, border: '2px solid rgba(255,255,255,0.25)',
-                background: 'rgba(80,80,80,0.75)', color: '#fff', fontSize: 13, fontWeight: 700,
+                width: 44, height: 36, borderRadius: 8, border: '2px solid rgba(255,255,255,0.25)',
+                background: 'rgba(80,80,80,0.75)', color: '#fff', fontSize: 10, fontWeight: 700,
                 touchAction: 'none', userSelect: 'none',
               }}
               {...touchBtn('s', 'BRAKE')}
@@ -2033,9 +2093,9 @@ export default function RacingGamePage() {
               type="button"
               aria-label="Accelerate"
               style={{
-                width: 72, height: 72, borderRadius: '50%', border: '3px solid #b30059',
-                background: '#ff0080', color: '#fff', fontSize: 14, fontWeight: 800,
-                boxShadow: '0 4px 0 #b30059', touchAction: 'none', userSelect: 'none',
+                width: 56, height: 56, borderRadius: '50%', border: '2px solid #b30059',
+                background: '#ff0080', color: '#fff', fontSize: 12, fontWeight: 800,
+                boxShadow: '0 3px 0 #b30059', touchAction: 'none', userSelect: 'none',
               }}
               {...touchBtn('w', 'GAS')}
             />
