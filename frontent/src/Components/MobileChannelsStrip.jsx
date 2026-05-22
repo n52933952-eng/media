@@ -1,18 +1,32 @@
 import React, { useEffect, useState } from 'react'
-import { Box, HStack, Avatar, Text, Spinner, useColorModeValue } from '@chakra-ui/react'
+import {
+  Box,
+  HStack,
+  VStack,
+  Avatar,
+  Text,
+  Spinner,
+  Button,
+  useColorModeValue,
+} from '@chakra-ui/react'
 import { useNavigate } from 'react-router-dom'
 import useShowToast from '../hooks/useShowToast'
+import { ensureChannelLivePost } from '../utils/channelNavigation'
 
 const CACHE_KEY = 'suggestedChannelsCache'
 
-/** Live channels row for mobile home — same data as desktop SuggestedChannels sidebar. */
+/** Live channels on mobile — tap opens the channel post (creates stream post if needed). */
 const MobileChannelsStrip = () => {
   const navigate = useNavigate()
   const showToast = useShowToast()
   const [channels, setChannels] = useState([])
   const [loading, setLoading] = useState(true)
+  const [openingKey, setOpeningKey] = useState(null)
+  const [expandedId, setExpandedId] = useState(null)
   const textColor = useColorModeValue('gray.800', 'white')
   const hoverBg = useColorModeValue('gray.100', 'gray.700')
+  const cardBg = useColorModeValue('gray.50', '#252b3b')
+  const borderColor = useColorModeValue('gray.200', '#2d2d2d')
 
   useEffect(() => {
     let cancelled = false
@@ -42,35 +56,37 @@ const MobileChannelsStrip = () => {
     }
   }, [])
 
-  const openChannel = async (channel) => {
-    const channelUsername = channel?.username
-    if (!channelUsername) return
+  const openChannel = async (channel, streamIndex = 0) => {
+    if (!channel?.id || !channel?.username) return
+    const key = `${channel.id}-${streamIndex}`
+    setOpeningKey(key)
     try {
-      const baseUrl = import.meta.env.PROD ? window.location.origin : 'http://localhost:5000'
-      const userRes = await fetch(`${baseUrl}/api/user/getUserPro/${channelUsername}`, {
-        credentials: 'include',
-      })
-      const userData = await userRes.json()
-      if (!userRes.ok || !userData?._id) {
-        showToast('Error', 'Channel not found', 'error')
+      const result = await ensureChannelLivePost(channel, streamIndex)
+      if (result.ok) {
+        navigate(`/${channel.username}/post/${result.postId}`)
         return
       }
-      const postsRes = await fetch(`${baseUrl}/api/post/user/id/${userData._id}?limit=1`, {
-        credentials: 'include',
-      })
-      const postsData = await postsRes.json()
-      if (postsRes.ok && postsData.posts?.length > 0) {
-        navigate(`/${channelUsername}/post/${postsData.posts[0]._id}`)
-      } else {
-        showToast('Info', 'No posts from this channel yet', 'info')
-      }
+      showToast('Error', result.error || 'Could not open channel', 'error')
     } catch (e) {
-      console.error(e)
-      showToast('Error', 'Could not load channel', 'error')
+      console.error('[MobileChannelsStrip] openChannel', e)
+      showToast('Error', 'Could not open channel', 'error')
+    } finally {
+      setOpeningKey(null)
     }
   }
 
+  const onChannelTap = (channel) => {
+    const streams = channel.streams || []
+    if (streams.length > 1) {
+      setExpandedId((prev) => (prev === channel.id ? null : channel.id))
+      return
+    }
+    openChannel(channel, 0)
+  }
+
   if (!loading && channels.length === 0) return null
+
+  const expanded = channels.find((c) => c.id === expandedId)
 
   return (
     <Box>
@@ -80,27 +96,72 @@ const MobileChannelsStrip = () => {
       {loading ? (
         <Spinner size="sm" />
       ) : (
-        <HStack spacing={3} overflowX="auto" pb={1} sx={{ WebkitOverflowScrolling: 'touch' }}>
-          {channels.map((channel) => (
+        <>
+          <HStack spacing={3} overflowX="auto" pb={1} sx={{ WebkitOverflowScrolling: 'touch' }}>
+            {channels.map((channel) => {
+              const busy = openingKey?.startsWith(`${channel.id}-`)
+              return (
+                <Box
+                  key={channel.id || channel.username}
+                  as="button"
+                  type="button"
+                  onClick={() => onChannelTap(channel)}
+                  flexShrink={0}
+                  textAlign="center"
+                  minW="64px"
+                  _hover={{ bg: hoverBg }}
+                  borderRadius="md"
+                  p={1}
+                  border="1px solid"
+                  borderColor={expandedId === channel.id ? 'blue.400' : 'transparent'}
+                  opacity={busy ? 0.7 : 1}
+                >
+                  {busy ? (
+                    <Spinner size="sm" mx="auto" mb={1} />
+                  ) : (
+                    <Avatar name={channel.name} size="sm" bg="blue.500" mx="auto" mb={1} />
+                  )}
+                  <Text fontSize="2xs" color={textColor} noOfLines={2} maxW="72px">
+                    {channel.name}
+                  </Text>
+                </Box>
+              )
+            })}
+          </HStack>
+
+          {expanded && expanded.streams?.length > 1 && (
             <Box
-              key={channel.id || channel.username}
-              as="button"
-              type="button"
-              onClick={() => openChannel(channel)}
-              flexShrink={0}
-              textAlign="center"
-              minW="64px"
-              _hover={{ bg: hoverBg }}
+              mt={2}
+              p={2}
+              bg={cardBg}
               borderRadius="md"
-              p={1}
+              border="1px solid"
+              borderColor={borderColor}
             >
-              <Avatar name={channel.name} size="sm" bg="blue.500" mx="auto" mb={1} />
-              <Text fontSize="2xs" color={textColor} noOfLines={2} maxW="72px">
-                {channel.name}
+              <Text fontSize="xs" color={textColor} mb={2} fontWeight="semibold">
+                {expanded.name} — choose stream
               </Text>
+              <VStack align="stretch" spacing={1}>
+                {expanded.streams.map((stream, index) => {
+                  const key = `${expanded.id}-${index}`
+                  return (
+                    <Button
+                      key={key}
+                      size="sm"
+                      colorScheme="blue"
+                      variant="outline"
+                      isLoading={openingKey === key}
+                      onClick={() => openChannel(expanded, index)}
+                      leftIcon={<Box w={2} h={2} bg="red.500" borderRadius="full" />}
+                    >
+                      {stream.name || `Stream ${index + 1}`}
+                    </Button>
+                  )
+                })}
+              </VStack>
             </Box>
-          ))}
-        </HStack>
+          )}
+        </>
       )}
     </Box>
   )
