@@ -65,6 +65,7 @@ export function scrollToHomeFeed(postId) {
     document.getElementById('home-feed-anchor')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }
   requestAnimationFrame(() => {
-    setTimeout(run, 350)
+    setTimeout(run, 500)
+    setTimeout(run, 1200)
   })
 }
