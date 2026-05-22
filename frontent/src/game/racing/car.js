@@ -1,5 +1,76 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { clone as cloneSkeleton } from 'three/examples/jsm/utils/SkeletonUtils.js';
+
+function getLoadingManager() {
+  return typeof window !== 'undefined' ? window.loadingManager : null;
+}
+
+/** Each call loads a fresh GLTF (player mutates scene — never reuse the same scene). */
+function loadCarGltf(url, onOk, onErr) {
+  const loader = new GLTFLoader(getLoadingManager() || undefined);
+  loader.load(url, onOk, undefined, onErr);
+}
+
+/** Visual-only opponent car; counted by LoadingManager when present. */
+export function loadOpponentCarVisual(scene, carColor, onRoot) {
+  const url = `/models/car_${carColor}.glb`;
+  loadCarGltf(
+    url,
+    (gltf) => {
+      const root = buildOpponentCarRoot(gltf);
+      scene.add(root);
+      onRoot?.(root);
+    },
+    (err) => {
+      console.error('[car] opponent model load failed:', err);
+      onRoot?.(null);
+    }
+  );
+}
+
+/** Deep-clone car scene for a second visual (opponent); keeps wheels on body. */
+export function cloneCarVisualScene(sourceScene) {
+  let hasSkinned = false;
+  sourceScene.traverse((n) => {
+    if (n.isSkinnedMesh) hasSkinned = true;
+  });
+  if (hasSkinned) {
+    try {
+      return cloneSkeleton(sourceScene);
+    } catch (e) {
+      console.warn('[car] cloneSkeleton failed, using scene.clone', e);
+    }
+  }
+  return sourceScene.clone(true);
+}
+
+const CAR_MODEL_SCALE = 4;
+
+function applyCarBodyScale(model) {
+  model.scale.set(CAR_MODEL_SCALE, CAR_MODEL_SCALE, CAR_MODEL_SCALE);
+  model.position.set(0, 0, 0);
+  model.updateMatrixWorld(true);
+  model.traverse((node) => {
+    if (node.isMesh) {
+      node.castShadow = true;
+      node.receiveShadow = false;
+      node.frustumCulled = true;
+    }
+  });
+}
+
+/** Opponent-only visual (wheels stay on the body — no physics detach). */
+export function buildOpponentCarRoot(gltf) {
+  const model = cloneCarVisualScene(gltf.scene);
+  applyCarBodyScale(model);
+  const root = new THREE.Group();
+  root.name = 'opponentCarRoot';
+  root.position.set(0, 100, 0);
+  root.visible = false;
+  root.add(model);
+  return root;
+}
 
 // Vehicle parameters
 const VEHICLE_WIDTH = 2.0;
@@ -79,9 +150,6 @@ const STEERING_RETURN_SPEED = 2;
 // Modify createVehicle to accept a callback for when the car is fully loaded
 export function createVehicle(ammo, scene, physicsWorld, debugObjects, onCarLoaded, carColor = 'blue') {
   console.log("Starting vehicle creation, color:", carColor);
-  
-  // Use the global loadingManager
-  const loader = new GLTFLoader(window.loadingManager);
   
   // Store car color for model loading
   window._playerCarColor = carColor;
@@ -192,8 +260,6 @@ export function createVehicle(ammo, scene, physicsWorld, debugObjects, onCarLoad
 
 // Modify loadCarModel to accept and use a callback
 function loadCarModel(ammo, scene, carComponents, wheelPositions, onModelLoaded) {
-  const loader = new GLTFLoader();
-  
   // Get the player ID
   const myPlayerId = localStorage.getItem('myPlayerId');
   
@@ -228,23 +294,12 @@ function loadCarModel(ammo, scene, carComponents, wheelPositions, onModelLoaded)
     }
   }
   
-  // Load the appropriate colored car model
-  loader.load(
-    `/models/car_${carColor}.glb`,
-    (gltf) => {
+  const url = `/models/car_${carColor}.glb`;
+
+  const applyGltfToPlayer = (gltf) => {
       const carModel = gltf.scene;
-      
-      // Adjust model scale and position if needed
-      carModel.scale.set(4, 4, 4); // Adjust scale as needed
-      carModel.position.set(0, 0, 0); // Position will be updated by physics
-      
-      // Make sure car casts shadows
-      carModel.traverse((node) => {
-        if (node.isMesh) {
-          node.castShadow = true;
-          node.receiveShadow = false;
-        }
-      });
+      applyCarBodyScale(carModel);
+      carModel.visible = false;
       
       // Find wheel meshes in the car model
       let wheelMeshFL = carModel.getObjectByName('wheel-fr');
@@ -293,19 +348,30 @@ function loadCarModel(ammo, scene, carComponents, wheelPositions, onModelLoaded)
         }
       }
       
-      // Add car model to scene
       scene.add(carModel);
       carComponents.carModel = carModel;
-      
-      console.log('Car model loaded successfully');
-      
-      // Now call the callback with the updated components
-      if (onModelLoaded) onModelLoaded(carComponents);
-    },
-    undefined,
+
+      const wheelsReady = carComponents.wheelMeshes.every((w) => w != null);
+      if (wheelsReady) {
+        carModel.visible = true;
+        console.log('Car model loaded successfully');
+        if (onModelLoaded) onModelLoaded(carComponents);
+      } else {
+        console.warn('[car] Missing wheel meshes — retrying with fallback model');
+        if (carColor !== 'red') {
+          loadFallbackCarModel(ammo, scene, carComponents, wheelPositions, onModelLoaded);
+        } else {
+          carModel.visible = true;
+          if (onModelLoaded) onModelLoaded(carComponents);
+        }
+      }
+  };
+
+  loadCarGltf(
+    url,
+    applyGltfToPlayer,
     (error) => {
       console.error(`Error loading ${carColor} car model:`, error);
-      // Handle fallback with callback
       if (carColor !== 'red') {
         loadFallbackCarModel(ammo, scene, carComponents, wheelPositions, onModelLoaded);
       }
@@ -316,24 +382,20 @@ function loadCarModel(ammo, scene, carComponents, wheelPositions, onModelLoaded)
 // Update fallback model function to also use callback
 function loadFallbackCarModel(ammo, scene, carComponents, wheelPositions, onModelLoaded) {
   console.log('Falling back to red car model');
-  const loader = new GLTFLoader();
-  
-  loader.load(
+
+  loadCarGltf(
     '/models/car_red.glb',
     (gltf) => {
-      const carModel = gltf.scene;
-      
-      // Adjust model scale and position
-      carModel.scale.set(4, 4, 4);
-      carModel.position.set(0, 0, 0);
-      
-      // Make sure car casts shadows
-      carModel.traverse((node) => {
-        if (node.isMesh) {
-          node.castShadow = true;
-          node.receiveShadow = false;
-        }
+      if (carComponents.carModel) {
+        scene.remove(carComponents.carModel);
+      }
+      carComponents.wheelMeshes.forEach((w) => {
+        if (w) scene.remove(w);
       });
+      carComponents.wheelMeshes = [];
+
+      const carModel = gltf.scene;
+      applyCarBodyScale(carModel);
       
       // Process wheel meshes (same as in loadCarModel)
       let wheelMeshFL = carModel.getObjectByName('wheel-fr');
@@ -367,13 +429,10 @@ function loadFallbackCarModel(ammo, scene, carComponents, wheelPositions, onMode
       
       scene.add(carModel);
       carComponents.carModel = carModel;
-      
+      carModel.visible = true;
       console.log('Fallback car model loaded successfully');
-      
-      // Call the callback when complete
       if (onModelLoaded) onModelLoaded(carComponents);
     },
-    undefined,
     (error) => {
       console.error('Error loading fallback red car model:', error);
     }
@@ -496,7 +555,7 @@ export function resetCarPosition(ammo, carBody, vehicle, currentSteeringAngle, c
 
 // Update car and wheel positions from physics
 export function updateCarPosition(ammo, vehicle, carModel, wheelMeshes) {
-  if (!vehicle || !carModel) return;
+  if (!vehicle || !carModel || !carModel.visible) return;
   
   // Update chassis transform
   const chassisWorldTrans = vehicle.getChassisWorldTransform();
@@ -515,11 +574,13 @@ export function updateCarPosition(ammo, vehicle, carModel, wheelMeshes) {
     const wheelPosition = transform.getOrigin();
     const wheelQuaternion = transform.getRotation();
     
-    wheelMeshes[i].position.set(wheelPosition.x(), wheelPosition.y(), wheelPosition.z());
-    wheelMeshes[i].quaternion.set(
-      wheelQuaternion.x(), 
-      wheelQuaternion.y(), 
-      wheelQuaternion.z(), 
+    const wm = wheelMeshes[i];
+    if (!wm) continue;
+    wm.position.set(wheelPosition.x(), wheelPosition.y(), wheelPosition.z());
+    wm.quaternion.set(
+      wheelQuaternion.x(),
+      wheelQuaternion.y(),
+      wheelQuaternion.z(),
       wheelQuaternion.w()
     );
   }

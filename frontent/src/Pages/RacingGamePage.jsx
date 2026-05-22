@@ -1,7 +1,5 @@
 import React, { useEffect, useRef, useState, useContext, useCallback } from 'react'
 import * as THREE from 'three'
-import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
-import { clone as cloneSkeleton } from 'three/examples/jsm/utils/SkeletonUtils.js'
 import { Room, RoomEvent } from 'livekit-client'
 import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import { UserContext } from '../context/UserContext'
@@ -13,7 +11,13 @@ import raceLoopMusic from '../assets/k.mp3'
 import goSfx from '../assets/go.mp3'
 import raceMusicFile from '../assets/rasemusic.mp3'
 import { initPhysics, updatePhysics, FIXED_PHYSICS_STEP } from '../game/racing/physics.js'
-import { createVehicle, updateSteering, resetCarPosition, updateCarPosition } from '../game/racing/car.js'
+import {
+  createVehicle,
+  updateSteering,
+  resetCarPosition,
+  updateCarPosition,
+  loadOpponentCarVisual,
+} from '../game/racing/car.js'
 import { loadTrackModel, loadMapDecorations, checkGroundCollision } from '../game/racing/track.js'
 import { loadGates, updateGateFading, checkGateProximity, showFinishMessage } from '../game/racing/gates.js'
 import { lockRaceLandscape, unlockRaceLandscape, isPortraitViewport } from '../utils/raceOrientation.js'
@@ -140,6 +144,7 @@ export default function RacingGamePage() {
   const raceExitHandledRef = useRef(false)
   const exitRaceAndGoHomeRef = useRef(() => {})
   const assetsReadyRef = useRef(false)
+  const playerCarReadyRef = useRef(false)
   const raceReadySentRef = useRef(false)
   const bothPlayersReadyRef = useRef(false)
   const startSfxRef = useRef(null)
@@ -1019,11 +1024,18 @@ export default function RacingGamePage() {
     const lm = new THREE.LoadingManager()
     lm.onProgress = (_, loaded, total) => setLoadingPct(Math.round(loaded/total*100))
     lm.onLoad = () => {
-      setLoading(false)
-      // Final snap after ALL assets are loaded — guarantees car is on the start line
-      // even when gate and car models loaded in different order (race condition fix).
-      // A short delay lets the render loop settle after setLoading(false).
-      setTimeout(() => { snapPlayerToStartLine() }, 100)
+      // Wait until player car mesh + wheels are ready (car GLTF is on this manager too).
+      let attempts = 0
+      const tryFinishLoading = () => {
+        if (playerCarReadyRef.current || carModelRef.current?.visible || attempts > 200) {
+          setLoading(false)
+          setTimeout(() => { snapPlayerToStartLine() }, 100)
+          return
+        }
+        attempts += 1
+        setTimeout(tryFinishLoading, 50)
+      }
+      tryFinishLoading()
     }
     window.loadingManager = lm
 
@@ -1091,23 +1103,23 @@ export default function RacingGamePage() {
     gateDataRef.current = gd
     window.gateData = gd
 
-    // ── Player car (with physics) ───────────────────────────────────────────
+    // ── Opponent car first (clone before player detaches wheels from its GLTF) ─
+    loadOpponentCarVisual(scene, oppColorRef.current, (oppRoot) => {
+      if (oppRoot) oppModelRef.current = oppRoot
+    })
+
+    // ── Player car (with physics) — GLTF tied to LoadingManager via car.js ─
     const carComps = createVehicle(window.Ammo, scene, physics.physicsWorld, [], (loaded) => {
       carBodyRef.current  = loaded.carBody
       vehicleRef.current  = loaded.vehicle
       wheelMeshesRef.current = loaded.wheelMeshes
       carModelRef.current    = loaded.carModel
       steeringRef.current    = loaded.currentSteeringAngle
+      playerCarReadyRef.current = !!(loaded.carModel?.visible && loaded.wheelMeshes?.every((w) => w))
 
       snapPlayerToStartLine()
 
-      // ── Opponent car (visual only, no physics) ─────────────────────────
-      loadOpponentCar(scene)
-
-      // ── Minimap ────────────────────────────────────────────────────────
       initMinimap()
-
-      // ── Start render loop ──────────────────────────────────────────────
       animate()
     }, myColorRef.current)
     carBodyRef.current = carComps.carBody
@@ -1116,38 +1128,6 @@ export default function RacingGamePage() {
 
     tryStart()
   }, [user, opponentId])
-
-  // ─── Opponent car (visual only) ────────────────────────────────────────────
-  const loadOpponentCar = (scene) => {
-    const loader = new GLTFLoader()
-    loader.load(`/models/car_${oppColorRef.current}.glb`, (gltf) => {
-      // cloneSkeleton() deep-clones skinned / rigged GLTFs; plain .clone() can break
-      // wheels/body hierarchy and leave parts at wrong scale (tiny detached wheels).
-      const model = cloneSkeleton(gltf.scene)
-      model.scale.set(4, 4, 4)
-      model.position.set(0, 0, 0)
-      model.updateMatrixWorld(true)
-      // Slight tint only — do not clone materials on SkinnedMesh (breaks skinning)
-      model.traverse((n) => {
-        if (n.isMesh && n.material && !n.isSkinnedMesh) {
-          const mats = Array.isArray(n.material) ? n.material : [n.material]
-          const cloned = mats.map((m) => {
-            const c = m.clone()
-            c.transparent = true
-            c.opacity = 0.95
-            return c
-          })
-          n.material = cloned.length === 1 ? cloned[0] : cloned
-        }
-      })
-      const root = new THREE.Group()
-      root.name = 'opponentCarRoot'
-      root.position.set(0, 100, 0) // hide until first network update
-      root.add(model)
-      scene.add(root)
-      oppModelRef.current = root
-    })
-  }
 
   // ─── Update opponent car position from socket data ─────────────────────────
   const updateOpponentCarPosition = (data) => {
@@ -1409,7 +1389,9 @@ export default function RacingGamePage() {
           steeringRef.current = result.currentSteeringAngle ?? steeringRef.current
         }
 
-        updateCarPosition(window.Ammo, vehicleRef.current, carModelRef.current, wheelMeshesRef.current)
+        if (playerCarReadyRef.current) {
+          updateCarPosition(window.Ammo, vehicleRef.current, carModelRef.current, wheelMeshesRef.current)
+        }
 
         checkGroundCollision(window.Ammo, carBodyRef.current, () => resetCar())
         checkFlipped(FIXED_PHYSICS_STEP)
