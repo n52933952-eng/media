@@ -429,7 +429,7 @@ export const FollowAndUnfollow = async(req,res) => {
                     const deliveredInApp = result?.deliveredInApp === true
                     console.log(`👤 [follow] client=${followClientType} followee=${id} deliveredInApp=${deliveredInApp}`)
 
-                    // Web: always try email (Gmail). Mobile: push/in-app only.
+                    // Web: follow email via Resend. Mobile: push/in-app only.
                     if (followClientType === 'web') {
                         const emailResult = await sendWebFollowEmailToUser(id, req.user._id)
                         console.log(`📧 [follow] email result:`, emailResult)
