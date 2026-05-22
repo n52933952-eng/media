@@ -121,32 +121,35 @@ const AppContent = () => {
       {/* Global Racing Challenge Notification - shows on all pages */}
       {user && <RacingChallengeNotification />}
       
-      {/* Fixed header — always stays at top regardless of parent overflow */}
-      <Box
-        position="fixed"
-        top={0}
-        left={0}
-        right={0}
-        zIndex={100}
-        bg={
-          isScrolled
-            ? colorMode === 'dark'
-              ? 'rgba(16,16,16,0.92)'
-              : 'rgba(255,255,255,0.92)'
-            : colorMode === 'dark'
-              ? '#101010'
-              : 'white'
-        }
-        backdropFilter={isScrolled ? 'blur(12px)' : 'none'}
-        boxShadow={isScrolled ? '0 1px 14px rgba(0,0,0,0.18)' : 'none'}
-        transition="background 0.25s ease, box-shadow 0.25s ease"
-      >
-        <Container maxW={headerMaxW} px={{ base: 4, md: 6 }} position="relative">
-          <Header/>
-        </Container>
-      </Box>
-      {/* Spacer to push page content below the fixed header (~72px = py-4 top+bottom + icon height) */}
-      <Box h="72px" />
+      {/* Hide site header during race — fullscreen landscape game */}
+      {!isRacePage && (
+        <>
+          <Box
+            position="fixed"
+            top={0}
+            left={0}
+            right={0}
+            zIndex={100}
+            bg={
+              isScrolled
+                ? colorMode === 'dark'
+                  ? 'rgba(16,16,16,0.92)'
+                  : 'rgba(255,255,255,0.92)'
+                : colorMode === 'dark'
+                  ? '#101010'
+                  : 'white'
+            }
+            backdropFilter={isScrolled ? 'blur(12px)' : 'none'}
+            boxShadow={isScrolled ? '0 1px 14px rgba(0,0,0,0.18)' : 'none'}
+            transition="background 0.25s ease, box-shadow 0.25s ease"
+          >
+            <Container maxW={headerMaxW} px={{ base: 4, md: 6 }} position="relative">
+              <Header/>
+            </Container>
+          </Box>
+          <Box h="72px" />
+        </>
+      )}
       
       
       {/* Content: full-bleed messages / race; centered column for the rest */}
@@ -170,10 +173,11 @@ const AppContent = () => {
       ) : isRacePage ? (
         <Box
           position="fixed"
-          top="72px"
+          top={0}
           left="0"
           right="0"
           bottom="0"
+          h={{ base: '100dvh', md: '100vh' }}
           w="100%"
           maxW="100%"
           m={0}

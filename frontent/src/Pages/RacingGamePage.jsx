@@ -16,6 +16,7 @@ import { initPhysics, updatePhysics, FIXED_PHYSICS_STEP } from '../game/racing/p
 import { createVehicle, updateSteering, resetCarPosition, updateCarPosition } from '../game/racing/car.js'
 import { loadTrackModel, loadMapDecorations, checkGroundCollision } from '../game/racing/track.js'
 import { loadGates, updateGateFading, checkGateProximity, showFinishMessage } from '../game/racing/gates.js'
+import { lockRaceLandscape, unlockRaceLandscape, isPortraitViewport } from '../utils/raceOrientation.js'
 
 // ─── Camera constants (same as reference game) ───────────────────────────────
 const CAMERA_DISTANCE  = 10
@@ -87,6 +88,9 @@ export default function RacingGamePage() {
   const [oppReconnecting, setOppReconnecting] = useState(false)
   const [mobileControls, setMobileControls] = useState(
     () => typeof window !== 'undefined' && window.matchMedia('(max-width: 991px)').matches
+  )
+  const [isPortrait, setIsPortrait] = useState(() =>
+    typeof window !== 'undefined' ? isPortraitViewport() : false
   )
 
   // ── Three.js / physics refs ─────────────────────────────────────────────────
@@ -264,6 +268,7 @@ export default function RacingGamePage() {
       raceStateRef.current.raceStarted = false
     } catch (_) { /* ignore */ }
     try { endRaceGameOnNavigate?.() } catch (_) { /* ignore */ }
+    try { unlockRaceLandscape() } catch (_) { /* ignore */ }
     try { navigate('/', { replace: true }) } catch (_) { /* ignore */ }
   }, [navigate, endRaceGameOnNavigate])
 
@@ -280,6 +285,7 @@ export default function RacingGamePage() {
     return () => {
       document.documentElement.style.overflow = prevHtml
       document.body.style.overflow = prevBody
+      unlockRaceLandscape()
     }
   }, [])
 
@@ -403,6 +409,9 @@ export default function RacingGamePage() {
     // already in progress (raceActualStartTime received from server confirms this).
     // Restores the race timer from elapsed time so the clock is accurate.
     const goLiveImmediate = (raceActualStartTime) => {
+      if (typeof window !== 'undefined' && window.matchMedia('(max-width: 991px)').matches) {
+        lockRaceLandscape()
+      }
       raceStateRef.current.countdownStarted = true
       raceStateRef.current.raceStarted = true
       raceStateRef.current.allPlayersConnected = true
@@ -794,6 +803,17 @@ export default function RacingGamePage() {
     onChange()
     mq.addEventListener('change', onChange)
     return () => mq.removeEventListener('change', onChange)
+  }, [])
+
+  useEffect(() => {
+    const onOrient = () => setIsPortrait(isPortraitViewport())
+    onOrient()
+    window.addEventListener('resize', onOrient)
+    window.addEventListener('orientationchange', onOrient)
+    return () => {
+      window.removeEventListener('resize', onOrient)
+      window.removeEventListener('orientationchange', onOrient)
+    }
   }, [])
 
   const setDriveKey = useCallback((key, pressed) => {
@@ -1204,6 +1224,9 @@ export default function RacingGamePage() {
 
   // ─── Countdown (3 → 2 → 1 → GO!) ─────────────────────────────────────────
   const startCountdown = useCallback(() => {
+    if (typeof window !== 'undefined' && window.matchMedia('(max-width: 991px)').matches) {
+      lockRaceLandscape()
+    }
     let val = 3
     setCountdown(val)
     const id = setInterval(() => {
@@ -1542,6 +1565,8 @@ export default function RacingGamePage() {
     disconnectRaceVoice()
   }, [raceFinished, disconnectRaceVoice])
 
+  const raceHudTop = mobileControls ? 12 : RACE_TOP_OFFSET_PX
+
   // ─── Render ─────────────────────────────────────────────────────────────────
   return (
     <div style={{
@@ -1685,7 +1710,7 @@ export default function RacingGamePage() {
       {/* HUD — top left: player names + gate progress (below fixed app header) */}
       {!loading && (
         <div style={{
-          position:'fixed', top:`${RACE_TOP_OFFSET_PX}px`, left:'20px', zIndex:1000,
+          position:'fixed', top:`${raceHudTop}px`, left: mobileControls ? '56px' : '20px', zIndex:1000,
           background:'rgba(0,0,0,0.55)', backdropFilter:'blur(8px)',
           borderRadius:'10px', padding:'12px 18px', color:'#fff',
           fontFamily:'Poppins,sans-serif', minWidth:'200px',
@@ -1708,7 +1733,7 @@ export default function RacingGamePage() {
       {!loading && reconnecting && (
         <div style={{
           position:'fixed',
-          top:`${RACE_TOP_OFFSET_PX + 84}px`,
+          top:`${raceHudTop + 84}px`,
           left:'20px',
           zIndex:1001,
           background:'rgba(0,0,0,0.62)',
@@ -1726,7 +1751,7 @@ export default function RacingGamePage() {
       {!loading && oppReconnecting && (
         <div style={{
           position:'fixed',
-          top:`${RACE_TOP_OFFSET_PX + 84}px`,
+          top:`${raceHudTop + 84}px`,
           left:'20px',
           zIndex:1001,
           background:'rgba(0,0,0,0.72)',
@@ -1748,7 +1773,7 @@ export default function RacingGamePage() {
       {/* HUD — top center: timer */}
       {!loading && raceLive && (
         <div style={{
-          position:'fixed', top:`${RACE_TOP_OFFSET_PX}px`, left:'50%', transform:'translateX(-50%)',
+          position:'fixed', top:`${raceHudTop}px`, left:'50%', transform:'translateX(-50%)',
           background:'rgba(0,0,0,0.55)', backdropFilter:'blur(8px)',
           borderRadius:'10px', padding:'10px 24px', color:'#fff',
           fontFamily:'Poppins,sans-serif', fontSize:'28px', fontWeight:700,
@@ -1759,13 +1784,16 @@ export default function RacingGamePage() {
         </div>
       )}
 
-      {/* Speedometer — bottom right */}
+      {/* Speedometer — bottom right (offset from touch pedals on mobile) */}
       {!loading && (
         <div id="racing-ui" style={{
-          position:'fixed', bottom:'30px', right:'30px', zIndex:1000,
+          position:'fixed',
+          bottom: mobileControls ? '24px' : '30px',
+          right: mobileControls ? '108px' : '30px',
+          zIndex:1000,
           pointerEvents:'none', userSelect:'none',
         }}>
-          <div style={{ width:'160px' }}>
+          <div style={{ width: mobileControls ? '120px' : '160px' }}>
             <div style={{
               position:'relative', borderRadius:'50%',
               background:'rgba(0,0,0,0.55)', padding:'16px',
@@ -1804,18 +1832,26 @@ export default function RacingGamePage() {
         </div>
       )}
 
-      {/* Voice: LiveKit in-race opponent voice */}
+      {/* Voice: LiveKit in-race opponent voice (top-right on mobile — avoids steer/call overlap) */}
       {!loading && (
         <div style={{
-          position:'fixed', bottom:'20px', left:'20px', right:'220px', zIndex:1000,
-          display:'flex', flexDirection:'column', gap:'10px', maxWidth:420,
+          position:'fixed',
+          zIndex:1000,
+          display:'flex',
+          flexDirection:'column',
+          gap:'10px',
+          ...(mobileControls
+            ? { top: '12px', right: '12px', left: 'auto', bottom: 'auto', maxWidth: 'none' }
+            : { bottom: '20px', left: '20px', right: '220px', maxWidth: 420 }),
         }}>
+          {!mobileControls && (
           <div style={{
             fontFamily:'Poppins,sans-serif', fontSize:'11px', color:'rgba(255,255,255,0.45)',
             letterSpacing:'0.04em', textTransform:'uppercase',
           }}>
             Voice with opponent — tap the phone, accept mic. Safari on Mac: allow when the browser asks.
           </div>
+          )}
           {callActive && (
             <div style={{
               display:'flex', alignItems:'center', gap:'10px',
@@ -1909,6 +1945,49 @@ export default function RacingGamePage() {
         </div>
       )}
 
+      {/* Portrait: prompt rotate when landscape lock is not available */}
+      {!loading && mobileControls && isPortrait && (countdown != null || raceLive) && !raceFinished && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 9998,
+            background: 'rgba(0,0,0,0.88)',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 24,
+            fontFamily: 'Poppins,sans-serif',
+            color: '#fff',
+            textAlign: 'center',
+          }}
+        >
+          <div style={{ fontSize: 48, marginBottom: 16 }}>📱↻</div>
+          <div style={{ fontSize: 20, fontWeight: 800, marginBottom: 8 }}>Rotate your phone sideways</div>
+          <div style={{ fontSize: 14, opacity: 0.75, marginBottom: 20, maxWidth: 280 }}>
+            The race plays in landscape. Turn your device, then tap below if needed.
+          </div>
+          <button
+            type="button"
+            onClick={() => lockRaceLandscape()}
+            style={{
+              padding: '12px 24px',
+              borderRadius: 10,
+              border: 'none',
+              background: '#ff0080',
+              color: '#fff',
+              fontWeight: 700,
+              fontSize: 15,
+              cursor: 'pointer',
+              boxShadow: '0 4px 0 #b30059',
+            }}
+          >
+            Enter landscape mode
+          </button>
+        </div>
+      )}
+
       {/* Mobile touch driving controls */}
       {!loading && raceLive && mobileControls && (
         <div
@@ -1922,10 +2001,10 @@ export default function RacingGamePage() {
         >
           <div style={{
             position: 'absolute',
-            left: 12,
-            bottom: 16,
+            left: 20,
+            bottom: 24,
             display: 'flex',
-            gap: 10,
+            gap: 12,
             pointerEvents: 'auto',
           }}>
             <button
@@ -1951,8 +2030,8 @@ export default function RacingGamePage() {
           </div>
           <div style={{
             position: 'absolute',
-            right: 12,
-            bottom: 16,
+            right: 20,
+            bottom: 24,
             display: 'flex',
             flexDirection: 'column',
             gap: 10,
@@ -1985,7 +2064,11 @@ export default function RacingGamePage() {
       {/* Leave button (offset so it does not overlap call + mute) */}
       {!loading && (
         <button onClick={handleLeave} title="Leave race" style={{
-          position:'fixed', bottom: mobileControls ? '100px' : '20px', left: mobileControls ? '12px' : '200px', zIndex:1000,
+          position:'fixed',
+          top: mobileControls ? '12px' : 'auto',
+          bottom: mobileControls ? 'auto' : '20px',
+          left: mobileControls ? '12px' : '200px',
+          zIndex:1002,
           width:44, height:44, borderRadius:'50%',
           background:'#ff0080', border:'2px solid #b30059',
           boxShadow:'0 3px 0 #b30059', color:'#fff', fontSize:'18px',
