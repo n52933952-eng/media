@@ -13,6 +13,16 @@ const sameId = (a, b) => String(a ?? '').trim() === String(b ?? '').trim()
 const LIVEKIT_API_KEY    = process.env.LIVEKIT_API_KEY
 const LIVEKIT_API_SECRET = process.env.LIVEKIT_API_SECRET
 const LIVEKIT_URL        = process.env.LIVEKIT_URL
+const LIVEKIT_MAX_SESSION_MS = Number(process.env.LIVEKIT_MAX_SESSION_MS || 0)
+
+const getTokenTtl = () => {
+    if (!Number.isFinite(LIVEKIT_MAX_SESSION_MS) || LIVEKIT_MAX_SESSION_MS <= 0) {
+        return null
+    }
+    const seconds = Math.floor(LIVEKIT_MAX_SESSION_MS / 1000)
+    if (seconds <= 0) return null
+    return `${seconds}s`
+}
 
 /**
  * Build a deterministic room name so both participants always land in the
@@ -80,13 +90,14 @@ export const getLiveKitToken = async (req, res) => {
         const canPublish   = type !== 'viewer'   // viewers only watch
         const canSubscribe = true                 // everyone can receive streams
 
-        // Cost-control policy: cap all LiveKit sessions at 25 minutes.
-        const ttl = '25m'
-        const at = new AccessToken(LIVEKIT_API_KEY, LIVEKIT_API_SECRET, {
+        const atOptions = {
             identity: userId,
             name:     userName,
-            ttl,
-        })
+        }
+        const ttl = getTokenTtl()
+        if (ttl) atOptions.ttl = ttl
+
+        const at = new AccessToken(LIVEKIT_API_KEY, LIVEKIT_API_SECRET, atOptions)
 
         at.addGrant({
             roomJoin:       true,
