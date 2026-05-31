@@ -406,17 +406,17 @@ const LiveStreamPage = () => {
                   🖥️ Share
                 </MenuButton>
                 <MenuList zIndex={2000} minW="240px">
-                  <MenuItem onClick={() => void startShare()}>
+                  <MenuItem closeOnSelect onClick={() => void startShare()}>
                     <VStack align="flex-start" spacing={0}>
                       <Text fontWeight="600">Share screen or window</Text>
-                      <Text fontSize="xs" color="gray.500">Pick a tab, window, or your full screen</Text>
+                      <Text fontSize="xs" color="gray.500">Pick any tab, window, or your full screen</Text>
                     </VStack>
                   </MenuItem>
                   <MenuDivider />
-                  <MenuItem onClick={() => void shareAndGoHome()}>
+                  <MenuItem closeOnSelect onClick={shareAndGoHome}>
                     <VStack align="flex-start" spacing={0}>
                       <Text fontWeight="600">🏠 App home</Text>
-                      <Text fontSize="xs" color="gray.500">Share the app and browse home to play chess or cards</Text>
+                      <Text fontSize="xs" color="gray.500">Go to home first, then share this tab once</Text>
                     </VStack>
                   </MenuItem>
                 </MenuList>

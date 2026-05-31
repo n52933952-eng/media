@@ -35,6 +35,7 @@ export const LiveBroadcastProvider = ({ children }) => {
   const roomNameRef = useRef('');
   const isSharingRef = useRef(false);
   const isLiveRef = useRef(false);
+  const pendingAppHomeShareRef = useRef(false);
   const liveEndedRef = useRef(false);
   const liveTimeoutRef = useRef(null);
   const endLiveRef = useRef(async () => {});
@@ -170,11 +171,14 @@ export const LiveBroadcastProvider = ({ children }) => {
     }
   }, [user, socket, startingLive, isLive, syncLocalTrack, toast]);
 
-  const startShare = useCallback(async () => {
+  const startShare = useCallback(async (opts = {}) => {
     const room = roomRef.current;
     if (!room || isSharingRef.current) return true;
     try {
-      await room.localParticipant.setScreenShareEnabled(true);
+      await room.localParticipant.setScreenShareEnabled(true, {
+        audio: false,
+        ...opts,
+      });
       isSharingRef.current = true;
       setIsSharing(true);
       return true;
@@ -227,12 +231,21 @@ export const LiveBroadcastProvider = ({ children }) => {
     liveBroadcastNav.returnToLive?.();
   }, []);
 
-  const shareAndGoHome = useCallback(async () => {
+  const shareAndGoHome = useCallback(() => {
     if (!isLiveRef.current) return;
-    const ok = isSharingRef.current ? true : await startShare();
-    if (!ok) return;
+    pendingAppHomeShareRef.current = true;
     minimizeLive();
-  }, [startShare, minimizeLive]);
+  }, [minimizeLive]);
+
+  // App home: land on feed first, then one share picker (prefer this tab in Chrome).
+  useEffect(() => {
+    if (!isMinimized || !pendingAppHomeShareRef.current) return undefined;
+    pendingAppHomeShareRef.current = false;
+    const timer = setTimeout(() => {
+      void startShare({ preferCurrentTab: true });
+    }, 450);
+    return () => clearTimeout(timer);
+  }, [isMinimized, startShare]);
 
   const sendChat = useCallback(async (text, senderName) => {
     const trimmed = String(text || '').trim();
