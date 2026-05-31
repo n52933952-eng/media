@@ -358,11 +358,12 @@ const ActiveCallScreen = () => {
             boxShadow="0 14px 36px rgba(0,0,0,0.45)"
           >
             <Box
+              key={remoteVideo?.track?.sid || 'remote-main'}
               as="video"
               ref={remoteVideoRef}
               autoPlay
               playsInline
-              style={{ width: '100%', height: '100%', objectFit: 'contain' }}
+              style={{ width: '100%', height: '100%', objectFit: remoteScreen ? 'contain' : 'cover' }}
             />
             {remoteScreen && (
               <Badge
