@@ -14,12 +14,14 @@ import {
   Box, Flex, Avatar, Text, IconButton, HStack, VStack, Badge,
 } from '@chakra-ui/react';
 import { PhoneIcon } from '@chakra-ui/icons';
+import { RoomEvent } from 'livekit-client';
 import { useLiveKit } from '../context/LiveKitContext';
 
 // ── small helpers ────────────────────────────────────────────────────────────
 const HangupIcon = () => <span style={{ fontSize: 20 }}>📵</span>;
 const MicIcon = ({ muted }) => <span style={{ fontSize: 18 }}>{muted ? '🔇' : '🎙️'}</span>;
 const CamIcon = ({ off }) => <span style={{ fontSize: 18 }}>{off ? '📷' : '📹'}</span>;
+const ShareIcon = ({ on }) => <span style={{ fontSize: 18 }}>{on ? '🛑' : '🖥️'}</span>;
 
 // ── Incoming call overlay ─────────────────────────────────────────────────────
 const IncomingCallOverlay = () => {
@@ -182,11 +184,17 @@ const ActiveCallScreen = () => {
   if (!callAccepted) return null;
   const [isMuted, setIsMuted] = useState(false);
   const [isCamOff, setIsCamOff] = useState(callType === 'audio');
+  const [isSharing, setIsSharing] = useState(false);
 
-  const remoteVideo  = remoteTracks.find(t => t.track.kind === 'video');
+  const isScreen     = (t) => t?.source === 'screen_share' || t?.track?.source === 'screen_share';
+  const remoteScreen = remoteTracks.find(t => t.track.kind === 'video' && isScreen(t));
+  const remoteCamera = remoteTracks.find(t => t.track.kind === 'video' && !isScreen(t));
+  // When the other side shares their screen, that becomes the big view (Google Meet style).
+  const remoteVideo  = remoteScreen || remoteCamera;
   const remoteAudio  = remoteTracks.find(t => t.track.kind === 'audio');
   const localVideo   = localTracks.find(t => t.kind   === 'video');
   const remoteVideoRef = useRef(null);
+  const remoteCamPipRef = useRef(null);
   const localVideoRef = useRef(null);
   const remoteAudioElRef = useRef(null);
 
@@ -199,6 +207,17 @@ const ActiveCallScreen = () => {
       if (el) el.srcObject = null;
     };
   }, [remoteVideo]);
+
+  // While they present, keep showing their camera in a small thumbnail too.
+  useEffect(() => {
+    if (!remoteScreen || !remoteCamera?.track || !remoteCamPipRef.current) return;
+    const el = remoteCamPipRef.current;
+    try { remoteCamera.track.attach(el); } catch (_) {}
+    return () => {
+      try { remoteCamera.track.detach(el); } catch (_) {}
+      if (el) el.srcObject = null;
+    };
+  }, [remoteScreen, remoteCamera]);
 
   useEffect(() => {
     if (!localVideo || !localVideoRef.current) return;
@@ -260,6 +279,31 @@ const ActiveCallScreen = () => {
     } catch (_) {}
   };
 
+  // Screen share — on desktop the browser shows the native "Entire screen / Window / Tab" picker.
+  const handleToggleShare = async () => {
+    const roomObj = room?.current;
+    if (!roomObj?.localParticipant) return;
+    const next = !isSharing;
+    try {
+      await roomObj.localParticipant.setScreenShareEnabled(next);
+      setIsSharing(next);
+    } catch (_) {
+      // User cancelled the browser picker, or it failed.
+      setIsSharing(false);
+    }
+  };
+
+  // Keep the button in sync if the user clicks the browser's own "Stop sharing" bar.
+  useEffect(() => {
+    const roomObj = room?.current;
+    if (!roomObj) return;
+    const onUnpub = (pub) => {
+      if (pub?.source === 'screen_share') setIsSharing(false);
+    };
+    roomObj.on(RoomEvent.LocalTrackUnpublished, onUnpub);
+    return () => { try { roomObj.off(RoomEvent.LocalTrackUnpublished, onUnpub); } catch (_) {} };
+  }, [room, callAccepted]);
+
   return (
     <Box
       position="fixed" top={0} left={0} right={0} bottom={0}
@@ -301,6 +345,7 @@ const ActiveCallScreen = () => {
       >
         {remoteVideo ? (
           <Box
+            position="relative"
             w="100%"
             h="100%"
             maxW="1100px"
@@ -319,6 +364,19 @@ const ActiveCallScreen = () => {
               playsInline
               style={{ width: '100%', height: '100%', objectFit: 'contain' }}
             />
+            {remoteScreen && (
+              <Badge
+                position="absolute"
+                top={3}
+                left={3}
+                colorScheme="teal"
+                borderRadius="full"
+                px={3}
+                py={1}
+              >
+                {callPartner?.name ? `${callPartner.name} is sharing screen` : 'Sharing screen'}
+              </Badge>
+            )}
           </Box>
         ) : (
           <VStack>
@@ -327,6 +385,31 @@ const ActiveCallScreen = () => {
             <Text color="gray.400">{callType === 'audio' ? 'Voice call' : 'Connecting video…'}</Text>
           </VStack>
         )}
+        {/* Remote camera thumbnail (while they present their screen) */}
+        {remoteScreen && remoteCamera && (
+          <Box
+            position="absolute"
+            bottom={{ base: 100, md: 34 }}
+            right={{ base: '124px', md: '162px' }}
+            w={{ base: '108px', md: '142px' }}
+            h={{ base: '80px', md: '106px' }}
+            borderRadius="xl"
+            overflow="hidden"
+            border="2px solid"
+            borderColor="whiteAlpha.500"
+            boxShadow="0 6px 20px rgba(0,0,0,0.45)"
+            bg="black"
+          >
+            <Box
+              as="video"
+              ref={remoteCamPipRef}
+              autoPlay
+              playsInline
+              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+            />
+          </Box>
+        )}
+
         {/* Local pip */}
         {localVideo && callType !== 'audio' && (
           <Box
@@ -388,6 +471,18 @@ const ActiveCallScreen = () => {
             <Text color="gray.400" fontSize="xs">{isCamOff ? 'Cam On' : 'Cam Off'}</Text>
           </VStack>
         )}
+
+        <VStack spacing={1}>
+          <IconButton
+            icon={<ShareIcon on={isSharing} />}
+            colorScheme={isSharing ? 'teal' : 'gray'}
+            borderRadius="full"
+            size="md"
+            onClick={handleToggleShare}
+            aria-label={isSharing ? 'Stop sharing' : 'Share screen'}
+          />
+          <Text color="gray.400" fontSize="xs">{isSharing ? 'Stop' : 'Share'}</Text>
+        </VStack>
 
         <VStack spacing={1}>
           <IconButton

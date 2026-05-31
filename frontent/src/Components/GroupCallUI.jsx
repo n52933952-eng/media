@@ -13,9 +13,53 @@ import {
   Badge, SimpleGrid,
 } from '@chakra-ui/react';
 import { PhoneIcon } from '@chakra-ui/icons';
+import { RoomEvent } from 'livekit-client';
 import { GroupCallContext } from '../context/GroupCallContext';
 
 const HangupIcon = () => <span style={{ fontSize: 20 }}>📵</span>;
+
+// Find a screen-share track among everyone (remote first, then me).
+const findScreenShare = (localParticipant, participants) => {
+  const all = [...participants, localParticipant].filter(Boolean);
+  for (const p of all) {
+    const pub = [...p.trackPublications.values()].find(t => t.source === 'screen_share' && t.track);
+    if (pub) {
+      const isLocal = p === localParticipant;
+      return { track: pub.track, name: isLocal ? 'You' : (p.name || p.identity || 'Someone') };
+    }
+  }
+  return null;
+};
+
+// ── Big "presenter" stage for a shared screen ────────────────────────────────
+const ScreenShareStage = ({ track, name }) => {
+  const ref = useRef(null);
+  useEffect(() => {
+    if (!track || !ref.current) return;
+    const el = ref.current;
+    try { track.attach(el); } catch (_) {}
+    return () => {
+      try { track.detach(el); } catch (_) {}
+      if (el) el.srcObject = null;
+    };
+  }, [track]);
+
+  return (
+    <Box
+      position="relative" flex={1} minH="0"
+      bg="black" borderRadius="xl" overflow="hidden"
+      border="1px solid" borderColor="whiteAlpha.300"
+    >
+      <Box
+        as="video" ref={ref} autoPlay playsInline muted
+        style={{ width: '100%', height: '100%', objectFit: 'contain' }}
+      />
+      <Badge position="absolute" top={3} left={3} colorScheme="teal" borderRadius="full" px={3} py={1}>
+        {name} sharing screen
+      </Badge>
+    </Box>
+  );
+};
 
 // ── Single participant tile ───────────────────────────────────────────────────
 const ParticipantTile = ({ participant }) => {
@@ -131,8 +175,18 @@ const IncomingGroupCallOverlay = () => {
 // ── Active group call screen ──────────────────────────────────────────────────
 const ActiveGroupCallScreen = () => {
   const { groupCallActive, groupCallType, groupCallRoom, leaveGroupCall, participants } = useContext(GroupCallContext);
-  const [isMuted,   setIsMuted]   = useState(false);
-  const [isCamOff,  setIsCamOff]  = useState(false);
+  const [isMuted,    setIsMuted]    = useState(false);
+  const [isCamOff,   setIsCamOff]   = useState(false);
+  const [isSharing,  setIsSharing]  = useState(false);
+
+  // Keep Share button in sync if the user stops via the browser's own bar.
+  useEffect(() => {
+    const room = groupCallRoom.current;
+    if (!room) return;
+    const onUnpub = (pub) => { if (pub?.source === 'screen_share') setIsSharing(false); };
+    room.on(RoomEvent.LocalTrackUnpublished, onUnpub);
+    return () => { try { room.off(RoomEvent.LocalTrackUnpublished, onUnpub); } catch (_) {} };
+  }, [groupCallActive]);
 
   if (!groupCallActive) return null;
 
@@ -154,8 +208,21 @@ const ActiveGroupCallScreen = () => {
     } catch (_) {}
   };
 
+  // Screen share — desktop browsers show the "Entire screen / Window / Tab" picker.
+  const handleShare = async () => {
+    if (!groupCallRoom.current) return;
+    const next = !isSharing;
+    try {
+      await groupCallRoom.current.localParticipant.setScreenShareEnabled(next);
+      setIsSharing(next);
+    } catch (_) {
+      setIsSharing(false);
+    }
+  };
+
   // Include local participant in grid
   const localParticipant = groupCallRoom.current?.localParticipant;
+  const screenShare = findScreenShare(localParticipant, participants);
 
   return (
     <Box
@@ -173,15 +240,31 @@ const ActiveGroupCallScreen = () => {
         </Badge>
       </Flex>
 
-      {/* Participant grid */}
-      <Box flex={1} overflowY="auto" p={3}>
-        <SimpleGrid columns={{ base: 1, sm: 2, md: 3, lg: 4 }} spacing={3}>
-          {/* Local tile */}
-          {localParticipant && <ParticipantTile participant={localParticipant} />}
-          {/* Remote tiles */}
-          {participants.map(p => <ParticipantTile key={p.identity} participant={p} />)}
-        </SimpleGrid>
-      </Box>
+      {/* When someone shares, their screen takes the stage and tiles shrink to a strip below. */}
+      {screenShare ? (
+        <Flex flex={1} direction="column" minH="0" p={3} gap={3}>
+          <ScreenShareStage track={screenShare.track} name={screenShare.name} />
+          <Box flexShrink={0} overflowX="auto">
+            <HStack spacing={3} align="stretch" minH="120px">
+              {localParticipant && (
+                <Box minW="160px" maxW="160px"><ParticipantTile participant={localParticipant} /></Box>
+              )}
+              {participants.map(p => (
+                <Box key={p.identity} minW="160px" maxW="160px"><ParticipantTile participant={p} /></Box>
+              ))}
+            </HStack>
+          </Box>
+        </Flex>
+      ) : (
+        <Box flex={1} overflowY="auto" p={3}>
+          <SimpleGrid columns={{ base: 1, sm: 2, md: 3, lg: 4 }} spacing={3}>
+            {/* Local tile */}
+            {localParticipant && <ParticipantTile participant={localParticipant} />}
+            {/* Remote tiles */}
+            {participants.map(p => <ParticipantTile key={p.identity} participant={p} />)}
+          </SimpleGrid>
+        </Box>
+      )}
 
       {/* Controls */}
       <HStack justify="center" spacing={4} p={4} bg="blackAlpha.600">
@@ -204,6 +287,15 @@ const ActiveGroupCallScreen = () => {
             <Text color="gray.400" fontSize="xs">{isCamOff ? 'Cam On' : 'Cam Off'}</Text>
           </VStack>
         )}
+
+        <VStack spacing={1}>
+          <IconButton
+            icon={<span style={{ fontSize: 18 }}>{isSharing ? '🛑' : '🖥️'}</span>}
+            colorScheme={isSharing ? 'teal' : 'gray'} borderRadius="full" size="md"
+            onClick={handleShare} aria-label="Share screen"
+          />
+          <Text color="gray.400" fontSize="xs">{isSharing ? 'Stop' : 'Share'}</Text>
+        </VStack>
 
         <VStack spacing={1}>
           <IconButton

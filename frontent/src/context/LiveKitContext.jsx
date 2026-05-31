@@ -121,7 +121,10 @@ export const LiveKitProvider = ({ children }) => {
 
     // Track events
     room.on(RoomEvent.TrackSubscribed, (track, _pub, participant) => {
-      setRemoteTracks(prev => [...prev, { track, participantId: participant.identity }]);
+      setRemoteTracks(prev => [
+        ...prev,
+        { track, participantId: participant.identity, source: _pub?.source || track?.source },
+      ]);
     });
     room.on(RoomEvent.TrackUnsubscribed, (track) => {
       setRemoteTracks(prev => prev.filter(t => t.track !== track));
