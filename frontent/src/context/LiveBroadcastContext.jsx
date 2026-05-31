@@ -7,6 +7,7 @@ import { Room, RoomEvent, Track } from 'livekit-client';
 import { useToast } from '@chakra-ui/react';
 import { UserContext } from './UserContext';
 import { SocketContext } from './SocketContext';
+import { resignActiveGames } from '../utils/liveGameResign';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
 const LIVESTREAM_MAX_MS = 25 * 60 * 1000;
@@ -33,10 +34,13 @@ export const LiveBroadcastProvider = ({ children }) => {
   const roomRef = useRef(null);
   const roomNameRef = useRef('');
   const isSharingRef = useRef(false);
+  const isLiveRef = useRef(false);
   const liveEndedRef = useRef(false);
   const liveTimeoutRef = useRef(null);
   const endLiveRef = useRef(async () => {});
   const onChatRef = useRef(null);
+
+  isLiveRef.current = isLive;
 
   const syncLocalTrack = useCallback(() => {
     const room = roomRef.current;
@@ -62,6 +66,7 @@ export const LiveBroadcastProvider = ({ children }) => {
   }, []);
 
   const endLive = useCallback(async () => {
+    resignActiveGames(socket, user);
     if (socket && user?._id && roomNameRef.current && !liveEndedRef.current) {
       liveEndedRef.current = true;
       socket.emit('livekit:endLive', {
@@ -111,8 +116,14 @@ export const LiveBroadcastProvider = ({ children }) => {
         isSharingRef.current = false;
         setIsSharing(false);
       });
+      room.on(RoomEvent.LocalTrackPublished, (pub) => {
+        if (pub?.source === Track.Source.ScreenShare) {
+          isSharingRef.current = true;
+          setIsSharing(true);
+        }
+      });
       room.on(RoomEvent.LocalTrackUnpublished, (pub) => {
-        if (pub?.source === 'screen_share') {
+        if (pub?.source === Track.Source.ScreenShare) {
           isSharingRef.current = false;
           setIsSharing(false);
         }
@@ -159,31 +170,69 @@ export const LiveBroadcastProvider = ({ children }) => {
     }
   }, [user, socket, startingLive, isLive, syncLocalTrack, toast]);
 
-  const toggleShare = useCallback(async () => {
+  const startShare = useCallback(async () => {
     const room = roomRef.current;
-    if (!room) return;
-    const next = !isSharingRef.current;
+    if (!room || isSharingRef.current) return true;
     try {
-      await room.localParticipant.setScreenShareEnabled(next);
-      isSharingRef.current = next;
-      setIsSharing(next);
-    } catch (_) {
+      await room.localParticipant.setScreenShareEnabled(true);
+      isSharingRef.current = true;
+      setIsSharing(true);
+      return true;
+    } catch (err) {
       isSharingRef.current = false;
       setIsSharing(false);
+      toast({
+        title: 'Screen share failed',
+        description: err?.message || 'Could not start screen sharing.',
+        status: 'error',
+        duration: 4000,
+        isClosable: true,
+        position: 'top',
+      });
+      return false;
     }
+  }, [toast]);
+
+  const stopShare = useCallback(async () => {
+    const room = roomRef.current;
+    if (!room || !isSharingRef.current) return;
+    try {
+      await room.localParticipant.setScreenShareEnabled(false);
+    } catch (_) {}
+    isSharingRef.current = false;
+    setIsSharing(false);
   }, []);
+
+  const toggleShare = useCallback(async () => {
+    if (isSharingRef.current) await stopShare();
+    else await startShare();
+  }, [startShare, stopShare]);
 
   const minimizeLive = useCallback(() => {
     if (!isLive) return;
-    setIsMinimized(true);
     liveBroadcastNav.minimize?.();
   }, [isLive]);
 
   const openLiveControls = useCallback(() => {
-    if (!isLive) return;
+    setIsMinimized(false);
+  }, []);
+
+  const leaveLiveControls = useCallback(() => {
+    if (isLiveRef.current) setIsMinimized(true);
+  }, []);
+
+  const returnToLiveControls = useCallback(() => {
+    if (!isLiveRef.current) return;
     setIsMinimized(false);
     liveBroadcastNav.returnToLive?.();
-  }, [isLive]);
+  }, []);
+
+  const shareAndGoHome = useCallback(async () => {
+    if (!isLiveRef.current) return;
+    const ok = isSharingRef.current ? true : await startShare();
+    if (!ok) return;
+    minimizeLive();
+  }, [startShare, minimizeLive]);
 
   const sendChat = useCallback(async (text, senderName) => {
     const trimmed = String(text || '').trim();
@@ -225,9 +274,14 @@ export const LiveBroadcastProvider = ({ children }) => {
     localTrack,
     goLive,
     endLive,
+    startShare,
+    stopShare,
     toggleShare,
+    shareAndGoHome,
     minimizeLive,
     openLiveControls,
+    leaveLiveControls,
+    returnToLiveControls,
     syncLocalTrack,
     getRoom: () => roomRef.current,
     sendChat,

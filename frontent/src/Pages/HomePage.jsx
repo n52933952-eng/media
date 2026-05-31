@@ -21,8 +21,15 @@ const HomePage = () => {
   const{followPost,setFollowPost}=useContext(PostContext)
   const {socket, liveStreams} = useContext(SocketContext) || {}
   const {user} = useContext(UserContext) || {}
-  const { isLive, isMinimized } = useLiveBroadcast()
+  const { isLive } = useLiveBroadcast()
   const myUserId = user?._id != null ? String(user._id) : ''
+
+  const isOwnLivePost = useCallback((post) => {
+    if (!myUserId || !post?.isLive) return false
+    const authorId = post.postedBy?._id != null ? String(post.postedBy._id) : ''
+    const postId = post._id != null ? String(post._id) : ''
+    return authorId === myUserId || postId === `live_${myUserId}`
+  }, [myUserId])
   
   const[loading,setLoading]=useState(true)
   const[loadingMore,setLoadingMore]=useState(false)
@@ -426,6 +433,7 @@ const HomePage = () => {
     const handleStreamStarted = (data) => {
       const sid = normalizeStreamerId(data?.streamerId)
       if (!sid) return
+      if (myUserId && sid === myUserId && isLive) return
       const pseudo = {
         _id:           `live_${sid}`,
         isLive:        true,
@@ -466,7 +474,16 @@ const HomePage = () => {
       socket.off('livekit:streamStarted', handleStreamStarted)
       socket.off('livekit:streamEnded',   handleStreamEnded)
     }
-  }, [socket, setFollowPost, getFeedPost, user])
+  }, [socket, setFollowPost, getFeedPost, user, myUserId, isLive])
+
+  // Hide your own LIVE card while you are broadcasting (avoids opening viewer by mistake)
+  useEffect(() => {
+    if (!isLive || !myUserId) return
+    setFollowPost(prev => {
+      const next = prev.filter(p => !isOwnLivePost(p))
+      return next.length === prev.length ? prev : next
+    })
+  }, [isLive, myUserId, isOwnLivePost, setFollowPost])
  
  
 
@@ -538,7 +555,7 @@ const HomePage = () => {
         {/* Posts list */}
         {!loading && followPost.length > 0 && (
           <>
-            {followPost.map((post) =>
+            {followPost.filter(p => !isLive || !isOwnLivePost(p)).map((post) =>
               post.isLive
                 ? <LivePostCard key={post._id} post={post} />
                 : <Post key={post._id} post={post} postedBy={post.postedBy} visibleVideoOnly showFeedExtras />
