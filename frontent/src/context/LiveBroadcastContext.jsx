@@ -12,6 +12,12 @@ import { resignActiveGames } from '../utils/liveGameResign';
 const API_BASE = import.meta.env.VITE_API_URL || '';
 const LIVESTREAM_MAX_MS = 25 * 60 * 1000;
 
+const isScreenSharePub = (pub, track) =>
+  pub?.source === Track.Source.ScreenShare
+  || track?.source === Track.Source.ScreenShare
+  || pub?.source === 'screen_share'
+  || track?.source === 'screen_share';
+
 const LiveBroadcastContext = createContext(null);
 
 export const liveBroadcastNav = {
@@ -35,7 +41,6 @@ export const LiveBroadcastProvider = ({ children }) => {
   const roomNameRef = useRef('');
   const isSharingRef = useRef(false);
   const isLiveRef = useRef(false);
-  const pendingAppHomeShareRef = useRef(false);
   const liveEndedRef = useRef(false);
   const liveTimeoutRef = useRef(null);
   const endLiveRef = useRef(async () => {});
@@ -118,13 +123,13 @@ export const LiveBroadcastProvider = ({ children }) => {
         setIsSharing(false);
       });
       room.on(RoomEvent.LocalTrackPublished, (pub) => {
-        if (pub?.source === Track.Source.ScreenShare) {
+        if (isScreenSharePub(pub)) {
           isSharingRef.current = true;
           setIsSharing(true);
         }
       });
       room.on(RoomEvent.LocalTrackUnpublished, (pub) => {
-        if (pub?.source === Track.Source.ScreenShare) {
+        if (isScreenSharePub(pub)) {
           isSharingRef.current = false;
           setIsSharing(false);
         }
@@ -173,14 +178,13 @@ export const LiveBroadcastProvider = ({ children }) => {
 
   const startShare = useCallback(async (opts = {}) => {
     const room = roomRef.current;
-    if (!room || isSharingRef.current) return true;
+    if (!room) return false;
+    if (isSharingRef.current) return true;
     try {
       await room.localParticipant.setScreenShareEnabled(true, {
         audio: false,
         ...opts,
       });
-      isSharingRef.current = true;
-      setIsSharing(true);
       return true;
     } catch (err) {
       isSharingRef.current = false;
@@ -218,11 +222,12 @@ export const LiveBroadcastProvider = ({ children }) => {
   }, [isLive]);
 
   const openLiveControls = useCallback(() => {
-    setIsMinimized(false);
+    setIsMinimized(prev => (prev ? false : prev));
   }, []);
 
   const leaveLiveControls = useCallback(() => {
-    if (isLiveRef.current) setIsMinimized(true);
+    if (!isLiveRef.current) return;
+    setIsMinimized(prev => (prev ? prev : true));
   }, []);
 
   const returnToLiveControls = useCallback(() => {
@@ -233,19 +238,11 @@ export const LiveBroadcastProvider = ({ children }) => {
 
   const shareAndGoHome = useCallback(() => {
     if (!isLiveRef.current) return;
-    pendingAppHomeShareRef.current = true;
-    minimizeLive();
-  }, [minimizeLive]);
-
-  // App home: land on feed first, then one share picker (prefer this tab in Chrome).
-  useEffect(() => {
-    if (!isMinimized || !pendingAppHomeShareRef.current) return undefined;
-    pendingAppHomeShareRef.current = false;
-    const timer = setTimeout(() => {
+    liveBroadcastNav.minimize?.();
+    window.setTimeout(() => {
       void startShare({ preferCurrentTab: true });
-    }, 450);
-    return () => clearTimeout(timer);
-  }, [isMinimized, startShare]);
+    }, 500);
+  }, [startShare]);
 
   const sendChat = useCallback(async (text, senderName) => {
     const trimmed = String(text || '').trim();

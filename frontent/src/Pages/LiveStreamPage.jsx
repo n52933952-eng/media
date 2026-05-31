@@ -20,6 +20,12 @@ import ScreenShareViewer from '../Components/ScreenShareViewer';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
 
+const isScreenShareSource = (pub, track) =>
+  pub?.source === Track.Source.ScreenShare
+  || track?.source === Track.Source.ScreenShare
+  || pub?.source === 'screen_share'
+  || track?.source === 'screen_share';
+
 const floatUp = keyframes`
   0%   { transform: translateY(0);   opacity: 1; }
   70%  { transform: translateY(-80px); opacity: 1; }
@@ -112,13 +118,13 @@ const LiveStreamPage = () => {
   }, [chatLog]);
 
   useEffect(() => {
-    if (!isBroadcaster) return;
+    if (!isBroadcaster) return undefined;
     registerChatHandler(addMessage);
     openLiveControls();
-    return () => {
-      leaveLiveControls();
-    };
-  }, [isBroadcaster, registerChatHandler, addMessage, openLiveControls, leaveLiveControls]);
+    return () => { leaveLiveControls(); };
+    // Stable handlers from context — avoid re-running on every render
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isBroadcaster]);
 
   useEffect(() => {
     if (!localVideoRef.current || !localTrack) return;
@@ -202,9 +208,7 @@ const LiveStreamPage = () => {
     const attachRemoteTrack = (track, pub) => {
       if (!mounted || !track) return;
       if (track.kind === 'video') {
-        const isScreen = pub?.source === Track.Source.ScreenShare
-          || track?.source === Track.Source.ScreenShare;
-        if (isScreen) setRemoteScreenTrack(track);
+        if (isScreenShareSource(pub, track)) setRemoteScreenTrack(track);
         else setRemoteVideoTrack(track);
       }
       if (track.kind === 'audio') {
@@ -219,14 +223,15 @@ const LiveStreamPage = () => {
       }
     };
 
-    const syncExistingRemoteTracks = (room) => {
-      room.remoteParticipants.forEach((participant) => {
-        participant.trackPublications.forEach((pub) => {
-          if (pub.track && pub.isSubscribed !== false) {
-            attachRemoteTrack(pub.track, pub);
+    const syncExistingRemoteTracks = async (room) => {
+      for (const participant of room.remoteParticipants.values()) {
+        for (const pub of participant.trackPublications.values()) {
+          if (!pub.isSubscribed) {
+            try { await pub.setSubscribed(true); } catch (_) {}
           }
-        });
-      });
+          if (pub.track) attachRemoteTrack(pub.track, pub);
+        }
+      }
     };
 
     const join = async () => {
@@ -252,9 +257,7 @@ const LiveStreamPage = () => {
         room.on(RoomEvent.TrackUnsubscribed, (track, pub) => {
           if (!mounted) return;
           if (track.kind === 'video') {
-            const isScreen = pub?.source === Track.Source.ScreenShare
-              || track?.source === Track.Source.ScreenShare;
-            if (isScreen) setRemoteScreenTrack(null);
+            if (isScreenShareSource(pub, track)) setRemoteScreenTrack(null);
             else setRemoteVideoTrack(null);
           }
           if (track.kind === 'audio' && audioElRef.current) {
@@ -280,7 +283,7 @@ const LiveStreamPage = () => {
         });
 
         await room.connect(livekitUrl, token);
-        syncExistingRemoteTracks(room);
+        await syncExistingRemoteTracks(room);
         if (mounted) {
           setViewerConnected(true);
           setViewerCount(room.remoteParticipants.size);
