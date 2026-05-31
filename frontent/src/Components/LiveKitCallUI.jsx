@@ -16,6 +16,7 @@ import {
 import { PhoneIcon } from '@chakra-ui/icons';
 import { RoomEvent } from 'livekit-client';
 import { useLiveKit } from '../context/LiveKitContext';
+import ScreenShareViewer from './ScreenShareViewer';
 
 // ── small helpers ────────────────────────────────────────────────────────────
 const HangupIcon = () => <span style={{ fontSize: 20 }}>📵</span>;
@@ -185,7 +186,6 @@ const ActiveCallScreen = () => {
   const [isMuted, setIsMuted] = useState(false);
   const [isCamOff, setIsCamOff] = useState(callType === 'audio');
   const [isSharing, setIsSharing] = useState(false);
-  const [portraitShare, setPortraitShare] = useState(false);
 
   const isScreen     = (t) => t?.source === 'screen_share' || t?.track?.source === 'screen_share';
   const remoteScreen = remoteTracks.find(t => t.track.kind === 'video' && isScreen(t));
@@ -200,14 +200,14 @@ const ActiveCallScreen = () => {
   const remoteAudioElRef = useRef(null);
 
   useEffect(() => {
-    if (!remoteVideo?.track || !remoteVideoRef.current) return;
+    if (remoteScreen || !remoteCamera?.track || !remoteVideoRef.current) return;
     const el = remoteVideoRef.current;
-    try { remoteVideo.track.attach(el); } catch (_) {}
+    try { remoteCamera.track.attach(el); } catch (_) {}
     return () => {
-      try { remoteVideo.track.detach(el); } catch (_) {}
+      try { remoteCamera.track.detach(el); } catch (_) {}
       if (el) el.srcObject = null;
     };
-  }, [remoteVideo]);
+  }, [remoteScreen, remoteCamera]);
 
   // While they present, keep showing their camera in a small thumbnail too.
   useEffect(() => {
@@ -219,21 +219,6 @@ const ActiveCallScreen = () => {
       if (el) el.srcObject = null;
     };
   }, [remoteScreen, remoteCamera]);
-
-  useEffect(() => {
-    const track = remoteScreen?.track;
-    if (!track) {
-      setPortraitShare(false);
-      return;
-    }
-    const syncDims = () => {
-      const d = track.dimensions;
-      setPortraitShare(Boolean(d?.height && d?.width && d.height > d.width));
-    };
-    syncDims();
-    track.on?.('dimensionsChanged', syncDims);
-    return () => { track.off?.('dimensionsChanged', syncDims); };
-  }, [remoteScreen]);
 
   useEffect(() => {
     if (!localVideo || !localVideoRef.current) return;
@@ -360,49 +345,46 @@ const ActiveCallScreen = () => {
         py={{ base: 2, md: 4 }}
       >
         {remoteVideo ? (
-          <Box
-            position="relative"
-            w={remoteScreen && portraitShare ? 'auto' : '100%'}
-            h="100%"
-            maxW={remoteScreen && portraitShare ? { base: 'min(92vw, 520px)', md: '520px' } : '1100px'}
-            maxH="calc(100vh - 170px)"
-            borderRadius={{ base: 'md', md: '2xl' }}
-            overflow="hidden"
-            bg="black"
-            border="1px solid"
-            borderColor="whiteAlpha.300"
-            boxShadow="0 14px 36px rgba(0,0,0,0.45)"
-            display="flex"
-            alignItems="center"
-            justifyContent="center"
-          >
+          remoteScreen ? (
             <Box
-              key={remoteVideo?.track?.sid || 'remote-main'}
-              as="video"
-              ref={remoteVideoRef}
-              autoPlay
-              playsInline
-              style={{
-                width: remoteScreen && portraitShare ? 'auto' : '100%',
-                height: '100%',
-                maxWidth: remoteScreen && portraitShare ? 'min(520px, 42vw)' : '100%',
-                objectFit: remoteScreen ? 'contain' : 'cover',
-              }}
-            />
-            {remoteScreen && (
-              <Badge
-                position="absolute"
-                top={3}
-                left={3}
-                colorScheme="teal"
-                borderRadius="full"
-                px={3}
-                py={1}
-              >
-                {callPartner?.name ? `${callPartner.name} is sharing screen` : 'Sharing screen'}
-              </Badge>
-            )}
-          </Box>
+              position="relative"
+              w="100%"
+              h="100%"
+              maxW="1100px"
+              maxH="calc(100vh - 170px)"
+              alignSelf="stretch"
+            >
+              <ScreenShareViewer
+                track={remoteScreen.track}
+                name={callPartner?.name || 'User'}
+                flex="1"
+                minH="calc(100vh - 170px)"
+              />
+            </Box>
+          ) : (
+            <Box
+              position="relative"
+              w="100%"
+              h="100%"
+              maxW="1100px"
+              maxH="calc(100vh - 170px)"
+              borderRadius={{ base: 'md', md: '2xl' }}
+              overflow="hidden"
+              bg="black"
+              border="1px solid"
+              borderColor="whiteAlpha.300"
+              boxShadow="0 14px 36px rgba(0,0,0,0.45)"
+            >
+              <Box
+                key={remoteVideo?.track?.sid || 'remote-main'}
+                as="video"
+                ref={remoteVideoRef}
+                autoPlay
+                playsInline
+                style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+              />
+            </Box>
+          )
         ) : (
           <VStack>
             <Avatar src={callPartner?.profilePic} name={callPartner?.name} size="2xl" />
