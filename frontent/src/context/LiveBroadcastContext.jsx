@@ -185,6 +185,8 @@ export const LiveBroadcastProvider = ({ children }) => {
         audio: false,
         ...opts,
       });
+      isSharingRef.current = true;
+      setIsSharing(true);
       return true;
     } catch (err) {
       isSharingRef.current = false;

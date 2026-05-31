@@ -476,17 +476,6 @@ const HomePage = () => {
     }
   }, [socket, setFollowPost, getFeedPost, user, myUserId, isLive])
 
-  // Hide your own LIVE card while you are broadcasting (avoids opening viewer by mistake)
-  useEffect(() => {
-    if (!isLive || !myUserId) return
-    setFollowPost(prev => {
-      const next = prev.filter(p => !isOwnLivePost(p))
-      return next.length === prev.length ? prev : next
-    })
-  }, [isLive, myUserId, isOwnLivePost, setFollowPost])
- 
- 
-
  
 
 
