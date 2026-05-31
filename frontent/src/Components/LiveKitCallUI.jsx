@@ -185,6 +185,7 @@ const ActiveCallScreen = () => {
   const [isMuted, setIsMuted] = useState(false);
   const [isCamOff, setIsCamOff] = useState(callType === 'audio');
   const [isSharing, setIsSharing] = useState(false);
+  const [portraitShare, setPortraitShare] = useState(false);
 
   const isScreen     = (t) => t?.source === 'screen_share' || t?.track?.source === 'screen_share';
   const remoteScreen = remoteTracks.find(t => t.track.kind === 'video' && isScreen(t));
@@ -218,6 +219,21 @@ const ActiveCallScreen = () => {
       if (el) el.srcObject = null;
     };
   }, [remoteScreen, remoteCamera]);
+
+  useEffect(() => {
+    const track = remoteScreen?.track;
+    if (!track) {
+      setPortraitShare(false);
+      return;
+    }
+    const syncDims = () => {
+      const d = track.dimensions;
+      setPortraitShare(Boolean(d?.height && d?.width && d.height > d.width));
+    };
+    syncDims();
+    track.on?.('dimensionsChanged', syncDims);
+    return () => { track.off?.('dimensionsChanged', syncDims); };
+  }, [remoteScreen]);
 
   useEffect(() => {
     if (!localVideo || !localVideoRef.current) return;
@@ -346,9 +362,9 @@ const ActiveCallScreen = () => {
         {remoteVideo ? (
           <Box
             position="relative"
-            w="100%"
+            w={remoteScreen && portraitShare ? 'auto' : '100%'}
             h="100%"
-            maxW="1100px"
+            maxW={remoteScreen && portraitShare ? { base: 'min(92vw, 520px)', md: '520px' } : '1100px'}
             maxH="calc(100vh - 170px)"
             borderRadius={{ base: 'md', md: '2xl' }}
             overflow="hidden"
@@ -356,6 +372,9 @@ const ActiveCallScreen = () => {
             border="1px solid"
             borderColor="whiteAlpha.300"
             boxShadow="0 14px 36px rgba(0,0,0,0.45)"
+            display="flex"
+            alignItems="center"
+            justifyContent="center"
           >
             <Box
               key={remoteVideo?.track?.sid || 'remote-main'}
@@ -363,7 +382,12 @@ const ActiveCallScreen = () => {
               ref={remoteVideoRef}
               autoPlay
               playsInline
-              style={{ width: '100%', height: '100%', objectFit: remoteScreen ? 'contain' : 'cover' }}
+              style={{
+                width: remoteScreen && portraitShare ? 'auto' : '100%',
+                height: '100%',
+                maxWidth: remoteScreen && portraitShare ? 'min(520px, 42vw)' : '100%',
+                objectFit: remoteScreen ? 'contain' : 'cover',
+              }}
             />
             {remoteScreen && (
               <Badge

@@ -34,6 +34,8 @@ const findScreenShare = (localParticipant, participants) => {
 // ── Big "presenter" stage for a shared screen ────────────────────────────────
 const ScreenShareStage = ({ track, name }) => {
   const ref = useRef(null);
+  const [portrait, setPortrait] = useState(false);
+
   useEffect(() => {
     if (!track || !ref.current) return;
     const el = ref.current;
@@ -44,15 +46,33 @@ const ScreenShareStage = ({ track, name }) => {
     };
   }, [track]);
 
+  useEffect(() => {
+    if (!track) return;
+    const syncDims = () => {
+      const d = track.dimensions;
+      setPortrait(Boolean(d?.height && d?.width && d.height > d.width));
+    };
+    syncDims();
+    track.on?.('dimensionsChanged', syncDims);
+    return () => { track.off?.('dimensionsChanged', syncDims); };
+  }, [track]);
+
   return (
     <Box
       position="relative" flex={1} minH="0"
       bg="black" borderRadius="xl" overflow="hidden"
       border="1px solid" borderColor="whiteAlpha.300"
+      display="flex" alignItems="center" justifyContent="center"
     >
       <Box
         as="video" ref={ref} autoPlay playsInline muted
-        style={{ width: '100%', height: '100%', objectFit: 'contain' }}
+        style={{
+          height: portrait ? '100%' : '100%',
+          width: portrait ? 'auto' : '100%',
+          maxHeight: '100%',
+          maxWidth: portrait ? 'min(520px, 42vw)' : '100%',
+          objectFit: 'contain',
+        }}
       />
       <Badge position="absolute" top={3} left={3} colorScheme="teal" borderRadius="full" px={3} py={1}>
         {name} sharing screen
