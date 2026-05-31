@@ -1,10 +1,9 @@
 /**
- * Screen share stage with zoom, pan (when zoomed), and fullscreen.
- * Portrait mobile shares scale to fill available height (fixes tiny phone share on desktop).
+ * Screen share with real zoom (larger canvas) + scroll to see hidden edges.
  */
 
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { Box, Flex, Text, IconButton, HStack, Badge } from '@chakra-ui/react';
+import { Box, Text, IconButton, HStack, Badge } from '@chakra-ui/react';
 
 const ZOOM_MIN = 1;
 const ZOOM_MAX = 3;
@@ -14,12 +13,12 @@ const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 
 const ScreenShareViewer = ({ track, name, flex = 1, minH = '0' }) => {
   const containerRef = useRef(null);
+  const viewportRef = useRef(null);
   const videoRef = useRef(null);
-  const [portrait, setPortrait] = useState(false);
-  const [zoom, setZoom] = useState(1);
-  const [pan, setPan] = useState({ x: 0, y: 0 });
-  const [isFullscreen, setIsFullscreen] = useState(false);
   const dragRef = useRef(null);
+  const [zoom, setZoom] = useState(1);
+  const [vpSize, setVpSize] = useState({ w: 0, h: 0 });
+  const [isFullscreen, setIsFullscreen] = useState(false);
 
   useEffect(() => {
     if (!track || !videoRef.current) return;
@@ -31,84 +30,93 @@ const ScreenShareViewer = ({ track, name, flex = 1, minH = '0' }) => {
     };
   }, [track]);
 
+  // Measure the visible viewport so zoom grows content in real pixels.
   useEffect(() => {
-    if (!track) return;
-    const syncDims = () => {
-      const d = track.dimensions;
-      setPortrait(Boolean(d?.height && d?.width && d.height > d.width));
+    const el = viewportRef.current;
+    if (!el) return undefined;
+    const measure = () => {
+      setVpSize({ w: el.clientWidth, h: el.clientHeight });
     };
-    syncDims();
-    track.on?.('dimensionsChanged', syncDims);
-    return () => { track.off?.('dimensionsChanged', syncDims); };
-  }, [track]);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [isFullscreen]);
+
+  const resetScroll = useCallback((center = false) => {
+    const vp = viewportRef.current;
+    if (!vp) return;
+    if (center && zoom > 1) {
+      vp.scrollLeft = Math.max(0, (vp.scrollWidth - vp.clientWidth) / 2);
+      vp.scrollTop = Math.max(0, (vp.scrollHeight - vp.clientHeight) / 2);
+    } else {
+      vp.scrollLeft = 0;
+      vp.scrollTop = 0;
+    }
+  }, [zoom]);
 
   useEffect(() => {
-    const onFsChange = () => {
-      setIsFullscreen(Boolean(document.fullscreenElement));
-    };
+    if (zoom <= 1) resetScroll(false);
+    else requestAnimationFrame(() => resetScroll(true));
+  }, [zoom, vpSize.w, vpSize.h, resetScroll]);
+
+  useEffect(() => {
+    const onFsChange = () => setIsFullscreen(Boolean(document.fullscreenElement));
     document.addEventListener('fullscreenchange', onFsChange);
     return () => document.removeEventListener('fullscreenchange', onFsChange);
   }, []);
 
-  const zoomIn = useCallback(() => {
-    setZoom((z) => clamp(Number((z + ZOOM_STEP).toFixed(2)), ZOOM_MIN, ZOOM_MAX));
+  const applyZoom = useCallback((next) => {
+    setZoom(clamp(Number(next.toFixed(2)), ZOOM_MIN, ZOOM_MAX));
   }, []);
 
-  const zoomOut = useCallback(() => {
-    setZoom((z) => {
-      const next = clamp(Number((z - ZOOM_STEP).toFixed(2)), ZOOM_MIN, ZOOM_MAX);
-      if (next <= 1) setPan({ x: 0, y: 0 });
-      return next;
-    });
-  }, []);
-
+  const zoomIn = useCallback(() => applyZoom(zoom + ZOOM_STEP), [zoom, applyZoom]);
+  const zoomOut = useCallback(() => applyZoom(zoom - ZOOM_STEP), [zoom, applyZoom]);
   const resetView = useCallback(() => {
     setZoom(1);
-    setPan({ x: 0, y: 0 });
-  }, []);
+    resetScroll(false);
+  }, [resetScroll]);
 
   const toggleFullscreen = useCallback(async () => {
     const el = containerRef.current;
     if (!el) return;
     try {
-      if (document.fullscreenElement) {
-        await document.exitFullscreen();
-      } else {
-        await el.requestFullscreen();
-      }
+      if (document.fullscreenElement) await document.exitFullscreen();
+      else await el.requestFullscreen();
     } catch (_) {}
   }, []);
 
   const onWheel = useCallback((e) => {
+    if (!e.ctrlKey && !e.metaKey) return;
     e.preventDefault();
     const delta = e.deltaY < 0 ? ZOOM_STEP : -ZOOM_STEP;
-    setZoom((z) => {
-      const next = clamp(Number((z + delta).toFixed(2)), ZOOM_MIN, ZOOM_MAX);
-      if (next <= 1) setPan({ x: 0, y: 0 });
-      return next;
-    });
-  }, []);
+    applyZoom(zoom + delta);
+  }, [zoom, applyZoom]);
 
   const onPointerDown = useCallback((e) => {
-    if (zoom <= 1) return;
-    dragRef.current = { startX: e.clientX, startY: e.clientY, panX: pan.x, panY: pan.y };
+    if (zoom <= 1 || !viewportRef.current) return;
+    dragRef.current = {
+      startX: e.clientX,
+      startY: e.clientY,
+      scrollLeft: viewportRef.current.scrollLeft,
+      scrollTop: viewportRef.current.scrollTop,
+    };
     e.currentTarget.setPointerCapture?.(e.pointerId);
-  }, [zoom, pan]);
-
-  const onPointerMove = useCallback((e) => {
-    if (!dragRef.current || zoom <= 1) return;
-    const dx = e.clientX - dragRef.current.startX;
-    const dy = e.clientY - dragRef.current.startY;
-    setPan({
-      x: dragRef.current.panX + dx,
-      y: dragRef.current.panY + dy,
-    });
   }, [zoom]);
 
-  const onPointerUp = useCallback(() => {
-    dragRef.current = null;
+  const onPointerMove = useCallback((e) => {
+    if (!dragRef.current || !viewportRef.current) return;
+    const dx = e.clientX - dragRef.current.startX;
+    const dy = e.clientY - dragRef.current.startY;
+    viewportRef.current.scrollLeft = dragRef.current.scrollLeft - dx;
+    viewportRef.current.scrollTop = dragRef.current.scrollTop - dy;
   }, []);
 
+  const onPointerUp = useCallback(() => { dragRef.current = null; }, []);
+
+  const canScroll = zoom > 1 && vpSize.w > 0;
+  const contentW = vpSize.w * zoom;
+  const contentH = vpSize.h * zoom;
   const zoomLabel = `${Math.round(zoom * 100)}%`;
 
   return (
@@ -124,54 +132,62 @@ const ScreenShareViewer = ({ track, name, flex = 1, minH = '0' }) => {
       overflow="hidden"
       border={isFullscreen ? 'none' : '1px solid'}
       borderColor="whiteAlpha.300"
-      onWheel={onWheel}
+      display="flex"
+      flexDir="column"
     >
-      <Flex
-        h="100%"
+      <Box
+        ref={viewportRef}
+        flex={1}
+        minH={0}
         w="100%"
-        align="center"
-        justify="center"
-        overflow="hidden"
-        cursor={zoom > 1 ? 'grab' : 'default'}
+        overflow={canScroll ? 'scroll' : 'hidden'}
+        onWheel={onWheel}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerUp}
+        cursor={canScroll ? 'grab' : 'default'}
         userSelect="none"
+        css={{
+          '&::-webkit-scrollbar': { width: '10px', height: '10px' },
+          '&::-webkit-scrollbar-track': { background: 'rgba(255,255,255,0.06)' },
+          '&::-webkit-scrollbar-thumb': { background: 'rgba(255,255,255,0.35)', borderRadius: '6px' },
+        }}
       >
-        <Box
-          style={{
-            transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
-            transformOrigin: 'center center',
-            transition: dragRef.current ? 'none' : 'transform 0.12s ease-out',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            height: '100%',
-            width: '100%',
-          }}
-        >
+        {vpSize.w > 0 && (
           <Box
-            as="video"
-            ref={videoRef}
-            autoPlay
-            playsInline
-            muted
-            style={{
-              display: 'block',
-              objectFit: 'contain',
-              maxHeight: '100%',
-              maxWidth: '100%',
-              height: portrait ? '100%' : 'auto',
-              width: portrait ? 'auto' : '100%',
-            }}
-          />
-        </Box>
-      </Flex>
+            w={`${contentW}px`}
+            h={`${contentH}px`}
+            position="relative"
+            flexShrink={0}
+          >
+            <Box
+              as="video"
+              ref={videoRef}
+              autoPlay
+              playsInline
+              muted
+              pointerEvents="none"
+              style={{
+                display: 'block',
+                width: '100%',
+                height: '100%',
+                objectFit: 'contain',
+              }}
+            />
+          </Box>
+        )}
+      </Box>
 
       <Badge position="absolute" top={3} left={3} colorScheme="teal" borderRadius="full" px={3} py={1} zIndex={2}>
         {name} sharing screen
       </Badge>
+
+      {canScroll && (
+        <Badge position="absolute" top={3} right={3} bg="blackAlpha.700" borderRadius="full" px={2} py={1} zIndex={2}>
+          Scroll sideways / up-down to see hidden parts
+        </Badge>
+      )}
 
       <HStack
         position="absolute"
@@ -186,43 +202,11 @@ const ScreenShareViewer = ({ track, name, flex = 1, minH = '0' }) => {
         border="1px solid"
         borderColor="whiteAlpha.300"
       >
-        <IconButton
-          aria-label="Zoom out"
-          icon={<Text fontSize="sm" fontWeight="bold">−</Text>}
-          size="xs"
-          variant="ghost"
-          color="white"
-          onClick={zoomOut}
-          isDisabled={zoom <= ZOOM_MIN}
-        />
-        <Text color="white" fontSize="xs" fontWeight="bold" minW="38px" textAlign="center">
-          {zoomLabel}
-        </Text>
-        <IconButton
-          aria-label="Zoom in"
-          icon={<Text fontSize="sm" fontWeight="bold">+</Text>}
-          size="xs"
-          variant="ghost"
-          color="white"
-          onClick={zoomIn}
-          isDisabled={zoom >= ZOOM_MAX}
-        />
-        <IconButton
-          aria-label="Reset zoom"
-          icon={<Text fontSize="xs">↺</Text>}
-          size="xs"
-          variant="ghost"
-          color="white"
-          onClick={resetView}
-        />
-        <IconButton
-          aria-label={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
-          icon={<Text fontSize="sm">{isFullscreen ? '⤡' : '⛶'}</Text>}
-          size="xs"
-          variant="ghost"
-          color="white"
-          onClick={toggleFullscreen}
-        />
+        <IconButton aria-label="Zoom out" icon={<Text fontSize="sm" fontWeight="bold">−</Text>} size="xs" variant="ghost" color="white" onClick={zoomOut} isDisabled={zoom <= ZOOM_MIN} />
+        <Text color="white" fontSize="xs" fontWeight="bold" minW="38px" textAlign="center">{zoomLabel}</Text>
+        <IconButton aria-label="Zoom in" icon={<Text fontSize="sm" fontWeight="bold">+</Text>} size="xs" variant="ghost" color="white" onClick={zoomIn} isDisabled={zoom >= ZOOM_MAX} />
+        <IconButton aria-label="Reset zoom" icon={<Text fontSize="xs">↺</Text>} size="xs" variant="ghost" color="white" onClick={resetView} />
+        <IconButton aria-label={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'} icon={<Text fontSize="sm">{isFullscreen ? '⤡' : '⛶'}</Text>} size="xs" variant="ghost" color="white" onClick={toggleFullscreen} />
       </HStack>
     </Box>
   );
