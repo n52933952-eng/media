@@ -122,12 +122,7 @@ export const LiveBroadcastProvider = ({ children }) => {
         isSharingRef.current = false;
         setIsSharing(false);
       });
-      room.on(RoomEvent.LocalTrackPublished, (pub) => {
-        if (isScreenSharePub(pub)) {
-          isSharingRef.current = true;
-          setIsSharing(true);
-        }
-      });
+      // Sync only when user stops via browser UI (same as GroupCallUI).
       room.on(RoomEvent.LocalTrackUnpublished, (pub) => {
         if (isScreenSharePub(pub)) {
           isSharingRef.current = false;
@@ -176,47 +171,32 @@ export const LiveBroadcastProvider = ({ children }) => {
     }
   }, [user, socket, startingLive, isLive, syncLocalTrack, toast]);
 
-  const startShare = useCallback(async (opts = {}) => {
+  // Same pattern as GroupCallUI handleShare — plain toggle, optimistic UI.
+  const toggleShare = useCallback(async (opts = {}) => {
     const room = roomRef.current;
     if (!room) return false;
-    if (isSharingRef.current) return true;
+    const next = !isSharingRef.current;
     try {
-      await room.localParticipant.setScreenShareEnabled(true, {
-        audio: false,
-        ...opts,
-      });
-      isSharingRef.current = true;
-      setIsSharing(true);
-      return true;
+      await room.localParticipant.setScreenShareEnabled(next, next ? opts : undefined);
+      isSharingRef.current = next;
+      setIsSharing(next);
+      return next;
     } catch (err) {
       isSharingRef.current = false;
       setIsSharing(false);
-      toast({
-        title: 'Screen share failed',
-        description: err?.message || 'Could not start screen sharing.',
-        status: 'error',
-        duration: 4000,
-        isClosable: true,
-        position: 'top',
-      });
+      if (next) {
+        toast({
+          title: 'Screen share failed',
+          description: err?.message || 'Could not start screen sharing.',
+          status: 'error',
+          duration: 4000,
+          isClosable: true,
+          position: 'top',
+        });
+      }
       return false;
     }
   }, [toast]);
-
-  const stopShare = useCallback(async () => {
-    const room = roomRef.current;
-    if (!room || !isSharingRef.current) return;
-    try {
-      await room.localParticipant.setScreenShareEnabled(false);
-    } catch (_) {}
-    isSharingRef.current = false;
-    setIsSharing(false);
-  }, []);
-
-  const toggleShare = useCallback(async () => {
-    if (isSharingRef.current) await stopShare();
-    else await startShare();
-  }, [startShare, stopShare]);
 
   const minimizeLive = useCallback(() => {
     if (!isLive) return;
@@ -238,13 +218,29 @@ export const LiveBroadcastProvider = ({ children }) => {
     liveBroadcastNav.returnToLive?.();
   }, []);
 
-  const shareAndGoHome = useCallback(() => {
+  const shareAndGoHome = useCallback(async () => {
     if (!isLiveRef.current) return;
+    if (!isSharingRef.current) {
+      const room = roomRef.current;
+      if (!room) return;
+      try {
+        await room.localParticipant.setScreenShareEnabled(true, { preferCurrentTab: true });
+        isSharingRef.current = true;
+        setIsSharing(true);
+      } catch (err) {
+        toast({
+          title: 'Screen share failed',
+          description: err?.message || 'Could not start screen sharing.',
+          status: 'error',
+          duration: 4000,
+          isClosable: true,
+          position: 'top',
+        });
+        return;
+      }
+    }
     liveBroadcastNav.minimize?.();
-    window.setTimeout(() => {
-      void startShare({ preferCurrentTab: true });
-    }, 500);
-  }, [startShare]);
+  }, [toast]);
 
   const sendChat = useCallback(async (text, senderName) => {
     const trimmed = String(text || '').trim();
@@ -286,8 +282,6 @@ export const LiveBroadcastProvider = ({ children }) => {
     localTrack,
     goLive,
     endLive,
-    startShare,
-    stopShare,
     toggleShare,
     shareAndGoHome,
     minimizeLive,
