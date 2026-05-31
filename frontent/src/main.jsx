@@ -13,6 +13,7 @@ import{PostContextProvider} from './context/PostContext'
 import{SocketContextProvider} from './context/SocketContext'
 import { LiveKitProvider } from './context/LiveKitContext'
 import { GroupCallProvider } from './context/GroupCallContext'
+import { LiveBroadcastProvider } from './context/LiveBroadcastContext'
 import { GoogleOAuthProvider } from '@react-oauth/google'
 import { GOOGLE_WEB_CLIENT_ID } from './config/googleWebClient'
 
@@ -79,6 +80,7 @@ const appShell = (
     <SocketContextProvider>
     <LiveKitProvider>
     <GroupCallProvider>
+    <LiveBroadcastProvider>
    <BrowserRouter>
   
   <ChakraProvider theme={theme}>
@@ -88,6 +90,7 @@ const appShell = (
   </ChakraProvider>
 
   </BrowserRouter>
+  </LiveBroadcastProvider>
   </GroupCallProvider>
   </LiveKitProvider>
   </SocketContextProvider>

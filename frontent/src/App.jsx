@@ -26,6 +26,8 @@ import RacingGamePage from './Pages/RacingGamePage'
 import CallNotification from './Components/CallNotification'
 import LiveKitCallUI from './Components/LiveKitCallUI'
 import GroupCallUI from './Components/GroupCallUI'
+import LiveStreamMiniBar from './Components/LiveStreamMiniBar'
+import { liveBroadcastNav } from './context/LiveBroadcastContext'
 import ChessChallengeNotification from './Components/ChessChallengeNotification'
 import CardChallengeNotification from './Components/CardChallengeNotification'
 import RacingChallengeNotification from './Components/RacingChallengeNotification'
@@ -71,6 +73,11 @@ const AppContent = () => {
     socket.on('acceptRaceChallenge', handleRaceAccepted)
     return () => socket.off('acceptRaceChallenge', handleRaceAccepted)
   }, [socket, user, navigate])
+
+  useEffect(() => {
+    liveBroadcastNav.minimize = () => navigate('/home');
+    liveBroadcastNav.returnToLive = () => navigate('/live/broadcast');
+  }, [navigate]);
 
   useEffect(() => {
     const handleScroll = () => {
@@ -120,6 +127,7 @@ const AppContent = () => {
 
       {/* Global Racing Challenge Notification - shows on all pages */}
       {user && <RacingChallengeNotification />}
+      {user && <LiveStreamMiniBar />}
       
       {/* Fixed header — visible on race too (home / messages / leave game) */}
       <Box

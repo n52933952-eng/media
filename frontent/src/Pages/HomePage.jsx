@@ -7,6 +7,7 @@ import LivePostCard from '../Components/LivePostCard'
 import {PostContext} from '../context/PostContext'
 import {SocketContext} from '../context/SocketContext'
 import {UserContext} from '../context/UserContext'
+import { useLiveBroadcast } from '../context/LiveBroadcastContext'
 import SuggestedUsers from '../Components/SuggestedUsers'
 import SuggestedChannels from '../Components/SuggestedChannels'
 import ActivityFeed from '../Components/ActivityFeed'
@@ -20,6 +21,8 @@ const HomePage = () => {
   const{followPost,setFollowPost}=useContext(PostContext)
   const {socket, liveStreams} = useContext(SocketContext) || {}
   const {user} = useContext(UserContext) || {}
+  const { isLive, isMinimized } = useLiveBroadcast()
+  const myUserId = user?._id != null ? String(user._id) : ''
   
   const[loading,setLoading]=useState(true)
   const[loadingMore,setLoadingMore]=useState(false)
@@ -200,7 +203,9 @@ const HomePage = () => {
     if (!Array.isArray(liveStreams)) return
     setFollowPost(prev => {
       const withoutOldLive = prev.filter(p => !p?.isLive)
-      const livePseudo = liveStreams.map(s => ({
+      const livePseudo = liveStreams
+        .filter(s => !(isLive && isMinimized && myUserId && String(s.streamerId) === myUserId))
+        .map(s => ({
         _id: `live_${s.streamerId}`,
         isLive: true,
         liveStreamId: s.streamerId,
@@ -217,7 +222,7 @@ const HomePage = () => {
       // which guarantees stale live cards are removed.
       return [...livePseudo, ...withoutOldLive]
     })
-  }, [liveStreams, setFollowPost])
+  }, [liveStreams, setFollowPost, isLive, isMinimized, myUserId])
 
   // Infinite scroll with Intersection Observer
   useEffect(() => {
