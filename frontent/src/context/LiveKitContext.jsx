@@ -121,6 +121,11 @@ export const LiveKitProvider = ({ children }) => {
 
     // Track events
     room.on(RoomEvent.TrackSubscribed, (track, _pub, participant) => {
+      // Receiving the other side's media means we're connected — make sure the
+      // "Calling…" overlay is gone and the active call screen is shown.
+      setCallAccepted(true);
+      setIsCalling(false);
+      stopRingtone();
       setRemoteTracks(prev => [
         ...prev,
         { track, participantId: participant.identity, source: _pub?.source || track?.source },
@@ -131,6 +136,7 @@ export const LiveKitProvider = ({ children }) => {
     });
     room.on(RoomEvent.ParticipantConnected, () => {
       setCallAccepted(true);
+      setIsCalling(false);   // hide the "Calling…" overlay so the live call shows
       stopRingtone();
     });
     room.on(RoomEvent.ParticipantDisconnected, () => {
