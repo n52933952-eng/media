@@ -211,7 +211,7 @@ const HomePage = () => {
     setFollowPost(prev => {
       const withoutOldLive = prev.filter(p => !p?.isLive)
       const livePseudo = liveStreams
-        .filter(s => !(isLive && isMinimized && myUserId && String(s.streamerId) === myUserId))
+        .filter(s => !(isLive && myUserId && String(s.streamerId) === myUserId))
         .map(s => ({
         _id: `live_${s.streamerId}`,
         isLive: true,
@@ -229,7 +229,7 @@ const HomePage = () => {
       // which guarantees stale live cards are removed.
       return [...livePseudo, ...withoutOldLive]
     })
-  }, [liveStreams, setFollowPost, isLive, isMinimized, myUserId])
+  }, [liveStreams, setFollowPost, isLive, myUserId])
 
   // Infinite scroll with Intersection Observer
   useEffect(() => {
