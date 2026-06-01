@@ -416,7 +416,7 @@ const LiveStreamPage = () => {
                     </VStack>
                   </MenuItem>
                   <MenuDivider />
-                  <MenuItem closeOnSelect onClick={shareAndGoHome}>
+                  <MenuItem closeOnSelect onClick={() => { void shareAndGoHome(); }}>
                     <VStack align="flex-start" spacing={0}>
                       <Text fontWeight="600">🏠 App home</Text>
                       <Text fontSize="xs" color="gray.500">Go to home first, then share this tab once</Text>

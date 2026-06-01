@@ -35,7 +35,6 @@ export const LiveBroadcastProvider = ({ children }) => {
   const roomNameRef = useRef('');
   const isSharingRef = useRef(false);
   const isLiveRef = useRef(false);
-  const pendingAppHomeShareRef = useRef(false);
   const liveEndedRef = useRef(false);
   const liveTimeoutRef = useRef(null);
   const endLiveRef = useRef(async () => {});
@@ -100,7 +99,17 @@ export const LiveBroadcastProvider = ({ children }) => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ type: 'livestream', targetId: String(user._id) }),
       });
-      if (!res.ok) return;
+      if (!res.ok) {
+        toast({
+          title: 'Go Live failed',
+          description: 'Could not connect to the live server.',
+          status: 'error',
+          duration: 4000,
+          isClosable: true,
+          position: 'top',
+        });
+        return;
+      }
       const { token, roomName, livekitUrl } = await res.json();
       roomNameRef.current = roomName;
 
@@ -173,12 +182,20 @@ export const LiveBroadcastProvider = ({ children }) => {
 
   const startShare = useCallback(async (opts = {}) => {
     const room = roomRef.current;
-    if (!room || isSharingRef.current) return true;
-    try {
-      await room.localParticipant.setScreenShareEnabled(true, {
-        audio: false,
-        ...opts,
+    if (!room) {
+      toast({
+        title: 'Not connected',
+        description: 'Go live first, then try sharing again.',
+        status: 'error',
+        duration: 4000,
+        isClosable: true,
+        position: 'top',
       });
+      return false;
+    }
+    if (isSharingRef.current) return true;
+    try {
+      await room.localParticipant.setScreenShareEnabled(true, opts);
       isSharingRef.current = true;
       setIsSharing(true);
       return true;
@@ -232,21 +249,11 @@ export const LiveBroadcastProvider = ({ children }) => {
     liveBroadcastNav.returnToLive?.();
   }, []);
 
-  const shareAndGoHome = useCallback(() => {
+  const shareAndGoHome = useCallback(async () => {
     if (!isLiveRef.current) return;
-    pendingAppHomeShareRef.current = true;
-    minimizeLive();
-  }, [minimizeLive]);
-
-  // App home: land on feed first, then one share picker (prefer this tab in Chrome).
-  useEffect(() => {
-    if (!isMinimized || !pendingAppHomeShareRef.current) return undefined;
-    pendingAppHomeShareRef.current = false;
-    const timer = setTimeout(() => {
-      void startShare({ preferCurrentTab: true });
-    }, 450);
-    return () => clearTimeout(timer);
-  }, [isMinimized, startShare]);
+    const ok = await startShare({ preferCurrentTab: true });
+    if (ok) minimizeLive();
+  }, [startShare, minimizeLive]);
 
   const sendChat = useCallback(async (text, senderName) => {
     const trimmed = String(text || '').trim();
