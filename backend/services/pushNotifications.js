@@ -192,6 +192,26 @@ async function sendCallNotification(userId, callerName, callerId, callType = 'vi
 }
 
 /**
+ * Follower went live — tray push when follower is not in the app (socket handles in-app).
+ * Tap opens home feed only (not live viewer) so an ended stream does not error.
+ */
+async function sendLiveStartedNotification(followerUserId, streamerName, streamerId, images = {}) {
+  const name = String(streamerName || 'Someone').trim() || 'Someone';
+  return await sendNotificationToUser(
+    followerUserId,
+    `${name} is live now 🔴`,
+    'Tap to open the app',
+    {
+      type: 'live_started',
+      streamerId: String(streamerId || ''),
+      streamerName: name,
+      openHome: 'true',
+    },
+    images
+  );
+}
+
+/**
  * Send notification for missed call (tray notification via general FCM)
  */
 async function sendMissedCallNotification(userId, callerName, callType = 'video') {
@@ -278,4 +298,5 @@ export {
   sendFootballScoreNotification,
   sendCallNotification,
   sendMissedCallNotification,
+  sendLiveStartedNotification,
 };

@@ -2243,19 +2243,33 @@ export const initializeSocket = async (app) => {
                     { streamer: streamerId, roomName, active: true, startedAt: new Date(), endedAt: null },
                     { upsert: true, new: true }
                 )
-                // Notify all followers via their personal rooms
+                // Notify followers: in-app socket when online; FCM push when not in app
                 const streamerNorm = normalizeUserId(streamerId) || String(streamerId)
                 const streamer = await User.findById(streamerId).select('followers').lean()
-                if (streamer?.followers?.length) {
-                    for (const followerId of streamer.followers) {
-                        const fid = normalizeUserId(followerId) || String(followerId)
-                        emitToUserSelf(fid, 'livekit:streamStarted', {
-                            streamerId: streamerNorm,
-                            streamerName,
-                            streamerProfilePic,
-                            roomName,
-                        })
+                const followerList = streamer?.followers || []
+                if (followerList.length) {
+                    const livePayload = {
+                        streamerId: streamerNorm,
+                        streamerName,
+                        streamerProfilePic,
+                        roomName,
                     }
+                    void (async () => {
+                        try {
+                            const { sendLiveStartedNotification } = await import('../services/pushNotifications.js')
+                            const images = { profilePic: streamerProfilePic || null }
+                            for (const followerId of followerList) {
+                                const fid = normalizeUserId(followerId) || String(followerId)
+                                if (!fid || fid === streamerNorm) continue
+                                emitToUserSelf(fid, 'livekit:streamStarted', livePayload)
+                                const socketId = await getRecipientSockedId(fid)
+                                if (socketId) continue
+                                await sendLiveStartedNotification(fid, streamerName, streamerNorm, images)
+                            }
+                        } catch (notifyErr) {
+                            console.error('❌ [livekit:goLive] follower notify:', notifyErr.message)
+                        }
+                    })()
                 }
                 const streamTimerKey = normalizeUserId(streamerId)
                 if (streamTimerKey) {
