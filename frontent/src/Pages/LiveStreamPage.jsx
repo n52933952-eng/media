@@ -124,15 +124,26 @@ const LiveStreamPage = () => {
   }, [isBroadcaster, setLiveControlsFocused]);
 
   useEffect(() => {
-    if (!localTrack || !isBroadcaster) return undefined;
-    const el = isSharing ? localPipVideoRef.current : localVideoRef.current;
-    if (!el) return undefined;
-    try { localTrack.attach(el); } catch (_) {}
-    return () => {
-      try { localTrack.detach(el); } catch (_) {}
-      if (el) el.srcObject = null;
+    if (!localTrack || !isBroadcaster || !hostLive) return undefined;
+    let cancelled = false;
+    const attach = () => {
+      if (cancelled) return;
+      const el = isSharing ? localPipVideoRef.current : localVideoRef.current;
+      if (!el) return;
+      try { localTrack.attach(el); } catch (_) {}
     };
-  }, [localTrack, isSharing, isBroadcaster]);
+    attach();
+    const raf = requestAnimationFrame(attach);
+    const t1 = setTimeout(attach, 50);
+    const t2 = setTimeout(attach, 250);
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(raf);
+      clearTimeout(t1);
+      clearTimeout(t2);
+      try { localTrack.detach(); } catch (_) {}
+    };
+  }, [localTrack, isSharing, isBroadcaster, hostLive]);
 
   useEffect(() => {
     if (!remoteVideoRef.current || !remoteCameraTrack || remoteScreenTrack) return;
@@ -331,17 +342,40 @@ const LiveStreamPage = () => {
 
   return (
     <Box position="fixed" inset={0} w="100vw" h="100dvh" bg="black" zIndex={1600} overflow="hidden">
-      {isBroadcaster && isSharing ? (
-        <Flex position="absolute" inset={0} align="center" justify="center" bg="gray.900" px={6}>
-          <Text color="white" fontSize="lg" fontWeight="bold" textAlign="center">
-            🖥 Sharing — viewers see your screen. Use the bar to return.
-          </Text>
-        </Flex>
-      ) : isBroadcaster && localTrack ? (
-        <Box as="video" ref={localVideoRef} autoPlay muted playsInline
-          style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain', objectPosition: 'center' }}
-        />
-      ) : !isBroadcaster && remoteScreenTrack ? (
+      {isBroadcaster && hostLive && (
+        <>
+          <Box
+            as="video"
+            ref={localVideoRef}
+            autoPlay
+            muted
+            playsInline
+            display={isSharing ? 'none' : 'block'}
+            style={{
+              position: 'absolute', inset: 0, width: '100%', height: '100%',
+              objectFit: 'contain', objectPosition: 'center', backgroundColor: '#000',
+            }}
+          />
+          {isSharing && (
+            <Flex position="absolute" inset={0} align="center" justify="center" bg="gray.900" px={6}>
+              <Text color="white" fontSize="lg" fontWeight="bold" textAlign="center">
+                🖥 Sharing — viewers see your screen. Use the bar to return.
+              </Text>
+            </Flex>
+          )}
+          <Box
+            position="absolute" top="72px" right={4} w="120px" h="90px"
+            borderRadius="lg" overflow="hidden" border="2px solid" borderColor="whiteAlpha.500"
+            bg="black" zIndex={18}
+            display={isSharing ? 'block' : 'none'}
+          >
+            <Box as="video" ref={localPipVideoRef} autoPlay muted playsInline
+              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+            />
+          </Box>
+        </>
+      )}
+      {!isBroadcaster && remoteScreenTrack ? (
         <Box position="absolute" inset={0} display="flex" flexDir="column" p={2}>
           <ScreenShareViewer
             track={remoteScreenTrack}
@@ -355,28 +389,14 @@ const LiveStreamPage = () => {
           key={remoteMainCamera?.sid || 'cam'}
           style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain', objectPosition: 'center' }}
         />
+      ) : !isBroadcaster ? (
+        <Flex h="100%" alignItems="center" justifyContent="center" bg="gray.900">
+          <Avatar src={user?.profilePic} name={user?.name || user?.username || 'User'} size="2xl" />
+        </Flex>
       ) : (
         <Flex h="100%" alignItems="center" justifyContent="center" bg="gray.900">
           <Avatar src={user?.profilePic} name={user?.name || user?.username || 'User'} size="2xl" />
         </Flex>
-      )}
-
-      {isBroadcaster && isSharing && (
-        <Box
-          position="absolute" top="72px" right={4} w="120px" h="90px"
-          borderRadius="lg" overflow="hidden" border="2px solid" borderColor="whiteAlpha.500"
-          bg="black" zIndex={18}
-        >
-          {localTrack ? (
-            <Box as="video" ref={localPipVideoRef} autoPlay muted playsInline
-              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-            />
-          ) : (
-            <Flex h="100%" align="center" justify="center" bg="gray.800">
-              <Text color="whiteAlpha.800" fontSize="xs" fontWeight="bold">🔴 LIVE</Text>
-            </Flex>
-          )}
-        </Box>
       )}
 
       {!isBroadcaster && remoteScreenTrack && remoteCameraTrack && (

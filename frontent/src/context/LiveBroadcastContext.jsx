@@ -171,7 +171,7 @@ export const LiveBroadcastProvider = ({ children }) => {
       } else {
         await room.localParticipant.setScreenShareEnabled(false);
         await room.localParticipant.setCameraEnabled(true, {
-          resolution: VideoPresets.h540.resolution,
+          resolution: VideoPresets.h360.resolution,
         });
       }
       isSharingRef.current = next;
