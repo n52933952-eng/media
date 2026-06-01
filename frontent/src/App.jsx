@@ -43,6 +43,7 @@ import {
 import CookieConsentBanner from './Components/CookieConsentBanner'
 import AdSenseLoader from './Components/AdSenseLoader'
 import LiveStreamMiniBar from './Components/LiveStreamMiniBar'
+import LiveCameraPip from './Components/LiveCameraPip'
 import { liveBroadcastNav } from './services/liveBroadcastNav'
 
 const AppContent = () => {
@@ -76,7 +77,9 @@ const AppContent = () => {
 
   useEffect(() => {
     liveBroadcastNav.minimize = () => navigate('/home');
-    liveBroadcastNav.returnToLive = () => navigate('/live/broadcast');
+    liveBroadcastNav.returnToLive = () => {
+      navigate('/live/broadcast', { replace: false });
+    };
     return () => {
       liveBroadcastNav.minimize = null;
       liveBroadcastNav.returnToLive = null;
@@ -132,6 +135,7 @@ const AppContent = () => {
       {/* Global Racing Challenge Notification - shows on all pages */}
       {user && <RacingChallengeNotification />}
       {user && <LiveStreamMiniBar />}
+      {user && <LiveCameraPip />}
       {/* Fixed header — visible on race too (home / messages / leave game) */}
       <Box
         position="fixed"

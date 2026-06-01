@@ -10,11 +10,17 @@ import {
 } from '@chakra-ui/react';
 import { CloseIcon } from '@chakra-ui/icons';
 import { css } from '@emotion/react';
-import { Room, RoomEvent, Track } from 'livekit-client';
+import { Room, RoomEvent } from 'livekit-client';
 import { UserContext } from '../context/UserContext';
 import { SocketContext } from '../context/SocketContext';
 import { useLiveBroadcast } from '../context/LiveBroadcastContext';
 import ScreenShareViewer from '../Components/ScreenShareViewer';
+import {
+  isScreenSharePublication,
+  isVideoPublication,
+  collectRemoteVideoTracks,
+  applyRemoteVideoTrack,
+} from '../utils/liveKitTracks';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
 
@@ -60,12 +66,12 @@ const LiveStreamPage = () => {
     viewerCount: hostViewers,
     startingLive,
     localTrack,
-    localScreenTrack,
     isSharing,
     goLive,
     endLive,
     toggleShare,
     shareAndGoAppHome,
+    shareWindow,
     setLiveControlsFocused,
     registerChatHandler,
     sendChat: sendHostChat,
@@ -194,17 +200,10 @@ const LiveStreamPage = () => {
     if (isBroadcaster || !streamerId) return;
     let mounted = true;
 
-    const isScreenPub = (pub, track) =>
-      pub?.source === Track.Source.ScreenShare
-      || track?.source === Track.Source.ScreenShare
-      || pub?.source === 'screen_share'
-      || track?.source === 'screen_share';
-
     const attachRemoteTrack = (track, pub) => {
       if (!mounted || !track) return;
-      if (track.kind === 'video') {
-        if (isScreenPub(pub, track)) setRemoteScreenTrack(track);
-        else setRemoteCameraTrack(track);
+      if (track.kind === 'video' && isVideoPublication(pub)) {
+        applyRemoteVideoTrack(track, pub, setRemoteScreenTrack, setRemoteCameraTrack);
       }
       if (track.kind === 'audio') {
         try {
@@ -218,16 +217,12 @@ const LiveStreamPage = () => {
       }
     };
 
-    const syncExistingRemoteTracks = async (room) => {
-      for (const participant of room.remoteParticipants.values()) {
-        for (const pub of participant.trackPublications.values()) {
-          if (!pub.isSubscribed) {
-            try { await pub.setSubscribed(true); } catch (_) {}
-          }
-          if (pub.track && pub.kind === 'video') attachRemoteTrack(pub.track, pub);
-          if (pub.track && pub.kind === 'audio') attachRemoteTrack(pub.track, pub);
-        }
+    const onRemotePublication = async (pub) => {
+      if (!mounted || !isVideoPublication(pub)) return;
+      if (!pub.isSubscribed) {
+        try { await pub.setSubscribed(true); } catch (_) {}
       }
+      if (pub.track) attachRemoteTrack(pub.track, pub);
     };
 
     const join = async () => {
@@ -244,14 +239,19 @@ const LiveStreamPage = () => {
         }
         const { token, livekitUrl } = await fetchToken(streamerId, 'viewer');
         if (!mounted) return;
-        const room = new Room({ adaptiveStream: true, dynacast: true });
+        const room = new Room({
+          adaptiveStream: true,
+          dynacast: true,
+          autoSubscribe: true,
+        });
         roomRef.current = room;
 
         room.on(RoomEvent.TrackSubscribed, (track, pub) => attachRemoteTrack(track, pub));
+        room.on(RoomEvent.TrackPublished, (pub) => { void onRemotePublication(pub); });
         room.on(RoomEvent.TrackUnsubscribed, (track, pub) => {
           if (!mounted) return;
           if (track.kind === 'video') {
-            if (isScreenPub(pub, track)) setRemoteScreenTrack(null);
+            if (isScreenSharePublication(pub, track)) setRemoteScreenTrack(null);
             else setRemoteCameraTrack(null);
           }
           if (track.kind === 'audio' && audioElRef.current) {
@@ -277,8 +277,10 @@ const LiveStreamPage = () => {
         });
 
         await room.connect(livekitUrl, token);
-        await syncExistingRemoteTracks(room);
+        const { screen, camera } = await collectRemoteVideoTracks(room);
         if (mounted) {
+          if (screen) setRemoteScreenTrack(screen);
+          if (camera) setRemoteCameraTrack(camera);
           setViewerConnected(true);
           setViewerCount(room.remoteParticipants.size);
         }
@@ -327,10 +329,12 @@ const LiveStreamPage = () => {
 
   return (
     <Box position="fixed" inset={0} w="100vw" h="100dvh" bg="black" zIndex={1600} overflow="hidden">
-      {isBroadcaster && localScreenTrack ? (
-        <Box position="absolute" inset={0} display="flex" flexDir="column" p={2}>
-          <ScreenShareViewer track={localScreenTrack} name="You" flex={1} minH="0" />
-        </Box>
+      {isBroadcaster && isSharing ? (
+        <Flex position="absolute" inset={0} align="center" justify="center" bg="gray.900" px={6}>
+          <Text color="white" fontSize="lg" fontWeight="bold" textAlign="center">
+            🖥 Sharing — viewers see your screen. Use the bar to return.
+          </Text>
+        </Flex>
       ) : isBroadcaster && localTrack ? (
         <Box as="video" ref={localVideoRef} autoPlay muted playsInline
           style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain', objectPosition: 'center' }}
@@ -405,7 +409,10 @@ const LiveStreamPage = () => {
           {isBroadcaster && isLive && (
             <>
               <Button size="sm" borderRadius="full" colorScheme="teal" color="white" onClick={shareAndGoAppHome}>
-                Share app
+                🏠 Share app
+              </Button>
+              <Button size="sm" borderRadius="full" colorScheme="blue" color="white" onClick={shareWindow}>
+                🖥 Share window
               </Button>
               {isSharing && (
                 <Button size="sm" borderRadius="full" variant="outline" colorScheme="whiteAlpha" color="white"

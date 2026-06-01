@@ -3,7 +3,7 @@
  */
 
 import { createContext, useContext, useCallback, useEffect, useRef, useState } from 'react';
-import { Room, RoomEvent, Track } from 'livekit-client';
+import { Room, RoomEvent, Track, VideoPresets } from 'livekit-client';
 import { useToast } from '@chakra-ui/react';
 import { UserContext } from './UserContext';
 import { SocketContext } from './SocketContext';
@@ -12,6 +12,26 @@ import { liveBroadcastNav } from '../services/liveBroadcastNav';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
 const LIVESTREAM_MAX_MS = 25 * 60 * 1000;
+
+/** VP8 + no simulcast — best compatibility with React Native viewers. */
+const LIVE_ROOM_OPTIONS = {
+  adaptiveStream: true,
+  dynacast: true,
+  videoCaptureDefaults: {
+    resolution: VideoPresets.h360.resolution,
+  },
+  publishDefaults: {
+    simulcast: false,
+    videoCodec: 'vp8',
+    videoEncoding: { maxBitrate: 550_000, maxFramerate: 20 },
+    screenShareEncoding: { maxBitrate: 900_000, maxFramerate: 12 },
+  },
+};
+
+const SCREEN_SHARE_BASE = {
+  audio: false,
+  resolution: { width: 854, height: 480, frameRate: 12 },
+};
 
 const LiveBroadcastContext = createContext(null);
 
@@ -55,11 +75,22 @@ export const LiveBroadcastProvider = ({ children }) => {
     setIsSharing(sharing);
   }, []);
 
+  const stopAllPublishedTracks = useCallback(async () => {
+    const room = roomRef.current;
+    if (!room) return;
+    try { await room.localParticipant.setScreenShareEnabled(false); } catch (_) {}
+    try { await room.localParticipant.setCameraEnabled(false); } catch (_) {}
+    try { await room.localParticipant.setMicrophoneEnabled(false); } catch (_) {}
+    isSharingRef.current = false;
+    setIsSharing(false);
+  }, []);
+
   const disconnect = useCallback(async () => {
     if (liveTimeoutRef.current) {
       clearTimeout(liveTimeoutRef.current);
       liveTimeoutRef.current = null;
     }
+    await stopAllPublishedTracks();
     try { await roomRef.current?.disconnect(); } catch (_) {}
     roomRef.current = null;
     setLocalTrack(null);
@@ -69,18 +100,38 @@ export const LiveBroadcastProvider = ({ children }) => {
     setIsMinimized(false);
     setIsLiveControlsFocused(false);
     setViewerCount(0);
-  }, []);
+  }, [stopAllPublishedTracks]);
 
-  const ensureScreenShare = useCallback(async () => {
+  const enableShareCameraPip = useCallback(async () => {
     const room = roomRef.current;
-    if (!room || isSharingRef.current) return true;
+    if (!room) return;
     try {
-      await room.localParticipant.setScreenShareEnabled(true);
+      await room.localParticipant.setCameraEnabled(true, {
+        resolution: VideoPresets.h360.resolution,
+      });
+    } catch (_) {}
+    syncLocalTrack();
+  }, [syncLocalTrack]);
+
+  const ensureScreenShare = useCallback(async ({ preferCurrentTab = false } = {}) => {
+    const room = roomRef.current;
+    if (!room) return false;
+    try {
+      if (isSharingRef.current) {
+        await room.localParticipant.setScreenShareEnabled(false);
+        isSharingRef.current = false;
+      }
+      await room.localParticipant.setScreenShareEnabled(true, {
+        ...SCREEN_SHARE_BASE,
+        preferCurrentTab,
+      });
+      await enableShareCameraPip();
       isSharingRef.current = true;
       setIsSharing(true);
       syncLocalTrack();
       return true;
     } catch (err) {
+      if (/cancel|abort|denied/i.test(String(err?.message || err))) return false;
       console.warn('[LiveBroadcast] screen share failed:', err);
       toast({
         title: 'Screen share failed',
@@ -92,7 +143,7 @@ export const LiveBroadcastProvider = ({ children }) => {
       });
       return false;
     }
-  }, [syncLocalTrack, toast]);
+  }, [syncLocalTrack, toast, enableShareCameraPip]);
 
   const minimizeLive = useCallback(() => {
     setIsMinimized(true);
@@ -110,18 +161,33 @@ export const LiveBroadcastProvider = ({ children }) => {
     if (focused) setIsMinimized(false);
   }, []);
 
+  /** Share this browser tab, then go to app home (feed / games). */
   const shareAndGoAppHome = useCallback(async () => {
     if (!roomRef.current || !isLive) return;
-    const ok = await ensureScreenShare();
+    const ok = await ensureScreenShare({ preferCurrentTab: true });
     if (ok) minimizeLive();
   }, [isLive, ensureScreenShare, minimizeLive]);
+
+  /** Share a window — browser picker; stay on live controls. */
+  const shareWindow = useCallback(async () => {
+    if (!roomRef.current || !isLive) return;
+    await ensureScreenShare({ preferCurrentTab: false });
+  }, [isLive, ensureScreenShare]);
 
   const toggleShare = useCallback(async () => {
     const room = roomRef.current;
     if (!room || !isLive) return;
     const next = !isSharingRef.current;
     try {
-      await room.localParticipant.setScreenShareEnabled(next);
+      if (next) {
+        await room.localParticipant.setScreenShareEnabled(true, SCREEN_SHARE_BASE);
+        await enableShareCameraPip();
+      } else {
+        await room.localParticipant.setScreenShareEnabled(false);
+        await room.localParticipant.setCameraEnabled(true, {
+          resolution: VideoPresets.h540.resolution,
+        });
+      }
       isSharingRef.current = next;
       setIsSharing(next);
       syncLocalTrack();
@@ -140,7 +206,7 @@ export const LiveBroadcastProvider = ({ children }) => {
         });
       }
     }
-  }, [isLive, syncLocalTrack, toast]);
+  }, [isLive, syncLocalTrack, toast, enableShareCameraPip]);
 
   const endLive = useCallback(async () => {
     resignActiveGames(socket, user);
@@ -190,7 +256,7 @@ export const LiveBroadcastProvider = ({ children }) => {
       const { token, roomName, livekitUrl } = await res.json();
       roomNameRef.current = roomName;
 
-      const room = new Room({ adaptiveStream: true, dynacast: true });
+      const room = new Room(LIVE_ROOM_OPTIONS);
       roomRef.current = room;
 
       room.on(RoomEvent.ParticipantConnected, () => setViewerCount(c => c + 1));
@@ -214,7 +280,10 @@ export const LiveBroadcastProvider = ({ children }) => {
       });
 
       await room.connect(livekitUrl, token);
-      await room.localParticipant.enableCameraAndMicrophone();
+      await room.localParticipant.setMicrophoneEnabled(true);
+      await room.localParticipant.setCameraEnabled(true, {
+        resolution: VideoPresets.h360.resolution,
+      });
       syncLocalTrack();
 
       setIsLive(true);
@@ -291,6 +360,7 @@ export const LiveBroadcastProvider = ({ children }) => {
     endLive,
     toggleShare,
     shareAndGoAppHome,
+    shareWindow,
     minimizeLive,
     returnToLiveControls,
     setLiveControlsFocused,
