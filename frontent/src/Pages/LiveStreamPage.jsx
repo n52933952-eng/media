@@ -290,12 +290,12 @@ const LiveStreamPage = () => {
     <Box position="fixed" inset={0} w="100vw" h="100dvh" bg="black" zIndex={1600} overflow="hidden">
       {isBroadcaster && localTrack ? (
         <Box as="video" ref={localVideoRef} autoPlay muted playsInline
-          style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }}
+          style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain', objectPosition: 'center' }}
         />
       ) : !isBroadcaster && remoteVideoTrack ? (
         <Box as="video" ref={remoteVideoRef} autoPlay playsInline
           key={remoteVideoTrack?.sid || 'cam'}
-          style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }}
+          style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain', objectPosition: 'center' }}
         />
       ) : (
         <Flex h="100%" alignItems="center" justifyContent="center" bg="gray.900">
