@@ -9,6 +9,7 @@ import { UserContext } from './UserContext';
 import { SocketContext } from './SocketContext';
 import { resignActiveGames } from '../utils/liveGameResign';
 import { liveBroadcastNav } from '../services/liveBroadcastNav';
+import { prepareCameraForScreenShare, restoreCameraForViewers } from '../utils/liveBroadcastCamera';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
 const LIVESTREAM_MAX_MS = 25 * 60 * 1000;
@@ -88,17 +89,6 @@ export const LiveBroadcastProvider = ({ children }) => {
     setViewerCount(0);
   }, [stopAllPublishedTracks]);
 
-  const enableShareCameraPip = useCallback(async () => {
-    const room = roomRef.current;
-    if (!room) return;
-    try {
-      await room.localParticipant.setCameraEnabled(true, {
-        resolution: VideoPresets.h360.resolution,
-      });
-    } catch (_) {}
-    syncLocalTrack();
-  }, [syncLocalTrack]);
-
   const ensureScreenShare = useCallback(async ({ preferCurrentTab = false } = {}) => {
     const room = roomRef.current;
     if (!room) return false;
@@ -111,7 +101,7 @@ export const LiveBroadcastProvider = ({ children }) => {
         audio: false,
         preferCurrentTab,
       });
-      await enableShareCameraPip();
+      await prepareCameraForScreenShare(room);
       isSharingRef.current = true;
       setIsSharing(true);
       syncLocalTrack();
@@ -129,7 +119,7 @@ export const LiveBroadcastProvider = ({ children }) => {
       });
       return false;
     }
-  }, [syncLocalTrack, toast, enableShareCameraPip]);
+  }, [syncLocalTrack, toast]);
 
   const minimizeLive = useCallback(() => {
     setIsMinimized(true);
@@ -167,12 +157,10 @@ export const LiveBroadcastProvider = ({ children }) => {
     try {
       if (next) {
         await room.localParticipant.setScreenShareEnabled(true, { audio: false });
-        await enableShareCameraPip();
+        await prepareCameraForScreenShare(room);
       } else {
         await room.localParticipant.setScreenShareEnabled(false);
-        await room.localParticipant.setCameraEnabled(true, {
-          resolution: VideoPresets.h360.resolution,
-        });
+        await restoreCameraForViewers(room);
       }
       isSharingRef.current = next;
       setIsSharing(next);
@@ -192,7 +180,7 @@ export const LiveBroadcastProvider = ({ children }) => {
         });
       }
     }
-  }, [isLive, syncLocalTrack, toast, enableShareCameraPip]);
+  }, [isLive, syncLocalTrack, toast]);
 
   const endLive = useCallback(async () => {
     resignActiveGames(socket, user);

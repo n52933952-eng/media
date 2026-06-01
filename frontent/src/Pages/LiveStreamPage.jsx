@@ -91,7 +91,6 @@ const LiveStreamPage = () => {
   const localVideoRef = useRef(null);
   const localPipVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
-  const remoteCamPipRef = useRef(null);
   const audioElRef = useRef(null);
   const closingRef = useRef(false);
   let floatIdCounter = useRef(0);
@@ -148,16 +147,6 @@ const LiveStreamPage = () => {
   useEffect(() => {
     if (!remoteVideoRef.current || !remoteCameraTrack || remoteScreenTrack) return;
     const el = remoteVideoRef.current;
-    try { remoteCameraTrack.attach(el); } catch (_) {}
-    return () => {
-      try { remoteCameraTrack.detach(el); } catch (_) {}
-      if (el) el.srcObject = null;
-    };
-  }, [remoteCameraTrack, remoteScreenTrack]);
-
-  useEffect(() => {
-    if (!remoteCamPipRef.current || !remoteCameraTrack || !remoteScreenTrack) return;
-    const el = remoteCamPipRef.current;
     try { remoteCameraTrack.attach(el); } catch (_) {}
     return () => {
       try { remoteCameraTrack.detach(el); } catch (_) {}
@@ -397,18 +386,6 @@ const LiveStreamPage = () => {
         <Flex h="100%" alignItems="center" justifyContent="center" bg="gray.900">
           <Avatar src={user?.profilePic} name={user?.name || user?.username || 'User'} size="2xl" />
         </Flex>
-      )}
-
-      {!isBroadcaster && remoteScreenTrack && remoteCameraTrack && (
-        <Box
-          position="absolute" top="72px" right={4} w="120px" h="90px"
-          borderRadius="lg" overflow="hidden" border="2px solid" borderColor="whiteAlpha.500"
-          bg="black" zIndex={18}
-        >
-          <Box as="video" ref={remoteCamPipRef} autoPlay playsInline
-            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-          />
-        </Box>
       )}
 
       <Flex position="absolute" top={0} left={0} right={0} zIndex={20} px={4} pt={4} pb={2}
