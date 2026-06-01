@@ -8,8 +8,9 @@ import { useParams, useNavigate } from 'react-router-dom';
 import {
   Box, Flex, Avatar, Text, VStack, HStack, Input, Button,
   Badge, IconButton, keyframes, useToast,
+  Menu, MenuButton, MenuList, MenuItem, MenuDivider,
 } from '@chakra-ui/react';
-import { CloseIcon } from '@chakra-ui/icons';
+import { CloseIcon, ChevronDownIcon } from '@chakra-ui/icons';
 import { css } from '@emotion/react';
 import { Room, RoomEvent, Track } from 'livekit-client';
 import { UserContext } from '../context/UserContext';
@@ -72,7 +73,9 @@ const LiveStreamPage = () => {
     localTrack,
     goLive,
     endLive,
-    toggleShare,
+    startShare,
+    stopShare,
+    shareAndGoHome,
     minimizeLive,
     openLiveControls,
     leaveLiveControls,
@@ -382,22 +385,46 @@ const LiveStreamPage = () => {
             </Button>
           )}
           {isBroadcaster && isLive && (
-            <>
-              <Button
-                size="sm"
-                borderRadius="full"
-                colorScheme={isSharing ? 'teal' : 'gray'}
-                onClick={() => void toggleShare()}
-              >
-                {isSharing ? '🛑 Stop share' : '🖥️ Share'}
-              </Button>
-              {isSharing && (
+            isSharing ? (
+              <>
+                <Button size="sm" borderRadius="full" colorScheme="teal" onClick={() => void stopShare()}>
+                  Stop share
+                </Button>
                 <Button size="sm" borderRadius="full" variant="outline" colorScheme="whiteAlpha" color="white"
                   onClick={minimizeLive}>
                   🏠 App home
                 </Button>
-              )}
-            </>
+              </>
+            ) : (
+              <Menu placement="bottom-end">
+                <MenuButton
+                  as={Button}
+                  size="sm"
+                  borderRadius="full"
+                  colorScheme="whiteAlpha"
+                  variant="outline"
+                  color="white"
+                  rightIcon={<ChevronDownIcon />}
+                >
+                  🖥️ Share
+                </MenuButton>
+                <MenuList zIndex={2000} minW="240px">
+                  <MenuItem closeOnSelect onClick={() => void startShare()}>
+                    <VStack align="flex-start" spacing={0}>
+                      <Text fontWeight="600">Share screen or window</Text>
+                      <Text fontSize="xs" color="gray.500">Pick any tab, window, or your full screen</Text>
+                    </VStack>
+                  </MenuItem>
+                  <MenuDivider />
+                  <MenuItem closeOnSelect onClick={shareAndGoHome}>
+                    <VStack align="flex-start" spacing={0}>
+                      <Text fontWeight="600">🏠 App home</Text>
+                      <Text fontSize="xs" color="gray.500">Go to home first, then share this tab once</Text>
+                    </VStack>
+                  </MenuItem>
+                </MenuList>
+              </Menu>
+            )
           )}
           {isBroadcaster && isLive && (
             <Button variant="outline" colorScheme="whiteAlpha" size="sm" borderRadius="full" color="white"
