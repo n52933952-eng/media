@@ -89,6 +89,7 @@ const LiveStreamPage = () => {
   const roomRef = useRef(null);
   const chatLogRef = useRef(null);
   const localVideoRef = useRef(null);
+  const localPipVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
   const remoteCamPipRef = useRef(null);
   const audioElRef = useRef(null);
@@ -123,14 +124,15 @@ const LiveStreamPage = () => {
   }, [isBroadcaster, setLiveControlsFocused]);
 
   useEffect(() => {
-    if (!localVideoRef.current || !localTrack) return;
-    const el = localVideoRef.current;
+    if (!localTrack || !isBroadcaster) return undefined;
+    const el = isSharing ? localPipVideoRef.current : localVideoRef.current;
+    if (!el) return undefined;
     try { localTrack.attach(el); } catch (_) {}
     return () => {
       try { localTrack.detach(el); } catch (_) {}
       if (el) el.srcObject = null;
     };
-  }, [localTrack]);
+  }, [localTrack, isSharing, isBroadcaster]);
 
   useEffect(() => {
     if (!remoteVideoRef.current || !remoteCameraTrack || remoteScreenTrack) return;
@@ -359,15 +361,21 @@ const LiveStreamPage = () => {
         </Flex>
       )}
 
-      {isBroadcaster && isSharing && localTrack && (
+      {isBroadcaster && isSharing && (
         <Box
           position="absolute" top="72px" right={4} w="120px" h="90px"
           borderRadius="lg" overflow="hidden" border="2px solid" borderColor="whiteAlpha.500"
           bg="black" zIndex={18}
         >
-          <Box as="video" ref={localVideoRef} autoPlay muted playsInline
-            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-          />
+          {localTrack ? (
+            <Box as="video" ref={localPipVideoRef} autoPlay muted playsInline
+              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+            />
+          ) : (
+            <Flex h="100%" align="center" justify="center" bg="gray.800">
+              <Text color="whiteAlpha.800" fontSize="xs" fontWeight="bold">🔴 LIVE</Text>
+            </Flex>
+          )}
         </Box>
       )}
 
