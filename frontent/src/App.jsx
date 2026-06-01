@@ -42,6 +42,8 @@ import {
 } from './Pages/FeatureSeoPages'
 import CookieConsentBanner from './Components/CookieConsentBanner'
 import AdSenseLoader from './Components/AdSenseLoader'
+import LiveStreamMiniBar from './Components/LiveStreamMiniBar'
+import { liveBroadcastNav } from './services/liveBroadcastNav'
 
 const AppContent = () => {
   const location = useLocation()
@@ -71,6 +73,15 @@ const AppContent = () => {
     socket.on('acceptRaceChallenge', handleRaceAccepted)
     return () => socket.off('acceptRaceChallenge', handleRaceAccepted)
   }, [socket, user, navigate])
+
+  useEffect(() => {
+    liveBroadcastNav.minimize = () => navigate('/home');
+    liveBroadcastNav.returnToLive = () => navigate('/live/broadcast');
+    return () => {
+      liveBroadcastNav.minimize = null;
+      liveBroadcastNav.returnToLive = null;
+    };
+  }, [navigate]);
 
   useEffect(() => {
     const handleScroll = () => {
@@ -120,6 +131,7 @@ const AppContent = () => {
 
       {/* Global Racing Challenge Notification - shows on all pages */}
       {user && <RacingChallengeNotification />}
+      {user && <LiveStreamMiniBar />}
       {/* Fixed header — visible on race too (home / messages / leave game) */}
       <Box
         position="fixed"

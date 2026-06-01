@@ -65,6 +65,8 @@ const LiveStreamPage = () => {
     goLive,
     endLive,
     toggleShare,
+    shareAndGoAppHome,
+    setLiveControlsFocused,
     registerChatHandler,
     sendChat: sendHostChat,
   } = useLiveBroadcast();
@@ -107,6 +109,12 @@ const LiveStreamPage = () => {
     return undefined;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isBroadcaster]);
+
+  useEffect(() => {
+    if (!isBroadcaster) return undefined;
+    setLiveControlsFocused(true);
+    return () => setLiveControlsFocused(false);
+  }, [isBroadcaster, setLiveControlsFocused]);
 
   useEffect(() => {
     if (!localVideoRef.current || !localTrack) return;
@@ -396,14 +404,15 @@ const LiveStreamPage = () => {
           )}
           {isBroadcaster && isLive && (
             <>
-              <Button
-                size="sm" borderRadius="full" color="white"
-                colorScheme={isSharing ? 'teal' : 'whiteAlpha'}
-                variant={isSharing ? 'solid' : 'outline'}
-                onClick={toggleShare}
-              >
-                {isSharing ? 'Stop share' : 'Share screen'}
+              <Button size="sm" borderRadius="full" colorScheme="teal" color="white" onClick={shareAndGoAppHome}>
+                Share app
               </Button>
+              {isSharing && (
+                <Button size="sm" borderRadius="full" variant="outline" colorScheme="whiteAlpha" color="white"
+                  onClick={toggleShare}>
+                  Stop share
+                </Button>
+              )}
               <Button variant="outline" colorScheme="whiteAlpha" size="sm" borderRadius="full" color="white"
                 onClick={async () => { await endLive(); exitLivePage(); }}>
                 End

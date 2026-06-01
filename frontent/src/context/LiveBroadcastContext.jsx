@@ -8,6 +8,7 @@ import { useToast } from '@chakra-ui/react';
 import { UserContext } from './UserContext';
 import { SocketContext } from './SocketContext';
 import { resignActiveGames } from '../utils/liveGameResign';
+import { liveBroadcastNav } from '../services/liveBroadcastNav';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
 const LIVESTREAM_MAX_MS = 25 * 60 * 1000;
@@ -25,6 +26,8 @@ export const LiveBroadcastProvider = ({ children }) => {
   const [localTrack, setLocalTrack] = useState(null);
   const [localScreenTrack, setLocalScreenTrack] = useState(null);
   const [isSharing, setIsSharing] = useState(false);
+  const [isMinimized, setIsMinimized] = useState(false);
+  const [isLiveControlsFocused, setIsLiveControlsFocused] = useState(false);
 
   const roomRef = useRef(null);
   const roomNameRef = useRef('');
@@ -63,8 +66,55 @@ export const LiveBroadcastProvider = ({ children }) => {
     setLocalScreenTrack(null);
     setIsSharing(false);
     isSharingRef.current = false;
+    setIsMinimized(false);
+    setIsLiveControlsFocused(false);
     setViewerCount(0);
   }, []);
+
+  const ensureScreenShare = useCallback(async () => {
+    const room = roomRef.current;
+    if (!room || isSharingRef.current) return true;
+    try {
+      await room.localParticipant.setScreenShareEnabled(true);
+      isSharingRef.current = true;
+      setIsSharing(true);
+      syncLocalTrack();
+      return true;
+    } catch (err) {
+      console.warn('[LiveBroadcast] screen share failed:', err);
+      toast({
+        title: 'Screen share failed',
+        description: 'Could not start screen sharing.',
+        status: 'error',
+        duration: 4000,
+        isClosable: true,
+        position: 'top',
+      });
+      return false;
+    }
+  }, [syncLocalTrack, toast]);
+
+  const minimizeLive = useCallback(() => {
+    setIsMinimized(true);
+    setIsLiveControlsFocused(false);
+    liveBroadcastNav.minimize?.();
+  }, []);
+
+  const returnToLiveControls = useCallback(() => {
+    setIsMinimized(false);
+    setIsLiveControlsFocused(true);
+  }, []);
+
+  const setLiveControlsFocused = useCallback((focused) => {
+    setIsLiveControlsFocused(focused);
+    if (focused) setIsMinimized(false);
+  }, []);
+
+  const shareAndGoAppHome = useCallback(async () => {
+    if (!roomRef.current || !isLive) return;
+    const ok = await ensureScreenShare();
+    if (ok) minimizeLive();
+  }, [isLive, ensureScreenShare, minimizeLive]);
 
   const toggleShare = useCallback(async () => {
     const room = roomRef.current;
@@ -104,6 +154,8 @@ export const LiveBroadcastProvider = ({ children }) => {
     roomNameRef.current = '';
     await disconnect();
     setIsLive(false);
+    setIsMinimized(false);
+    setIsLiveControlsFocused(false);
   }, [socket, user, disconnect]);
 
   endLiveRef.current = endLive;
@@ -233,9 +285,15 @@ export const LiveBroadcastProvider = ({ children }) => {
     localTrack,
     localScreenTrack,
     isSharing,
+    isMinimized,
+    isLiveControlsFocused,
     goLive,
     endLive,
     toggleShare,
+    shareAndGoAppHome,
+    minimizeLive,
+    returnToLiveControls,
+    setLiveControlsFocused,
     syncLocalTrack,
     getRoom: () => roomRef.current,
     sendChat,
