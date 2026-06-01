@@ -15,7 +15,7 @@ import { UserContext } from '../context/UserContext';
 import { SocketContext } from '../context/SocketContext';
 import { useLiveBroadcast } from '../context/LiveBroadcastContext';
 import ScreenShareViewer from '../Components/ScreenShareViewer';
-import HostCameraPipOverlay from '../Components/HostCameraPipOverlay';
+import HostCameraPipHost from '../Components/HostCameraPipHost';
 import {
   isScreenSharePublication,
   isVideoPublication,
@@ -354,7 +354,7 @@ const LiveStreamPage = () => {
             </Flex>
           )}
           {isSharing && localTrack && (
-            <HostCameraPipOverlay track={localTrack} visible zIndex={18} defaultTop={72} />
+            <HostCameraPipHost track={localTrack} active zIndex={18} defaultTop={72} />
           )}
         </>
       )}

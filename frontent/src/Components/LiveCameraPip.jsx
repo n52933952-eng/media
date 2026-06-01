@@ -4,17 +4,17 @@
 
 import { useLocation } from 'react-router-dom';
 import { useLiveBroadcast } from '../context/LiveBroadcastContext';
-import HostCameraPipOverlay from './HostCameraPipOverlay';
+import HostCameraPipHost from './HostCameraPipHost';
 
 const LiveCameraPip = () => {
   const location = useLocation();
   const { isLive, isSharing, localTrack } = useLiveBroadcast();
   const onLivePage = location.pathname === '/live/broadcast';
-  const visible = isLive && isSharing && localTrack && !onLivePage;
+  const active = isLive && isSharing && localTrack && !onLivePage;
 
-  if (!visible) return null;
+  if (!active) return null;
 
-  return <HostCameraPipOverlay track={localTrack} visible />;
+  return <HostCameraPipHost track={localTrack} active />;
 };
 
 export default LiveCameraPip;

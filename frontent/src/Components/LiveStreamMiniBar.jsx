@@ -15,8 +15,8 @@ const pulse = keyframes`
 const LiveStreamMiniBar = () => {
   const location = useLocation();
   const {
-    isLive, isMinimized, isSharing, viewerCount,
-    returnToLiveControls, endLive,
+    isLive, isMinimized, isSharing, viewerCount, hostPipVisible,
+    returnToLiveControls, endLive, showHostPip,
   } = useLiveBroadcast();
 
   const onLivePage = location.pathname === '/live/broadcast';
@@ -72,6 +72,22 @@ const LiveStreamMiniBar = () => {
             {isSharing ? (
               <Text fontSize="xs" color="white" bg="whiteAlpha.200" px={2} py={0.5} borderRadius="full">
                 🖥 sharing
+              </Text>
+            ) : null}
+            {isSharing && !hostPipVisible ? (
+              <Text
+                as="button"
+                type="button"
+                fontSize="xs"
+                color="white"
+                bg="whiteAlpha.200"
+                px={2}
+                py={0.5}
+                borderRadius="full"
+                cursor="pointer"
+                onClick={(e) => { e.stopPropagation(); showHostPip(); }}
+              >
+                📷 camera
               </Text>
             ) : null}
             <Text color="whiteAlpha.900" fontSize="xs">👁 {viewerCount}</Text>

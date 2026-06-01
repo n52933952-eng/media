@@ -35,6 +35,7 @@ export const LiveBroadcastProvider = ({ children }) => {
   const [isSharing, setIsSharing] = useState(false);
   const [isMinimized, setIsMinimized] = useState(false);
   const [isLiveControlsFocused, setIsLiveControlsFocused] = useState(false);
+  const [hostPipVisible, setHostPipVisible] = useState(true);
 
   const roomRef = useRef(null);
   const roomNameRef = useRef('');
@@ -67,6 +68,9 @@ export const LiveBroadcastProvider = ({ children }) => {
     isSharingRef.current = sharing;
     setIsSharing(sharing);
   }, []);
+
+  const showHostPip = useCallback(() => setHostPipVisible(true), []);
+  const hideHostPip = useCallback(() => setHostPipVisible(false), []);
 
   const stashPreviewForShare = useCallback(async (room) => {
     let pub = room.localParticipant.getTrackPublication(Track.Source.Camera);
@@ -104,6 +108,7 @@ export const LiveBroadcastProvider = ({ children }) => {
     setIsSharing(false);
     isSharingRef.current = false;
     hostPreviewTrackRef.current = null;
+    setHostPipVisible(true);
     setIsMinimized(false);
     setIsLiveControlsFocused(false);
     setViewerCount(0);
@@ -185,11 +190,13 @@ export const LiveBroadcastProvider = ({ children }) => {
       }
       isSharingRef.current = next;
       setIsSharing(next);
+      if (!next) setHostPipVisible(true);
       syncLocalTrack();
     } catch (err) {
       console.warn('[LiveBroadcast] screen share failed:', err);
       isSharingRef.current = false;
       setIsSharing(false);
+      setHostPipVisible(true);
       if (next) {
         toast({
           title: 'Screen share failed',
@@ -351,6 +358,9 @@ export const LiveBroadcastProvider = ({ children }) => {
     isSharing,
     isMinimized,
     isLiveControlsFocused,
+    hostPipVisible,
+    showHostPip,
+    hideHostPip,
     goLive,
     endLive,
     toggleShare,

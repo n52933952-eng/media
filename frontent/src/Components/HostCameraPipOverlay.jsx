@@ -4,12 +4,14 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { Box, HStack, IconButton } from '@chakra-ui/react';
-import { AddIcon, MinusIcon } from '@chakra-ui/icons';
+import { AddIcon, MinusIcon, CloseIcon } from '@chakra-ui/icons';
 import {
   PIP_SIZE_STEPS, PIP_DEFAULT_SIZE_INDEX, clampPipPosition,
 } from '../utils/liveCameraPipLayout';
 
-const HostCameraPipOverlay = ({ track, visible = true, defaultTop = 72, zIndex = 1690 }) => {
+const HostCameraPipOverlay = ({
+  track, visible = true, defaultTop = 72, zIndex = 1690, onClose,
+}) => {
   const videoRef = useRef(null);
   const dragRef = useRef(null);
   const [sizeIndex, setSizeIndex] = useState(PIP_DEFAULT_SIZE_INDEX);
@@ -48,7 +50,7 @@ const HostCameraPipOverlay = ({ track, visible = true, defaultTop = 72, zIndex =
   }, [pipW, pipH, visible, defaultTop]);
 
   const onDragDown = useCallback((e) => {
-    if (!dragRef.current || e.target.closest('[data-pip-size]')) return;
+    if (!dragRef.current || e.target.closest('[data-pip-ctrl]')) return;
     const rect = dragRef.current.getBoundingClientRect();
     const x = pos.x ?? rect.left;
     const y = pos.y ?? rect.top;
@@ -110,6 +112,24 @@ const HostCameraPipOverlay = ({ track, visible = true, defaultTop = 72, zIndex =
       onPointerUp={onDragUp}
       onPointerCancel={onDragUp}
     >
+      {onClose ? (
+        <IconButton
+          data-pip-ctrl
+          aria-label="Hide camera preview"
+          icon={<CloseIcon boxSize={2.5} />}
+          size="xs"
+          minW="24px"
+          h="24px"
+          borderRadius="full"
+          position="absolute"
+          top="4px"
+          left="4px"
+          zIndex={2}
+          bg="blackAlpha.700"
+          color="white"
+          onClick={(e) => { e.stopPropagation(); onClose(); }}
+        />
+      ) : null}
       <Box
         as="video"
         ref={videoRef}
@@ -119,7 +139,7 @@ const HostCameraPipOverlay = ({ track, visible = true, defaultTop = 72, zIndex =
         style={{ width: '100%', height: '100%', objectFit: 'cover', pointerEvents: 'none' }}
       />
       <HStack
-        data-pip-size
+        data-pip-ctrl
         position="absolute"
         bottom="4px"
         right="4px"
@@ -127,7 +147,7 @@ const HostCameraPipOverlay = ({ track, visible = true, defaultTop = 72, zIndex =
         pointerEvents="auto"
       >
         <IconButton
-          data-pip-size
+          data-pip-ctrl
           aria-label="Smaller camera"
           icon={<MinusIcon />}
           size="xs"
@@ -140,7 +160,7 @@ const HostCameraPipOverlay = ({ track, visible = true, defaultTop = 72, zIndex =
           onClick={(e) => { e.stopPropagation(); setSizeIndex((i) => Math.max(0, i - 1)); }}
         />
         <IconButton
-          data-pip-size
+          data-pip-ctrl
           aria-label="Larger camera"
           icon={<AddIcon />}
           size="xs"
