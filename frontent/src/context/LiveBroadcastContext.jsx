@@ -13,24 +13,25 @@ import { liveBroadcastNav } from '../services/liveBroadcastNav';
 const API_BASE = import.meta.env.VITE_API_URL || '';
 const LIVESTREAM_MAX_MS = 25 * 60 * 1000;
 
-/** VP8 + no simulcast — best compatibility with React Native viewers. */
+/** H264 + low bitrate — decodes reliably on Android viewers. */
 const LIVE_ROOM_OPTIONS = {
-  adaptiveStream: true,
-  dynacast: true,
+  adaptiveStream: false,
+  dynacast: false,
   videoCaptureDefaults: {
     resolution: VideoPresets.h360.resolution,
   },
   publishDefaults: {
     simulcast: false,
-    videoCodec: 'vp8',
-    videoEncoding: { maxBitrate: 550_000, maxFramerate: 20 },
-    screenShareEncoding: { maxBitrate: 900_000, maxFramerate: 12 },
+    videoCodec: 'h264',
+    videoEncoding: { maxBitrate: 450_000, maxFramerate: 18 },
+    screenShareEncoding: { maxBitrate: 650_000, maxFramerate: 10 },
   },
 };
 
 const SCREEN_SHARE_BASE = {
   audio: false,
-  resolution: { width: 854, height: 480, frameRate: 12 },
+  resolution: { width: 640, height: 360, frameRate: 10 },
+  contentHint: 'detail',
 };
 
 const LiveBroadcastContext = createContext(null);
