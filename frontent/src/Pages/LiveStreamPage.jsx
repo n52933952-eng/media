@@ -378,13 +378,13 @@ const LiveStreamPage = () => {
           key={remoteMainCamera?.sid || 'cam'}
           style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain', objectPosition: 'center' }}
         />
-      ) : !isBroadcaster ? (
-        <Flex h="100%" alignItems="center" justifyContent="center" bg="gray.900">
-          <Avatar src={user?.profilePic} name={user?.name || user?.username || 'User'} size="2xl" />
-        </Flex>
       ) : (
-        <Flex h="100%" alignItems="center" justifyContent="center" bg="gray.900">
-          <Avatar src={user?.profilePic} name={user?.name || user?.username || 'User'} size="2xl" />
+        <Flex h="100%" alignItems="center" justifyContent="center" bg="gray.900" px={6}>
+          <Text color="gray.400" fontSize="md" textAlign="center">
+            {!isBroadcaster
+              ? (viewerConnected ? 'Waiting for video…' : 'Connecting…')
+              : (hostLive ? 'Starting camera…' : 'Tap Go Live to start')}
+          </Text>
         </Flex>
       )}
 

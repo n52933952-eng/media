@@ -9,7 +9,7 @@ import { UserContext } from './UserContext';
 import { SocketContext } from './SocketContext';
 import { resignActiveGames } from '../utils/liveGameResign';
 import { liveBroadcastNav } from '../services/liveBroadcastNav';
-import { prepareCameraForScreenShare, restoreCameraForViewers } from '../utils/liveBroadcastCamera';
+import { restoreCameraForViewers } from '../utils/liveBroadcastCamera';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
 const LIVESTREAM_MAX_MS = 25 * 60 * 1000;
@@ -43,6 +43,7 @@ export const LiveBroadcastProvider = ({ children }) => {
   const endLiveRef = useRef(async () => {});
   const onChatRef = useRef(null);
   const isSharingRef = useRef(false);
+  const hostPreviewTrackRef = useRef(null);
 
   const syncLocalTrack = useCallback(() => {
     const room = roomRef.current;
@@ -51,15 +52,33 @@ export const LiveBroadcastProvider = ({ children }) => {
       setLocalScreenTrack(null);
       setIsSharing(false);
       isSharingRef.current = false;
+      hostPreviewTrackRef.current = null;
       return;
     }
     const camPub = room.localParticipant.getTrackPublication(Track.Source.Camera);
     const screenPub = room.localParticipant.getTrackPublication(Track.Source.ScreenShare);
-    setLocalTrack(camPub?.track ?? null);
-    setLocalScreenTrack(screenPub?.track ?? null);
     const sharing = !!screenPub?.track;
+    const publishedCam = camPub?.track ?? null;
+    const cam = sharing
+      ? (hostPreviewTrackRef.current ?? publishedCam)
+      : publishedCam;
+    setLocalTrack(cam);
+    setLocalScreenTrack(screenPub?.track ?? null);
     isSharingRef.current = sharing;
     setIsSharing(sharing);
+  }, []);
+
+  const stashPreviewForShare = useCallback(async (room) => {
+    let pub = room.localParticipant.getTrackPublication(Track.Source.Camera);
+    if (!pub?.track) {
+      await room.localParticipant.setCameraEnabled(true, {
+        resolution: VideoPresets.h360.resolution,
+      });
+      pub = room.localParticipant.getTrackPublication(Track.Source.Camera);
+    }
+    const track = pub?.track ?? null;
+    if (track) hostPreviewTrackRef.current = track;
+    if (track) await room.localParticipant.unpublishTrack(track, false);
   }, []);
 
   const stopAllPublishedTracks = useCallback(async () => {
@@ -84,6 +103,7 @@ export const LiveBroadcastProvider = ({ children }) => {
     setLocalScreenTrack(null);
     setIsSharing(false);
     isSharingRef.current = false;
+    hostPreviewTrackRef.current = null;
     setIsMinimized(false);
     setIsLiveControlsFocused(false);
     setViewerCount(0);
@@ -101,7 +121,7 @@ export const LiveBroadcastProvider = ({ children }) => {
         audio: false,
         preferCurrentTab,
       });
-      await prepareCameraForScreenShare(room);
+      await stashPreviewForShare(room);
       isSharingRef.current = true;
       setIsSharing(true);
       syncLocalTrack();
@@ -119,7 +139,7 @@ export const LiveBroadcastProvider = ({ children }) => {
       });
       return false;
     }
-  }, [syncLocalTrack, toast]);
+  }, [syncLocalTrack, toast, stashPreviewForShare]);
 
   const minimizeLive = useCallback(() => {
     setIsMinimized(true);
@@ -157,10 +177,11 @@ export const LiveBroadcastProvider = ({ children }) => {
     try {
       if (next) {
         await room.localParticipant.setScreenShareEnabled(true, { audio: false });
-        await prepareCameraForScreenShare(room);
+        await stashPreviewForShare(room);
       } else {
         await room.localParticipant.setScreenShareEnabled(false);
-        await restoreCameraForViewers(room);
+        await restoreCameraForViewers(room, hostPreviewTrackRef.current);
+        hostPreviewTrackRef.current = null;
       }
       isSharingRef.current = next;
       setIsSharing(next);
@@ -180,7 +201,7 @@ export const LiveBroadcastProvider = ({ children }) => {
         });
       }
     }
-  }, [isLive, syncLocalTrack, toast]);
+  }, [isLive, syncLocalTrack, toast, stashPreviewForShare]);
 
   const endLive = useCallback(async () => {
     resignActiveGames(socket, user);
