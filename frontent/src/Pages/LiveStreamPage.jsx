@@ -10,10 +10,11 @@ import {
 } from '@chakra-ui/react';
 import { CloseIcon } from '@chakra-ui/icons';
 import { css } from '@emotion/react';
-import { Room, RoomEvent } from 'livekit-client';
+import { Room, RoomEvent, Track } from 'livekit-client';
 import { UserContext } from '../context/UserContext';
 import { SocketContext } from '../context/SocketContext';
 import { useLiveBroadcast } from '../context/LiveBroadcastContext';
+import ScreenShareViewer from '../Components/ScreenShareViewer';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
 
@@ -59,15 +60,19 @@ const LiveStreamPage = () => {
     viewerCount: hostViewers,
     startingLive,
     localTrack,
+    localScreenTrack,
+    isSharing,
     goLive,
     endLive,
+    toggleShare,
     registerChatHandler,
     sendChat: sendHostChat,
   } = useLiveBroadcast();
 
   const [viewerConnected, setViewerConnected] = useState(false);
   const [viewerCount, setViewerCount] = useState(0);
-  const [remoteVideoTrack, setRemoteVideoTrack] = useState(null);
+  const [remoteScreenTrack, setRemoteScreenTrack] = useState(null);
+  const [remoteCameraTrack, setRemoteCameraTrack] = useState(null);
 
   const [chatInput, setChatInput] = useState('');
   const [floatingMsgs, setFloatingMsgs] = useState([]);
@@ -77,6 +82,7 @@ const LiveStreamPage = () => {
   const chatLogRef = useRef(null);
   const localVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
+  const remoteCamPipRef = useRef(null);
   const audioElRef = useRef(null);
   const closingRef = useRef(false);
   let floatIdCounter = useRef(0);
@@ -113,14 +119,24 @@ const LiveStreamPage = () => {
   }, [localTrack]);
 
   useEffect(() => {
-    if (!remoteVideoRef.current || !remoteVideoTrack) return;
+    if (!remoteVideoRef.current || !remoteCameraTrack || remoteScreenTrack) return;
     const el = remoteVideoRef.current;
-    try { remoteVideoTrack.attach(el); } catch (_) {}
+    try { remoteCameraTrack.attach(el); } catch (_) {}
     return () => {
-      try { remoteVideoTrack.detach(el); } catch (_) {}
+      try { remoteCameraTrack.detach(el); } catch (_) {}
       if (el) el.srcObject = null;
     };
-  }, [remoteVideoTrack]);
+  }, [remoteCameraTrack, remoteScreenTrack]);
+
+  useEffect(() => {
+    if (!remoteCamPipRef.current || !remoteCameraTrack || !remoteScreenTrack) return;
+    const el = remoteCamPipRef.current;
+    try { remoteCameraTrack.attach(el); } catch (_) {}
+    return () => {
+      try { remoteCameraTrack.detach(el); } catch (_) {}
+      if (el) el.srcObject = null;
+    };
+  }, [remoteCameraTrack, remoteScreenTrack]);
 
   const fetchToken = useCallback(async (targetId, type) => {
     const res = await fetch(`${API_BASE}/api/call/token`, {
@@ -138,7 +154,8 @@ const LiveStreamPage = () => {
       try { await roomRef.current.disconnect(); } catch (_) {}
       roomRef.current = null;
     }
-    setRemoteVideoTrack(null);
+    setRemoteScreenTrack(null);
+    setRemoteCameraTrack(null);
     if (audioElRef.current) {
       try { audioElRef.current.remove(); } catch (_) {}
       audioElRef.current = null;
@@ -169,9 +186,18 @@ const LiveStreamPage = () => {
     if (isBroadcaster || !streamerId) return;
     let mounted = true;
 
-    const attachRemoteTrack = (track) => {
+    const isScreenPub = (pub, track) =>
+      pub?.source === Track.Source.ScreenShare
+      || track?.source === Track.Source.ScreenShare
+      || pub?.source === 'screen_share'
+      || track?.source === 'screen_share';
+
+    const attachRemoteTrack = (track, pub) => {
       if (!mounted || !track) return;
-      if (track.kind === 'video') setRemoteVideoTrack(track);
+      if (track.kind === 'video') {
+        if (isScreenPub(pub, track)) setRemoteScreenTrack(track);
+        else setRemoteCameraTrack(track);
+      }
       if (track.kind === 'audio') {
         try {
           const audioEl = track.attach();
@@ -190,8 +216,8 @@ const LiveStreamPage = () => {
           if (!pub.isSubscribed) {
             try { await pub.setSubscribed(true); } catch (_) {}
           }
-          if (pub.track && pub.kind === 'video') attachRemoteTrack(pub.track);
-          if (pub.track && pub.kind === 'audio') attachRemoteTrack(pub.track);
+          if (pub.track && pub.kind === 'video') attachRemoteTrack(pub.track, pub);
+          if (pub.track && pub.kind === 'audio') attachRemoteTrack(pub.track, pub);
         }
       }
     };
@@ -213,10 +239,13 @@ const LiveStreamPage = () => {
         const room = new Room({ adaptiveStream: true, dynacast: true });
         roomRef.current = room;
 
-        room.on(RoomEvent.TrackSubscribed, (track) => attachRemoteTrack(track));
-        room.on(RoomEvent.TrackUnsubscribed, (track) => {
+        room.on(RoomEvent.TrackSubscribed, (track, pub) => attachRemoteTrack(track, pub));
+        room.on(RoomEvent.TrackUnsubscribed, (track, pub) => {
           if (!mounted) return;
-          if (track.kind === 'video') setRemoteVideoTrack(null);
+          if (track.kind === 'video') {
+            if (isScreenPub(pub, track)) setRemoteScreenTrack(null);
+            else setRemoteCameraTrack(null);
+          }
           if (track.kind === 'audio' && audioElRef.current) {
             try {
               track.detach(audioElRef.current);
@@ -286,21 +315,60 @@ const LiveStreamPage = () => {
     setChatInput('');
   }, [chatInput, user, isBroadcaster, sendHostChat, addMessage]);
 
+  const remoteMainCamera = !isBroadcaster && !remoteScreenTrack ? remoteCameraTrack : null;
+
   return (
     <Box position="fixed" inset={0} w="100vw" h="100dvh" bg="black" zIndex={1600} overflow="hidden">
-      {isBroadcaster && localTrack ? (
+      {isBroadcaster && localScreenTrack ? (
+        <Box position="absolute" inset={0} display="flex" flexDir="column" p={2}>
+          <ScreenShareViewer track={localScreenTrack} name="You" flex={1} minH="0" />
+        </Box>
+      ) : isBroadcaster && localTrack ? (
         <Box as="video" ref={localVideoRef} autoPlay muted playsInline
           style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain', objectPosition: 'center' }}
         />
-      ) : !isBroadcaster && remoteVideoTrack ? (
+      ) : !isBroadcaster && remoteScreenTrack ? (
+        <Box position="absolute" inset={0} display="flex" flexDir="column" p={2}>
+          <ScreenShareViewer
+            track={remoteScreenTrack}
+            name={user?.name || user?.username || 'Streamer'}
+            flex={1}
+            minH="0"
+          />
+        </Box>
+      ) : !isBroadcaster && remoteMainCamera ? (
         <Box as="video" ref={remoteVideoRef} autoPlay playsInline
-          key={remoteVideoTrack?.sid || 'cam'}
+          key={remoteMainCamera?.sid || 'cam'}
           style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain', objectPosition: 'center' }}
         />
       ) : (
         <Flex h="100%" alignItems="center" justifyContent="center" bg="gray.900">
           <Avatar src={user?.profilePic} name={user?.name || user?.username || 'User'} size="2xl" />
         </Flex>
+      )}
+
+      {isBroadcaster && isSharing && localTrack && (
+        <Box
+          position="absolute" top="72px" right={4} w="120px" h="90px"
+          borderRadius="lg" overflow="hidden" border="2px solid" borderColor="whiteAlpha.500"
+          bg="black" zIndex={18}
+        >
+          <Box as="video" ref={localVideoRef} autoPlay muted playsInline
+            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+          />
+        </Box>
+      )}
+
+      {!isBroadcaster && remoteScreenTrack && remoteCameraTrack && (
+        <Box
+          position="absolute" top="72px" right={4} w="120px" h="90px"
+          borderRadius="lg" overflow="hidden" border="2px solid" borderColor="whiteAlpha.500"
+          bg="black" zIndex={18}
+        >
+          <Box as="video" ref={remoteCamPipRef} autoPlay playsInline
+            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+          />
+        </Box>
       )}
 
       <Flex position="absolute" top={0} left={0} right={0} zIndex={20} px={4} pt={4} pb={2}
@@ -327,10 +395,20 @@ const LiveStreamPage = () => {
             </Button>
           )}
           {isBroadcaster && isLive && (
-            <Button variant="outline" colorScheme="whiteAlpha" size="sm" borderRadius="full" color="white"
-              onClick={async () => { await endLive(); exitLivePage(); }}>
-              End
-            </Button>
+            <>
+              <Button
+                size="sm" borderRadius="full" color="white"
+                colorScheme={isSharing ? 'teal' : 'whiteAlpha'}
+                variant={isSharing ? 'solid' : 'outline'}
+                onClick={toggleShare}
+              >
+                {isSharing ? 'Stop share' : 'Share screen'}
+              </Button>
+              <Button variant="outline" colorScheme="whiteAlpha" size="sm" borderRadius="full" color="white"
+                onClick={async () => { await endLive(); exitLivePage(); }}>
+                End
+              </Button>
+            </>
           )}
           <IconButton icon={<CloseIcon boxSize={3} />} size="sm" variant="ghost"
             colorScheme="whiteAlpha" color="white" onClick={safeClose} aria-label="Close"

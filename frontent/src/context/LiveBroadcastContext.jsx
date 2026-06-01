@@ -23,6 +23,8 @@ export const LiveBroadcastProvider = ({ children }) => {
   const [viewerCount, setViewerCount] = useState(0);
   const [startingLive, setStartingLive] = useState(false);
   const [localTrack, setLocalTrack] = useState(null);
+  const [localScreenTrack, setLocalScreenTrack] = useState(null);
+  const [isSharing, setIsSharing] = useState(false);
 
   const roomRef = useRef(null);
   const roomNameRef = useRef('');
@@ -30,15 +32,24 @@ export const LiveBroadcastProvider = ({ children }) => {
   const liveTimeoutRef = useRef(null);
   const endLiveRef = useRef(async () => {});
   const onChatRef = useRef(null);
+  const isSharingRef = useRef(false);
 
   const syncLocalTrack = useCallback(() => {
     const room = roomRef.current;
     if (!room) {
       setLocalTrack(null);
+      setLocalScreenTrack(null);
+      setIsSharing(false);
+      isSharingRef.current = false;
       return;
     }
     const camPub = room.localParticipant.getTrackPublication(Track.Source.Camera);
+    const screenPub = room.localParticipant.getTrackPublication(Track.Source.ScreenShare);
     setLocalTrack(camPub?.track ?? null);
+    setLocalScreenTrack(screenPub?.track ?? null);
+    const sharing = !!screenPub?.track;
+    isSharingRef.current = sharing;
+    setIsSharing(sharing);
   }, []);
 
   const disconnect = useCallback(async () => {
@@ -49,8 +60,37 @@ export const LiveBroadcastProvider = ({ children }) => {
     try { await roomRef.current?.disconnect(); } catch (_) {}
     roomRef.current = null;
     setLocalTrack(null);
+    setLocalScreenTrack(null);
+    setIsSharing(false);
+    isSharingRef.current = false;
     setViewerCount(0);
   }, []);
+
+  const toggleShare = useCallback(async () => {
+    const room = roomRef.current;
+    if (!room || !isLive) return;
+    const next = !isSharingRef.current;
+    try {
+      await room.localParticipant.setScreenShareEnabled(next);
+      isSharingRef.current = next;
+      setIsSharing(next);
+      syncLocalTrack();
+    } catch (err) {
+      console.warn('[LiveBroadcast] screen share failed:', err);
+      isSharingRef.current = false;
+      setIsSharing(false);
+      if (next) {
+        toast({
+          title: 'Screen share failed',
+          description: 'Could not start screen sharing.',
+          status: 'error',
+          duration: 4000,
+          isClosable: true,
+          position: 'top',
+        });
+      }
+    }
+  }, [isLive, syncLocalTrack, toast]);
 
   const endLive = useCallback(async () => {
     resignActiveGames(socket, user);
@@ -106,8 +146,14 @@ export const LiveBroadcastProvider = ({ children }) => {
       room.on(RoomEvent.Disconnected, () => {
         roomRef.current = null;
         setLocalTrack(null);
+        setLocalScreenTrack(null);
+        setIsSharing(false);
+        isSharingRef.current = false;
         setIsLive(false);
       });
+      const onLocalTracks = () => syncLocalTrack();
+      room.on(RoomEvent.LocalTrackPublished, onLocalTracks);
+      room.on(RoomEvent.LocalTrackUnpublished, onLocalTracks);
       room.on(RoomEvent.DataReceived, (payload) => {
         try {
           const msg = JSON.parse(new TextDecoder().decode(payload));
@@ -185,8 +231,11 @@ export const LiveBroadcastProvider = ({ children }) => {
     viewerCount,
     startingLive,
     localTrack,
+    localScreenTrack,
+    isSharing,
     goLive,
     endLive,
+    toggleShare,
     syncLocalTrack,
     getRoom: () => roomRef.current,
     sendChat,
