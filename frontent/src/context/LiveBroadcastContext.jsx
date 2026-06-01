@@ -13,25 +13,10 @@ import { liveBroadcastNav } from '../services/liveBroadcastNav';
 const API_BASE = import.meta.env.VITE_API_URL || '';
 const LIVESTREAM_MAX_MS = 25 * 60 * 1000;
 
-/** H264 + low bitrate — decodes reliably on Android viewers. */
+/** Match group-call room settings — proven to work web → mobile screen share. */
 const LIVE_ROOM_OPTIONS = {
-  adaptiveStream: false,
-  dynacast: false,
-  videoCaptureDefaults: {
-    resolution: VideoPresets.h360.resolution,
-  },
-  publishDefaults: {
-    simulcast: false,
-    videoCodec: 'h264',
-    videoEncoding: { maxBitrate: 450_000, maxFramerate: 18 },
-    screenShareEncoding: { maxBitrate: 650_000, maxFramerate: 10 },
-  },
-};
-
-const SCREEN_SHARE_BASE = {
-  audio: false,
-  resolution: { width: 640, height: 360, frameRate: 10 },
-  contentHint: 'detail',
+  adaptiveStream: true,
+  dynacast: true,
 };
 
 const LiveBroadcastContext = createContext(null);
@@ -123,7 +108,7 @@ export const LiveBroadcastProvider = ({ children }) => {
         isSharingRef.current = false;
       }
       await room.localParticipant.setScreenShareEnabled(true, {
-        ...SCREEN_SHARE_BASE,
+        audio: false,
         preferCurrentTab,
       });
       await enableShareCameraPip();
@@ -181,7 +166,7 @@ export const LiveBroadcastProvider = ({ children }) => {
     const next = !isSharingRef.current;
     try {
       if (next) {
-        await room.localParticipant.setScreenShareEnabled(true, SCREEN_SHARE_BASE);
+        await room.localParticipant.setScreenShareEnabled(true, { audio: false });
         await enableShareCameraPip();
       } else {
         await room.localParticipant.setScreenShareEnabled(false);
