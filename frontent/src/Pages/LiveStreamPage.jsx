@@ -15,6 +15,7 @@ import { UserContext } from '../context/UserContext';
 import { SocketContext } from '../context/SocketContext';
 import { useLiveBroadcast } from '../context/LiveBroadcastContext';
 import ScreenShareViewer from '../Components/ScreenShareViewer';
+import HostCameraPipOverlay from '../Components/HostCameraPipOverlay';
 import {
   isScreenSharePublication,
   isVideoPublication,
@@ -89,7 +90,6 @@ const LiveStreamPage = () => {
   const roomRef = useRef(null);
   const chatLogRef = useRef(null);
   const localVideoRef = useRef(null);
-  const localPipVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
   const audioElRef = useRef(null);
   const closingRef = useRef(false);
@@ -127,7 +127,8 @@ const LiveStreamPage = () => {
     let cancelled = false;
     const attach = () => {
       if (cancelled) return;
-      const el = isSharing ? localPipVideoRef.current : localVideoRef.current;
+      if (isSharing) return;
+      const el = localVideoRef.current;
       if (!el) return;
       try { localTrack.attach(el); } catch (_) {}
     };
@@ -352,16 +353,9 @@ const LiveStreamPage = () => {
               </Text>
             </Flex>
           )}
-          <Box
-            position="absolute" top="72px" right={4} w="120px" h="90px"
-            borderRadius="lg" overflow="hidden" border="2px solid" borderColor="whiteAlpha.500"
-            bg="black" zIndex={18}
-            display={isSharing ? 'block' : 'none'}
-          >
-            <Box as="video" ref={localPipVideoRef} autoPlay muted playsInline
-              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-            />
-          </Box>
+          {isSharing && localTrack && (
+            <HostCameraPipOverlay track={localTrack} visible zIndex={18} defaultTop={72} />
+          )}
         </>
       )}
       {!isBroadcaster && remoteScreenTrack ? (
