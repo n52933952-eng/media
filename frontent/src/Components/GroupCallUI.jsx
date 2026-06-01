@@ -13,7 +13,7 @@ import {
   Badge, SimpleGrid,
 } from '@chakra-ui/react';
 import { PhoneIcon } from '@chakra-ui/icons';
-import { RoomEvent } from 'livekit-client';
+import { RoomEvent, Track } from 'livekit-client';
 import { GroupCallContext } from '../context/GroupCallContext';
 import ScreenShareViewer from './ScreenShareViewer';
 
@@ -23,7 +23,9 @@ const HangupIcon = () => <span style={{ fontSize: 20 }}>📵</span>;
 const findScreenShare = (localParticipant, participants) => {
   const all = [...participants, localParticipant].filter(Boolean);
   for (const p of all) {
-    const pub = [...p.trackPublications.values()].find(t => t.source === 'screen_share' && t.track);
+    const pub = [...p.trackPublications.values()].find(
+      (t) => (t.source === Track.Source.ScreenShare || t.source === 'screen_share') && t.track,
+    );
     if (pub) {
       const isLocal = p === localParticipant;
       return { track: pub.track, name: isLocal ? 'You' : (p.name || p.identity || 'Someone') };

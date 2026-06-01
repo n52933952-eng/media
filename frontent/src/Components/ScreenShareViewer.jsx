@@ -1,5 +1,5 @@
 /**
- * Screen share with real zoom (larger canvas) + scroll to see hidden edges.
+ * Screen share with zoom (scroll when zoomed) + fullscreen.
  */
 
 import { useEffect, useRef, useState, useCallback } from 'react';
@@ -20,22 +20,24 @@ const ScreenShareViewer = ({ track, name, flex = 1, minH = '0' }) => {
   const [vpSize, setVpSize] = useState({ w: 0, h: 0 });
   const [isFullscreen, setIsFullscreen] = useState(false);
 
+  // Attach whenever track or the video element is ready (layout can mount video after first paint).
   useEffect(() => {
-    if (!track || !videoRef.current) return;
     const el = videoRef.current;
+    if (!track || !el) return undefined;
     try { track.attach(el); } catch (_) {}
     return () => {
       try { track.detach(el); } catch (_) {}
       if (el) el.srcObject = null;
     };
-  }, [track]);
+  }, [track, vpSize.w, vpSize.h, isFullscreen]);
 
-  // Measure the visible viewport so zoom grows content in real pixels.
   useEffect(() => {
     const el = viewportRef.current;
     if (!el) return undefined;
     const measure = () => {
-      setVpSize({ w: el.clientWidth, h: el.clientHeight });
+      const w = el.clientWidth;
+      const h = el.clientHeight;
+      if (w > 0 && h > 0) setVpSize({ w, h });
     };
     measure();
     const ro = new ResizeObserver(measure);
@@ -114,9 +116,9 @@ const ScreenShareViewer = ({ track, name, flex = 1, minH = '0' }) => {
 
   const onPointerUp = useCallback(() => { dragRef.current = null; }, []);
 
-  const canScroll = zoom > 1 && vpSize.w > 0;
-  const contentW = vpSize.w * zoom;
-  const contentH = vpSize.h * zoom;
+  const canScroll = zoom > 1 && vpSize.w > 0 && vpSize.h > 0;
+  const contentW = canScroll ? vpSize.w * zoom : '100%';
+  const contentH = canScroll ? vpSize.h * zoom : '100%';
   const zoomLabel = `${Math.round(zoom * 100)}%`;
 
   return (
@@ -154,29 +156,31 @@ const ScreenShareViewer = ({ track, name, flex = 1, minH = '0' }) => {
           '&::-webkit-scrollbar-thumb': { background: 'rgba(255,255,255,0.35)', borderRadius: '6px' },
         }}
       >
-        {vpSize.w > 0 && (
+        <Box
+          w={contentW}
+          h={contentH}
+          minW={canScroll ? undefined : '100%'}
+          minH={canScroll ? undefined : '100%'}
+          position="relative"
+          flexShrink={0}
+          mx={canScroll ? undefined : 'auto'}
+          my={canScroll ? undefined : 'auto'}
+        >
           <Box
-            w={`${contentW}px`}
-            h={`${contentH}px`}
-            position="relative"
-            flexShrink={0}
-          >
-            <Box
-              as="video"
-              ref={videoRef}
-              autoPlay
-              playsInline
-              muted
-              pointerEvents="none"
-              style={{
-                display: 'block',
-                width: '100%',
-                height: '100%',
-                objectFit: 'contain',
-              }}
-            />
-          </Box>
-        )}
+            as="video"
+            ref={videoRef}
+            autoPlay
+            playsInline
+            muted
+            pointerEvents="none"
+            style={{
+              display: 'block',
+              width: '100%',
+              height: '100%',
+              objectFit: 'contain',
+            }}
+          />
+        </Box>
       </Box>
 
       <Badge position="absolute" top={3} left={3} colorScheme="teal" borderRadius="full" px={3} py={1} zIndex={2}>
