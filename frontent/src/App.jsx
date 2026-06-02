@@ -78,7 +78,11 @@ const AppContent = () => {
   useEffect(() => {
     liveBroadcastNav.minimize = () => navigate('/home');
     liveBroadcastNav.returnToLive = () => {
-      navigate('/live/broadcast', { replace: false });
+      liveBroadcastNav.returningToLive = true;
+      navigate('/live/broadcast', { replace: true });
+      window.setTimeout(() => {
+        liveBroadcastNav.returningToLive = false;
+      }, 400);
     };
     return () => {
       liveBroadcastNav.minimize = null;

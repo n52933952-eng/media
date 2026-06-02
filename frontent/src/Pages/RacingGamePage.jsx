@@ -21,6 +21,7 @@ import {
 import { loadTrackModel, loadMapDecorations, checkGroundCollision } from '../game/racing/track.js'
 import { loadGates, updateGateFading, checkGateProximity, showFinishMessage } from '../game/racing/gates.js'
 import { lockRaceLandscape, unlockRaceLandscape, isPortraitViewport } from '../utils/raceOrientation.js'
+import { shouldSkipGameExitForLive } from '../services/liveBroadcastNav'
 
 // ─── Camera constants (same as reference game) ───────────────────────────────
 const CAMERA_DISTANCE  = 10
@@ -925,7 +926,9 @@ export default function RacingGamePage() {
   // React Router path change: if we left the race route, end game
   useEffect(() => {
     if (location.pathname !== prevPathRef.current && !location.pathname.startsWith('/race/')) {
-      if (localStorage.getItem('raceRoomId') && endRaceGameOnNavigate) endRaceGameOnNavigate()
+      if (localStorage.getItem('raceRoomId') && endRaceGameOnNavigate && !shouldSkipGameExitForLive(location.pathname)) {
+        endRaceGameOnNavigate()
+      }
     }
     prevPathRef.current = location.pathname
   }, [location.pathname, endRaceGameOnNavigate])
@@ -940,10 +943,9 @@ export default function RacingGamePage() {
       const activeRoom = localStorage.getItem('raceRoomId')
       if (activeRoom && endRaceGameOnNavigate) {
         setTimeout(() => {
-          const stillOnRacePage = window.location.pathname.startsWith('/race/')
-          if (!stillOnRacePage) {
-            endRaceGameOnNavigate()
-          }
+          const p = window.location.pathname
+          if (p.startsWith('/race/') || shouldSkipGameExitForLive(p)) return
+          endRaceGameOnNavigate()
         }, 50)
       }
     }

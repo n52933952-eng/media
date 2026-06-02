@@ -28,6 +28,7 @@ import { UserContext } from '../context/UserContext'
 import { SocketContext } from '../context/SocketContext'
 import { PostContext } from '../context/PostContext'
 import API_BASE_URL from '../config/api'
+import { shouldSkipGameExitForLive } from '../services/liveBroadcastNav'
 
 // ─── Rank helpers ──────────────────────────────────────────────────────────────
 const RANK_LABELS = {
@@ -179,7 +180,9 @@ const CardGamePage = () => {
         const previousPath = previousPathRef.current
         const isCardPage = currentPath.startsWith('/card/')
         const wasOnCardPage = previousPath && previousPath.startsWith('/card/')
-        if (wasOnCardPage && !isCardPage && previousPath !== currentPath) endCardGameOnce()
+        if (wasOnCardPage && !isCardPage && previousPath !== currentPath && !shouldSkipGameExitForLive(currentPath)) {
+            endCardGameOnce()
+        }
         previousPathRef.current = currentPath
     }, [location.pathname, endCardGameOnce])
 
@@ -192,10 +195,9 @@ const CardGamePage = () => {
             const activeRoom = localStorage.getItem('cardRoomId')
             if (activeRoom && endCardGameOnNavigate) {
                 setTimeout(() => {
-                    const stillOnCardPage = window.location.pathname.startsWith('/card/')
-                    if (!stillOnCardPage) {
-                        endCardGameOnNavigate()
-                    }
+                    const p = window.location.pathname
+                    if (p.startsWith('/card/') || shouldSkipGameExitForLive(p)) return
+                    endCardGameOnNavigate()
                 }, 50)
             }
         }

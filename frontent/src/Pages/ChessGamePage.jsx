@@ -26,6 +26,7 @@ import { useParams, useNavigate, useSearchParams, useLocation } from 'react-rout
 import { UserContext } from '../context/UserContext'
 import { SocketContext } from '../context/SocketContext'
 import useShowToast from '../hooks/useShowToast'
+import { shouldSkipGameExitForLive } from '../services/liveBroadcastNav'
 
 // Import sounds
 import moveSound from '../assets/p.mp3'
@@ -1331,7 +1332,7 @@ const ChessGamePage = () => {
         // If we were on chess page and now we're not, cancel the game
         if (wasOnChessPage && !isChessPage && previousPath !== currentPath) {
             const gameLive = localStorage.getItem('gameLive') === 'true'
-            if (gameLive && endChessGameOnNavigate) {
+            if (gameLive && endChessGameOnNavigate && !shouldSkipGameExitForLive(currentPath)) {
                 console.log('⬅️ [ChessGamePage] Navigated away from chess page - ending chess game')
                 endChessGameOnNavigate()
             }
@@ -1355,11 +1356,9 @@ const ChessGamePage = () => {
                 // Use a small delay to check the actual URL after navigation
                 setTimeout(() => {
                     const currentUrl = window.location.pathname
-                    const stillOnChessPage = currentUrl.startsWith('/chess/')
-                    if (!stillOnChessPage) {
-                        console.log('⬅️ [ChessGamePage] Component unmounting (navigation detected) - ending chess game')
-                        endChessGameOnNavigate()
-                    }
+                    if (currentUrl.startsWith('/chess/') || shouldSkipGameExitForLive(currentUrl)) return
+                    console.log('⬅️ [ChessGamePage] Component unmounting (navigation detected) - ending chess game')
+                    endChessGameOnNavigate()
                 }, 50)
             }
         }
