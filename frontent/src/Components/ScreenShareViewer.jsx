@@ -11,7 +11,14 @@ const ZOOM_STEP = 0.25;
 
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 
-const ScreenShareViewer = ({ track, name, flex = 1, minH = '0' }) => {
+const ScreenShareViewer = ({
+  track,
+  name,
+  flex = 1,
+  minH = '0',
+  /** Keep controls above page-level bottom UI (chat bar/send). */
+  controlsBottom = 3,
+}) => {
   const containerRef = useRef(null);
   const viewportRef = useRef(null);
   const videoRef = useRef(null);
@@ -195,7 +202,7 @@ const ScreenShareViewer = ({ track, name, flex = 1, minH = '0' }) => {
 
       <HStack
         position="absolute"
-        bottom={3}
+        bottom={controlsBottom}
         right={3}
         spacing={1}
         bg="blackAlpha.700"
