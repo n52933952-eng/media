@@ -216,7 +216,11 @@ const ActiveGroupCallScreen = () => {
       {/* When someone shares, their screen takes the stage and tiles shrink to a strip below. */}
       {screenShare ? (
         <Flex flex={1} direction="column" minH="0" p={3} gap={3}>
-          <ScreenShareViewer track={screenShare.track} name={screenShare.name} />
+          <ScreenShareViewer
+            track={screenShare.track}
+            name={screenShare.name}
+            controlsBottom="84px"
+          />
           <Box flexShrink={0} overflowX="auto">
             <HStack spacing={3} align="stretch" minH="120px">
               {localParticipant && (

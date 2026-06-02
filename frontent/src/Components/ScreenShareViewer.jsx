@@ -17,7 +17,7 @@ const ScreenShareViewer = ({
   flex = 1,
   minH = '0',
   /** Keep controls above page-level bottom UI (chat bar/send). */
-  controlsBottom = 3,
+  controlsBottom = '12px',
 }) => {
   const containerRef = useRef(null);
   const viewportRef = useRef(null);
@@ -209,7 +209,7 @@ const ScreenShareViewer = ({
         borderRadius="full"
         px={2}
         py={1}
-        zIndex={2}
+        zIndex={30}
         border="1px solid"
         borderColor="whiteAlpha.300"
       >

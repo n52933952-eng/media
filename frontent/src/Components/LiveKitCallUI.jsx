@@ -359,6 +359,7 @@ const ActiveCallScreen = () => {
                 name={callPartner?.name || 'User'}
                 flex="1"
                 minH="calc(100vh - 170px)"
+                controlsBottom="92px"
               />
             </Box>
           ) : (

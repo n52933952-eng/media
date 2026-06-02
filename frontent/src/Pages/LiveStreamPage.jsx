@@ -365,7 +365,7 @@ const LiveStreamPage = () => {
             name={user?.name || user?.username || 'Streamer'}
             flex={1}
             minH="0"
-            controlsBottom={24}
+            controlsBottom="88px"
           />
         </Box>
       ) : !isBroadcaster && remoteMainCamera ? (
