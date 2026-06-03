@@ -189,13 +189,12 @@ const ActiveCallScreen = () => {
 
   const isScreen     = (t) => t?.source === 'screen_share' || t?.track?.source === 'screen_share';
   const remoteScreen = remoteTracks.find(t => t.track.kind === 'video' && isScreen(t));
-  const localScreen  = localTracks.find(t => t.kind === 'video' && isScreen(t));
   const remoteCamera = remoteTracks.find(t => t.track.kind === 'video' && !isScreen(t));
-  // Remote share first; when you present, your screen is the big view (same as group call).
-  const activeScreen = remoteScreen || (isSharing ? localScreen : null);
+  // Only show the other person's screen — never echo your own share (infinite mirror in-browser).
+  const activeScreen = remoteScreen || null;
   const remoteVideo  = activeScreen || remoteCamera;
   const remoteAudio  = remoteTracks.find(t => t.track.kind === 'audio');
-  const localVideo   = localTracks.find(t => t.kind   === 'video');
+  const localCamera  = localTracks.find(t => t.kind === 'video' && !isScreen(t));
   const remoteVideoRef = useRef(null);
   const remoteCamPipRef = useRef(null);
   const localVideoRef = useRef(null);
@@ -223,14 +222,14 @@ const ActiveCallScreen = () => {
   }, [activeScreen, remoteCamera]);
 
   useEffect(() => {
-    if (!localVideo || !localVideoRef.current) return;
+    if (!localCamera || !localVideoRef.current) return;
     const el = localVideoRef.current;
-    try { localVideo.attach(el); } catch (_) {}
+    try { localCamera.attach(el); } catch (_) {}
     return () => {
-      try { localVideo.detach(el); } catch (_) {}
+      try { localCamera.detach(el); } catch (_) {}
       if (el) el.srcObject = null;
     };
-  }, [localVideo]);
+  }, [localCamera]);
 
   useEffect(() => {
     if (!remoteAudio?.track) return;
@@ -346,7 +345,14 @@ const ActiveCallScreen = () => {
         px={{ base: 2, md: 6 }}
         py={{ base: 2, md: 4 }}
       >
-        {remoteVideo ? (
+        {isSharing && !activeScreen ? (
+          <VStack spacing={2} px={6} textAlign="center">
+            <Text color="white" fontWeight="bold" fontSize="lg">You are sharing your screen</Text>
+            <Text color="gray.400" fontSize="sm">
+              Others can see your screen. Pick a window or tab other than this call to avoid a mirror effect.
+            </Text>
+          </VStack>
+        ) : remoteVideo ? (
           activeScreen ? (
             <Box
               position="relative"
@@ -360,7 +366,7 @@ const ActiveCallScreen = () => {
             >
               <ScreenShareViewer
                 track={activeScreen.track}
-                name={remoteScreen ? (callPartner?.name || 'User') : 'You'}
+                name={callPartner?.name || 'User'}
                 flex="1"
                 minH="calc(100vh - 200px)"
                 controlsBottom="108px"
@@ -398,7 +404,7 @@ const ActiveCallScreen = () => {
           </VStack>
         )}
         {/* Remote camera thumbnail (while they present their screen) */}
-        {(remoteScreen || (isSharing && localScreen)) && remoteCamera && (
+        {remoteScreen && remoteCamera && (
           <Box
             position="absolute"
             bottom={{ base: 118, md: 42 }}
@@ -423,7 +429,7 @@ const ActiveCallScreen = () => {
         )}
 
         {/* Local pip */}
-        {localVideo && callType !== 'audio' && (
+        {localCamera && callType !== 'audio' && (
           <Box
             position="absolute"
             bottom={{ base: 118, md: 42 }}
