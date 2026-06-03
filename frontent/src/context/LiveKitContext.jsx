@@ -119,18 +119,36 @@ export const LiveKitProvider = ({ children }) => {
     });
     roomRef.current = room;
 
-    // Track events
-    room.on(RoomEvent.TrackSubscribed, (track, _pub, participant) => {
-      // Receiving the other side's media means we're connected — make sure the
-      // "Calling…" overlay is gone and the active call screen is shown.
+    const addRemoteTrack = (track, _pub, participant) => {
       setCallAccepted(true);
       setIsCalling(false);
       stopRingtone();
-      setRemoteTracks(prev => [
-        ...prev,
-        { track, participantId: participant.identity, source: _pub?.source || track?.source },
-      ]);
-    });
+      setRemoteTracks((prev) => {
+        if (prev.some((t) => t.track === track)) return prev;
+        return [
+          ...prev,
+          { track, participantId: participant.identity, source: _pub?.source || track?.source },
+        ];
+      });
+    };
+
+    const syncRemoteTracks = () => {
+      const next = [];
+      room.remoteParticipants.forEach((participant) => {
+        participant.trackPublications.forEach((pub) => {
+          if (pub.track) {
+            next.push({
+              track: pub.track,
+              participantId: participant.identity,
+              source: pub.source || pub.track?.source,
+            });
+          }
+        });
+      });
+      if (next.length > 0) setRemoteTracks(next);
+    };
+
+    room.on(RoomEvent.TrackSubscribed, addRemoteTrack);
     room.on(RoomEvent.TrackUnsubscribed, (track) => {
       setRemoteTracks(prev => prev.filter(t => t.track !== track));
     });
@@ -146,8 +164,9 @@ export const LiveKitProvider = ({ children }) => {
     room.on(RoomEvent.LocalTrackUnpublished, syncLocalTracks);
     room.on(RoomEvent.ParticipantConnected, () => {
       setCallAccepted(true);
-      setIsCalling(false);   // hide the "Calling…" overlay so the live call shows
+      setIsCalling(false);
       stopRingtone();
+      syncRemoteTracks();
     });
     room.on(RoomEvent.ParticipantDisconnected, () => {
       // Other side left — end call
@@ -167,6 +186,7 @@ export const LiveKitProvider = ({ children }) => {
       await room.localParticipant.enableCameraAndMicrophone();
     }
     syncLocalTracks();
+    syncRemoteTracks();
 
     return room;
   }, [disconnectRoom]);

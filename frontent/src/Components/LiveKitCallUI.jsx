@@ -18,12 +18,38 @@ import { RoomEvent, Track } from 'livekit-client';
 import { useLiveKit } from '../context/LiveKitContext';
 import ScreenShareViewer from './ScreenShareViewer';
 import DraggableCallPip from './DraggableCallPip';
+import CallVideoFrame from './CallVideoFrame';
 
 // ── small helpers ────────────────────────────────────────────────────────────
 const HangupIcon = () => <span style={{ fontSize: 20 }}>📵</span>;
 const MicIcon = ({ muted }) => <span style={{ fontSize: 18 }}>{muted ? '🔇' : '🎙️'}</span>;
 const CamIcon = ({ off }) => <span style={{ fontSize: 18 }}>{off ? '📷' : '📹'}</span>;
 const ShareIcon = ({ on }) => <span style={{ fontSize: 18 }}>{on ? '🛑' : '🖥️'}</span>;
+
+const isScreenSource = (src) =>
+  src === Track.Source.ScreenShare || src === 'screen_share';
+
+const findRemoteCamera = (remoteTracks) =>
+  remoteTracks.find((t) => {
+    const track = t.track;
+    const src = t.source ?? track?.source;
+    return track?.kind === 'video' && !isScreenSource(src);
+  });
+
+const CameraTileLabel = ({ children }) => (
+  <Badge
+    position="absolute"
+    top={2}
+    left={2}
+    zIndex={3}
+    colorScheme="blackAlpha"
+    borderRadius="md"
+    fontSize="10px"
+    px={2}
+  >
+    {children}
+  </Badge>
+);
 
 // ── Incoming call overlay ─────────────────────────────────────────────────────
 const IncomingCallOverlay = () => {
@@ -188,54 +214,39 @@ const ActiveCallScreen = () => {
   const [isCamOff, setIsCamOff] = useState(callType === 'audio');
   const [isSharing, setIsSharing] = useState(false);
 
-  const isScreen = (entry) => {
-    const src = entry?.source ?? entry?.track?.source;
-    return src === Track.Source.ScreenShare || src === 'screen_share';
-  };
-  const remoteScreen = remoteTracks.find(t => t.track?.kind === 'video' && isScreen(t));
-  const remoteCamera = remoteTracks.find(t => t.track?.kind === 'video' && !isScreen(t));
-  // Only show the other person's screen — never echo your own share (infinite mirror in-browser).
+  const remoteScreen = remoteTracks.find((t) => {
+    const src = t.source ?? t.track?.source;
+    return t.track?.kind === 'video' && isScreenSource(src);
+  });
+  const remoteCamera = findRemoteCamera(remoteTracks);
   const activeScreen = remoteScreen || null;
-  const showRemoteMain = !activeScreen && !isSharing && remoteCamera;
-  const showRemotePip = remoteCamera && (activeScreen || isSharing);
-  const remoteVideo  = activeScreen || remoteCamera;
+  const isVideoCall = callType !== 'audio';
+  /** Side-by-side cameras when not presenting (always show you + them). */
+  const showDualCameras = isVideoCall && !activeScreen && !isSharing;
+  const showCameraPips = isVideoCall && (activeScreen || isSharing);
   const remoteCamSid = remoteCamera?.track?.sid ?? '';
-  const remoteAudio  = remoteTracks.find(t => t.track.kind === 'audio');
-  const localCamera  = localTracks.find(t => t.kind === 'video' && !isScreen(t));
-  const remoteVideoRef = useRef(null);
-  const remoteCamPipRef = useRef(null);
-  const localVideoRef = useRef(null);
+  const remoteAudio = remoteTracks.find((t) => t.track?.kind === 'audio');
+
+  const [localCamTrack, setLocalCamTrack] = useState(null);
+  const localCamSid = localCamTrack?.sid ?? '';
+
   const remoteAudioElRef = useRef(null);
 
   useEffect(() => {
-    if (!showRemoteMain || !remoteCamera?.track || !remoteVideoRef.current) return;
-    const el = remoteVideoRef.current;
-    try { remoteCamera.track.attach(el); } catch (_) {}
-    return () => {
-      try { remoteCamera.track.detach(el); } catch (_) {}
-      if (el) el.srcObject = null;
+    const roomObj = room?.current;
+    if (!roomObj || !callAccepted) return undefined;
+    const syncLocalCam = () => {
+      const pub = roomObj.localParticipant.getTrackPublication(Track.Source.Camera);
+      setLocalCamTrack(pub?.track ?? null);
     };
-  }, [showRemoteMain, remoteCamSid, remoteCamera]);
-
-  useEffect(() => {
-    if (!showRemotePip || !remoteCamera?.track || !remoteCamPipRef.current) return;
-    const el = remoteCamPipRef.current;
-    try { remoteCamera.track.attach(el); } catch (_) {}
+    syncLocalCam();
+    roomObj.on(RoomEvent.LocalTrackPublished, syncLocalCam);
+    roomObj.on(RoomEvent.LocalTrackUnpublished, syncLocalCam);
     return () => {
-      try { remoteCamera.track.detach(el); } catch (_) {}
-      if (el) el.srcObject = null;
+      roomObj.off(RoomEvent.LocalTrackPublished, syncLocalCam);
+      roomObj.off(RoomEvent.LocalTrackUnpublished, syncLocalCam);
     };
-  }, [showRemotePip, remoteCamSid, remoteCamera]);
-
-  useEffect(() => {
-    if (!localCamera || !localVideoRef.current) return;
-    const el = localVideoRef.current;
-    try { localCamera.attach(el); } catch (_) {}
-    return () => {
-      try { localCamera.detach(el); } catch (_) {}
-      if (el) el.srcObject = null;
-    };
-  }, [localCamera, localCamera?.sid]);
+  }, [room, callAccepted, isCamOff]);
 
   useEffect(() => {
     if (!remoteAudio?.track) return;
@@ -365,30 +376,63 @@ const ActiveCallScreen = () => {
             name={callPartner?.name || 'User'}
             controlsBottom="108px"
           />
-        ) : showRemoteMain ? (
-          <Flex flex={1} align="center" justify="center" px={{ base: 2, md: 6 }} py={{ base: 2, md: 4 }}>
+        ) : showDualCameras ? (
+          <Flex
+            flex={1}
+            direction={{ base: 'column', md: 'row' }}
+            gap={3}
+            px={{ base: 2, md: 4 }}
+            py={2}
+            minH={0}
+            w="100%"
+            maxW="1200px"
+            alignSelf="center"
+          >
             <Box
-              position="relative"
-              w="100%"
-              maxW="1100px"
               flex={1}
-              maxH="100%"
-              minH={0}
-              borderRadius={{ base: 'md', md: '2xl' }}
+              minH={{ base: '220px', md: 0 }}
+              minW={0}
+              position="relative"
+              borderRadius="xl"
               overflow="hidden"
-              bg="black"
               border="1px solid"
               borderColor="whiteAlpha.300"
-              boxShadow="0 14px 36px rgba(0,0,0,0.45)"
+              bg="black"
             >
-              <Box
-                key={`remote-main-${remoteCamSid}`}
-                as="video"
-                ref={remoteVideoRef}
-                autoPlay
-                playsInline
-                style={{ width: '100%', height: '100%', objectFit: 'contain' }}
-              />
+              <CameraTileLabel>{callPartner?.name || 'User'}</CameraTileLabel>
+              {remoteCamera?.track ? (
+                <CallVideoFrame track={remoteCamera.track} trackKey={`remote-${remoteCamSid}`} />
+              ) : (
+                <Flex h="100%" align="center" justify="center" minH="200px">
+                  <VStack>
+                    <Avatar src={callPartner?.profilePic} name={callPartner?.name} size="lg" />
+                    <Text color="gray.400" fontSize="sm">Waiting for their camera…</Text>
+                  </VStack>
+                </Flex>
+              )}
+            </Box>
+            <Box
+              flex={1}
+              minH={{ base: '220px', md: 0 }}
+              minW={0}
+              maxW={{ md: '420px' }}
+              position="relative"
+              borderRadius="xl"
+              overflow="hidden"
+              border="1px solid"
+              borderColor="whiteAlpha.300"
+              bg="black"
+            >
+              <CameraTileLabel>You</CameraTileLabel>
+              {localCamTrack ? (
+                <CallVideoFrame track={localCamTrack} trackKey={`local-${localCamSid}`} muted />
+              ) : (
+                <Flex h="100%" align="center" justify="center" minH="200px">
+                  <Text color="gray.400" fontSize="sm">
+                    {isCamOff ? 'Camera off' : 'Starting your camera…'}
+                  </Text>
+                </Flex>
+              )}
             </Box>
           </Flex>
         ) : (
@@ -400,38 +444,27 @@ const ActiveCallScreen = () => {
             </VStack>
           </Flex>
         )}
-        {showRemotePip && callType !== 'audio' && (
+        {showCameraPips && remoteCamera?.track && (
           <DraggableCallPip
             label={callPartner?.name || 'User'}
             defaultRight={168}
             defaultBottom={118}
+            width={128}
+            height={96}
           >
-            <Box
-              key={`remote-pip-${remoteCamSid}`}
-              as="video"
-              ref={remoteCamPipRef}
-              autoPlay
-              playsInline
-              w="100%"
-              h="100%"
-              style={{ objectFit: 'contain' }}
-            />
+            <CallVideoFrame track={remoteCamera.track} trackKey={`pip-remote-${remoteCamSid}`} />
           </DraggableCallPip>
         )}
 
-        {localCamera && callType !== 'audio' && (
-          <DraggableCallPip label="You" defaultRight={16} defaultBottom={118}>
-            <Box
-              key={`local-pip-${localCamera.sid ?? 'cam'}`}
-              as="video"
-              ref={localVideoRef}
-              autoPlay
-              muted
-              playsInline
-              w="100%"
-              h="100%"
-              style={{ objectFit: 'contain' }}
-            />
+        {showCameraPips && (
+          <DraggableCallPip label="You" defaultRight={16} defaultBottom={118} width={128} height={96}>
+            {localCamTrack ? (
+              <CallVideoFrame track={localCamTrack} trackKey={`pip-local-${localCamSid}`} muted />
+            ) : (
+              <Flex h="100%" align="center" justify="center" bg="gray.900">
+                <Text color="gray.500" fontSize="xs">{isCamOff ? 'Cam off' : 'No camera'}</Text>
+              </Flex>
+            )}
           </DraggableCallPip>
         )}
       </Flex>

@@ -16,26 +16,8 @@ const DraggableCallPip = ({
 }) => {
   const hostRef = useRef(null);
   const dragRef = useRef(null);
+  const userPlaced = useRef(false);
   const [pos, setPos] = useState(null);
-
-  useEffect(() => {
-    const host = hostRef.current;
-    if (!host || pos) return;
-    const place = () => {
-      const w = host.clientWidth;
-      const h = host.clientHeight;
-      if (w > 0 && h > 0) {
-        setPos({
-          x: Math.max(0, w - width - defaultRight),
-          y: Math.max(0, h - height - defaultBottom),
-        });
-      }
-    };
-    place();
-    const ro = new ResizeObserver(place);
-    ro.observe(host);
-    return () => ro.disconnect();
-  }, [pos, width, height, defaultRight, defaultBottom]);
 
   const clamp = useCallback((x, y) => {
     const host = hostRef.current;
@@ -47,6 +29,32 @@ const DraggableCallPip = ({
       y: Math.min(maxY, Math.max(0, y)),
     };
   }, [width, height]);
+
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!host) return undefined;
+    const place = () => {
+      if (userPlaced.current) return;
+      const w = host.clientWidth;
+      const h = host.clientHeight;
+      if (w > 0 && h > 0) {
+        setPos({
+          x: Math.max(0, w - width - defaultRight),
+          y: Math.max(0, h - height - defaultBottom),
+        });
+      }
+    };
+    place();
+    const ro = new ResizeObserver(() => {
+      if (userPlaced.current) {
+        setPos((p) => (p ? clamp(p.x, p.y) : p));
+      } else {
+        place();
+      }
+    });
+    ro.observe(host);
+    return () => ro.disconnect();
+  }, [width, height, defaultRight, defaultBottom, clamp]);
 
   const onPointerDown = useCallback((e) => {
     if (!pos) return;
@@ -61,6 +69,7 @@ const DraggableCallPip = ({
 
   const onPointerMove = useCallback((e) => {
     if (!dragRef.current) return;
+    userPlaced.current = true;
     const dx = e.clientX - dragRef.current.startX;
     const dy = e.clientY - dragRef.current.startY;
     setPos(clamp(dragRef.current.originX + dx, dragRef.current.originY + dy));
