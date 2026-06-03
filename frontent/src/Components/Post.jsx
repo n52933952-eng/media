@@ -156,6 +156,7 @@ const showToast = useShowToast()
   
   // Check if this is a Chess game post
   const isChessPost = post?.chessGameData
+  const isCardPost = !!post?.cardGameData
   
   // Hide entire chess post immediately if user canceled their game (local state only)
   const [hideChessPost, setHideChessPost] = useState(false)
@@ -724,6 +725,15 @@ const showToast = useShowToast()
         e.nativeEvent.stopImmediatePropagation()
       }
     }
+
+    // Feed/profile: post detail only (game posts are deleted when finished).
+    const onPostDetailPage =
+      typeof window !== 'undefined' && /\/post\//.test(window.location.pathname)
+    if (!onPostDetailPage && post?._id) {
+      const username = postedBy?.username || postedBy?.name || 'post'
+      navigate(`/${username}/post/${post._id}`)
+      return false
+    }
     
     if (import.meta.env.DEV) {
       console.log('🎯 [Post] Chess card clicked!', { chessGameData, event: e })
@@ -1192,7 +1202,9 @@ const showToast = useShowToast()
               Playing Chess
             </Text>
             <Text fontSize="xs" color={secondaryTextColor}>
-              Click to view game
+              {typeof window !== 'undefined' && /\/post\//.test(window.location.pathname)
+                ? 'Click to view game'
+                : 'Tap for post details'}
             </Text>
           </VStack>
         </Flex>
@@ -1377,7 +1389,9 @@ const showToast = useShowToast()
   
   
   <Flex gap={2} my={1} align="center" flexWrap="wrap">
-    <Actions post={post} showFeedExtras={showFeedExtras} />
+    {!isChessPost && !isCardPost && (
+      <Actions post={post} showFeedExtras={showFeedExtras} />
+    )}
     
     {/* Edit Post Button - Show for:
         1. Post owner (for both regular and collaborative posts)

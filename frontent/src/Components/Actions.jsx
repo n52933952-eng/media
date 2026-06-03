@@ -28,7 +28,10 @@ import useShowToast from '../hooks/useShowToast.js'
 
 
 const Actions = ({ post, showFeedExtras = true }) => {
-	
+	const isEphemeralGamePost = !!(post?.chessGameData || post?.cardGameData)
+	if (isEphemeralGamePost) {
+		return null
+	}
 
 	const{user}=useContext(UserContext)
 	const ENABLE_POST_SHARE_TO_CHAT = (import.meta.env.VITE_ENABLE_POST_SHARE_TO_CHAT || 'true') !== 'false'

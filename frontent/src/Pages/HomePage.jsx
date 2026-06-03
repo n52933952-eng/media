@@ -13,6 +13,7 @@ import SuggestedChannels from '../Components/SuggestedChannels'
 import ActivityFeed from '../Components/ActivityFeed'
 import StoryStrip from '../Components/StoryStrip'
 import MobileHomePanel from '../Components/MobileHomePanel'
+import { dedupeGamePostsForFeed, getGameRoomIdFromPost } from '../utils/dedupeGameFeedPosts.js'
 
 
 
@@ -71,18 +72,19 @@ const HomePage = () => {
           const unique = combined.filter((post, index, self) => 
             index === self.findIndex(p => p._id === post._id)
           )
+          const dedupedGame = dedupeGamePostsForFeed(unique)
           
           // Sort by updatedAt (or createdAt if no updatedAt) - matches backend sorting logic
-          unique.sort((a, b) => {
+          dedupedGame.sort((a, b) => {
             const dateA = new Date(a.updatedAt || a.createdAt).getTime()
             const dateB = new Date(b.updatedAt || b.createdAt).getTime()
             return dateB - dateA // Newest first
           })
           
           // Update ref with new count
-          followPostCountRef.current = unique.length
+          followPostCountRef.current = dedupedGame.length
           
-          return unique
+          return dedupedGame
         })
         
         // Restore scroll position after state update to prevent page jumping
@@ -148,7 +150,7 @@ const HomePage = () => {
               return prev
             }
             
-            const updated = [...prev, ...newPosts]
+            const updated = dedupeGamePostsForFeed([...prev, ...newPosts])
             followPostCountRef.current = updated.length
             return updated
           })
@@ -158,9 +160,10 @@ const HomePage = () => {
           const uniquePosts = posts.filter((post, index, self) => 
             index === self.findIndex(p => p._id?.toString() === post._id?.toString())
           )
-          console.log(`📥 [getFeedPost] Initial load: received ${posts.length} posts, ${uniquePosts.length} unique posts`)
-          setFollowPost(uniquePosts)
-          followPostCountRef.current = uniquePosts.length
+          const dedupedPosts = dedupeGamePostsForFeed(uniquePosts)
+          console.log(`📥 [getFeedPost] Initial load: received ${posts.length} posts, ${dedupedPosts.length} after dedupe`)
+          setFollowPost(dedupedPosts)
+          followPostCountRef.current = dedupedPosts.length
           // Page 1 includes up to 12 normal posts from feedNormalPosts; totalCount is full normal list length
           const totalNormal = Number(data.totalCount)
           const safeTotal = Number.isFinite(totalNormal) ? totalNormal : 0
@@ -272,6 +275,12 @@ const HomePage = () => {
           console.log('⚠️ [HomePage] Duplicate post detected, skipping:', newPost._id)
           return prev
         }
+
+        const newGameRoomId = getGameRoomIdFromPost(newPost)
+        if (newGameRoomId && prev.some((p) => getGameRoomIdFromPost(p) === newGameRoomId)) {
+          console.log('⚠️ [HomePage] Same chess/card game already in feed, skipping:', newGameRoomId)
+          return prev
+        }
         
         // Get the author ID of the new post
         const newPostAuthorId = newPost.postedBy?._id?.toString() || newPost.postedBy?.toString()
@@ -330,11 +339,11 @@ const HomePage = () => {
           return dateB - dateA // Newest first
         })
         
-        // Update ref with new count
-        followPostCountRef.current = updatedFeed.length
+        const dedupedFeed = dedupeGamePostsForFeed(updatedFeed)
+        followPostCountRef.current = dedupedFeed.length
         
         console.log(`✅ [HomePage] Added new post to feed (maintained 3 newest per user rule):`, newPost._id)
-        return updatedFeed
+        return dedupedFeed
       })
     }
 

@@ -6,6 +6,7 @@ import LiveStream from '../models/liveStream.js'
 import { v2 as cloudinary } from 'cloudinary'
 import { Readable } from 'stream'
 import { getIO, getUserSocket, getAllUserSockets } from '../socket/socket.js'
+import { dedupeGamePostsForFeed } from '../utils/dedupeGameFeedPosts.js'
 
 const CLOUDINARY_UPLOAD_QUALITY = (process.env.CLOUDINARY_UPLOAD_QUALITY || 'auto:eco').trim()
 
@@ -1066,6 +1067,9 @@ export const getFeedPost = async(req,res) => {
             }
         }
 
+        // One feed row per chess/card game (same roomId) when viewer follows both players
+        const dedupedNormalPosts = dedupeGamePostsForFeed(uniqueNormalPosts)
+
         // Hide own solo posts from feed (show only if collaborative with another contributor)
         const viewerIdStr = userId.toString()
         const hasAnotherContributor = (post, authorIdStr) => {
@@ -1075,7 +1079,7 @@ export const getFeedPost = async(req,res) => {
                 return cid && cid !== authorIdStr
             })
         }
-        const feedNormalPosts = uniqueNormalPosts.filter((post) => {
+        const feedNormalPosts = dedupedNormalPosts.filter((post) => {
             const pb = post.postedBy
             if (!pb) return false
             const aid = pb._id != null ? pb._id.toString() : String(pb)
