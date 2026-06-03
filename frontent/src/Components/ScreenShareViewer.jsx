@@ -6,8 +6,8 @@ import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { Box, Text, IconButton, HStack, Badge } from '@chakra-ui/react';
 
 const ZOOM_MIN = 1;
-const ZOOM_MAX = 2;
-const ZOOM_STEP = 0.12;
+const ZOOM_MAX = 1.6;
+const ZOOM_STEP = 0.08;
 
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 
@@ -25,8 +25,12 @@ const ScreenShareViewer = ({
   const dragRef = useRef(null);
   const [zoom, setZoom] = useState(1);
   const [vpSize, setVpSize] = useState({ w: 0, h: 0 });
+  /** Frozen at zoom=1 so scrollbar width changes don't break layout while zoomed. */
+  const [baseVpSize, setBaseVpSize] = useState({ w: 0, h: 0 });
   const [videoSize, setVideoSize] = useState({ w: 0, h: 0 });
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const zoomRef = useRef(1);
+  zoomRef.current = zoom;
 
   // Attach ONLY when the track changes — never on zoom/resize/fullscreen.
   // Re-attaching on vpSize changes (which zoom triggers via scrollbar width)
@@ -82,7 +86,11 @@ const ScreenShareViewer = ({
     const measure = () => {
       const w = el.clientWidth;
       const h = el.clientHeight;
-      if (w > 0 && h > 0) setVpSize({ w, h });
+      if (w <= 0 || h <= 0) return;
+      setVpSize({ w, h });
+      // Only refresh zoom baseline at 1× — scrollbars at >1× would shrink the
+      // viewport and make zoom jump / break the UI.
+      if (zoomRef.current <= 1) setBaseVpSize({ w, h });
     };
     measure();
     const ro = new ResizeObserver(measure);
@@ -133,12 +141,7 @@ const ScreenShareViewer = ({
     } catch (_) {}
   }, []);
 
-  const onWheel = useCallback((e) => {
-    if (!e.ctrlKey && !e.metaKey) return;
-    e.preventDefault();
-    const delta = e.deltaY < 0 ? ZOOM_STEP : -ZOOM_STEP;
-    applyZoom(zoom + delta);
-  }, [zoom, applyZoom]);
+  // Pinch/ctrl+wheel disabled — it zoomed too fast and fought page scroll.
 
   const onPointerDown = useCallback((e) => {
     if (zoom <= 1 || !viewportRef.current) return;
@@ -161,19 +164,19 @@ const ScreenShareViewer = ({
 
   const onPointerUp = useCallback(() => { dragRef.current = null; }, []);
 
+  const measureVp = baseVpSize.w > 0 ? baseVpSize : vpSize;
+
   const fitBox = useMemo(() => {
-    if (!vpSize.w || !vpSize.h || !videoSize.w || !videoSize.h) return null;
-    const scale = Math.min(vpSize.w / videoSize.w, vpSize.h / videoSize.h);
+    if (!measureVp.w || !measureVp.h || !videoSize.w || !videoSize.h) return null;
+    const scale = Math.min(measureVp.w / videoSize.w, measureVp.h / videoSize.h);
     return {
       w: Math.max(1, Math.round(videoSize.w * scale)),
       h: Math.max(1, Math.round(videoSize.h * scale)),
     };
-  }, [vpSize.w, vpSize.h, videoSize.w, videoSize.h]);
+  }, [measureVp.w, measureVp.h, videoSize.w, videoSize.h]);
 
-  // Zoom scales the letterboxed video size, not the whole viewport (avoids
-  // huge empty margins and "very zoomed" jumps on portrait phone shares).
-  const baseW = fitBox?.w ?? vpSize.w;
-  const baseH = fitBox?.h ?? vpSize.h;
+  const baseW = fitBox?.w ?? measureVp.w;
+  const baseH = fitBox?.h ?? measureVp.h;
   const canScroll = zoom > 1 && baseW > 0 && baseH > 0;
   const contentW = canScroll ? Math.round(baseW * zoom) : (fitBox ? `${fitBox.w}px` : '100%');
   const contentH = canScroll ? Math.round(baseH * zoom) : (fitBox ? `${fitBox.h}px` : '100%');
@@ -203,8 +206,7 @@ const ScreenShareViewer = ({
         display="flex"
         alignItems="center"
         justifyContent="center"
-        overflow={canScroll ? 'scroll' : 'hidden'}
-        onWheel={onWheel}
+        overflow={canScroll ? 'auto' : 'hidden'}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}

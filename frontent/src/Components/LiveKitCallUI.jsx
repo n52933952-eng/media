@@ -50,6 +50,101 @@ const CameraTileLabel = ({ children }) => (
   </Badge>
 );
 
+/** Same tile style as group call — cover fill, fixed min height. */
+const CallCameraTile = ({ label, track, trackKey, muted = false, minW = '160px', minH = '140px' }) => {
+  const videoRef = useRef(null);
+  useEffect(() => {
+    const el = videoRef.current;
+    if (!track || !el) return undefined;
+    try { track.attach(el); } catch (_) {}
+    return () => {
+      try { track.detach(el); } catch (_) {}
+      if (el) el.srcObject = null;
+    };
+  }, [track, trackKey]);
+  return (
+    <Box
+      position="relative"
+      flex={`0 0 ${minW}`}
+      minW={minW}
+      maxW={minW}
+      minH={minH}
+      h={minH}
+      borderRadius="xl"
+      overflow="hidden"
+      bg="gray.900"
+      border="2px solid"
+      borderColor="gray.600"
+    >
+      <CameraTileLabel>{label}</CameraTileLabel>
+      {track ? (
+        <Box
+          as="video"
+          ref={videoRef}
+          key={trackKey}
+          autoPlay
+          playsInline
+          muted={muted}
+          w="100%"
+          h="100%"
+          style={{ display: 'block', objectFit: 'cover' }}
+        />
+      ) : (
+        <Flex h="100%" align="center" justify="center" bg="gray.800">
+          <Text color="gray.500" fontSize="xs">Camera…</Text>
+        </Flex>
+      )}
+    </Box>
+  );
+};
+
+/** Group-style: screen on top (flex 1), camera strip below (never overlapping). */
+const ShareStageLayout = ({
+  shareTrack,
+  shareName,
+  remoteTrack,
+  remoteKey,
+  localTrack,
+  localKey,
+  isCamOff,
+  partnerName,
+  presenting = false,
+}) => (
+  <Flex flex={1} direction="column" minH={0} p={3} gap={3} w="100%">
+    {presenting ? (
+      <Flex flex={1} align="center" justify="center" minH={0} bg="black" borderRadius="xl">
+        <VStack spacing={2} textAlign="center" px={6}>
+          <Text color="white" fontWeight="bold" fontSize="lg">You are sharing your screen</Text>
+          <Text color="gray.400" fontSize="sm">
+            Others can see your screen. Pick another window or tab to avoid a mirror.
+          </Text>
+        </VStack>
+      </Flex>
+    ) : (
+      <ScreenShareViewer track={shareTrack} name={shareName} flex={1} minH={0} />
+    )}
+    <Box flexShrink={0} w="100%" bg="blackAlpha.700" borderRadius="xl" py={3} px={2}>
+      <HStack spacing={4} justify="center" align="stretch" minH="150px">
+        <CallCameraTile
+          label={partnerName || 'User'}
+          track={remoteTrack}
+          trackKey={remoteKey}
+          minW="140px"
+          minH="130px"
+        />
+        <CallCameraTile
+          label="You"
+          track={!isCamOff ? localTrack : null}
+          trackKey={localKey}
+          muted
+          minW="220px"
+          minH="160px"
+        />
+      </HStack>
+    </Box>
+  </Flex>
+);
+
 // ── Incoming call overlay ─────────────────────────────────────────────────────
 const IncomingCallOverlay = () => {
   const { incomingCall, answerCall, declineCall } = useLiveKit();
@@ -402,15 +497,7 @@ const ActiveCallScreen = () => {
     return () => document.removeEventListener('visibilitychange', onVis);
   }, [room, callAccepted, isCamOff]);
 
-  const pipBoxProps = {
-    w: '128px',
-    h: '96px',
-    borderRadius: 'xl',
-    overflow: 'hidden',
-    border: '1px solid',
-    borderColor: 'whiteAlpha.400',
-    bg: 'black',
-  };
+  const anyShare = isSharing || !!activeScreen;
 
   return (
     <Box
@@ -440,77 +527,20 @@ const ActiveCallScreen = () => {
         </Badge>
       </Flex>
 
-      {/* Main stage — same flex layout as group call when screen sharing */}
-      <Flex
-        flex={1}
-        direction="column"
-        minH={0}
-        w="100%"
-        position="relative"
-        p={activeScreen ? 3 : undefined}
-        gap={activeScreen ? 0 : undefined}
-      >
-        {isSharing && !activeScreen ? (
-          <Flex flex={1} direction="column" minH={0}>
-            <Flex flex={1} align="center" justify="center" px={6}>
-              <VStack spacing={2} textAlign="center">
-                <Text color="white" fontWeight="bold" fontSize="lg">You are sharing your screen</Text>
-                <Text color="gray.400" fontSize="sm">
-                  Others can see your screen. Pick a window or tab other than this call to avoid a mirror effect.
-                </Text>
-              </VStack>
-            </Flex>
-            <HStack spacing={3} px={4} py={3} justify="center" bg="blackAlpha.700">
-              <Box {...pipBoxProps} position="relative" w="160px" h="120px">
-                <CameraTileLabel>{callPartner?.name || 'User'}</CameraTileLabel>
-                {remoteCamera?.track ? (
-                  <CallVideoFrame track={remoteCamera.track} trackKey={`share-r-${remoteCamSid}`} />
-                ) : (
-                  <Flex h="100%" align="center" justify="center"><Text color="gray.500" fontSize="xs">Waiting…</Text></Flex>
-                )}
-              </Box>
-              <Box {...pipBoxProps} position="relative" w="160px" h="120px">
-                <CameraTileLabel>You</CameraTileLabel>
-                {effectiveLocalCam && !isCamOff ? (
-                  <CallVideoFrame track={effectiveLocalCam} trackKey={`share-l-${localCamSid}`} muted />
-                ) : (
-                  <Flex h="100%" align="center" justify="center"><Text color="gray.500" fontSize="xs">{isCamOff ? 'Cam off' : 'Camera…'}</Text></Flex>
-                )}
-              </Box>
-            </HStack>
-          </Flex>
-        ) : activeScreen ? (
-          <Flex flex={1} direction="column" minH={0} gap={3}>
-            {/* Shared screen fills the stage; viewer letterboxes any aspect. */}
-            <Box flex={1} minH={0} w="100%">
-              <ScreenShareViewer
-                track={activeScreen.track}
-                name={callPartner?.name || 'User'}
-                controlsBottom="16px"
-                flex={1}
-                minH="100%"
-              />
-            </Box>
-            {/* Both cameras as a fixed row under the share (mirrors mobile). */}
-            <HStack spacing={3} justify="center" pb={1}>
-              <Box {...pipBoxProps} position="relative" w="150px" h="110px">
-                <CameraTileLabel>{callPartner?.name || 'User'}</CameraTileLabel>
-                {remoteCamera?.track ? (
-                  <CallVideoFrame track={remoteCamera.track} trackKey={`vs-r-${remoteCamSid}`} />
-                ) : (
-                  <Flex h="100%" align="center" justify="center"><Text color="gray.500" fontSize="xs">Waiting…</Text></Flex>
-                )}
-              </Box>
-              <Box {...pipBoxProps} position="relative" w="150px" h="110px">
-                <CameraTileLabel>You</CameraTileLabel>
-                {effectiveLocalCam && !isCamOff ? (
-                  <CallVideoFrame track={effectiveLocalCam} trackKey={`vs-l-${localCamSid}`} muted />
-                ) : (
-                  <Flex h="100%" align="center" justify="center"><Text color="gray.500" fontSize="xs">{isCamOff ? 'Cam off' : 'Camera…'}</Text></Flex>
-                )}
-              </Box>
-            </HStack>
-          </Flex>
+      {/* Main stage — group-call layout when sharing; remote full + big self PiP otherwise */}
+      <Flex flex={1} direction="column" minH={0} w="100%" position="relative">
+        {anyShare ? (
+          <ShareStageLayout
+            shareTrack={activeScreen?.track}
+            shareName={callPartner?.name || 'User'}
+            presenting={isSharing && !activeScreen}
+            remoteTrack={remoteCamera?.track}
+            remoteKey={`share-r-${remoteCamSid}`}
+            localTrack={effectiveLocalCam}
+            localKey={`share-l-${localCamSid}`}
+            isCamOff={isCamOff}
+            partnerName={callPartner?.name}
+          />
         ) : showMainRemote ? (
           <Box flex={1} position="relative" minH={0} bg="black">
             <CameraTileLabel>{callPartner?.name || 'User'}</CameraTileLabel>
@@ -525,31 +555,22 @@ const ActiveCallScreen = () => {
             </VStack>
           </Flex>
         )}
-        {/* Self-PiP over the remote camera (non-sharing view). Cameras during a
-            remote share are handled by the fixed row in the activeScreen branch. */}
         {showLocalPip && (
           <Box
             position="absolute"
             right={4}
-            bottom="118px"
-            w="140px"
-            h="105px"
+            bottom="120px"
             zIndex={25}
-            borderRadius="xl"
-            overflow="hidden"
-            border="2px solid"
-            borderColor="whiteAlpha.500"
-            boxShadow="0 6px 20px rgba(0,0,0,0.5)"
-            bg="black"
+            boxShadow="0 8px 24px rgba(0,0,0,0.55)"
           >
-            <CameraTileLabel>You</CameraTileLabel>
-            {effectiveLocalCam ? (
-              <CallVideoFrame track={effectiveLocalCam} trackKey={`pip-local-${localCamSid}`} muted />
-            ) : (
-              <Flex h="100%" align="center" justify="center">
-                <Text color="gray.500" fontSize="xs">{isCamOff ? 'Cam off' : 'Camera…'}</Text>
-              </Flex>
-            )}
+            <CallCameraTile
+              label="You"
+              track={effectiveLocalCam}
+              trackKey={`pip-local-${localCamSid}`}
+              muted
+              minW="200px"
+              minH="150px"
+            />
           </Box>
         )}
       </Flex>
