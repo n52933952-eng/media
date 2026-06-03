@@ -16,6 +16,7 @@ import EditPost from './EditPost'
 import FootballIcon from './FootballIcon'
 import FootballMatchCards from './FootballMatchCards'
 import { normalizeDbMatchForFootballFeed, isFootballMatchLive } from '../utils/footballFeed'
+import { isGoFishFeedPost, getCardGameDataForPost } from '../utils/gameFeedPostUtils.js'
 
 const apiBaseUrl = () => (import.meta.env.PROD ? window.location.origin : 'http://localhost:5000')
 const CLOUDINARY_DELIVERY_QUALITY = (import.meta.env.VITE_CLOUDINARY_DELIVERY_QUALITY || 'eco').trim()
@@ -156,7 +157,7 @@ const showToast = useShowToast()
   
   // Check if this is a Chess game post
   const isChessPost = post?.chessGameData
-  const isCardPost = !!post?.cardGameData
+  const isCardPost = isGoFishFeedPost(post)
   
   // Hide entire chess post immediately if user canceled their game (local state only)
   const [hideChessPost, setHideChessPost] = useState(false)
@@ -715,6 +716,18 @@ const showToast = useShowToast()
       console.error('Failed to parse chess game data:', e)
     }
   }
+
+  const cardGameData = isCardPost ? getCardGameDataForPost(post) : null
+
+  const resolveGameOpponentId = (player1Id, player2Id) => {
+    const p1 = player1Id != null ? String(player1Id) : ''
+    const p2 = player2Id != null ? String(player2Id) : ''
+    const me = user?._id?.toString?.() ?? ''
+    if (!p1 && !p2) return ''
+    if (me && me === p1) return p2 || p1
+    if (me && me === p2) return p1 || p2
+    return p1 || p2
+  }
   
   const handleChessPostClick = (e) => {
     // CRITICAL: Stop all event propagation immediately - MUST be first
@@ -726,15 +739,6 @@ const showToast = useShowToast()
       }
     }
 
-    // Feed/profile: post detail only (game posts are deleted when finished).
-    const onPostDetailPage =
-      typeof window !== 'undefined' && /\/post\//.test(window.location.pathname)
-    if (!onPostDetailPage && post?._id) {
-      const username = postedBy?.username || postedBy?.name || 'post'
-      navigate(`/${username}/post/${post._id}`)
-      return false
-    }
-    
     if (import.meta.env.DEV) {
       console.log('🎯 [Post] Chess card clicked!', { chessGameData, event: e })
     }
@@ -1202,9 +1206,7 @@ const showToast = useShowToast()
               Playing Chess
             </Text>
             <Text fontSize="xs" color={secondaryTextColor}>
-              {typeof window !== 'undefined' && /\/post\//.test(window.location.pathname)
-                ? 'Click to view game'
-                : 'Tap for post details'}
+              Tap to watch
             </Text>
           </VStack>
         </Flex>
@@ -1259,6 +1261,48 @@ const showToast = useShowToast()
           <Text fontSize="xs" color={secondaryTextColor} pointerEvents="none">
             @{chessGameData.player2?.username}
           </Text>
+        </VStack>
+      </Flex>
+    </Box>
+  )}
+
+  {/* Card Game Card Display */}
+  {isCardPost && cardGameData && (
+    <Box
+      data-card-game-card
+      mt={3}
+      mb={2}
+      bg={cardBg}
+      borderRadius="lg"
+      border="1px solid"
+      borderColor={borderColor}
+      p={4}
+      w="full"
+    >
+      <Flex align="center" justify="space-between" mb={3}>
+        <Flex align="center" gap={3}>
+          <Text fontSize="3xl">🃏</Text>
+          <VStack align="start" spacing={0}>
+            <Text fontSize="sm" fontWeight="bold" color={textColor}>
+              Playing Go Fish
+            </Text>
+          </VStack>
+        </Flex>
+        {cardGameData?.gameStatus === 'active' || cardGameData?.gameStatus == null ? (
+          <Text fontSize="xs" fontWeight="semibold" color="green.500">Live</Text>
+        ) : (
+          <Text fontSize="xs" fontWeight="semibold" color={secondaryTextColor}>Ended</Text>
+        )}
+      </Flex>
+      <Flex align="center" justify="space-around" gap={4} onClick={(e) => e.stopPropagation()}>
+        <VStack spacing={1}>
+          <Avatar src={cardGameData.player1?.profilePic} name={cardGameData.player1?.name} size="md" pointerEvents="none" />
+          <Text fontSize="xs" fontWeight="semibold" color={textColor} pointerEvents="none">{cardGameData.player1?.name}</Text>
+        </VStack>
+        <Text fontSize="xl" color={textColor} fontWeight="bold" pointerEvents="none">vs</Text>
+        <VStack spacing={1}>
+          <Avatar src={cardGameData.player2?.profilePic} name={cardGameData.player2?.name} size="md" pointerEvents="none" />
+          <Text fontSize="xs" fontWeight="semibold" color={textColor} pointerEvents="none">{cardGameData.player2?.name}</Text>
         </VStack>
       </Flex>
     </Box>
@@ -1686,23 +1730,20 @@ const showToast = useShowToast()
     </Flex>
   )
 
-  // For chess posts, don't wrap in Link - only chess card should be clickable
-  // Make the wrapper non-clickable to prevent any navigation
-  if (isChessPost) {
+  // Chess/card posts: game card opens match; don't wrap whole post in Link to post detail
+  if (isChessPost || isCardPost) {
     return (
       <Box 
         onClick={(e) => {
-          // Only allow navigation if clicking the chess card itself
-          const chessCard = e.target.closest('[data-chess-card]')
-          if (!chessCard) {
-            // If clicking outside chess card, prevent any navigation
+          const gameCard = e.target.closest('[data-chess-card], [data-card-game-card]')
+          if (!gameCard) {
             e.preventDefault()
             e.stopPropagation()
           }
         }}
         onMouseDown={(e) => {
-          const chessCard = e.target.closest('[data-chess-card]')
-          if (!chessCard) {
+          const gameCard = e.target.closest('[data-chess-card], [data-card-game-card]')
+          if (!gameCard) {
             e.preventDefault()
             e.stopPropagation()
           }

@@ -7,6 +7,8 @@ import { v2 as cloudinary } from 'cloudinary'
 import { Readable } from 'stream'
 import { getIO, getUserSocket, getAllUserSockets } from '../socket/socket.js'
 import { dedupeGamePostsForFeed } from '../utils/dedupeGameFeedPosts.js'
+import { enrichGoFishPostsForFeed } from '../utils/enrichGoFishFeedPosts.js'
+import { normalizeCardGamePlayers } from '../utils/gameFeedPostUtils.js'
 
 const CLOUDINARY_UPLOAD_QUALITY = (process.env.CLOUDINARY_UPLOAD_QUALITY || 'auto:eco').trim()
 
@@ -1067,6 +1069,9 @@ export const getFeedPost = async(req,res) => {
             }
         }
 
+        // Legacy Go Fish posts may lack cardGameData — attach from Redis when game is still active
+        await enrichGoFishPostsForFeed(uniqueNormalPosts)
+
         // One feed row per chess/card game (same roomId) when viewer follows both players
         const dedupedNormalPosts = dedupeGamePostsForFeed(uniqueNormalPosts)
 
@@ -1547,8 +1552,8 @@ export const createCardGamePost = async (player1Id, player2Id, roomId) => {
             return null
         }
         
-        // Create card game data
-        const cardGameData = {
+        // Create card game data (player order by id so feed avatars never swap between the two posts)
+        const cardGameData = normalizeCardGamePlayers({
             player1: {
                 _id: player1._id.toString(),
                 username: player1.username,
@@ -1565,7 +1570,7 @@ export const createCardGamePost = async (player1Id, player2Id, roomId) => {
             gameStatus: 'active',
             gameType: 'goFish',
             createdAt: new Date()
-        }
+        })
         
         // Create posts for both players
         const posts = []

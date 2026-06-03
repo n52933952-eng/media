@@ -27,8 +27,10 @@ import useShowToast from '../hooks/useShowToast.js'
 
 
 
+import { isGoFishFeedPost } from '../utils/gameFeedPostUtils.js'
+
 const Actions = ({ post, showFeedExtras = true }) => {
-	const isEphemeralGamePost = !!(post?.chessGameData || post?.cardGameData)
+	const isEphemeralGamePost = !!(post?.chessGameData || isGoFishFeedPost(post))
 	if (isEphemeralGamePost) {
 		return null
 	}
@@ -80,7 +82,7 @@ const Actions = ({ post, showFeedExtras = true }) => {
 			post?.footballData ||
 			post?.weatherData ||
 			post?.chessGameData ||
-			post?.cardGameData ||
+			isGoFishFeedPost(post) ||
 			post?.raceGameData ||
 			post?.isMatchReaction ||
 			postId.startsWith('live_')

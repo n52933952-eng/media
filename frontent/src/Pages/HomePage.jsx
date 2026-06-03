@@ -13,7 +13,12 @@ import SuggestedChannels from '../Components/SuggestedChannels'
 import ActivityFeed from '../Components/ActivityFeed'
 import StoryStrip from '../Components/StoryStrip'
 import MobileHomePanel from '../Components/MobileHomePanel'
-import { dedupeGamePostsForFeed, getGameRoomIdFromPost } from '../utils/dedupeGameFeedPosts.js'
+import { dedupeGamePostsForFeed } from '../utils/dedupeGameFeedPosts.js'
+import {
+  getGameFeedDedupeKey,
+  isGoFishFeedPost,
+  mergeGoFishFeedPostData,
+} from '../utils/gameFeedPostUtils.js'
 
 
 
@@ -276,10 +281,19 @@ const HomePage = () => {
           return prev
         }
 
-        const newGameRoomId = getGameRoomIdFromPost(newPost)
-        if (newGameRoomId && prev.some((p) => getGameRoomIdFromPost(p) === newGameRoomId)) {
-          console.log('⚠️ [HomePage] Same chess/card game already in feed, skipping:', newGameRoomId)
-          return prev
+        const newGameKey = getGameFeedDedupeKey(newPost)
+        if (newGameKey) {
+          const dupIdx = prev.findIndex((p) => getGameFeedDedupeKey(p) === newGameKey)
+          if (dupIdx >= 0) {
+            const merged = mergeGoFishFeedPostData(prev[dupIdx], newPost)
+            if (merged !== prev[dupIdx]) {
+              const next = [...prev]
+              next[dupIdx] = merged
+              return next
+            }
+            console.log('⚠️ [HomePage] Same chess/card game already in feed, skipping:', newGameKey)
+            return prev
+          }
         }
         
         // Get the author ID of the new post
@@ -291,7 +305,7 @@ const HomePage = () => {
         }
 
         const myId = user?._id?.toString?.()
-        const isGamePost = !!(newPost?.chessGameData || newPost?.cardGameData)
+        const isGamePost = !!(newPost?.chessGameData || isGoFishFeedPost(newPost))
         const contributors = newPost?.contributors
         const hasOtherContributor =
           !!newPost?.isCollaborative &&
