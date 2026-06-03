@@ -17,7 +17,6 @@ import { PhoneIcon } from '@chakra-ui/icons';
 import { RoomEvent, Track } from 'livekit-client';
 import { useLiveKit } from '../context/LiveKitContext';
 import ScreenShareViewer from './ScreenShareViewer';
-import DraggableCallPip from './DraggableCallPip';
 import CallVideoFrame from './CallVideoFrame';
 
 // ── small helpers ────────────────────────────────────────────────────────────
@@ -222,7 +221,13 @@ const ActiveCallScreen = () => {
   const remoteCamera = findRemoteCamera(remoteTracks);
   const activeScreen = remoteScreen || null;
   const isVideoCall = callType !== 'audio';
-  const localCamSid = localCamTrack?.sid ?? '';
+  // Fallback: publication sync can lag; localTracks from context often has the cam first.
+  const localCamFromList = localTracks.find((t) => {
+    if (t?.kind !== 'video') return false;
+    return !isScreenSource(t?.source);
+  });
+  const effectiveLocalCam = localCamTrack || localCamFromList || null;
+  const localCamSid = effectiveLocalCam?.sid ?? '';
   /** Remote full-screen; local is a small corner pip (same as mobile). */
   const showMainRemote = isVideoCall && !activeScreen && !isSharing && !!remoteCamera?.track;
   // When a remote screen share is active we show BOTH cameras in a fixed row
@@ -259,6 +264,17 @@ const ActiveCallScreen = () => {
       clearInterval(poll);
     };
   }, [room, callAccepted, isCamOff]);
+
+  // Keep local camera published for video calls (fixes "Camera…" with no self view).
+  useEffect(() => {
+    if (!callAccepted || callType === 'audio' || isCamOff) return;
+    const roomObj = room?.current;
+    if (!roomObj?.localParticipant) return;
+    void roomObj.localParticipant.setCameraEnabled(true).then(() => {
+      const pub = roomObj.localParticipant.getTrackPublication(Track.Source.Camera);
+      if (pub?.track) setLocalCamTrack(pub.track);
+    });
+  }, [room, callAccepted, callType, isCamOff]);
 
   useEffect(() => {
     if (!remoteAudio?.track) return;
@@ -455,8 +471,8 @@ const ActiveCallScreen = () => {
               </Box>
               <Box {...pipBoxProps} position="relative" w="160px" h="120px">
                 <CameraTileLabel>You</CameraTileLabel>
-                {localCamTrack && !isCamOff ? (
-                  <CallVideoFrame track={localCamTrack} trackKey={`share-l-${localCamSid}`} muted />
+                {effectiveLocalCam && !isCamOff ? (
+                  <CallVideoFrame track={effectiveLocalCam} trackKey={`share-l-${localCamSid}`} muted />
                 ) : (
                   <Flex h="100%" align="center" justify="center"><Text color="gray.500" fontSize="xs">{isCamOff ? 'Cam off' : 'Camera…'}</Text></Flex>
                 )}
@@ -487,8 +503,8 @@ const ActiveCallScreen = () => {
               </Box>
               <Box {...pipBoxProps} position="relative" w="150px" h="110px">
                 <CameraTileLabel>You</CameraTileLabel>
-                {localCamTrack && !isCamOff ? (
-                  <CallVideoFrame track={localCamTrack} trackKey={`vs-l-${localCamSid}`} muted />
+                {effectiveLocalCam && !isCamOff ? (
+                  <CallVideoFrame track={effectiveLocalCam} trackKey={`vs-l-${localCamSid}`} muted />
                 ) : (
                   <Flex h="100%" align="center" justify="center"><Text color="gray.500" fontSize="xs">{isCamOff ? 'Cam off' : 'Camera…'}</Text></Flex>
                 )}
@@ -512,17 +528,29 @@ const ActiveCallScreen = () => {
         {/* Self-PiP over the remote camera (non-sharing view). Cameras during a
             remote share are handled by the fixed row in the activeScreen branch. */}
         {showLocalPip && (
-          <DraggableCallPip label="You" defaultRight={16} defaultBottom={118} width={128} height={96}>
-            <Box {...pipBoxProps}>
-              {localCamTrack ? (
-                <CallVideoFrame track={localCamTrack} trackKey={`pip-local-${localCamSid}`} muted />
-              ) : (
-                <Flex h="100%" align="center" justify="center">
-                  <Text color="gray.500" fontSize="xs">{isCamOff ? 'Cam off' : 'Camera…'}</Text>
-                </Flex>
-              )}
-            </Box>
-          </DraggableCallPip>
+          <Box
+            position="absolute"
+            right={4}
+            bottom="118px"
+            w="140px"
+            h="105px"
+            zIndex={25}
+            borderRadius="xl"
+            overflow="hidden"
+            border="2px solid"
+            borderColor="whiteAlpha.500"
+            boxShadow="0 6px 20px rgba(0,0,0,0.5)"
+            bg="black"
+          >
+            <CameraTileLabel>You</CameraTileLabel>
+            {effectiveLocalCam ? (
+              <CallVideoFrame track={effectiveLocalCam} trackKey={`pip-local-${localCamSid}`} muted />
+            ) : (
+              <Flex h="100%" align="center" justify="center">
+                <Text color="gray.500" fontSize="xs">{isCamOff ? 'Cam off' : 'Camera…'}</Text>
+              </Flex>
+            )}
+          </Box>
         )}
       </Flex>
 

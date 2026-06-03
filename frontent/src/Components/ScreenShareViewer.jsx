@@ -6,8 +6,8 @@ import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { Box, Text, IconButton, HStack, Badge } from '@chakra-ui/react';
 
 const ZOOM_MIN = 1;
-const ZOOM_MAX = 3;
-const ZOOM_STEP = 0.25;
+const ZOOM_MAX = 2;
+const ZOOM_STEP = 0.12;
 
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 
@@ -161,19 +161,23 @@ const ScreenShareViewer = ({
 
   const onPointerUp = useCallback(() => { dragRef.current = null; }, []);
 
-  const canScroll = zoom > 1 && vpSize.w > 0 && vpSize.h > 0;
-  const contentW = canScroll ? vpSize.w * zoom : '100%';
-  const contentH = canScroll ? vpSize.h * zoom : '100%';
-  const zoomLabel = `${Math.round(zoom * 100)}%`;
-
   const fitBox = useMemo(() => {
-    if (canScroll || !vpSize.w || !vpSize.h || !videoSize.w || !videoSize.h) return null;
+    if (!vpSize.w || !vpSize.h || !videoSize.w || !videoSize.h) return null;
     const scale = Math.min(vpSize.w / videoSize.w, vpSize.h / videoSize.h);
     return {
       w: Math.max(1, Math.round(videoSize.w * scale)),
       h: Math.max(1, Math.round(videoSize.h * scale)),
     };
-  }, [canScroll, vpSize.w, vpSize.h, videoSize.w, videoSize.h]);
+  }, [vpSize.w, vpSize.h, videoSize.w, videoSize.h]);
+
+  // Zoom scales the letterboxed video size, not the whole viewport (avoids
+  // huge empty margins and "very zoomed" jumps on portrait phone shares).
+  const baseW = fitBox?.w ?? vpSize.w;
+  const baseH = fitBox?.h ?? vpSize.h;
+  const canScroll = zoom > 1 && baseW > 0 && baseH > 0;
+  const contentW = canScroll ? Math.round(baseW * zoom) : (fitBox ? `${fitBox.w}px` : '100%');
+  const contentH = canScroll ? Math.round(baseH * zoom) : (fitBox ? `${fitBox.h}px` : '100%');
+  const zoomLabel = `${Math.round(zoom * 100)}%`;
 
   return (
     <Box
@@ -214,8 +218,8 @@ const ScreenShareViewer = ({
         }}
       >
         <Box
-          w={canScroll ? contentW : (fitBox ? `${fitBox.w}px` : '100%')}
-          h={canScroll ? contentH : (fitBox ? `${fitBox.h}px` : '100%')}
+          w={typeof contentW === 'number' ? `${contentW}px` : contentW}
+          h={typeof contentH === 'number' ? `${contentH}px` : contentH}
           // Only clamp to the viewport in fit mode. When zoomed (canScroll) the
           // content MUST be allowed to exceed the viewport so it can scroll —
           // clamping here previously cancelled the zoom and blanked the view.
@@ -246,14 +250,14 @@ const ScreenShareViewer = ({
       </Badge>
 
       {canScroll && (
-        <Badge position="absolute" top={3} right={3} bg="blackAlpha.700" borderRadius="full" px={2} py={1} zIndex={2}>
-          Scroll sideways / up-down to see hidden parts
+        <Badge position="absolute" top={10} right={3} bg="blackAlpha.700" borderRadius="full" px={2} py={1} zIndex={2} maxW="55%">
+          <Text fontSize="10px">Drag or scroll to pan</Text>
         </Badge>
       )}
 
       <HStack
         position="absolute"
-        bottom={controlsBottom}
+        top={10}
         right={3}
         spacing={1}
         bg="blackAlpha.700"
