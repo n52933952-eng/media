@@ -213,6 +213,7 @@ const ActiveCallScreen = () => {
   const [isMuted, setIsMuted] = useState(false);
   const [isCamOff, setIsCamOff] = useState(callType === 'audio');
   const [isSharing, setIsSharing] = useState(false);
+  const [localCamTrack, setLocalCamTrack] = useState(null);
 
   const remoteScreen = remoteTracks.find((t) => {
     const src = t.source ?? t.track?.source;
@@ -221,15 +222,13 @@ const ActiveCallScreen = () => {
   const remoteCamera = findRemoteCamera(remoteTracks);
   const activeScreen = remoteScreen || null;
   const isVideoCall = callType !== 'audio';
+  const localCamSid = localCamTrack?.sid ?? '';
   /** Remote full-screen; local is a small corner pip (same as mobile). */
   const showMainRemote = isVideoCall && !activeScreen && !isSharing && !!remoteCamera?.track;
   const showCameraPips = isVideoCall && (activeScreen || isSharing);
   const showLocalPip = isVideoCall && !activeScreen && !isSharing && !!localCamTrack && !isCamOff;
   const remoteCamSid = remoteCamera?.track?.sid ?? '';
   const remoteAudio = remoteTracks.find((t) => t.track?.kind === 'audio');
-
-  const [localCamTrack, setLocalCamTrack] = useState(null);
-  const localCamSid = localCamTrack?.sid ?? '';
 
   const remoteAudioElRef = useRef(null);
 
@@ -325,21 +324,6 @@ const ActiveCallScreen = () => {
         setTimeout(syncLocalCamFromRoom, 120);
         setTimeout(syncLocalCamFromRoom, 450);
       }
-      setRemoteTracks((prev) => {
-        const nextRemote = [];
-        roomObj.remoteParticipants.forEach((participant) => {
-          participant.trackPublications.forEach((pub) => {
-            if (pub.track) {
-              nextRemote.push({
-                track: pub.track,
-                participantId: participant.identity,
-                source: pub.source || pub.track?.source,
-              });
-            }
-          });
-        });
-        return nextRemote.length > 0 ? nextRemote : prev;
-      });
     } catch (_) {
       setIsSharing(false);
     }
