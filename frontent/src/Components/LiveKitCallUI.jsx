@@ -298,6 +298,13 @@ const ActiveCallScreen = () => {
     } catch (_) {}
   };
 
+  const syncLocalCamFromRoom = () => {
+    const roomObj = room?.current;
+    if (!roomObj?.localParticipant) return;
+    const pub = roomObj.localParticipant.getTrackPublication(Track.Source.Camera);
+    setLocalCamTrack(pub?.track ?? null);
+  };
+
   // Screen share — on desktop the browser shows the native "Entire screen / Window / Tab" picker.
   const handleToggleShare = async () => {
     const roomObj = room?.current;
@@ -306,8 +313,14 @@ const ActiveCallScreen = () => {
     try {
       await roomObj.localParticipant.setScreenShareEnabled(next);
       setIsSharing(next);
+      if (!next && !isCamOff) {
+        await roomObj.localParticipant.setCameraEnabled(true);
+        syncLocalCamFromRoom();
+        requestAnimationFrame(syncLocalCamFromRoom);
+        setTimeout(syncLocalCamFromRoom, 120);
+        setTimeout(syncLocalCamFromRoom, 450);
+      }
     } catch (_) {
-      // User cancelled the browser picker, or it failed.
       setIsSharing(false);
     }
   };
@@ -316,12 +329,37 @@ const ActiveCallScreen = () => {
   useEffect(() => {
     const roomObj = room?.current;
     if (!roomObj) return;
-    const onUnpub = (pub) => {
-      if (pub?.source === 'screen_share') setIsSharing(false);
+    const onUnpub = async (pub) => {
+      if (pub?.source !== 'screen_share' && pub?.source !== Track.Source.ScreenShare) return;
+      setIsSharing(false);
+      if (!isCamOff) {
+        try {
+          await roomObj.localParticipant.setCameraEnabled(true);
+          syncLocalCamFromRoom();
+          setTimeout(syncLocalCamFromRoom, 120);
+          setTimeout(syncLocalCamFromRoom, 450);
+        } catch (_) {}
+      }
     };
     roomObj.on(RoomEvent.LocalTrackUnpublished, onUnpub);
     return () => { try { roomObj.off(RoomEvent.LocalTrackUnpublished, onUnpub); } catch (_) {} };
-  }, [room, callAccepted]);
+  }, [room, callAccepted, isCamOff]);
+
+  /** After screen share ends, re-enable camera if UI still shows "Starting your camera…". */
+  useEffect(() => {
+    if (isSharing || isCamOff || !callAccepted) return;
+    const roomObj = room?.current;
+    if (!roomObj?.localParticipant) return;
+    if (localCamTrack) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        await roomObj.localParticipant.setCameraEnabled(true);
+        if (!cancelled) syncLocalCamFromRoom();
+      } catch (_) {}
+    })();
+    return () => { cancelled = true; };
+  }, [isSharing, isCamOff, callAccepted, room, localCamTrack]);
 
   return (
     <Box
