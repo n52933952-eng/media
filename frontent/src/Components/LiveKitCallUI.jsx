@@ -225,8 +225,12 @@ const ActiveCallScreen = () => {
   const localCamSid = localCamTrack?.sid ?? '';
   /** Remote full-screen; local is a small corner pip (same as mobile). */
   const showMainRemote = isVideoCall && !activeScreen && !isSharing && !!remoteCamera?.track;
-  const showCameraPips = isVideoCall && activeScreen;
-  const showLocalPip = isVideoCall && !activeScreen && !isSharing && !!localCamTrack && !isCamOff;
+  // When a remote screen share is active we show BOTH cameras in a fixed row
+  // under the share (see activeScreen branch) instead of draggable pips.
+  // Render the self-PiP whenever it's a video call with the camera on — don't
+  // gate on localCamTrack being resolved, or the PiP never appears if the track
+  // object lands a beat late (this is why "my camera" was missing on screen 1).
+  const showLocalPip = isVideoCall && !activeScreen && !isSharing && !isCamOff;
   const remoteCamSid = remoteCamera?.track?.sid ?? '';
   const remoteAudio = remoteTracks.find((t) => t.track?.kind === 'audio');
 
@@ -246,9 +250,13 @@ const ActiveCallScreen = () => {
     syncLocalCam();
     roomObj.on(RoomEvent.LocalTrackPublished, syncLocalCam);
     roomObj.on(RoomEvent.LocalTrackUnpublished, syncLocalCam);
+    // Poll as a safety net — the publish event can fire before the track object
+    // is attached, leaving the self-PiP empty on the first call screen.
+    const poll = setInterval(syncLocalCam, 700);
     return () => {
       roomObj.off(RoomEvent.LocalTrackPublished, syncLocalCam);
       roomObj.off(RoomEvent.LocalTrackUnpublished, syncLocalCam);
+      clearInterval(poll);
     };
   }, [room, callAccepted, isCamOff]);
 
@@ -456,16 +464,36 @@ const ActiveCallScreen = () => {
             </HStack>
           </Flex>
         ) : activeScreen ? (
-          <Flex flex={1} align="center" justify="center" minH={0} px={4}>
-            <Box w="100%" maxW="400px" h="100%" maxH="72vh" minH="240px">
+          <Flex flex={1} direction="column" minH={0} gap={3}>
+            {/* Shared screen fills the stage; viewer letterboxes any aspect. */}
+            <Box flex={1} minH={0} w="100%">
               <ScreenShareViewer
                 track={activeScreen.track}
                 name={callPartner?.name || 'User'}
-                controlsBottom="108px"
+                controlsBottom="16px"
                 flex={1}
                 minH="100%"
               />
             </Box>
+            {/* Both cameras as a fixed row under the share (mirrors mobile). */}
+            <HStack spacing={3} justify="center" pb={1}>
+              <Box {...pipBoxProps} position="relative" w="150px" h="110px">
+                <CameraTileLabel>{callPartner?.name || 'User'}</CameraTileLabel>
+                {remoteCamera?.track ? (
+                  <CallVideoFrame track={remoteCamera.track} trackKey={`vs-r-${remoteCamSid}`} />
+                ) : (
+                  <Flex h="100%" align="center" justify="center"><Text color="gray.500" fontSize="xs">Waiting…</Text></Flex>
+                )}
+              </Box>
+              <Box {...pipBoxProps} position="relative" w="150px" h="110px">
+                <CameraTileLabel>You</CameraTileLabel>
+                {localCamTrack && !isCamOff ? (
+                  <CallVideoFrame track={localCamTrack} trackKey={`vs-l-${localCamSid}`} muted />
+                ) : (
+                  <Flex h="100%" align="center" justify="center"><Text color="gray.500" fontSize="xs">{isCamOff ? 'Cam off' : 'Camera…'}</Text></Flex>
+                )}
+              </Box>
+            </HStack>
           </Flex>
         ) : showMainRemote ? (
           <Box flex={1} position="relative" minH={0} bg="black">
@@ -481,21 +509,9 @@ const ActiveCallScreen = () => {
             </VStack>
           </Flex>
         )}
-        {showCameraPips && remoteCamera?.track && (
-          <DraggableCallPip
-            label={callPartner?.name || 'User'}
-            defaultRight={168}
-            defaultBottom={118}
-            width={128}
-            height={96}
-          >
-            <Box {...pipBoxProps}>
-              <CallVideoFrame track={remoteCamera.track} trackKey={`pip-remote-${remoteCamSid}`} />
-            </Box>
-          </DraggableCallPip>
-        )}
-
-        {(showCameraPips || showLocalPip) && (
+        {/* Self-PiP over the remote camera (non-sharing view). Cameras during a
+            remote share are handled by the fixed row in the activeScreen branch. */}
+        {showLocalPip && (
           <DraggableCallPip label="You" defaultRight={16} defaultBottom={118} width={128} height={96}>
             <Box {...pipBoxProps}>
               {localCamTrack ? (

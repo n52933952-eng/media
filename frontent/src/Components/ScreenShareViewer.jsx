@@ -28,7 +28,10 @@ const ScreenShareViewer = ({
   const [videoSize, setVideoSize] = useState({ w: 0, h: 0 });
   const [isFullscreen, setIsFullscreen] = useState(false);
 
-  // Attach whenever track or the video element is ready (layout can mount video after first paint).
+  // Attach ONLY when the track changes — never on zoom/resize/fullscreen.
+  // Re-attaching on vpSize changes (which zoom triggers via scrollbar width)
+  // detached the track mid-zoom and left the share black. The <video> element
+  // is always mounted, so a single attach per track is enough.
   useEffect(() => {
     const el = videoRef.current;
     if (!track || !el) return undefined;
@@ -37,7 +40,21 @@ const ScreenShareViewer = ({
       try { track.detach(el); } catch (_) {}
       if (el) el.srcObject = null;
     };
-  }, [track, vpSize.w, vpSize.h, isFullscreen]);
+  }, [track]);
+
+  // Self-heal: if the video ever loses its source (e.g. browser drops it after
+  // a layout change), re-attach without tearing down. Keeps zoom from blanking.
+  useEffect(() => {
+    if (!track) return undefined;
+    const ensureAttached = () => {
+      const el = videoRef.current;
+      if (el && !el.srcObject) {
+        try { track.attach(el); } catch (_) {}
+      }
+    };
+    const id = setInterval(ensureAttached, 500);
+    return () => clearInterval(id);
+  }, [track]);
 
   // Portrait phone shares need explicit letterbox sizing (100%×100% can crop on some browsers).
   useEffect(() => {
@@ -199,8 +216,11 @@ const ScreenShareViewer = ({
         <Box
           w={canScroll ? contentW : (fitBox ? `${fitBox.w}px` : '100%')}
           h={canScroll ? contentH : (fitBox ? `${fitBox.h}px` : '100%')}
-          maxW="100%"
-          maxH="100%"
+          // Only clamp to the viewport in fit mode. When zoomed (canScroll) the
+          // content MUST be allowed to exceed the viewport so it can scroll —
+          // clamping here previously cancelled the zoom and blanked the view.
+          maxW={canScroll ? 'none' : '100%'}
+          maxH={canScroll ? 'none' : '100%'}
           position="relative"
           flexShrink={0}
         >
