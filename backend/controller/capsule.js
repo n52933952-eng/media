@@ -2,7 +2,7 @@ import Capsule from '../models/capsule.js'
 import Post from '../models/post.js'
 import Notification from '../models/notification.js'
 import { getIO, getRecipientSockedId } from '../socket/socket.js'
-import { isGoFishFeedPost } from '../utils/gameFeedPostUtils.js'
+import { isChessFeedPost, isGoFishFeedPost } from '../utils/gameFeedPostUtils.js'
 
 const CAPSULE_RETENTION_MS = Number(process.env.CAPSULE_RETENTION_MS || (14 * 24 * 60 * 60 * 1000))
 const DURATIONS = {
@@ -34,8 +34,7 @@ export const sealCapsule = async (req, res) => {
     const isNormalFeedPost = !(
       post?.footballData ||
       post?.weatherData ||
-      post?.chessGameData ||
-      post?.cardGameData ||
+      isChessFeedPost(post) ||
       isGoFishFeedPost(post) ||
       post?.raceGameData ||
       post?.isMatchReaction ||

@@ -17,7 +17,8 @@ import { dedupeGamePostsForFeed } from '../utils/dedupeGameFeedPosts.js'
 import {
   getGameFeedDedupeKey,
   isGoFishFeedPost,
-  mergeGoFishFeedPostData,
+  mergeGameFeedPostData,
+  isChessFeedPost,
 } from '../utils/gameFeedPostUtils.js'
 
 
@@ -285,7 +286,7 @@ const HomePage = () => {
         if (newGameKey) {
           const dupIdx = prev.findIndex((p) => getGameFeedDedupeKey(p) === newGameKey)
           if (dupIdx >= 0) {
-            const merged = mergeGoFishFeedPostData(prev[dupIdx], newPost)
+            const merged = mergeGameFeedPostData(prev[dupIdx], newPost)
             if (merged !== prev[dupIdx]) {
               const next = [...prev]
               next[dupIdx] = merged
@@ -305,7 +306,7 @@ const HomePage = () => {
         }
 
         const myId = user?._id?.toString?.()
-        const isGamePost = !!(newPost?.chessGameData || isGoFishFeedPost(newPost))
+        const isGamePost = isChessFeedPost(newPost) || isGoFishFeedPost(newPost)
         const contributors = newPost?.contributors
         const hasOtherContributor =
           !!newPost?.isCollaborative &&

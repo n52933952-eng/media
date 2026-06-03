@@ -8,7 +8,7 @@ import { Readable } from 'stream'
 import { getIO, getUserSocket, getAllUserSockets } from '../socket/socket.js'
 import { dedupeGamePostsForFeed } from '../utils/dedupeGameFeedPosts.js'
 import { enrichGoFishPostsForFeed } from '../utils/enrichGoFishFeedPosts.js'
-import { normalizeCardGamePlayers } from '../utils/gameFeedPostUtils.js'
+import { normalizeGamePlayers } from '../utils/gameFeedPostUtils.js'
 
 const CLOUDINARY_UPLOAD_QUALITY = (process.env.CLOUDINARY_UPLOAD_QUALITY || 'auto:eco').trim()
 
@@ -1390,8 +1390,8 @@ export const createChessGamePost = async (player1Id, player2Id, roomId) => {
             return null
         }
         
-        // Create chess game data
-        const chessGameData = {
+        // Stable player order (sorted ids) so feed avatars never swap between the two posts
+        const chessGameData = normalizeGamePlayers({
             player1: {
                 _id: player1._id.toString(),
                 username: player1.username,
@@ -1407,7 +1407,7 @@ export const createChessGamePost = async (player1Id, player2Id, roomId) => {
             roomId: roomId,
             gameStatus: 'active', // active, ended, canceled
             createdAt: new Date()
-        }
+        })
         
         // Create posts for both players (so followers of either see it)
         const posts = []
@@ -1553,7 +1553,7 @@ export const createCardGamePost = async (player1Id, player2Id, roomId) => {
         }
         
         // Create card game data (player order by id so feed avatars never swap between the two posts)
-        const cardGameData = normalizeCardGamePlayers({
+        const cardGameData = normalizeGamePlayers({
             player1: {
                 _id: player1._id.toString(),
                 username: player1.username,

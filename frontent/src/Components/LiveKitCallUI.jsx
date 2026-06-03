@@ -189,9 +189,11 @@ const ActiveCallScreen = () => {
 
   const isScreen     = (t) => t?.source === 'screen_share' || t?.track?.source === 'screen_share';
   const remoteScreen = remoteTracks.find(t => t.track.kind === 'video' && isScreen(t));
+  const localScreen  = localTracks.find(t => t.kind === 'video' && isScreen(t));
   const remoteCamera = remoteTracks.find(t => t.track.kind === 'video' && !isScreen(t));
-  // When the other side shares their screen, that becomes the big view (Google Meet style).
-  const remoteVideo  = remoteScreen || remoteCamera;
+  // Remote share first; when you present, your screen is the big view (same as group call).
+  const activeScreen = remoteScreen || (isSharing ? localScreen : null);
+  const remoteVideo  = activeScreen || remoteCamera;
   const remoteAudio  = remoteTracks.find(t => t.track.kind === 'audio');
   const localVideo   = localTracks.find(t => t.kind   === 'video');
   const remoteVideoRef = useRef(null);
@@ -200,25 +202,25 @@ const ActiveCallScreen = () => {
   const remoteAudioElRef = useRef(null);
 
   useEffect(() => {
-    if (remoteScreen || !remoteCamera?.track || !remoteVideoRef.current) return;
+    if (activeScreen || !remoteCamera?.track || !remoteVideoRef.current) return;
     const el = remoteVideoRef.current;
     try { remoteCamera.track.attach(el); } catch (_) {}
     return () => {
       try { remoteCamera.track.detach(el); } catch (_) {}
       if (el) el.srcObject = null;
     };
-  }, [remoteScreen, remoteCamera]);
+  }, [activeScreen, remoteCamera]);
 
-  // While they present, keep showing their camera in a small thumbnail too.
+  // While someone presents, keep their camera in a small thumbnail.
   useEffect(() => {
-    if (!remoteScreen || !remoteCamera?.track || !remoteCamPipRef.current) return;
+    if (!activeScreen || !remoteCamera?.track || !remoteCamPipRef.current) return;
     const el = remoteCamPipRef.current;
     try { remoteCamera.track.attach(el); } catch (_) {}
     return () => {
       try { remoteCamera.track.detach(el); } catch (_) {}
       if (el) el.srcObject = null;
     };
-  }, [remoteScreen, remoteCamera]);
+  }, [activeScreen, remoteCamera]);
 
   useEffect(() => {
     if (!localVideo || !localVideoRef.current) return;
@@ -345,21 +347,23 @@ const ActiveCallScreen = () => {
         py={{ base: 2, md: 4 }}
       >
         {remoteVideo ? (
-          remoteScreen ? (
+          activeScreen ? (
             <Box
               position="relative"
               w="100%"
               h="100%"
               maxW="1100px"
-              maxH="calc(100vh - 170px)"
+              maxH="calc(100vh - 200px)"
               alignSelf="stretch"
+              flex={1}
+              minH={0}
             >
               <ScreenShareViewer
-                track={remoteScreen.track}
-                name={callPartner?.name || 'User'}
+                track={activeScreen.track}
+                name={remoteScreen ? (callPartner?.name || 'User') : 'You'}
                 flex="1"
-                minH="calc(100vh - 170px)"
-                controlsBottom="92px"
+                minH="calc(100vh - 200px)"
+                controlsBottom="108px"
               />
             </Box>
           ) : (
@@ -394,11 +398,11 @@ const ActiveCallScreen = () => {
           </VStack>
         )}
         {/* Remote camera thumbnail (while they present their screen) */}
-        {remoteScreen && remoteCamera && (
+        {(remoteScreen || (isSharing && localScreen)) && remoteCamera && (
           <Box
             position="absolute"
-            bottom={{ base: 100, md: 34 }}
-            right={{ base: '124px', md: '162px' }}
+            bottom={{ base: 118, md: 42 }}
+            right={{ base: '132px', md: '172px' }}
             w={{ base: '108px', md: '142px' }}
             h={{ base: '80px', md: '106px' }}
             borderRadius="xl"
@@ -422,7 +426,7 @@ const ActiveCallScreen = () => {
         {localVideo && callType !== 'audio' && (
           <Box
             position="absolute"
-            bottom={{ base: 100, md: 34 }}
+            bottom={{ base: 118, md: 42 }}
             right={{ base: 3, md: 5 }}
             w={{ base: '108px', md: '142px' }}
             h={{ base: '80px', md: '106px' }}
@@ -447,19 +451,22 @@ const ActiveCallScreen = () => {
 
       {/* Controls */}
       <HStack
-        spacing={6}
-        p={5}
+        spacing={{ base: 5, md: 8 }}
+        gap={{ base: 3, md: 5 }}
+        px={{ base: 4, md: 8 }}
+        py={6}
         justifyContent="center"
+        flexWrap="wrap"
         bg="blackAlpha.550"
         borderTop="1px solid"
         borderColor="whiteAlpha.200"
       >
-        <VStack spacing={1}>
+        <VStack spacing={1} minW="64px" align="center">
           <IconButton
             icon={<MicIcon muted={isMuted} />}
             colorScheme={isMuted ? 'red' : 'gray'}
             borderRadius="full"
-            size="md"
+            size="lg"
             onClick={handleToggleMute}
             aria-label={isMuted ? 'Unmute' : 'Mute'}
           />
@@ -467,12 +474,12 @@ const ActiveCallScreen = () => {
         </VStack>
 
         {callType !== 'audio' && (
-          <VStack spacing={1}>
+          <VStack spacing={1} minW="64px" align="center">
             <IconButton
               icon={<CamIcon off={isCamOff} />}
               colorScheme={isCamOff ? 'red' : 'gray'}
               borderRadius="full"
-              size="md"
+              size="lg"
               onClick={handleToggleCam}
               aria-label={isCamOff ? 'Turn camera on' : 'Turn camera off'}
             />
@@ -480,19 +487,19 @@ const ActiveCallScreen = () => {
           </VStack>
         )}
 
-        <VStack spacing={1}>
+        <VStack spacing={1} minW="64px" align="center">
           <IconButton
             icon={<ShareIcon on={isSharing} />}
             colorScheme={isSharing ? 'teal' : 'gray'}
             borderRadius="full"
-            size="md"
+            size="lg"
             onClick={handleToggleShare}
             aria-label={isSharing ? 'Stop sharing' : 'Share screen'}
           />
           <Text color="gray.400" fontSize="xs">{isSharing ? 'Stop' : 'Share'}</Text>
         </VStack>
 
-        <VStack spacing={1}>
+        <VStack spacing={1} minW="64px" align="center">
           <IconButton
             icon={<HangupIcon />}
             colorScheme="red"

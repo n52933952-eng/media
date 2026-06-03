@@ -16,7 +16,12 @@ import EditPost from './EditPost'
 import FootballIcon from './FootballIcon'
 import FootballMatchCards from './FootballMatchCards'
 import { normalizeDbMatchForFootballFeed, isFootballMatchLive } from '../utils/footballFeed'
-import { isGoFishFeedPost, getCardGameDataForPost } from '../utils/gameFeedPostUtils.js'
+import {
+  isGoFishFeedPost,
+  isChessFeedPost,
+  getCardGameDataForPost,
+  getChessGameDataForPost,
+} from '../utils/gameFeedPostUtils.js'
 
 const apiBaseUrl = () => (import.meta.env.PROD ? window.location.origin : 'http://localhost:5000')
 const CLOUDINARY_DELIVERY_QUALITY = (import.meta.env.VITE_CLOUDINARY_DELIVERY_QUALITY || 'eco').trim()
@@ -156,7 +161,7 @@ const showToast = useShowToast()
   const isWeatherOnboarding = post?.weatherOnboarding === true
   
   // Check if this is a Chess game post
-  const isChessPost = post?.chessGameData
+  const isChessPost = isChessFeedPost(post)
   const isCardPost = isGoFishFeedPost(post)
   
   // Hide entire chess post immediately if user canceled their game (local state only)
@@ -708,15 +713,7 @@ const showToast = useShowToast()
     }
   }, [isFootballPost, fetchFootballLiveMatches])
   
-  let chessGameData = null
-  if (isChessPost) {
-    try {
-      chessGameData = JSON.parse(post.chessGameData)
-    } catch (e) {
-      console.error('Failed to parse chess game data:', e)
-    }
-  }
-
+  const chessGameData = isChessPost ? getChessGameDataForPost(post) : null
   const cardGameData = isCardPost ? getCardGameDataForPost(post) : null
 
   const resolveGameOpponentId = (player1Id, player2Id) => {

@@ -1,9 +1,8 @@
 /**
  * One feed card per chess/card game (same roomId) when viewer follows both players.
- * Go Fish text-only posts dedupe by sorted player display names when roomId is absent.
  */
 
-import { getGameFeedDedupeKey, mergeGoFishFeedPostData } from './gameFeedPostUtils.js'
+import { getGameFeedDedupeKey, mergeGameFeedPostData } from './gameFeedPostUtils.js'
 
 export { getGameRoomIdFromPost } from './gameFeedPostUtils.js'
 
@@ -23,7 +22,7 @@ export function dedupeGamePostsForFeed(posts) {
       out.push(post)
       continue
     }
-    out[idx] = mergeGoFishFeedPostData(out[idx], post)
+    out[idx] = mergeGameFeedPostData(out[idx], post)
   }
   return out
 }

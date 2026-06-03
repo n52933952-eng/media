@@ -3,7 +3,7 @@ import * as redisService from '../services/redis.js'
 import {
   isGoFishFeedPost,
   parseCardGameDataRaw,
-  normalizeCardGamePlayers,
+  normalizeGamePlayers,
 } from './gameFeedPostUtils.js'
 
 /** Attach cardGameData from Redis for legacy Go Fish posts that only have text. */
@@ -71,7 +71,7 @@ export async function enrichGoFishPostsForFeed(posts) {
       /* ignore */
     }
     post.cardGameData = JSON.stringify(
-      normalizeCardGamePlayers({
+      normalizeGamePlayers({
         roomId,
         player1: {
           _id: p1id,
