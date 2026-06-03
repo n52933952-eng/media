@@ -221,9 +221,10 @@ const ActiveCallScreen = () => {
   const remoteCamera = findRemoteCamera(remoteTracks);
   const activeScreen = remoteScreen || null;
   const isVideoCall = callType !== 'audio';
-  /** Side-by-side cameras when not presenting (always show you + them). */
-  const showDualCameras = isVideoCall && !activeScreen && !isSharing;
+  /** Remote full-screen; local is a small corner pip (same as mobile). */
+  const showMainRemote = isVideoCall && !activeScreen && !isSharing && !!remoteCamera?.track;
   const showCameraPips = isVideoCall && (activeScreen || isSharing);
+  const showLocalPip = isVideoCall && !activeScreen && !isSharing && !!localCamTrack && !isCamOff;
   const remoteCamSid = remoteCamera?.track?.sid ?? '';
   const remoteAudio = remoteTracks.find((t) => t.track?.kind === 'audio');
 
@@ -317,7 +318,7 @@ const ActiveCallScreen = () => {
     try {
       await roomObj.localParticipant.setScreenShareEnabled(next);
       setIsSharing(next);
-      if (!next && !isCamOff) {
+      if (!isCamOff) {
         await roomObj.localParticipant.setCameraEnabled(true);
         syncLocalCamFromRoom();
         requestAnimationFrame(syncLocalCamFromRoom);
@@ -380,6 +381,29 @@ const ActiveCallScreen = () => {
     return () => { cancelled = true; };
   }, [isSharing, isCamOff, callAccepted, room, localCamTrack]);
 
+  useEffect(() => {
+    const onVis = () => {
+      if (document.visibilityState !== 'visible' || !callAccepted) return;
+      const roomObj = room?.current;
+      if (!roomObj?.localParticipant) return;
+      if (!isCamOff) {
+        void roomObj.localParticipant.setCameraEnabled(true).then(syncLocalCamFromRoom);
+      }
+    };
+    document.addEventListener('visibilitychange', onVis);
+    return () => document.removeEventListener('visibilitychange', onVis);
+  }, [room, callAccepted, isCamOff]);
+
+  const pipBoxProps = {
+    w: '128px',
+    h: '96px',
+    borderRadius: 'xl',
+    overflow: 'hidden',
+    border: '1px solid',
+    borderColor: 'whiteAlpha.400',
+    bg: 'black',
+  };
+
   return (
     <Box
       position="fixed" top={0} left={0} right={0} bottom={0}
@@ -428,70 +452,22 @@ const ActiveCallScreen = () => {
             </VStack>
           </Flex>
         ) : activeScreen ? (
-          <ScreenShareViewer
-            track={activeScreen.track}
-            name={callPartner?.name || 'User'}
-            controlsBottom="108px"
-          />
-        ) : showDualCameras ? (
-          <Flex
-            flex={1}
-            direction={{ base: 'column', md: 'row' }}
-            gap={3}
-            px={{ base: 2, md: 4 }}
-            py={2}
-            minH={0}
-            w="100%"
-            maxW="1200px"
-            alignSelf="center"
-          >
-            <Box
-              flex={1}
-              minH={{ base: '220px', md: 0 }}
-              minW={0}
-              position="relative"
-              borderRadius="xl"
-              overflow="hidden"
-              border="1px solid"
-              borderColor="whiteAlpha.300"
-              bg="black"
-            >
-              <CameraTileLabel>{callPartner?.name || 'User'}</CameraTileLabel>
-              {remoteCamera?.track ? (
-                <CallVideoFrame track={remoteCamera.track} trackKey={`remote-${remoteCamSid}`} />
-              ) : (
-                <Flex h="100%" align="center" justify="center" minH="200px">
-                  <VStack>
-                    <Avatar src={callPartner?.profilePic} name={callPartner?.name} size="lg" />
-                    <Text color="gray.400" fontSize="sm">Waiting for their camera…</Text>
-                  </VStack>
-                </Flex>
-              )}
-            </Box>
-            <Box
-              flex={1}
-              minH={{ base: '220px', md: 0 }}
-              minW={0}
-              maxW={{ md: '420px' }}
-              position="relative"
-              borderRadius="xl"
-              overflow="hidden"
-              border="1px solid"
-              borderColor="whiteAlpha.300"
-              bg="black"
-            >
-              <CameraTileLabel>You</CameraTileLabel>
-              {localCamTrack ? (
-                <CallVideoFrame track={localCamTrack} trackKey={`local-${localCamSid}`} muted />
-              ) : (
-                <Flex h="100%" align="center" justify="center" minH="200px">
-                  <Text color="gray.400" fontSize="sm">
-                    {isCamOff ? 'Camera off' : 'Starting your camera…'}
-                  </Text>
-                </Flex>
-              )}
+          <Flex flex={1} align="center" justify="center" minH={0} px={4}>
+            <Box w="100%" maxW="400px" h="100%" maxH="72vh" minH="240px">
+              <ScreenShareViewer
+                track={activeScreen.track}
+                name={callPartner?.name || 'User'}
+                controlsBottom="108px"
+                flex={1}
+                minH="100%"
+              />
             </Box>
           </Flex>
+        ) : showMainRemote ? (
+          <Box flex={1} position="relative" minH={0} bg="black">
+            <CameraTileLabel>{callPartner?.name || 'User'}</CameraTileLabel>
+            <CallVideoFrame track={remoteCamera.track} trackKey={`remote-main-${remoteCamSid}`} />
+          </Box>
         ) : (
           <Flex flex={1} align="center" justify="center">
             <VStack>
@@ -509,19 +485,23 @@ const ActiveCallScreen = () => {
             width={128}
             height={96}
           >
-            <CallVideoFrame track={remoteCamera.track} trackKey={`pip-remote-${remoteCamSid}`} />
+            <Box {...pipBoxProps}>
+              <CallVideoFrame track={remoteCamera.track} trackKey={`pip-remote-${remoteCamSid}`} />
+            </Box>
           </DraggableCallPip>
         )}
 
-        {showCameraPips && (
+        {(showCameraPips || showLocalPip) && (
           <DraggableCallPip label="You" defaultRight={16} defaultBottom={118} width={128} height={96}>
-            {localCamTrack ? (
-              <CallVideoFrame track={localCamTrack} trackKey={`pip-local-${localCamSid}`} muted />
-            ) : (
-              <Flex h="100%" align="center" justify="center" bg="gray.900">
-                <Text color="gray.500" fontSize="xs">{isCamOff ? 'Cam off' : 'No camera'}</Text>
-              </Flex>
-            )}
+            <Box {...pipBoxProps}>
+              {localCamTrack ? (
+                <CallVideoFrame track={localCamTrack} trackKey={`pip-local-${localCamSid}`} muted />
+              ) : (
+                <Flex h="100%" align="center" justify="center">
+                  <Text color="gray.500" fontSize="xs">{isCamOff ? 'Cam off' : 'Camera…'}</Text>
+                </Flex>
+              )}
+            </Box>
           </DraggableCallPip>
         )}
       </Flex>
