@@ -14,7 +14,7 @@ import {
   Box, Flex, Avatar, Text, IconButton, HStack, VStack, Badge,
 } from '@chakra-ui/react';
 import { PhoneIcon } from '@chakra-ui/icons';
-import { RoomEvent } from 'livekit-client';
+import { RoomEvent, Track } from 'livekit-client';
 import { useLiveKit } from '../context/LiveKitContext';
 import ScreenShareViewer from './ScreenShareViewer';
 
@@ -187,8 +187,11 @@ const ActiveCallScreen = () => {
   const [isCamOff, setIsCamOff] = useState(callType === 'audio');
   const [isSharing, setIsSharing] = useState(false);
 
-  const isScreen     = (t) => t?.source === 'screen_share' || t?.track?.source === 'screen_share';
-  const remoteScreen = remoteTracks.find(t => t.track.kind === 'video' && isScreen(t));
+  const isScreen = (entry) => {
+    const src = entry?.source ?? entry?.track?.source;
+    return src === Track.Source.ScreenShare || src === 'screen_share';
+  };
+  const remoteScreen = remoteTracks.find(t => t.track?.kind === 'video' && isScreen(t));
   const remoteCamera = remoteTracks.find(t => t.track.kind === 'video' && !isScreen(t));
   // Only show the other person's screen — never echo your own share (infinite mirror in-browser).
   const activeScreen = remoteScreen || null;
@@ -334,51 +337,40 @@ const ActiveCallScreen = () => {
         </Badge>
       </Flex>
 
-      {/* Remote video / audio-only placeholder */}
-      <Box
+      {/* Main stage — same flex layout as group call when screen sharing */}
+      <Flex
         flex={1}
+        direction="column"
+        minH={0}
         w="100%"
         position="relative"
-        display="flex"
-        alignItems="center"
-        justifyContent="center"
-        px={{ base: 2, md: 6 }}
-        py={{ base: 2, md: 4 }}
+        p={activeScreen ? 3 : undefined}
+        gap={activeScreen ? 0 : undefined}
       >
         {isSharing && !activeScreen ? (
-          <VStack spacing={2} px={6} textAlign="center">
-            <Text color="white" fontWeight="bold" fontSize="lg">You are sharing your screen</Text>
-            <Text color="gray.400" fontSize="sm">
-              Others can see your screen. Pick a window or tab other than this call to avoid a mirror effect.
-            </Text>
-          </VStack>
+          <Flex flex={1} align="center" justify="center" px={6}>
+            <VStack spacing={2} textAlign="center">
+              <Text color="white" fontWeight="bold" fontSize="lg">You are sharing your screen</Text>
+              <Text color="gray.400" fontSize="sm">
+                Others can see your screen. Pick a window or tab other than this call to avoid a mirror effect.
+              </Text>
+            </VStack>
+          </Flex>
+        ) : activeScreen ? (
+          <ScreenShareViewer
+            track={activeScreen.track}
+            name={callPartner?.name || 'User'}
+            controlsBottom="108px"
+          />
         ) : remoteVideo ? (
-          activeScreen ? (
+          <Flex flex={1} align="center" justify="center" px={{ base: 2, md: 6 }} py={{ base: 2, md: 4 }}>
             <Box
               position="relative"
               w="100%"
-              h="100%"
               maxW="1100px"
-              maxH="calc(100vh - 200px)"
-              alignSelf="stretch"
               flex={1}
+              maxH="100%"
               minH={0}
-            >
-              <ScreenShareViewer
-                track={activeScreen.track}
-                name={callPartner?.name || 'User'}
-                flex="1"
-                minH="calc(100vh - 200px)"
-                controlsBottom="108px"
-              />
-            </Box>
-          ) : (
-            <Box
-              position="relative"
-              w="100%"
-              h="100%"
-              maxW="1100px"
-              maxH="calc(100vh - 170px)"
               borderRadius={{ base: 'md', md: '2xl' }}
               overflow="hidden"
               bg="black"
@@ -395,13 +387,15 @@ const ActiveCallScreen = () => {
                 style={{ width: '100%', height: '100%', objectFit: 'cover' }}
               />
             </Box>
-          )
+          </Flex>
         ) : (
-          <VStack>
-            <Avatar src={callPartner?.profilePic} name={callPartner?.name} size="2xl" />
-            <Text color="white" fontWeight="bold" fontSize="xl">{callPartner?.name}</Text>
-            <Text color="gray.400">{callType === 'audio' ? 'Voice call' : 'Connecting video…'}</Text>
-          </VStack>
+          <Flex flex={1} align="center" justify="center">
+            <VStack>
+              <Avatar src={callPartner?.profilePic} name={callPartner?.name} size="2xl" />
+              <Text color="white" fontWeight="bold" fontSize="xl">{callPartner?.name}</Text>
+              <Text color="gray.400">{callType === 'audio' ? 'Voice call' : 'Connecting video…'}</Text>
+            </VStack>
+          </Flex>
         )}
         {/* Remote camera thumbnail (while they present their screen) */}
         {remoteScreen && remoteCamera && (
@@ -453,7 +447,7 @@ const ActiveCallScreen = () => {
             />
           </Box>
         )}
-      </Box>
+      </Flex>
 
       {/* Controls */}
       <HStack

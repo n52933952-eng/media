@@ -2,7 +2,7 @@
  * Screen share with zoom (scroll when zoomed) + fullscreen.
  */
 
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { Box, Text, IconButton, HStack, Badge } from '@chakra-ui/react';
 
 const ZOOM_MIN = 1;
@@ -25,6 +25,7 @@ const ScreenShareViewer = ({
   const dragRef = useRef(null);
   const [zoom, setZoom] = useState(1);
   const [vpSize, setVpSize] = useState({ w: 0, h: 0 });
+  const [videoSize, setVideoSize] = useState({ w: 0, h: 0 });
   const [isFullscreen, setIsFullscreen] = useState(false);
 
   // Attach whenever track or the video element is ready (layout can mount video after first paint).
@@ -37,6 +38,26 @@ const ScreenShareViewer = ({
       if (el) el.srcObject = null;
     };
   }, [track, vpSize.w, vpSize.h, isFullscreen]);
+
+  // Portrait phone shares need explicit letterbox sizing (100%×100% can crop on some browsers).
+  useEffect(() => {
+    const el = videoRef.current;
+    if (!el) return undefined;
+    const read = () => {
+      const w = el.videoWidth;
+      const h = el.videoHeight;
+      if (w > 0 && h > 0) setVideoSize({ w, h });
+    };
+    el.addEventListener('loadedmetadata', read);
+    el.addEventListener('resize', read);
+    read();
+    const poll = setInterval(read, 400);
+    return () => {
+      el.removeEventListener('loadedmetadata', read);
+      el.removeEventListener('resize', read);
+      clearInterval(poll);
+    };
+  }, [track]);
 
   useEffect(() => {
     const el = viewportRef.current;
@@ -128,6 +149,15 @@ const ScreenShareViewer = ({
   const contentH = canScroll ? vpSize.h * zoom : '100%';
   const zoomLabel = `${Math.round(zoom * 100)}%`;
 
+  const fitBox = useMemo(() => {
+    if (canScroll || !vpSize.w || !vpSize.h || !videoSize.w || !videoSize.h) return null;
+    const scale = Math.min(vpSize.w / videoSize.w, vpSize.h / videoSize.h);
+    return {
+      w: Math.max(1, Math.round(videoSize.w * scale)),
+      h: Math.max(1, Math.round(videoSize.h * scale)),
+    };
+  }, [canScroll, vpSize.w, vpSize.h, videoSize.w, videoSize.h]);
+
   return (
     <Box
       ref={containerRef}
@@ -149,6 +179,9 @@ const ScreenShareViewer = ({
         flex={1}
         minH={0}
         w="100%"
+        display="flex"
+        alignItems="center"
+        justifyContent="center"
         overflow={canScroll ? 'scroll' : 'hidden'}
         onWheel={onWheel}
         onPointerDown={onPointerDown}
@@ -164,14 +197,12 @@ const ScreenShareViewer = ({
         }}
       >
         <Box
-          w={contentW}
-          h={contentH}
-          minW={canScroll ? undefined : '100%'}
-          minH={canScroll ? undefined : '100%'}
+          w={canScroll ? contentW : (fitBox ? `${fitBox.w}px` : '100%')}
+          h={canScroll ? contentH : (fitBox ? `${fitBox.h}px` : '100%')}
+          maxW="100%"
+          maxH="100%"
           position="relative"
           flexShrink={0}
-          mx={canScroll ? undefined : 'auto'}
-          my={canScroll ? undefined : 'auto'}
         >
           <Box
             as="video"
