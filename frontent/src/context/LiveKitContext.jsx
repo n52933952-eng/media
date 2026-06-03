@@ -134,6 +134,16 @@ export const LiveKitProvider = ({ children }) => {
     room.on(RoomEvent.TrackUnsubscribed, (track) => {
       setRemoteTracks(prev => prev.filter(t => t.track !== track));
     });
+
+    const syncLocalTracks = () => {
+      const local = [];
+      room.localParticipant.trackPublications.forEach((pub) => {
+        if (pub.track) local.push(pub.track);
+      });
+      setLocalTracks(local);
+    };
+    room.on(RoomEvent.LocalTrackPublished, syncLocalTracks);
+    room.on(RoomEvent.LocalTrackUnpublished, syncLocalTracks);
     room.on(RoomEvent.ParticipantConnected, () => {
       setCallAccepted(true);
       setIsCalling(false);   // hide the "Calling…" overlay so the live call shows
@@ -156,12 +166,7 @@ export const LiveKitProvider = ({ children }) => {
     } else {
       await room.localParticipant.enableCameraAndMicrophone();
     }
-    const published = room.localParticipant.trackPublications;
-    const local = [];
-    published.forEach((pub) => {
-      if (pub.track) local.push(pub.track);
-    });
-    setLocalTracks(local);
+    syncLocalTracks();
 
     return room;
   }, [disconnectRoom]);

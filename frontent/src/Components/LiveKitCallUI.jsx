@@ -17,6 +17,7 @@ import { PhoneIcon } from '@chakra-ui/icons';
 import { RoomEvent, Track } from 'livekit-client';
 import { useLiveKit } from '../context/LiveKitContext';
 import ScreenShareViewer from './ScreenShareViewer';
+import DraggableCallPip from './DraggableCallPip';
 
 // ── small helpers ────────────────────────────────────────────────────────────
 const HangupIcon = () => <span style={{ fontSize: 20 }}>📵</span>;
@@ -192,10 +193,13 @@ const ActiveCallScreen = () => {
     return src === Track.Source.ScreenShare || src === 'screen_share';
   };
   const remoteScreen = remoteTracks.find(t => t.track?.kind === 'video' && isScreen(t));
-  const remoteCamera = remoteTracks.find(t => t.track.kind === 'video' && !isScreen(t));
+  const remoteCamera = remoteTracks.find(t => t.track?.kind === 'video' && !isScreen(t));
   // Only show the other person's screen — never echo your own share (infinite mirror in-browser).
   const activeScreen = remoteScreen || null;
+  const showRemoteMain = !activeScreen && !isSharing && remoteCamera;
+  const showRemotePip = remoteCamera && (activeScreen || isSharing);
   const remoteVideo  = activeScreen || remoteCamera;
+  const remoteCamSid = remoteCamera?.track?.sid ?? '';
   const remoteAudio  = remoteTracks.find(t => t.track.kind === 'audio');
   const localCamera  = localTracks.find(t => t.kind === 'video' && !isScreen(t));
   const remoteVideoRef = useRef(null);
@@ -204,25 +208,24 @@ const ActiveCallScreen = () => {
   const remoteAudioElRef = useRef(null);
 
   useEffect(() => {
-    if (activeScreen || !remoteCamera?.track || !remoteVideoRef.current) return;
+    if (!showRemoteMain || !remoteCamera?.track || !remoteVideoRef.current) return;
     const el = remoteVideoRef.current;
     try { remoteCamera.track.attach(el); } catch (_) {}
     return () => {
       try { remoteCamera.track.detach(el); } catch (_) {}
       if (el) el.srcObject = null;
     };
-  }, [activeScreen, remoteCamera]);
+  }, [showRemoteMain, remoteCamSid, remoteCamera]);
 
-  // While someone presents, keep their camera in a small thumbnail.
   useEffect(() => {
-    if (!activeScreen || !remoteCamera?.track || !remoteCamPipRef.current) return;
+    if (!showRemotePip || !remoteCamera?.track || !remoteCamPipRef.current) return;
     const el = remoteCamPipRef.current;
     try { remoteCamera.track.attach(el); } catch (_) {}
     return () => {
       try { remoteCamera.track.detach(el); } catch (_) {}
       if (el) el.srcObject = null;
     };
-  }, [activeScreen, remoteCamera]);
+  }, [showRemotePip, remoteCamSid, remoteCamera]);
 
   useEffect(() => {
     if (!localCamera || !localVideoRef.current) return;
@@ -232,7 +235,7 @@ const ActiveCallScreen = () => {
       try { localCamera.detach(el); } catch (_) {}
       if (el) el.srcObject = null;
     };
-  }, [localCamera]);
+  }, [localCamera, localCamera?.sid]);
 
   useEffect(() => {
     if (!remoteAudio?.track) return;
@@ -362,7 +365,7 @@ const ActiveCallScreen = () => {
             name={callPartner?.name || 'User'}
             controlsBottom="108px"
           />
-        ) : remoteVideo ? (
+        ) : showRemoteMain ? (
           <Flex flex={1} align="center" justify="center" px={{ base: 2, md: 6 }} py={{ base: 2, md: 4 }}>
             <Box
               position="relative"
@@ -379,12 +382,12 @@ const ActiveCallScreen = () => {
               boxShadow="0 14px 36px rgba(0,0,0,0.45)"
             >
               <Box
-                key={remoteVideo?.track?.sid || 'remote-main'}
+                key={`remote-main-${remoteCamSid}`}
                 as="video"
                 ref={remoteVideoRef}
                 autoPlay
                 playsInline
-                style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                style={{ width: '100%', height: '100%', objectFit: 'contain' }}
               />
             </Box>
           </Flex>
@@ -397,55 +400,39 @@ const ActiveCallScreen = () => {
             </VStack>
           </Flex>
         )}
-        {/* Remote camera thumbnail (while they present their screen) */}
-        {remoteScreen && remoteCamera && (
-          <Box
-            position="absolute"
-            bottom={{ base: 118, md: 42 }}
-            right={{ base: '132px', md: '172px' }}
-            w={{ base: '108px', md: '142px' }}
-            h={{ base: '80px', md: '106px' }}
-            borderRadius="xl"
-            overflow="hidden"
-            border="2px solid"
-            borderColor="whiteAlpha.500"
-            boxShadow="0 6px 20px rgba(0,0,0,0.45)"
-            bg="black"
+        {showRemotePip && callType !== 'audio' && (
+          <DraggableCallPip
+            label={callPartner?.name || 'User'}
+            defaultRight={168}
+            defaultBottom={118}
           >
             <Box
+              key={`remote-pip-${remoteCamSid}`}
               as="video"
               ref={remoteCamPipRef}
               autoPlay
               playsInline
-              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+              w="100%"
+              h="100%"
+              style={{ objectFit: 'contain' }}
             />
-          </Box>
+          </DraggableCallPip>
         )}
 
-        {/* Local pip */}
         {localCamera && callType !== 'audio' && (
-          <Box
-            position="absolute"
-            bottom={{ base: 118, md: 42 }}
-            right={{ base: 3, md: 5 }}
-            w={{ base: '108px', md: '142px' }}
-            h={{ base: '80px', md: '106px' }}
-            borderRadius="xl"
-            overflow="hidden"
-            border="2px solid"
-            borderColor="whiteAlpha.500"
-            boxShadow="0 6px 20px rgba(0,0,0,0.45)"
-            bg="black"
-          >
+          <DraggableCallPip label="You" defaultRight={16} defaultBottom={118}>
             <Box
+              key={`local-pip-${localCamera.sid ?? 'cam'}`}
               as="video"
               ref={localVideoRef}
               autoPlay
               muted
               playsInline
-              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+              w="100%"
+              h="100%"
+              style={{ objectFit: 'contain' }}
             />
-          </Box>
+          </DraggableCallPip>
         )}
       </Flex>
 
