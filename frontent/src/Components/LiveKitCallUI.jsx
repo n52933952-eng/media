@@ -225,7 +225,7 @@ const ActiveCallScreen = () => {
   const localCamSid = localCamTrack?.sid ?? '';
   /** Remote full-screen; local is a small corner pip (same as mobile). */
   const showMainRemote = isVideoCall && !activeScreen && !isSharing && !!remoteCamera?.track;
-  const showCameraPips = isVideoCall && (activeScreen || isSharing);
+  const showCameraPips = isVideoCall && activeScreen;
   const showLocalPip = isVideoCall && !activeScreen && !isSharing && !!localCamTrack && !isCamOff;
   const remoteCamSid = remoteCamera?.track?.sid ?? '';
   const remoteAudio = remoteTracks.find((t) => t.track?.kind === 'audio');
@@ -427,13 +427,33 @@ const ActiveCallScreen = () => {
         gap={activeScreen ? 0 : undefined}
       >
         {isSharing && !activeScreen ? (
-          <Flex flex={1} align="center" justify="center" px={6}>
-            <VStack spacing={2} textAlign="center">
-              <Text color="white" fontWeight="bold" fontSize="lg">You are sharing your screen</Text>
-              <Text color="gray.400" fontSize="sm">
-                Others can see your screen. Pick a window or tab other than this call to avoid a mirror effect.
-              </Text>
-            </VStack>
+          <Flex flex={1} direction="column" minH={0}>
+            <Flex flex={1} align="center" justify="center" px={6}>
+              <VStack spacing={2} textAlign="center">
+                <Text color="white" fontWeight="bold" fontSize="lg">You are sharing your screen</Text>
+                <Text color="gray.400" fontSize="sm">
+                  Others can see your screen. Pick a window or tab other than this call to avoid a mirror effect.
+                </Text>
+              </VStack>
+            </Flex>
+            <HStack spacing={3} px={4} py={3} justify="center" bg="blackAlpha.700">
+              <Box {...pipBoxProps} position="relative" w="160px" h="120px">
+                <CameraTileLabel>{callPartner?.name || 'User'}</CameraTileLabel>
+                {remoteCamera?.track ? (
+                  <CallVideoFrame track={remoteCamera.track} trackKey={`share-r-${remoteCamSid}`} />
+                ) : (
+                  <Flex h="100%" align="center" justify="center"><Text color="gray.500" fontSize="xs">Waiting…</Text></Flex>
+                )}
+              </Box>
+              <Box {...pipBoxProps} position="relative" w="160px" h="120px">
+                <CameraTileLabel>You</CameraTileLabel>
+                {localCamTrack && !isCamOff ? (
+                  <CallVideoFrame track={localCamTrack} trackKey={`share-l-${localCamSid}`} muted />
+                ) : (
+                  <Flex h="100%" align="center" justify="center"><Text color="gray.500" fontSize="xs">{isCamOff ? 'Cam off' : 'Camera…'}</Text></Flex>
+                )}
+              </Box>
+            </HStack>
           </Flex>
         ) : activeScreen ? (
           <Flex flex={1} align="center" justify="center" minH={0} px={4}>
