@@ -149,9 +149,11 @@ export const LiveKitProvider = ({ children }) => {
     };
 
     room.on(RoomEvent.TrackSubscribed, addRemoteTrack);
-    room.on(RoomEvent.TrackUnsubscribed, (track) => {
-      setRemoteTracks(prev => prev.filter(t => t.track !== track));
+    room.on(RoomEvent.TrackUnsubscribed, () => {
+      syncRemoteTracks();
     });
+    room.on(RoomEvent.TrackPublished, syncRemoteTracks);
+    room.on(RoomEvent.TrackUnpublished, syncRemoteTracks);
 
     const syncLocalTracks = () => {
       const local = [];

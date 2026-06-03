@@ -238,6 +238,10 @@ const ActiveCallScreen = () => {
     const syncLocalCam = () => {
       const pub = roomObj.localParticipant.getTrackPublication(Track.Source.Camera);
       setLocalCamTrack(pub?.track ?? null);
+      requestAnimationFrame(() => {
+        const p = roomObj.localParticipant.getTrackPublication(Track.Source.Camera);
+        setLocalCamTrack(p?.track ?? null);
+      });
     };
     syncLocalCam();
     roomObj.on(RoomEvent.LocalTrackPublished, syncLocalCam);
@@ -320,6 +324,21 @@ const ActiveCallScreen = () => {
         setTimeout(syncLocalCamFromRoom, 120);
         setTimeout(syncLocalCamFromRoom, 450);
       }
+      setRemoteTracks((prev) => {
+        const nextRemote = [];
+        roomObj.remoteParticipants.forEach((participant) => {
+          participant.trackPublications.forEach((pub) => {
+            if (pub.track) {
+              nextRemote.push({
+                track: pub.track,
+                participantId: participant.identity,
+                source: pub.source || pub.track?.source,
+              });
+            }
+          });
+        });
+        return nextRemote.length > 0 ? nextRemote : prev;
+      });
     } catch (_) {
       setIsSharing(false);
     }
