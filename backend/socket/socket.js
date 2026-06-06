@@ -1162,9 +1162,9 @@ export const initializeSocket = async (app) => {
 
     /** Broadcaster refresh/kill-tab without `livekit:endLive` — clean Mongo + notify after grace; reconnect cancels. */
     const LIVE_STREAM_DISCONNECT_GRACE_MS = (() => {
-        // Screen share + mobile uplink can flap the app socket briefly — 6s was ending lives too soon.
-        const n = Number(process.env.LIVE_STREAM_DISCONNECT_GRACE_MS || 45000)
-        return Number.isFinite(n) && n >= 2000 && n <= 120000 ? n : 45000
+        // Broadcaster killed app / lost socket without livekit:endLive — clear stale feed row after grace.
+        const n = Number(process.env.LIVE_STREAM_DISCONNECT_GRACE_MS || 15000)
+        return Number.isFinite(n) && n >= 2000 && n <= 120000 ? n : 15000
     })()
     const liveStreamDisconnectTimers = new Map()
 
