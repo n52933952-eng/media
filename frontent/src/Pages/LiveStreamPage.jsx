@@ -32,6 +32,25 @@ const floatUp = keyframes`
   100% { transform: translateY(-120px); opacity: 0; }
 `;
 
+const floatReactionUp = keyframes`
+  0%   { transform: translateY(0) scale(0.4); opacity: 1; }
+  15%  { transform: translateY(-20px) scale(1); opacity: 1; }
+  100% { transform: translateY(-220px) scale(1); opacity: 0; }
+`;
+
+const FloatingReaction = ({ reaction }) => (
+  <Box
+    position="absolute"
+    bottom={0}
+    pointerEvents="none"
+    css={css`animation: ${floatReactionUp} 2.8s ease-out forwards;`}
+    style={{ transform: `translateX(${reaction.driftX}px)` }}
+    zIndex={12}
+  >
+    <Text fontSize="42px" lineHeight={1} userSelect="none">{reaction.emoji}</Text>
+  </Box>
+);
+
 const FloatingMessage = ({ msg }) => (
   <Box
     position="absolute"
@@ -87,6 +106,7 @@ const LiveStreamPage = () => {
 
   const [chatInput, setChatInput] = useState('');
   const [floatingMsgs, setFloatingMsgs] = useState([]);
+  const [floatingReactions, setFloatingReactions] = useState([]);
   const [chatLog, setChatLog] = useState([]);
 
   const roomRef = useRef(null);
@@ -99,6 +119,7 @@ const LiveStreamPage = () => {
   const reconnectAttemptsRef = useRef(0);
   const reconnectTimerRef = useRef(null);
   let floatIdCounter = useRef(0);
+  let reactionIdCounter = useRef(0);
 
   const verifyStreamStillActive = useCallback(async () => {
     if (!streamerId) return false;
@@ -124,6 +145,18 @@ const LiveStreamPage = () => {
     setFloatingMsgs(prev => [...prev.slice(-5), { id, sender, text }]);
     setTimeout(() => setFloatingMsgs(prev => prev.filter(m => m.id !== id)), 4100);
   }, []);
+
+  const addEmojiFloat = useCallback((emoji) => {
+    const id = ++reactionIdCounter.current;
+    const driftX = Math.round((Math.random() - 0.5) * 48);
+    const reaction = { id, emoji, driftX };
+    setFloatingReactions(prev => [...prev.slice(-10), reaction]);
+    setTimeout(() => {
+      setFloatingReactions(prev => prev.filter(r => r.id !== id));
+    }, 3000);
+  }, []);
+
+  const liveWatchStreamerId = isBroadcaster ? String(user?._id || '') : String(streamerId || '');
 
   useEffect(() => {
     chatLogRef.current?.scrollTo(0, chatLogRef.current.scrollHeight);
@@ -366,17 +399,35 @@ const LiveStreamPage = () => {
       }
     };
 
+    if (socket && streamerId) {
+      socket.emit('livekit:joinLiveWatch', { streamerId: String(streamerId) });
+    }
+
     join();
     return () => {
       mounted = false;
       intentionalLeaveRef.current = true;
+      if (socket && streamerId) {
+        socket.emit('livekit:leaveLiveWatch', { streamerId: String(streamerId) });
+      }
       if (reconnectTimerRef.current) {
         clearTimeout(reconnectTimerRef.current);
         reconnectTimerRef.current = null;
       }
       disconnectViewerRoom();
     };
-  }, [isBroadcaster, streamerId, disconnectViewerRoom, exitLivePage, addMessage, verifyStreamStillActive]);
+  }, [isBroadcaster, streamerId, socket, disconnectViewerRoom, exitLivePage, addMessage, verifyStreamStillActive]);
+
+  useEffect(() => {
+    if (!socket || !liveWatchStreamerId) return undefined;
+    if (isBroadcaster && !hostLive) return undefined;
+    const onReaction = (payload) => {
+      if (String(payload?.streamerId || '') !== liveWatchStreamerId) return;
+      if (payload?.emoji) addEmojiFloat(payload.emoji);
+    };
+    socket.on('livekit:liveReaction', onReaction);
+    return () => { socket.off('livekit:liveReaction', onReaction); };
+  }, [socket, liveWatchStreamerId, addEmojiFloat, isBroadcaster, hostLive]);
 
   useEffect(() => {
     if (!socket || isBroadcaster) return;
@@ -520,6 +571,21 @@ const LiveStreamPage = () => {
 
       <Box position="absolute" bottom="108px" left={0} right={0} pointerEvents="none" zIndex={15}>
         {floatingMsgs.map(m => <FloatingMessage key={m.id} msg={m} />)}
+      </Box>
+
+      <Box
+        position="absolute"
+        top="40%"
+        left={0}
+        right={0}
+        h="280px"
+        display="flex"
+        alignItems="flex-end"
+        justifyContent="center"
+        pointerEvents="none"
+        zIndex={14}
+      >
+        {floatingReactions.map(r => <FloatingReaction key={r.id} reaction={r} />)}
       </Box>
 
       <Box position="absolute" top="66px" bottom="96px" right={0} w={{ base: '0', md: '280px' }}

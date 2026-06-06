@@ -214,6 +214,7 @@ export const LiveBroadcastProvider = ({ children }) => {
     resignActiveGames(socket, user);
     if (socket && user?._id && roomNameRef.current && !liveEndedRef.current) {
       liveEndedRef.current = true;
+      socket.emit('livekit:leaveLiveWatch', { streamerId: String(user._id) });
       socket.emit('livekit:endLive', {
         streamerId: String(user._id),
         roomName: roomNameRef.current,
@@ -295,6 +296,7 @@ export const LiveBroadcastProvider = ({ children }) => {
       syncLocalTrack();
 
       setIsLive(true);
+      socket.emit('livekit:joinLiveWatch', { streamerId: String(user._id) });
       socket.emit('livekit:goLive', {
         streamerId: String(user._id),
         streamerName: user.name || user.username,
