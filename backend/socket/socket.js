@@ -2328,6 +2328,35 @@ export const initializeSocket = async (app) => {
                 console.error('❌ [livekit:endLive]', err.message)
             }
         })
+
+        /** Ephemeral live reactions — in-memory fan-out only (no MongoDB). */
+        socket.on('livekit:joinLiveWatch', ({ streamerId }) => {
+            const sid = normalizeUserId(streamerId)
+            if (!sid) return
+            socket.join(`livewatch:${sid}`)
+        })
+
+        socket.on('livekit:leaveLiveWatch', ({ streamerId }) => {
+            const sid = normalizeUserId(streamerId)
+            if (!sid) return
+            socket.leave(`livewatch:${sid}`)
+        })
+
+        socket.on('livekit:liveReaction', ({ streamerId, emoji, sender }) => {
+            try {
+                const sid = normalizeUserId(streamerId)
+                if (!sid || !emoji) return
+                const payload = {
+                    streamerId: sid,
+                    emoji: String(emoji).slice(0, 8),
+                    sender: String(sender || 'Viewer').slice(0, 64),
+                }
+                socket.to(`livewatch:${sid}`).emit('livekit:liveReaction', payload)
+            } catch (err) {
+                console.error('❌ [livekit:liveReaction]', err.message)
+            }
+        })
+
         // ── Group call signaling ─────────────────────────────────────────────
         /**
          * livekit:startGroupCall — caller starts a group call in a conversation.
