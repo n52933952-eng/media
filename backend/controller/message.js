@@ -245,14 +245,28 @@ export async function ackMessageDeliveredHttp(req, res) {
   }
 }
 
+function parseLiveShareStreamerId(text) {
+  const raw = String(text || '')
+  if (!raw.startsWith('LIVE_SHARE:')) return null
+  try {
+    const data = JSON.parse(raw.slice('LIVE_SHARE:'.length))
+    const sid = data?.streamerId != null ? String(data.streamerId).trim() : ''
+    return sid || null
+  } catch {
+    return null
+  }
+}
+
 /** Core send logic shared between file-upload and plain-text paths */
 async function _persistAndBroadcastMessage({ conversation, senderId, message, img, replyTo }) {
+  const liveShareStreamerId = parseLiveShareStreamerId(message)
   const newMessage = new Message({
     conversationId: conversation._id,
     sender: senderId,
     text: message,
     img: img || '',
     replyTo: replyTo || null,
+    ...(liveShareStreamerId ? { liveShareStreamerId } : {}),
   })
 
   conversation.lastMessage = { text: message, sender: senderId }

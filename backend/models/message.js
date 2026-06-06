@@ -14,6 +14,13 @@ const MessageSchema = new mongoose.Schema({
 
     text:String,
 
+    /** Set for LIVE_SHARE chat cards — indexed purge when live ends. */
+    liveShareStreamerId: {
+        type: String,
+        default: null,
+        index: true,
+    },
+
     seen:{
         type:Boolean,
         default:false

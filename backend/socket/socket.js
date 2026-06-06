@@ -39,10 +39,14 @@ const PRESENCE_ROOM_PREFIX = 'presence:'
 const PRESENCE_KEY_PREFIX = 'userPresence:'
 /** Queued WebRTC answer SDP when caller socket drops before callee answers (Wi‑Fi / reconnect race). */
 const PENDING_ANSWER_PREFIX = 'pendingAnswer:'
-const LIVEKIT_DEFAULT_MAX_SESSION_MS = 25 * 60 * 1000
+/** 0 = no server auto-end (broadcaster stops manually). Set LIVEKIT_MAX_SESSION_MS in env to override. */
 const LIVEKIT_MAX_SESSION_MS = (() => {
-    const raw = Number(process.env.LIVEKIT_MAX_SESSION_MS || LIVEKIT_DEFAULT_MAX_SESSION_MS)
-    return Number.isFinite(raw) && raw > 0 ? raw : LIVEKIT_DEFAULT_MAX_SESSION_MS
+    const raw = process.env.LIVEKIT_MAX_SESSION_MS
+    if (raw === undefined || raw === null || raw === '') return 0
+    const n = Number(raw)
+    if (n === 0) return 0
+    if (Number.isFinite(n) && n > 0) return n
+    return 0
 })()
 const livekitDirectCallTimers = new Map()
 const livekitGroupCallTimers = new Map()
@@ -66,6 +70,24 @@ const getUserPresence = async (userId) => {
     } catch (e) {
         return null
     }
+}
+
+/** Background DB purge + one socket event per affected chat (not per message). */
+const scheduleLiveSharePurge = (streamerId) => {
+    const sid = normalizeUserId(streamerId) || String(streamerId || '')
+    if (!sid) return
+    setImmediate(async () => {
+        try {
+            const { purgeLiveShareMessagesForStreamer } = await import('../services/liveShareCleanup.js')
+            const { conversationIds } = await purgeLiveShareMessagesForStreamer(sid)
+            if (!conversationIds?.length || !io) return
+            for (const conversationId of conversationIds) {
+                io.to(conversationId).emit('liveShareExpired', { streamerId: sid, conversationId })
+            }
+        } catch (err) {
+            console.error('❌ [liveShare] purge on stream end failed:', err.message)
+        }
+    })
 }
 
 const deleteUserPresence = async (userId) => {
@@ -2274,12 +2296,13 @@ export const initializeSocket = async (app) => {
                     })()
                 }
                 const streamTimerKey = normalizeUserId(streamerId)
-                if (streamTimerKey) {
+                if (streamTimerKey && LIVEKIT_MAX_SESSION_MS > 0) {
                     safeClearTimer(livekitStreamTimers, streamTimerKey)
                     livekitStreamTimers.set(streamTimerKey, setTimeout(async () => {
                         try {
                             await LiveStream.deleteMany({ streamer: streamerId })
                             const streamerNorm = normalizeUserId(streamerId) || String(streamerId)
+                            scheduleLiveSharePurge(streamerNorm)
                             const endPayload = { streamerId: streamerNorm, roomName, reason: 'timeout' }
                             const streamerDoc = await User.findById(streamerId).select('followers').lean()
                             if (streamerDoc?.followers?.length) {
@@ -2315,6 +2338,7 @@ export const initializeSocket = async (app) => {
                 // Remove ended live stream from DB so no stale live row remains.
                 await LiveStream.deleteMany({ streamer: streamerId })
                 const streamerNorm = normalizeUserId(streamerId) || String(streamerId)
+                scheduleLiveSharePurge(streamerNorm)
                 const endPayload = { streamerId: streamerNorm, roomName }
                 const streamer = await User.findById(streamerId).select('followers').lean()
                 if (streamer?.followers?.length) {
@@ -4093,6 +4117,7 @@ export const initializeSocket = async (app) => {
                                 safeClearTimer(livekitStreamTimers, lsUid)
                                 await LiveStream.deleteMany({ streamer: lsUid })
                                 const streamerNorm = normalizeUserId(lsUid) || String(lsUid)
+                                scheduleLiveSharePurge(streamerNorm)
                                 const endPayload = { streamerId: streamerNorm, roomName: roomNm, reason: 'disconnect' }
                                 const streamerDoc = await User.findById(lsUid).select('followers').lean()
                                 if (streamerDoc?.followers?.length) {
