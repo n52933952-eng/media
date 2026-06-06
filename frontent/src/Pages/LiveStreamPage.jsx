@@ -10,7 +10,7 @@ import {
 } from '@chakra-ui/react';
 import { CloseIcon } from '@chakra-ui/icons';
 import { css } from '@emotion/react';
-import { Room, RoomEvent } from 'livekit-client';
+import { Room, RoomEvent, ConnectionState } from 'livekit-client';
 import { UserContext } from '../context/UserContext';
 import { SocketContext } from '../context/SocketContext';
 import { useLiveBroadcast } from '../context/LiveBroadcastContext';
@@ -24,6 +24,7 @@ import {
 } from '../utils/liveKitTracks';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
+const MAX_VIEWER_RECONNECT = 2;
 
 const floatUp = keyframes`
   0%   { transform: translateY(0);   opacity: 1; }
@@ -79,6 +80,7 @@ const LiveStreamPage = () => {
   } = useLiveBroadcast();
 
   const [viewerConnected, setViewerConnected] = useState(false);
+  const [isReconnecting, setIsReconnecting] = useState(false);
   const [viewerCount, setViewerCount] = useState(0);
   const [remoteScreenTrack, setRemoteScreenTrack] = useState(null);
   const [remoteCameraTrack, setRemoteCameraTrack] = useState(null);
@@ -93,7 +95,25 @@ const LiveStreamPage = () => {
   const remoteVideoRef = useRef(null);
   const audioElRef = useRef(null);
   const closingRef = useRef(false);
+  const intentionalLeaveRef = useRef(false);
+  const reconnectAttemptsRef = useRef(0);
+  const reconnectTimerRef = useRef(null);
   let floatIdCounter = useRef(0);
+
+  const verifyStreamStillActive = useCallback(async () => {
+    if (!streamerId) return false;
+    try {
+      const res = await fetch(
+        `${API_BASE}/api/call/livestream/${encodeURIComponent(streamerId)}/status`,
+        { credentials: 'include' },
+      );
+      if (!res.ok) return true;
+      const st = await res.json().catch(() => ({}));
+      return st?.active !== false;
+    } catch {
+      return true;
+    }
+  }, [streamerId]);
 
   const isLive = isBroadcaster ? hostLive : viewerConnected;
   const displayViewers = isBroadcaster ? hostViewers : viewerCount;
@@ -155,17 +175,6 @@ const LiveStreamPage = () => {
     };
   }, [remoteCameraTrack, remoteScreenTrack]);
 
-  const fetchToken = useCallback(async (targetId, type) => {
-    const res = await fetch(`${API_BASE}/api/call/token`, {
-      method: 'POST',
-      credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ type, targetId }),
-    });
-    if (!res.ok) throw new Error('Token error');
-    return res.json();
-  }, []);
-
   const disconnectViewerRoom = useCallback(async () => {
     if (roomRef.current) {
       try { await roomRef.current.disconnect(); } catch (_) {}
@@ -190,7 +199,12 @@ const LiveStreamPage = () => {
 
   const safeClose = useCallback(async () => {
     if (closingRef.current) return;
+    intentionalLeaveRef.current = true;
     closingRef.current = true;
+    if (reconnectTimerRef.current) {
+      clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
+    }
     if (isBroadcaster) {
       await endLive();
     } else {
@@ -202,6 +216,9 @@ const LiveStreamPage = () => {
   useEffect(() => {
     if (isBroadcaster || !streamerId) return;
     let mounted = true;
+    intentionalLeaveRef.current = false;
+    closingRef.current = false;
+    reconnectAttemptsRef.current = 0;
 
     const attachRemoteTrack = (track, pub) => {
       if (!mounted || !track) return;
@@ -228,11 +245,86 @@ const LiveStreamPage = () => {
       if (pub.track) attachRemoteTrack(pub.track, pub);
     };
 
+    const bindRoomEvents = (room) => {
+      room.on(RoomEvent.TrackSubscribed, (track, pub) => attachRemoteTrack(track, pub));
+      room.on(RoomEvent.TrackPublished, (pub) => { void onRemotePublication(pub); });
+      room.on(RoomEvent.TrackUnsubscribed, (track, pub) => {
+        if (!mounted) return;
+        if (track.kind === 'video') {
+          if (isScreenSharePublication(pub, track)) setRemoteScreenTrack(null);
+          else setRemoteCameraTrack(null);
+        }
+        if (track.kind === 'audio' && audioElRef.current) {
+          try {
+            track.detach(audioElRef.current);
+            audioElRef.current.remove();
+          } catch (_) {}
+          audioElRef.current = null;
+        }
+      });
+      room.on(RoomEvent.ParticipantConnected, () => mounted && setViewerCount(c => c + 1));
+      room.on(RoomEvent.ParticipantDisconnected, () => mounted && setViewerCount(c => Math.max(0, c - 1)));
+      room.on(RoomEvent.Reconnecting, () => {
+        if (mounted) setIsReconnecting(true);
+      });
+      room.on(RoomEvent.Reconnected, () => {
+        if (mounted) {
+          setIsReconnecting(false);
+          setViewerConnected(true);
+          void collectRemoteVideoTracks(room).then(({ screen, camera }) => {
+            if (!mounted) return;
+            if (screen) setRemoteScreenTrack(screen);
+            if (camera) setRemoteCameraTrack(camera);
+          });
+        }
+      });
+      room.on(RoomEvent.Disconnected, () => {
+        if (!mounted || intentionalLeaveRef.current || closingRef.current) return;
+        setViewerConnected(false);
+        if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
+        reconnectTimerRef.current = setTimeout(() => {
+          void (async () => {
+            if (!mounted || intentionalLeaveRef.current || closingRef.current) return;
+            const stillActive = await verifyStreamStillActive();
+            if (!stillActive) {
+              closingRef.current = true;
+              exitLivePage();
+              return;
+            }
+            if (reconnectAttemptsRef.current < MAX_VIEWER_RECONNECT) {
+              reconnectAttemptsRef.current += 1;
+              setIsReconnecting(true);
+              try { await roomRef.current?.disconnect(); } catch (_) {}
+              roomRef.current = null;
+              void join();
+              return;
+            }
+            closingRef.current = true;
+            exitLivePage();
+          })();
+        }, 2800);
+      });
+      room.on(RoomEvent.DataReceived, (payload) => {
+        try {
+          const msg = JSON.parse(new TextDecoder().decode(payload));
+          if (msg.type === 'chat') addMessage(msg.sender, msg.text);
+        } catch (_) {}
+      });
+    };
+
     const join = async () => {
       try {
-        const statusRes = await fetch(`${API_BASE}/api/call/livestream/${encodeURIComponent(streamerId)}/status`, {
-          credentials: 'include',
-        });
+        const [statusRes, tokenRes] = await Promise.all([
+          fetch(`${API_BASE}/api/call/livestream/${encodeURIComponent(streamerId)}/status`, {
+            credentials: 'include',
+          }),
+          fetch(`${API_BASE}/api/call/token`, {
+            method: 'POST',
+            credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ type: 'viewer', targetId: streamerId }),
+          }),
+        ]);
         if (statusRes.ok && mounted) {
           const st = await statusRes.json().catch(() => ({}));
           if (st?.active === false) {
@@ -240,54 +332,36 @@ const LiveStreamPage = () => {
             return;
           }
         }
-        const { token, livekitUrl } = await fetchToken(streamerId, 'viewer');
-        if (!mounted) return;
+        if (!tokenRes.ok || !mounted) return;
+        const { token, livekitUrl } = await tokenRes.json();
         const room = new Room({
           adaptiveStream: true,
           dynacast: true,
           autoSubscribe: true,
         });
         roomRef.current = room;
-
-        room.on(RoomEvent.TrackSubscribed, (track, pub) => attachRemoteTrack(track, pub));
-        room.on(RoomEvent.TrackPublished, (pub) => { void onRemotePublication(pub); });
-        room.on(RoomEvent.TrackUnsubscribed, (track, pub) => {
-          if (!mounted) return;
-          if (track.kind === 'video') {
-            if (isScreenSharePublication(pub, track)) setRemoteScreenTrack(null);
-            else setRemoteCameraTrack(null);
-          }
-          if (track.kind === 'audio' && audioElRef.current) {
-            try {
-              track.detach(audioElRef.current);
-              audioElRef.current.remove();
-            } catch (_) {}
-            audioElRef.current = null;
-          }
-        });
-        room.on(RoomEvent.ParticipantConnected, () => mounted && setViewerCount(c => c + 1));
-        room.on(RoomEvent.ParticipantDisconnected, () => mounted && setViewerCount(c => Math.max(0, c - 1)));
-        room.on(RoomEvent.Disconnected, () => {
-          if (!mounted || closingRef.current) return;
-          closingRef.current = true;
-          exitLivePage();
-        });
-        room.on(RoomEvent.DataReceived, (payload) => {
-          try {
-            const msg = JSON.parse(new TextDecoder().decode(payload));
-            if (msg.type === 'chat') addMessage(msg.sender, msg.text);
-          } catch (_) {}
-        });
+        bindRoomEvents(room);
 
         await room.connect(livekitUrl, token);
         const { screen, camera } = await collectRemoteVideoTracks(room);
         if (mounted) {
           if (screen) setRemoteScreenTrack(screen);
           if (camera) setRemoteCameraTrack(camera);
+          setIsReconnecting(false);
           setViewerConnected(true);
           setViewerCount(room.remoteParticipants.size);
         }
       } catch (_) {
+        if (!mounted || intentionalLeaveRef.current || closingRef.current) return;
+        const stillActive = await verifyStreamStillActive();
+        if (stillActive && reconnectAttemptsRef.current < MAX_VIEWER_RECONNECT) {
+          reconnectAttemptsRef.current += 1;
+          setIsReconnecting(true);
+          reconnectTimerRef.current = setTimeout(() => {
+            if (mounted) void join();
+          }, 2000);
+          return;
+        }
         if (mounted) exitLivePage();
       }
     };
@@ -295,23 +369,35 @@ const LiveStreamPage = () => {
     join();
     return () => {
       mounted = false;
+      intentionalLeaveRef.current = true;
+      if (reconnectTimerRef.current) {
+        clearTimeout(reconnectTimerRef.current);
+        reconnectTimerRef.current = null;
+      }
       disconnectViewerRoom();
     };
-  }, [isBroadcaster, streamerId, disconnectViewerRoom, exitLivePage, fetchToken, addMessage]);
+  }, [isBroadcaster, streamerId, disconnectViewerRoom, exitLivePage, addMessage, verifyStreamStillActive]);
 
   useEffect(() => {
     if (!socket || isBroadcaster) return;
-    const onEnded = (payload) => {
+    const onEnded = async (payload) => {
       const sid = payload?.streamerId != null ? String(payload.streamerId) : '';
-      if (sid && sid === String(streamerId) && !closingRef.current) {
-        closingRef.current = true;
-        disconnectViewerRoom();
-        exitLivePage();
+      if (!sid || sid !== String(streamerId) || closingRef.current) return;
+      const room = roomRef.current;
+      if (
+        room
+        && (room.state === ConnectionState.Connected || room.state === ConnectionState.Reconnecting)
+      ) {
+        const stillActive = await verifyStreamStillActive();
+        if (stillActive) return;
       }
+      closingRef.current = true;
+      disconnectViewerRoom();
+      exitLivePage();
     };
     socket.on('livekit:streamEnded', onEnded);
     return () => socket.off('livekit:streamEnded', onEnded);
-  }, [socket, isBroadcaster, streamerId, exitLivePage, disconnectViewerRoom]);
+  }, [socket, isBroadcaster, streamerId, exitLivePage, disconnectViewerRoom, verifyStreamStillActive]);
 
   const sendChat = useCallback(async () => {
     if (!chatInput.trim()) return;
@@ -377,7 +463,7 @@ const LiveStreamPage = () => {
         <Flex h="100%" alignItems="center" justifyContent="center" bg="gray.900" px={6}>
           <Text color="gray.400" fontSize="md" textAlign="center">
             {!isBroadcaster
-              ? (viewerConnected ? 'Waiting for video…' : 'Connecting…')
+              ? (isReconnecting ? 'Reconnecting…' : viewerConnected ? 'Waiting for video…' : 'Connecting…')
               : (hostLive ? 'Starting camera…' : 'Tap Go Live to start')}
           </Text>
         </Flex>

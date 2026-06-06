@@ -3,7 +3,7 @@
  */
 
 import { createContext, useContext, useCallback, useEffect, useRef, useState } from 'react';
-import { Room, RoomEvent, Track, VideoPresets } from 'livekit-client';
+import { Room, RoomEvent, Track, VideoPresets, ConnectionState } from 'livekit-client';
 import { useToast } from '@chakra-ui/react';
 import { UserContext } from './UserContext';
 import { SocketContext } from './SocketContext';
@@ -263,6 +263,12 @@ export const LiveBroadcastProvider = ({ children }) => {
 
       room.on(RoomEvent.ParticipantConnected, () => setViewerCount(c => c + 1));
       room.on(RoomEvent.ParticipantDisconnected, () => setViewerCount(c => Math.max(0, c - 1)));
+      room.on(RoomEvent.Reconnecting, () => {
+        console.warn('[LiveBroadcast] LiveKit reconnecting…');
+      });
+      room.on(RoomEvent.Reconnected, () => {
+        syncLocalTrack();
+      });
       room.on(RoomEvent.Disconnected, () => {
         roomRef.current = null;
         setLocalTrack(null);
@@ -335,6 +341,15 @@ export const LiveBroadcastProvider = ({ children }) => {
     if (!socket || !isLive || !user?._id) return;
     const onStreamEnded = async (payload) => {
       if (String(payload?.streamerId || '') !== String(user._id)) return;
+      const room = roomRef.current;
+      if (
+        room
+        && (room.state === ConnectionState.Connected || room.state === ConnectionState.Reconnecting)
+      ) {
+        console.warn('[LiveBroadcast] Ignoring streamEnded — LiveKit session still active');
+        return;
+      }
+      if (liveEndedRef.current) return;
       await endLiveRef.current?.();
     };
     socket.on('livekit:streamEnded', onStreamEnded);
