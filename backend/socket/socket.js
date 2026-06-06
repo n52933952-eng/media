@@ -2238,6 +2238,8 @@ export const initializeSocket = async (app) => {
                     // Ignore duplicate emits from double-click/retry to avoid noisy feed updates.
                     return
                 }
+                const streamerNorm = normalizeUserId(streamerId) || String(streamerId)
+                socket.join(`livewatch:${streamerNorm}`)
                 // Save live stream to DB so feed can surface it
                 await LiveStream.findOneAndUpdate(
                     { streamer: streamerId },
@@ -2245,7 +2247,6 @@ export const initializeSocket = async (app) => {
                     { upsert: true, new: true }
                 )
                 // Notify followers: in-app socket when online; FCM push when not in app
-                const streamerNorm = normalizeUserId(streamerId) || String(streamerId)
                 const streamer = await User.findById(streamerId).select('followers').lean()
                 const followerList = streamer?.followers || []
                 if (followerList.length) {
