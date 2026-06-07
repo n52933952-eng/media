@@ -9,6 +9,7 @@ import {
   deleteMessage,
   getTotalUnreadCount,
   ackMessageDeliveredHttp,
+  getUndeliveredIncomingMessageIds,
   createGroup,
   updateGroupInfo,
   addGroupMember,
@@ -25,6 +26,7 @@ const router = express.Router()
 // ── Message send / ack ─────────────────────────────────────────────────────
 router.post('/', protectRoute, upload.single('file'), sendMessaeg)
 router.post('/ack-delivered', ackMessageDeliveredHttp)
+router.get('/undelivered-ids', protectRoute, getUndeliveredIncomingMessageIds)
 
 // ── Conversations list ─────────────────────────────────────────────────────
 router.get('/conversations', protectRoute, mycon)

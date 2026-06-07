@@ -1,6 +1,6 @@
 import Conversation from '../models/conversation.js'
 import Message from '../models/message.js'
-import { getRecipientSockedId, getIO, getUserSocket, isUserEffectivelyOnline } from '../socket/socket.js'
+import { getRecipientSockedId, getIO, getUserSocket, isUserEffectivelyOnline, getUserSelfRoomId } from '../socket/socket.js'
 import { v2 as cloudinary } from 'cloudinary'
 import { Readable } from 'stream'
 import mongoose from 'mongoose'
@@ -9,6 +9,20 @@ const CLOUDINARY_UPLOAD_QUALITY = (process.env.CLOUDINARY_UPLOAD_QUALITY || 'aut
 
 // ── helpers ────────────────────────────────────────────────────────────────
 const idStr = (id) => (id != null ? id.toString() : '')
+
+const notifySenderMessageDelivered = (senderStr, messageId, conversationId) => {
+  try {
+    const io = getIO()
+    const room = getUserSelfRoomId(senderStr)
+    if (!io || !room) return
+    io.to(room).emit('messageDelivered', {
+      messageId: String(messageId),
+      conversationId: String(conversationId),
+    })
+  } catch {
+    // best-effort
+  }
+}
 
 /**
  * Best-effort delete of a Cloudinary image/video referenced by a chat message URL.
@@ -222,26 +236,42 @@ export async function ackMessageDeliveredHttp(req, res) {
 
       await Message.updateOne({ _id: msg._id }, { $set: { delivered: true } })
 
-      // Notify sender immediately if they're connected via socket.
-      try {
-        const senderSocket = await getUserSocket(senderStr)
-        const senderSocketId = senderSocket?.socketId
-        if (senderSocketId) {
-          const io = getIO()
-          io.to(senderSocketId).emit('messageDelivered', {
-            messageId: msg._id.toString(),
-            conversationId: convId,
-          })
-        }
-      } catch {
-        // best-effort
-      }
+      notifySenderMessageDelivered(senderStr, msg._id.toString(), convId)
     }
 
     return res.status(200).json({ ok: true })
   } catch (e) {
     console.warn('ackMessageDeliveredHttp error:', e?.message || e)
     return res.status(500).json({ ok: false, error: 'server_error' })
+  }
+}
+
+/** Incoming messages not yet delivery-acked — client acks on reconnect so sender gets ✓✓. */
+export async function getUndeliveredIncomingMessageIds(req, res) {
+  try {
+    const userId = req.user?._id
+    if (!userId) return res.status(401).json({ messageIds: [] })
+
+    const convs = await Conversation.find({ participants: userId }).select('_id').lean()
+    const convIds = convs.map((c) => c._id).filter(Boolean)
+    if (!convIds.length) return res.status(200).json({ messageIds: [] })
+
+    const msgs = await Message.find({
+      conversationId: { $in: convIds },
+      sender: { $ne: userId },
+      delivered: { $ne: true },
+    })
+      .select('_id')
+      .sort({ createdAt: -1 })
+      .limit(50)
+      .lean()
+
+    return res.status(200).json({
+      messageIds: msgs.map((m) => m._id.toString()),
+    })
+  } catch (e) {
+    console.warn('getUndeliveredIncomingMessageIds error:', e?.message || e)
+    return res.status(500).json({ messageIds: [] })
   }
 }
 

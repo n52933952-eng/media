@@ -381,7 +381,7 @@ const getOnlineSnapshotForUserIds = async (userIds) => {
     for (let i = 0; i < ids.length; i++) {
         const v = values?.[i]
         const p = parsePresenceMgetCell(presenceValues?.[i])
-        if (v && p !== 'offline') {
+        if (v && p === 'online') {
             online.push({ userId: ids[i] })
         }
     }
@@ -401,7 +401,7 @@ const filterOutPresenceOfflineUserIds = async (userIds) => {
     const keep = new Set()
     for (let i = 0; i < ids.length; i++) {
         const p = parsePresenceMgetCell(presenceValues?.[i])
-        if (p !== 'offline') keep.add(ids[i])
+        if (p === 'online') keep.add(ids[i])
     }
     return keep
 }
@@ -454,7 +454,7 @@ const isUserEffectivelyOnline = async (userId) => {
     const sock = await getUserSocket(uid)
     if (!sock?.socketId) return false
     const presence = await getUserPresence(uid)
-    if (presence && String(presence).toLowerCase() === 'offline') return false
+    if (!presence || String(presence).toLowerCase() !== 'online') return false
     return true
 }
 
@@ -1185,8 +1185,9 @@ export const initializeSocket = async (app) => {
                 onlineAt: Date.now(),
                 clientType: clientType || undefined,
             }
-            // Presence before socket so mGet snapshots never see userSocket without matching `online` (avoids false offline / asymmetric status).
-            await setUserPresence(userId, 'online')
+            // Start offline until the client emits `clientPresence: online` (foreground).
+            // Avoids false "online" from background socket reconnects / push wake-ups.
+            await setUserPresence(userId, 'offline')
             await setUserSocket(userId, socketData)
             // Reverse mapping for O(1) disconnect handling
             await setSocketUser(socket.id, userId)
@@ -1221,20 +1222,8 @@ export const initializeSocket = async (app) => {
                 if (normConn) clearCallDisconnectGraceTimer(normConn)
             } catch (_) {}
 
-            // Emit targeted presence update for this userId (for subscribed clients)
-            try {
-                const normalized = normalizeUserId(userId)
-                if (normalized) {
-                    io.to(`${PRESENCE_ROOM_PREFIX}${normalized}`).emit('presenceUpdate', {
-                        userId: normalized,
-                        online: true,
-                        onlineAt: socketData.onlineAt,
-                    })
-                }
-            } catch (e) {
-                console.error('❌ [socket] Failed to emit presenceUpdate (online):', e.message)
-            }
-            
+            // Do NOT broadcast online here — wait for `clientPresence` from a foreground client.
+
             // Do NOT send pending call here – client may not have callUser listener attached yet (race).
             // Client will emit requestCallSignal when ready; requestCallSignal handler sends the signal.
 
@@ -2675,14 +2664,10 @@ export const initializeSocket = async (app) => {
 
                     await Message.updateOne({ _id: msg._id }, { $set: { delivered: true } })
 
-                    const senderData = await getUserSocket(senderStr)
-                    const senderSocketId = senderData?.socketId
-                    if (senderSocketId) {
-                        io.to(senderSocketId).emit('messageDelivered', {
-                            messageId: msg._id.toString(),
-                            conversationId: convId,
-                        })
-                    }
+                    emitToUserSelf(senderStr, 'messageDelivered', {
+                        messageId: msg._id.toString(),
+                        conversationId: convId,
+                    })
                 }
             } catch (e) {
                 console.warn('ackMessageDelivered error:', e?.message || e)
