@@ -2149,7 +2149,7 @@ export const initializeSocket = async (app) => {
                 }
 
                 const directTimerKey = directCallTimerKey({ roomName, callerId, receiverId })
-                if (directTimerKey) {
+                if (directTimerKey && LIVEKIT_MAX_SESSION_MS > 0) {
                     safeClearTimer(livekitDirectCallTimers, directTimerKey)
                     livekitDirectCallTimers.set(directTimerKey, setTimeout(async () => {
                         try {
@@ -2470,7 +2470,7 @@ export const initializeSocket = async (app) => {
                     })
                 }
                 const groupTimerKey = groupCallTimerKey({ roomName, conversationId })
-                if (groupTimerKey) {
+                if (groupTimerKey && LIVEKIT_MAX_SESSION_MS > 0) {
                     safeClearTimer(livekitGroupCallTimers, groupTimerKey)
                     livekitGroupCallTimers.set(groupTimerKey, setTimeout(async () => {
                         try {

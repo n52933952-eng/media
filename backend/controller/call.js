@@ -233,11 +233,18 @@ export const cancelCall = async (req, res) => {
             console.error('❌ [HTTP cancelCall] FCM error:', fcmErr.message)
         }
 
-        // Socket notify both sides
+        // Socket notify both sides (legacy + LiveKit)
         const io = getIO()
         if (io) {
-            if (callerSocketId)   io.to(callerSocketId).emit('CallCanceled')
-            if (receiverSocketId) io.to(receiverSocketId).emit('CallCanceled')
+            const lkPayload = { from: sender, roomName: null }
+            if (callerSocketId) {
+                io.to(callerSocketId).emit('CallCanceled')
+                io.to(callerSocketId).emit('livekit:callCanceled', lkPayload)
+            }
+            if (receiverSocketId) {
+                io.to(receiverSocketId).emit('CallCanceled')
+                io.to(receiverSocketId).emit('livekit:callCanceled', lkPayload)
+            }
             io.emit('cancleCall', { userToCall: conversationId, from: sender })
         }
 

@@ -12,8 +12,6 @@ import { liveBroadcastNav } from '../services/liveBroadcastNav';
 import { restoreCameraForViewers } from '../utils/liveBroadcastCamera';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
-/** 0 = no client max — broadcaster ends manually. */
-const LIVESTREAM_MAX_MS = 0;
 
 /** Match group-call room settings — proven to work web → mobile screen share. */
 const LIVE_ROOM_OPTIONS = {
@@ -41,7 +39,6 @@ export const LiveBroadcastProvider = ({ children }) => {
   const roomRef = useRef(null);
   const roomNameRef = useRef('');
   const liveEndedRef = useRef(false);
-  const liveTimeoutRef = useRef(null);
   const endLiveRef = useRef(async () => {});
   const onChatRef = useRef(null);
   const isSharingRef = useRef(false);
@@ -97,10 +94,6 @@ export const LiveBroadcastProvider = ({ children }) => {
   }, []);
 
   const disconnect = useCallback(async () => {
-    if (liveTimeoutRef.current) {
-      clearTimeout(liveTimeoutRef.current);
-      liveTimeoutRef.current = null;
-    }
     await stopAllPublishedTracks();
     try { await roomRef.current?.disconnect(); } catch (_) {}
     roomRef.current = null;
@@ -305,23 +298,6 @@ export const LiveBroadcastProvider = ({ children }) => {
         roomName,
       });
 
-      if (LIVESTREAM_MAX_MS > 0) {
-        liveTimeoutRef.current = setTimeout(() => {
-          if (!liveEndedRef.current && socket) {
-            liveEndedRef.current = true;
-            socket.emit('livekit:endLive', { streamerId: String(user._id), roomName });
-          }
-          void endLiveRef.current?.();
-          toast({
-            title: 'Live ended',
-            description: 'Maximum live duration reached.',
-            status: 'info',
-            duration: 4000,
-            isClosable: true,
-            position: 'top',
-          });
-        }, LIVESTREAM_MAX_MS);
-      }
     } catch (err) {
       console.error('[LiveBroadcast] goLive:', err);
     } finally {
@@ -364,10 +340,6 @@ export const LiveBroadcastProvider = ({ children }) => {
   useEffect(() => {
     if (!user && isLive) void endLiveRef.current?.();
   }, [user, isLive]);
-
-  useEffect(() => () => {
-    if (liveTimeoutRef.current) clearTimeout(liveTimeoutRef.current);
-  }, []);
 
   const value = {
     isLive,
