@@ -1,14 +1,12 @@
 /**
  * Share a live stream to people you follow (DM).
- * Custom portal overlay — Chakra Modal content was hidden behind its own overlay on the live page.
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
-  Box, Flex, Avatar, Text, Input, Spinner, IconButton, useToast,
+  Box, Flex, Avatar, Text, Input, Spinner, useToast,
 } from '@chakra-ui/react';
-import { CloseIcon } from '@chakra-ui/icons';
 import { buildLiveShareMessage } from '../utils/liveShareMessage';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
@@ -19,6 +17,7 @@ const LiveShareModal = ({ isOpen, onClose, live }) => {
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(false);
   const [sendingToId, setSendingToId] = useState(null);
+  const [sentToIds, setSentToIds] = useState(() => new Set());
   const [searchQuery, setSearchQuery] = useState('');
 
   const filteredUsers = useMemo(() => {
@@ -50,6 +49,7 @@ const LiveShareModal = ({ isOpen, onClose, live }) => {
   useEffect(() => {
     if (isOpen) {
       setSearchQuery('');
+      setSentToIds(new Set());
       fetchFollowing();
     }
   }, [isOpen, fetchFollowing]);
@@ -64,7 +64,7 @@ const LiveShareModal = ({ isOpen, onClose, live }) => {
   const sendToUser = async (followUser) => {
     if (!live?.streamerId || sendingToId) return;
     const recipientId = String(followUser?._id || '');
-    if (!recipientId) return;
+    if (!recipientId || sentToIds.has(recipientId)) return;
 
     setSendingToId(recipientId);
     try {
@@ -79,8 +79,8 @@ const LiveShareModal = ({ isOpen, onClose, live }) => {
       });
       if (!res.ok) throw new Error('send failed');
       const label = followUser?.name || followUser?.username || 'user';
-      toast({ title: `Live shared with ${label}`, status: 'success', duration: 2500, position: 'top' });
-      onClose();
+      setSentToIds((prev) => new Set(prev).add(recipientId));
+      toast({ title: `Live shared with ${label}`, status: 'success', duration: 2000, position: 'top' });
     } catch {
       toast({ title: 'Could not send live', status: 'error', duration: 3000, position: 'top' });
     } finally {
@@ -111,10 +111,10 @@ const LiveShareModal = ({ isOpen, onClose, live }) => {
         position="relative"
         bg="white"
         color="gray.800"
-        borderRadius="xl"
+        borderRadius="2xl"
         w="100%"
-        maxW="md"
-        maxH="80vh"
+        maxW="340px"
+        maxH="72vh"
         display="flex"
         flexDirection="column"
         boxShadow="2xl"
@@ -124,59 +124,84 @@ const LiveShareModal = ({ isOpen, onClose, live }) => {
         <Flex
           align="center"
           justify="space-between"
-          px={5}
-          py={4}
+          px={4}
+          py={3}
           borderBottom="1px solid"
           borderColor="gray.200"
           flexShrink={0}
+          bg="gray.50"
         >
-          <Text fontWeight="bold" fontSize="lg">Share live</Text>
-          <IconButton
-            icon={<CloseIcon boxSize={3} />}
-            size="sm"
-            variant="ghost"
-            onClick={onClose}
+          <Text fontWeight="bold" fontSize="md">Share live</Text>
+          <Box
+            as="button"
+            type="button"
             aria-label="Close"
-          />
+            onClick={onClose}
+            w="32px"
+            h="32px"
+            display="flex"
+            alignItems="center"
+            justifyContent="center"
+            borderRadius="full"
+            bg="gray.200"
+            color="gray.700"
+            fontSize="18px"
+            fontWeight="bold"
+            lineHeight={1}
+            flexShrink={0}
+            _hover={{ bg: 'gray.300' }}
+          >
+            ×
+          </Box>
         </Flex>
-        <Box px={5} py={4} overflowY="auto" flex={1}>
+        <Box px={4} py={3} overflowY="auto" flex={1}>
           <Input
             placeholder="Search…"
             mb={3}
+            size="sm"
+            borderRadius="full"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
           />
           {loading ? (
-            <Flex justify="center" py={8}><Spinner /></Flex>
+            <Flex justify="center" py={8}><Spinner size="sm" /></Flex>
           ) : filteredUsers.length === 0 ? (
-            <Text color="gray.500" textAlign="center" py={6}>No people found</Text>
+            <Text color="gray.500" textAlign="center" py={6} fontSize="sm">No people found</Text>
           ) : (
-            <Box maxH="50vh" overflowY="auto">
+            <Box maxH="48vh" overflowY="auto">
               {filteredUsers.map((item) => {
                 const name = item?.name || item?.username || 'User';
-                const busy = sendingToId === String(item?._id || '');
+                const uid = String(item?._id || '');
+                const busy = sendingToId === uid;
+                const sent = sentToIds.has(uid);
                 return (
                   <Flex
-                    key={String(item._id)}
+                    key={uid}
                     align="center"
-                    gap={3}
+                    gap={2.5}
                     py={2}
                     px={1}
                     borderBottom="1px solid"
                     borderColor="gray.100"
-                    cursor={busy ? 'wait' : 'pointer'}
-                    onClick={() => !busy && sendToUser(item)}
-                    _hover={{ bg: 'gray.50' }}
+                    cursor={busy || sent ? 'default' : 'pointer'}
+                    onClick={() => !busy && !sent && sendToUser(item)}
+                    _hover={sent ? {} : { bg: 'gray.50' }}
                     borderRadius="md"
                   >
-                    <Avatar src={item?.profilePic} name={name} size="sm" />
+                    <Avatar src={item?.profilePic} name={name} size="sm" flexShrink={0} />
                     <Box flex={1} minW={0}>
                       <Text fontWeight="600" fontSize="sm" noOfLines={1}>{name}</Text>
                       {item?.username && (
                         <Text fontSize="xs" color="gray.500" noOfLines={1}>@{item.username}</Text>
                       )}
                     </Box>
-                    {busy ? <Spinner size="sm" /> : <Text fontSize="sm" color="blue.500" fontWeight="600">Send</Text>}
+                    {busy ? (
+                      <Spinner size="sm" flexShrink={0} />
+                    ) : sent ? (
+                      <Text fontSize="xs" color="green.600" fontWeight="700" flexShrink={0}>Sent ✓</Text>
+                    ) : (
+                      <Text fontSize="xs" color="blue.500" fontWeight="700" flexShrink={0}>Send</Text>
+                    )}
                   </Flex>
                 );
               })}

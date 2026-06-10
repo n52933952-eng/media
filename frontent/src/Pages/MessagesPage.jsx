@@ -54,7 +54,7 @@ import { MdDelete } from 'react-icons/md'
 import EmojiPicker from 'emoji-picker-react'
 import { compressVideo, needsCompression } from '../utils/videoCompress'
 import LiveShareChatCard from '../Components/LiveShareChatCard'
-import { parseLiveShareMessage } from '../utils/liveShareMessage'
+import { parseLiveShareMessage, liveSharePreviewText } from '../utils/liveShareMessage'
 
 /** Match socket `userId` strings to API user `_id` (string or ObjectId) — strict === fails and hides online friends. */
 const idStr = (id) => {
@@ -2750,7 +2750,8 @@ const MessagesPage = () => {
                             }
                           }
                           
-                          const normalizedPreview = lastText || (hasImageAttachment ? '📷 Image' : '')
+                          const livePreview = liveSharePreviewText(lastText)
+                          const normalizedPreview = livePreview || lastText || (hasImageAttachment ? '📷 Image' : '')
                           const messagePreview = normalizedPreview.length > 30
                             ? normalizedPreview.substring(0, 30) + "..."
                             : normalizedPreview

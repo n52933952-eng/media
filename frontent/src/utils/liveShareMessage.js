@@ -28,3 +28,9 @@ export function parseLiveShareMessage(text) {
     return null;
   }
 }
+
+export function liveSharePreviewText(text) {
+  const live = parseLiveShareMessage(text);
+  if (!live) return null;
+  return `🔴 ${live.streamerName} is live`;
+}

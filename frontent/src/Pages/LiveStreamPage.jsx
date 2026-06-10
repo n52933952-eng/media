@@ -35,13 +35,11 @@ const LIVE_EMOJIS = ['❤️', '😂', '🔥', '👏', '😍', '🎉', '💯', '
 const INPUT_BAR_H = 64;
 /** Top bar + safe gap — icons never overlap End / Leave. */
 const TOP_BAR_CLEAR = 72;
-const CHAT_PANEL_BG = 'rgba(20, 48, 82, 0.88)';
-const CHAT_PANEL_BORDER = 'rgba(59, 130, 246, 0.35)';
-
+const FLOAT_MSG_MS = 5500;
 const floatUp = keyframes`
-  0%   { transform: translateY(0);   opacity: 1; }
-  70%  { transform: translateY(-80px); opacity: 1; }
-  100% { transform: translateY(-120px); opacity: 0; }
+  0%   { transform: translateY(0);    opacity: 1; }
+  70%  { transform: translateY(-180px); opacity: 1; }
+  100% { transform: translateY(-260px); opacity: 0; }
 `;
 
 const floatReactionUp = keyframes`
@@ -66,16 +64,25 @@ const FloatingReaction = ({ reaction }) => (
 const FloatingMessage = ({ msg }) => (
   <Box
     position="absolute"
-    bottom="16px"
-    left="16px"
-    right="8px"
+    bottom={0}
+    left={0}
+    maxW="85%"
     pointerEvents="none"
-    css={css`animation: ${floatUp} 4s ease-out forwards;`}
+    css={css`animation: ${floatUp} ${FLOAT_MSG_MS}ms ease-out forwards;`}
     zIndex={10}
   >
-    <Box bg="blackAlpha.700" borderRadius="full" px={3} py={1} display="inline-flex" alignItems="center" gap={2}>
-      <Text as="span" fontWeight="bold" color="yellow.300" fontSize="sm">{msg.sender}</Text>
-      <Text as="span" color="white" fontSize="sm">{msg.text}</Text>
+    <Box
+      bg="rgba(0,0,0,0.62)"
+      borderRadius="full"
+      px={3}
+      py={1.5}
+      display="inline-flex"
+      alignItems="center"
+      gap={2}
+      border="1px solid rgba(255,255,255,0.12)"
+    >
+      <Text as="span" fontWeight="bold" color="yellow.300" fontSize="sm" noOfLines={1}>{msg.sender}</Text>
+      <Text as="span" color="white" fontSize="sm" noOfLines={2}>{msg.text}</Text>
     </Box>
   </Box>
 );
@@ -204,7 +211,7 @@ const LiveStreamPage = () => {
     const id = ++floatIdCounter.current;
     setChatLog(prev => [...prev.slice(-100), { id, sender, text }]);
     setFloatingMsgs(prev => [...prev.slice(-5), { id, sender, text }]);
-    setTimeout(() => setFloatingMsgs(prev => prev.filter(m => m.id !== id)), 4100);
+    setTimeout(() => setFloatingMsgs(prev => prev.filter(m => m.id !== id)), FLOAT_MSG_MS + 200);
   }, []);
 
   const addEmojiFloat = useCallback((emoji) => {
@@ -755,25 +762,25 @@ const LiveStreamPage = () => {
           overflowY="auto"
           display="flex"
           flexDir="column"
+          justifyContent="flex-end"
           ref={chatLogRef}
           px={3}
           py={2}
           gap={1}
           zIndex={22}
-          borderRadius="lg"
-          border="1px solid"
-          bg={isBroadcaster ? 'rgba(0,0,0,0.7)' : CHAT_PANEL_BG}
-          borderColor={isBroadcaster ? 'transparent' : CHAT_PANEL_BORDER}
+          borderRadius="xl"
+          border="1px solid rgba(255,255,255,0.12)"
+          bg="rgba(0,0,0,0.55)"
+          maxW="min(300px, calc(100vw - 110px))"
           style={{
             bottom: `${chatLogBottom}px`,
-            right: ui.logPanel.right,
             height: ui.logPanel.height,
           }}
           css={{ scrollbarWidth: 'none', '&::-webkit-scrollbar': { display: 'none' } }}
         >
           {chatLog.map(m => (
-            <Box key={m.id}>
-              <Text fontSize="sm" color="white">
+            <Box key={m.id} alignSelf="flex-start" maxW="100%">
+              <Text fontSize="sm" color="white" lineHeight="short">
                 <Text as="span" fontWeight="bold" color="yellow.300">{m.sender}: </Text>
                 {m.text}
               </Text>
