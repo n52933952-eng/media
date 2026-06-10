@@ -566,10 +566,11 @@ const LiveStreamPage = () => {
 
   const remoteMainCamera = !isBroadcaster && !remoteScreenTrack ? remoteCameraTrack : null;
   const chatLogBottom = INPUT_BAR_H + 12;
-  const actionRailBottom = INPUT_BAR_H + 16 + (
+  const actionRailBottom = INPUT_BAR_H + 20 + (
     isBroadcaster ? metrics.broadcasterRailBottomExtra : metrics.viewerRailBottomExtra
   );
-  const actionRailMaxH = `calc(100dvh - ${metrics.liveTopBarClear + 48}px - ${actionRailBottom}px)`;
+  /** Icons live in this band only — never clip under browser chrome or End/Leave */
+  const actionRailTop = metrics.liveTopBarClear + 56;
   const endBtnRight = metrics.actionRailGutter + 8;
   const displayName = isBroadcaster
     ? (user?.name || user?.username)
@@ -854,16 +855,18 @@ const LiveStreamPage = () => {
         <Box
           position="fixed"
           zIndex={25}
+          top={`${actionRailTop}px`}
           bottom={`${actionRailBottom}px`}
           right={`${metrics.actionRailRight}px`}
           w={`${metrics.actionRailWidth}px`}
-          maxH={actionRailMaxH}
           display="flex"
           flexDirection="column"
           justifyContent="flex-end"
           alignItems="center"
           gap={2}
           pointerEvents="auto"
+          overflowY="auto"
+          css={{ scrollbarWidth: 'none', '&::-webkit-scrollbar': { display: 'none' } }}
         >
           {isBroadcaster ? (
             <>
