@@ -33,9 +33,9 @@ const VIEWER_RAIL_SLOTS = 5;
 const LIVE_EMOJIS = ['❤️', '😂', '🔥', '👏', '😍', '🎉', '💯', '🙌'];
 /** Space reserved for bottom chat input row. */
 const INPUT_BAR_H = 64;
-/** Top bar + safe gap — icons never overlap End / Leave. */
-const TOP_BAR_CLEAR = 72;
 const FLOAT_MSG_MS = 5500;
+const CHAT_PANEL_BG = 'rgba(20, 48, 82, 0.88)';
+const CHAT_PANEL_BORDER = 'rgba(59, 130, 246, 0.4)';
 const floatUp = keyframes`
   0%   { transform: translateY(0);    opacity: 1; }
   70%  { transform: translateY(-180px); opacity: 1; }
@@ -582,6 +582,12 @@ const LiveStreamPage = () => {
 
   const remoteMainCamera = !isBroadcaster && !remoteScreenTrack ? remoteCameraTrack : null;
   const chatLogBottom = INPUT_BAR_H + 12;
+  const actionRailBottom = INPUT_BAR_H + 16 + (
+    isBroadcaster ? metrics.broadcasterRailBottomExtra : metrics.viewerRailBottomExtra
+  );
+  const actionRailHeight = metrics.actionSlotH * (
+    isBroadcaster ? BROADCASTER_RAIL_SLOTS : VIEWER_RAIL_SLOTS
+  );
   const displayName = isBroadcaster
     ? (user?.name || user?.username)
     : hostInfo.name;
@@ -772,7 +778,7 @@ const LiveStreamPage = () => {
         {floatingReactions.map(r => <FloatingReaction key={r.id} reaction={r} />)}
       </Box>
 
-      {showLog && isLive && chatLog.length > 0 && (
+      {showLog && isLive && (
         <Box
           position="fixed"
           left="12px"
@@ -781,16 +787,17 @@ const LiveStreamPage = () => {
           flexDir="column"
           justifyContent="flex-end"
           ref={chatLogRef}
-          px={3}
-          py={2}
-          gap={1}
+          px={4}
+          py={3}
+          gap={1.5}
           zIndex={22}
           borderRadius="xl"
-          border="1px solid rgba(255,255,255,0.12)"
-          bg="rgba(0,0,0,0.55)"
-          maxW="min(300px, calc(100vw - 110px))"
+          border="1px solid"
+          borderColor={CHAT_PANEL_BORDER}
+          bg={CHAT_PANEL_BG}
           style={{
             bottom: `${chatLogBottom}px`,
+            right: ui.logPanel.right,
             height: ui.logPanel.height,
           }}
           css={{ scrollbarWidth: 'none', '&::-webkit-scrollbar': { display: 'none' } }}
@@ -847,10 +854,10 @@ const LiveStreamPage = () => {
         <Box
           position="fixed"
           zIndex={25}
-          top={`${TOP_BAR_CLEAR}px`}
-          bottom={`${INPUT_BAR_H + 12}px`}
+          bottom={`${actionRailBottom}px`}
           right={`${metrics.actionRailRight}px`}
           w={`${metrics.actionRailWidth}px`}
+          h={`${actionRailHeight}px`}
           pointerEvents="none"
         >
           <Box position="relative" w="100%" h="100%" pointerEvents="none">
@@ -870,7 +877,7 @@ const LiveStreamPage = () => {
                     ui={ui}
                     icon="💬"
                     label="Chat"
-                    highlight={showLog}
+                    primary={showLog}
                     onClick={() => setShowLog(v => !v)}
                   />
                 </RailSlot>
@@ -927,7 +934,7 @@ const LiveStreamPage = () => {
                     ui={ui}
                     icon="💬"
                     label="Chat"
-                    highlight={showLog}
+                    primary={showLog}
                     onClick={() => setShowLog(v => !v)}
                   />
                 </RailSlot>
