@@ -36,21 +36,6 @@ const INPUT_BAR_H = 80;
 const CHAT_PANEL_BG = 'rgba(20, 48, 82, 0.88)';
 const CHAT_PANEL_BORDER = 'rgba(59, 130, 246, 0.35)';
 
-const ActionRailSlot = ({ slotIndex, metrics, children }) => (
-  <Box
-    position="absolute"
-    left={0}
-    right={0}
-    bottom={`${metrics.actionSlotH * slotIndex}px`}
-    display="flex"
-    alignItems="center"
-    justifyContent="center"
-    py={1}
-  >
-    {children}
-  </Box>
-);
-
 const floatUp = keyframes`
   0%   { transform: translateY(0);   opacity: 1; }
   70%  { transform: translateY(-80px); opacity: 1; }
@@ -128,9 +113,10 @@ const LiveStreamPage = () => {
 
   const metrics = useLiveScreenMetrics();
   const ui = liveActionStyles(metrics, isBroadcaster ? BROADCASTER_RAIL_SLOTS : VIEWER_RAIL_SLOTS);
-  const actionRailBottom = INPUT_BAR_H + (
+  const actionRailBottom = INPUT_BAR_H + 16 + (
     isBroadcaster ? metrics.broadcasterRailBottomExtra : metrics.viewerRailBottomExtra
   );
+  const showActionRail = isBroadcaster ? hostLive : viewerConnected;
 
   const [viewerConnected, setViewerConnected] = useState(false);
   const [isReconnecting, setIsReconnecting] = useState(false);
@@ -581,9 +567,10 @@ const LiveStreamPage = () => {
   const displayAvatar = isBroadcaster ? user?.profilePic : hostInfo.profilePic;
 
   return (
-    <Box position="fixed" inset={0} w="100vw" h="100dvh" bg="black" zIndex={1600} overflow="hidden">
+    <Box position="fixed" inset={0} w="100vw" h="100dvh" bg="#000" zIndex={1600} overflow="hidden">
       {isBroadcaster && hostLive && (
         <>
+          <Box position="absolute" inset={0} bg="#000" />
           <Box
             as="video"
             ref={localVideoRef}
@@ -619,15 +606,36 @@ const LiveStreamPage = () => {
           />
         </Box>
       ) : !isBroadcaster && remoteMainCamera ? (
-        <Box as="video" ref={remoteVideoRef} autoPlay playsInline
-          key={remoteMainCamera?.sid || 'cam'}
-          style={{
-            position: 'absolute', inset: 0, width: '100%', height: '100%',
-            objectFit: videoFitCover ? 'cover' : 'contain', objectPosition: 'center',
-          }}
-        />
+        <>
+          <Box position="absolute" inset={0} bg="#000" />
+          <Box
+            as="video"
+            ref={remoteVideoRef}
+            autoPlay
+            playsInline
+            key={remoteMainCamera?.sid || 'cam'}
+            style={{
+              position: 'absolute', inset: 0, width: '100%', height: '100%',
+              objectFit: videoFitCover ? 'cover' : 'contain',
+              objectPosition: 'center', backgroundColor: '#000',
+            }}
+          />
+        </>
       ) : (
-        <Flex h="100%" alignItems="center" justifyContent="center" bg="gray.900" px={6}>
+        <Flex h="100%" alignItems="center" justifyContent="center" bg="#000" px={6} direction="column" gap={3}>
+          {!isBroadcaster && (
+            <HStack
+              spacing={2}
+              bg="rgba(29, 78, 216, 0.35)"
+              border="1px solid rgba(96, 165, 250, 0.35)"
+              borderRadius="full"
+              px={3}
+              py={1.5}
+            >
+              <Avatar src={displayAvatar} name={displayName || 'User'} size="sm" />
+              <Text color="white" fontWeight="bold" fontSize="sm">{displayName}</Text>
+            </HStack>
+          )}
           <Text color="gray.400" fontSize="md" textAlign="center">
             {!isBroadcaster
               ? (isReconnecting ? 'Reconnecting…' : viewerConnected ? 'Waiting for video…' : 'Connecting…')
@@ -672,10 +680,7 @@ const LiveStreamPage = () => {
           </HStack>
         )}
         <HStack spacing={2} flexShrink={0}>
-          {!isBroadcaster && isLive && (
-            <Badge colorScheme="red" fontSize="xs" px={2} borderRadius="full">🔴 LIVE</Badge>
-          )}
-          {isBroadcaster && isLive && (
+          {isBroadcaster && hostLive && (
             <Button
               size="sm"
               borderRadius="full"
@@ -686,12 +691,15 @@ const LiveStreamPage = () => {
               End
             </Button>
           )}
-          {!isBroadcaster && isLive && (
-            <Button size="sm" borderRadius="full" colorScheme="red" onClick={safeClose}>
-              Leave
+          {!isBroadcaster && viewerConnected && (
+            <Badge colorScheme="red" fontSize="xs" px={2} borderRadius="full">🔴 LIVE</Badge>
+          )}
+          {!isBroadcaster && (
+            <Button size="sm" borderRadius="full" colorScheme="red" variant="solid" onClick={safeClose}>
+              {viewerConnected ? 'Leave' : 'Close'}
             </Button>
           )}
-          {(isBroadcaster && !isLive) || !isLive ? (
+          {isBroadcaster && !hostLive && (
             <IconButton
               icon={<CloseIcon boxSize={3} />}
               size="sm"
@@ -701,7 +709,7 @@ const LiveStreamPage = () => {
               onClick={safeClose}
               aria-label="Close"
             />
-          ) : null}
+          )}
         </HStack>
       </Flex>
 
@@ -818,128 +826,103 @@ const LiveStreamPage = () => {
         </>
       )}
 
-      {isLive && (
+      {showActionRail && (
         <Box
-          position="absolute"
+          position="fixed"
           zIndex={25}
-          top="auto"
           right={`${metrics.actionRailRight}px`}
           bottom={`${actionRailBottom}px`}
           w={`${metrics.actionRailWidth}px`}
-          h={`${metrics.actionSlotH * (isBroadcaster ? BROADCASTER_RAIL_SLOTS : VIEWER_RAIL_SLOTS)}px`}
+          display="flex"
+          flexDirection="column"
+          alignItems="center"
+          gap={3}
         >
           {isBroadcaster ? (
             <>
-              <ActionRailSlot slotIndex={6} metrics={metrics}>
+              <LiveActionButton
+                ui={ui}
+                icon={isMicMuted ? '🔇' : '🔊'}
+                label={isMicMuted ? 'Unmute' : 'Mute'}
+                onClick={() => { void toggleMicMute(); }}
+              />
+              <LiveActionButton
+                ui={ui}
+                icon="📤"
+                label="Share live"
+                primary
+                onClick={() => setShareLiveOpen(true)}
+              />
+              <LiveActionButton
+                ui={ui}
+                icon="🏠"
+                label="Share app"
+                primary={!isSharing}
+                disabled={isSharing}
+                onClick={shareAndGoAppHome}
+              />
+              <LiveActionButton
+                ui={ui}
+                icon="🖥"
+                label="Share window"
+                disabled={isSharing}
+                onClick={shareWindow}
+              />
+              <LiveActionButton
+                ui={ui}
+                icon="💬"
+                label="Chat"
+                highlight={showLog}
+                onClick={() => setShowLog(v => !v)}
+              />
+              {isSharing && (
                 <LiveActionButton
                   ui={ui}
-                  icon={isMicMuted ? '🔇' : '🔊'}
-                  label={isMicMuted ? 'Unmute' : 'Mute'}
-                  onClick={() => { void toggleMicMute(); }}
+                  icon="🛑"
+                  label="Stop"
+                  onClick={toggleShare}
+                  circleStyle={{ borderColor: 'red.400', borderWidth: '2px' }}
                 />
-              </ActionRailSlot>
-              <ActionRailSlot slotIndex={5} metrics={metrics}>
-                <LiveActionButton
-                  ui={ui}
-                  icon="📤"
-                  label="Share live"
-                  primary
-                  onClick={() => setShareLiveOpen(true)}
-                />
-              </ActionRailSlot>
-              <ActionRailSlot slotIndex={4} metrics={metrics}>
-                <LiveActionButton
-                  ui={ui}
-                  icon="🏠"
-                  label="Share app"
-                  primary={!isSharing}
-                  disabled={isSharing}
-                  onClick={shareAndGoAppHome}
-                />
-              </ActionRailSlot>
-              <ActionRailSlot slotIndex={3} metrics={metrics}>
-                <LiveActionButton
-                  ui={ui}
-                  icon="🖥"
-                  label="Share window"
-                  disabled={isSharing}
-                  onClick={shareWindow}
-                />
-              </ActionRailSlot>
-              <ActionRailSlot slotIndex={2} metrics={metrics}>
-                <LiveActionButton
-                  ui={ui}
-                  icon="💬"
-                  label="Chat"
-                  highlight={showLog}
-                  onClick={() => setShowLog(v => !v)}
-                />
-              </ActionRailSlot>
-              <ActionRailSlot slotIndex={1} metrics={metrics}>
-                <Box w={ui.actionCircle.width} h={ui.actionCircle.height} />
-              </ActionRailSlot>
-              <ActionRailSlot slotIndex={0} metrics={metrics}>
-                {isSharing ? (
-                  <LiveActionButton
-                    ui={ui}
-                    icon="🛑"
-                    label="Stop"
-                    onClick={toggleShare}
-                    circleStyle={{ borderColor: 'red.400', borderWidth: '2px' }}
-                  />
-                ) : (
-                  <Box w={ui.actionCircle.width} h={ui.actionCircle.height} />
-                )}
-              </ActionRailSlot>
+              )}
             </>
           ) : (
             <>
-              {remoteCameraTrack && !remoteScreenTrack ? (
-                <ActionRailSlot slotIndex={4} metrics={metrics}>
-                  <LiveActionButton
-                    ui={ui}
-                    icon={videoFitCover ? '⊡' : '⊞'}
-                    label={videoFitCover ? 'Fit' : 'Fill'}
-                    highlight={videoFitCover}
-                    onClick={() => setVideoFitCover(v => !v)}
-                  />
-                </ActionRailSlot>
-              ) : null}
-              <ActionRailSlot slotIndex={3} metrics={metrics}>
+              {remoteCameraTrack && !remoteScreenTrack && (
                 <LiveActionButton
                   ui={ui}
-                  icon={viewerMuted ? '🔇' : '🔊'}
-                  label={viewerMuted ? 'Unmute' : 'Mute'}
-                  onClick={() => setViewerMuted(v => !v)}
+                  icon={videoFitCover ? '⊡' : '⊞'}
+                  label={videoFitCover ? 'Fit' : 'Fill'}
+                  highlight={videoFitCover}
+                  onClick={() => setVideoFitCover(v => !v)}
                 />
-              </ActionRailSlot>
-              <ActionRailSlot slotIndex={2} metrics={metrics}>
-                <LiveActionButton
-                  ui={ui}
-                  icon="📤"
-                  label="Share"
-                  primary
-                  onClick={() => setShareLiveOpen(true)}
-                />
-              </ActionRailSlot>
-              <ActionRailSlot slotIndex={1} metrics={metrics}>
-                <LiveActionButton
-                  ui={ui}
-                  icon="💬"
-                  label="Chat"
-                  highlight={showLog}
-                  onClick={() => setShowLog(v => !v)}
-                />
-              </ActionRailSlot>
-              <ActionRailSlot slotIndex={0} metrics={metrics}>
-                <LiveActionButton
-                  ui={ui}
-                  icon="♥"
-                  label="React"
-                  highlight={emojiPickerOpen}
-                  onClick={() => setEmojiPickerOpen(v => !v)}
-                />
-              </ActionRailSlot>
+              )}
+              <LiveActionButton
+                ui={ui}
+                icon={viewerMuted ? '🔇' : '🔊'}
+                label={viewerMuted ? 'Unmute' : 'Mute'}
+                onClick={() => setViewerMuted(v => !v)}
+              />
+              <LiveActionButton
+                ui={ui}
+                icon="📤"
+                label="Share"
+                primary
+                onClick={() => setShareLiveOpen(true)}
+              />
+              <LiveActionButton
+                ui={ui}
+                icon="💬"
+                label="Chat"
+                highlight={showLog}
+                onClick={() => setShowLog(v => !v)}
+              />
+              <LiveActionButton
+                ui={ui}
+                icon="♥"
+                label="React"
+                highlight={emojiPickerOpen}
+                onClick={() => setEmojiPickerOpen(v => !v)}
+              />
             </>
           )}
         </Box>
@@ -951,9 +934,9 @@ const LiveStreamPage = () => {
         live={shareLivePayload}
       />
 
-      {isLive && (
+      {showActionRail && (
         <Flex
-          position="absolute"
+          position="fixed"
           bottom={0}
           left={0}
           zIndex={20}
