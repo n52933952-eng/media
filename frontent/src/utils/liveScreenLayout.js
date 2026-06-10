@@ -28,7 +28,8 @@ export function buildLiveScreenMetrics(width, height) {
     scale,
     pillH: s(46, scale),
     actionCircle: s(50, scale),
-    actionSlotH: s(82, scale),
+    /** Tighter on web — 82px phone slots push icons into the top bar on short viewports */
+    actionSlotH: s(64, scale),
     actionRailWidth: s(76, scale),
     actionRailRight: s(10, scale),
     actionRailGutter: s(88, scale),
@@ -36,7 +37,7 @@ export function buildLiveScreenMetrics(width, height) {
     floatChatStackH: s(200, scale),
     floatChatMaxH: Math.min(s(400, scale), Math.round(height * 0.45)),
     topBarTop,
-    liveTopBarClear: topBarTop + s(40, scale),
+    liveTopBarClear: topBarTop + s(52, scale),
     reactionAreaHeight: s(280, scale),
     emojiPickerBtn: s(38, scale),
     emojiPickerEmoji: s(24, scale),
