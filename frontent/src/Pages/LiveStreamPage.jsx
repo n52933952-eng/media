@@ -116,7 +116,6 @@ const LiveStreamPage = () => {
   const actionRailBottom = INPUT_BAR_H + 16 + (
     isBroadcaster ? metrics.broadcasterRailBottomExtra : metrics.viewerRailBottomExtra
   );
-  const showActionRail = isBroadcaster ? hostLive : viewerConnected;
 
   const [viewerConnected, setViewerConnected] = useState(false);
   const [isReconnecting, setIsReconnecting] = useState(false);
@@ -132,7 +131,7 @@ const LiveStreamPage = () => {
   const [shareLiveOpen, setShareLiveOpen] = useState(false);
   const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
   const [viewerMuted, setViewerMuted] = useState(false);
-  const [videoFitCover, setVideoFitCover] = useState(false);
+  const [videoFitCover, setVideoFitCover] = useState(true);
   const [hostInfo, setHostInfo] = useState({ name: 'User', profilePic: '', roomName: '' });
 
   const roomRef = useRef(null);
@@ -565,6 +564,7 @@ const LiveStreamPage = () => {
     ? (user?.name || user?.username)
     : hostInfo.name;
   const displayAvatar = isBroadcaster ? user?.profilePic : hostInfo.profilePic;
+  const showActionRail = isBroadcaster ? hostLive : viewerConnected;
 
   return (
     <Box position="fixed" inset={0} w="100vw" h="100dvh" bg="#000" zIndex={1600} overflow="hidden">
@@ -580,7 +580,7 @@ const LiveStreamPage = () => {
             display={isSharing ? 'none' : 'block'}
             style={{
               position: 'absolute', inset: 0, width: '100%', height: '100%',
-              objectFit: 'contain', objectPosition: 'center', backgroundColor: '#000',
+              objectFit: 'cover', objectPosition: 'center', backgroundColor: '#000',
             }}
           />
           {isSharing && (
@@ -645,7 +645,7 @@ const LiveStreamPage = () => {
       )}
 
       <Flex
-        position="absolute" left={3} right={3} zIndex={20} px={2} py={2}
+        position="absolute" left={3} right={3} zIndex={30} px={2} py={2}
         bg="linear-gradient(to bottom, rgba(0,0,0,0.55) 0%, transparent 100%)"
         alignItems="center" justifyContent="space-between"
         style={{ top: ui.topBar.top }}
@@ -834,24 +834,34 @@ const LiveStreamPage = () => {
           bottom={`${actionRailBottom}px`}
           w={`${metrics.actionRailWidth}px`}
           display="flex"
-          flexDirection="column"
+          flexDirection="column-reverse"
           alignItems="center"
           gap={3}
         >
           {isBroadcaster ? (
             <>
+              {isSharing && (
+                <LiveActionButton
+                  ui={ui}
+                  icon="🛑"
+                  label="Stop"
+                  onClick={toggleShare}
+                  circleStyle={{ borderColor: 'red.400', borderWidth: '2px' }}
+                />
+              )}
               <LiveActionButton
                 ui={ui}
-                icon={isMicMuted ? '🔇' : '🔊'}
-                label={isMicMuted ? 'Unmute' : 'Mute'}
-                onClick={() => { void toggleMicMute(); }}
+                icon="💬"
+                label="Chat"
+                highlight={showLog}
+                onClick={() => setShowLog(v => !v)}
               />
               <LiveActionButton
                 ui={ui}
-                icon="📤"
-                label="Share live"
-                primary
-                onClick={() => setShareLiveOpen(true)}
+                icon="🖥"
+                label="Share window"
+                disabled={isSharing}
+                onClick={shareWindow}
               />
               <LiveActionButton
                 ui={ui}
@@ -863,10 +873,26 @@ const LiveStreamPage = () => {
               />
               <LiveActionButton
                 ui={ui}
-                icon="🖥"
-                label="Share window"
-                disabled={isSharing}
-                onClick={shareWindow}
+                icon="📤"
+                label="Share live"
+                primary
+                onClick={() => setShareLiveOpen(true)}
+              />
+              <LiveActionButton
+                ui={ui}
+                icon={isMicMuted ? '🔇' : '🔊'}
+                label={isMicMuted ? 'Unmute' : 'Mute'}
+                onClick={() => { void toggleMicMute(); }}
+              />
+            </>
+          ) : (
+            <>
+              <LiveActionButton
+                ui={ui}
+                icon="♥"
+                label="React"
+                highlight={emojiPickerOpen}
+                onClick={() => setEmojiPickerOpen(v => !v)}
               />
               <LiveActionButton
                 ui={ui}
@@ -874,33 +900,6 @@ const LiveStreamPage = () => {
                 label="Chat"
                 highlight={showLog}
                 onClick={() => setShowLog(v => !v)}
-              />
-              {isSharing && (
-                <LiveActionButton
-                  ui={ui}
-                  icon="🛑"
-                  label="Stop"
-                  onClick={toggleShare}
-                  circleStyle={{ borderColor: 'red.400', borderWidth: '2px' }}
-                />
-              )}
-            </>
-          ) : (
-            <>
-              {remoteCameraTrack && !remoteScreenTrack && (
-                <LiveActionButton
-                  ui={ui}
-                  icon={videoFitCover ? '⊡' : '⊞'}
-                  label={videoFitCover ? 'Fit' : 'Fill'}
-                  highlight={videoFitCover}
-                  onClick={() => setVideoFitCover(v => !v)}
-                />
-              )}
-              <LiveActionButton
-                ui={ui}
-                icon={viewerMuted ? '🔇' : '🔊'}
-                label={viewerMuted ? 'Unmute' : 'Mute'}
-                onClick={() => setViewerMuted(v => !v)}
               />
               <LiveActionButton
                 ui={ui}
@@ -911,18 +910,19 @@ const LiveStreamPage = () => {
               />
               <LiveActionButton
                 ui={ui}
-                icon="💬"
-                label="Chat"
-                highlight={showLog}
-                onClick={() => setShowLog(v => !v)}
+                icon={viewerMuted ? '🔇' : '🔊'}
+                label={viewerMuted ? 'Unmute' : 'Mute'}
+                onClick={() => setViewerMuted(v => !v)}
               />
-              <LiveActionButton
-                ui={ui}
-                icon="♥"
-                label="React"
-                highlight={emojiPickerOpen}
-                onClick={() => setEmojiPickerOpen(v => !v)}
-              />
+              {remoteCameraTrack && !remoteScreenTrack && (
+                <LiveActionButton
+                  ui={ui}
+                  icon={videoFitCover ? '⊡' : '⊞'}
+                  label={videoFitCover ? 'Fit' : 'Fill'}
+                  highlight={videoFitCover}
+                  onClick={() => setVideoFitCover(v => !v)}
+                />
+              )}
             </>
           )}
         </Box>
@@ -939,14 +939,15 @@ const LiveStreamPage = () => {
           position="fixed"
           bottom={0}
           left={0}
+          right={0}
           zIndex={20}
-          px={4}
+          pl={4}
+          pr={`${metrics.actionRailGutter + 8}px`}
           pt={2}
-          pb="calc(env(safe-area-inset-bottom, 0px) + 12px)"
+          pb="calc(env(safe-area-inset-bottom, 0px) + 16px)"
           bg="linear-gradient(to top, rgba(0,0,0,0.62) 0%, transparent 100%)"
           gap={2}
           alignItems="center"
-          style={{ right: ui.floatArea.right }}
         >
           <Input
             flex={1}
