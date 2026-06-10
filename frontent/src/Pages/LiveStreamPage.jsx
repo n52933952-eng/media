@@ -221,7 +221,7 @@ const LiveStreamPage = () => {
 
   useEffect(() => {
     chatLogRef.current?.scrollTo(0, chatLogRef.current.scrollHeight);
-  }, [chatLog]);
+  }, [chatLog, showLog]);
 
   useEffect(() => {
     if (!isBroadcaster) return undefined;
@@ -750,7 +750,8 @@ const LiveStreamPage = () => {
 
       {showLog && isLive && (
         <Box
-          position="absolute"
+          position="fixed"
+          left="12px"
           overflowY="auto"
           display="flex"
           flexDir="column"
@@ -758,13 +759,13 @@ const LiveStreamPage = () => {
           px={3}
           py={2}
           gap={1}
-          zIndex={15}
+          zIndex={22}
           borderRadius="lg"
           border="1px solid"
           bg={isBroadcaster ? 'rgba(0,0,0,0.7)' : CHAT_PANEL_BG}
           borderColor={isBroadcaster ? 'transparent' : CHAT_PANEL_BORDER}
           style={{
-            bottom: `${chatLogBottom + metrics.chatLogH}px`,
+            bottom: `${chatLogBottom}px`,
             right: ui.logPanel.right,
             height: ui.logPanel.height,
           }}

@@ -79,9 +79,17 @@ const LiveShareModal = ({ isOpen, onClose, live }) => {
   };
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} size="md" isCentered scrollBehavior="inside">
-      <ModalOverlay bg="blackAlpha.700" />
-      <ModalContent maxH="80vh">
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      size="md"
+      isCentered
+      scrollBehavior="inside"
+      blockScrollOnMount={false}
+      portalProps={{ zIndex: 2000 }}
+    >
+      <ModalOverlay bg="blackAlpha.700" zIndex={2000} />
+      <ModalContent maxH="80vh" zIndex={2001}>
         <ModalHeader>Share live</ModalHeader>
         <ModalCloseButton />
         <ModalBody pb={6}>
