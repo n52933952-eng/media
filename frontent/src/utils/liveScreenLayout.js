@@ -45,7 +45,8 @@ export function buildLiveScreenMetrics(width, height) {
     actionIconSize: s(22, scale),
     actionLabelSize: s(11, scale),
     viewerRailBottomExtra: s(112, scale),
-    broadcasterRailBottomExtra: s(58, scale),
+    /** Web: rail sits above chat input — keep clear of bottom bar */
+    broadcasterRailBottomExtra: s(72, scale),
   };
 }
 

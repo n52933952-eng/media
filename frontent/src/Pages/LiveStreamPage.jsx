@@ -31,7 +31,8 @@ const MAX_VIEWER_RECONNECT = 2;
 const BROADCASTER_RAIL_SLOTS = 7;
 const VIEWER_RAIL_SLOTS = 5;
 const LIVE_EMOJIS = ['❤️', '😂', '🔥', '👏', '😍', '🎉', '💯', '🙌'];
-const INPUT_BAR_H = 72;
+/** Space reserved for bottom chat input row (rail sits above this). */
+const INPUT_BAR_H = 80;
 const CHAT_PANEL_BG = 'rgba(20, 48, 82, 0.88)';
 const CHAT_PANEL_BORDER = 'rgba(59, 130, 246, 0.35)';
 
@@ -821,7 +822,11 @@ const LiveStreamPage = () => {
         <Box
           position="absolute"
           zIndex={25}
-          style={{ bottom: `${actionRailBottom}px`, ...ui.actionRail }}
+          top="auto"
+          right={`${metrics.actionRailRight}px`}
+          bottom={`${actionRailBottom}px`}
+          w={`${metrics.actionRailWidth}px`}
+          h={`${metrics.actionSlotH * (isBroadcaster ? BROADCASTER_RAIL_SLOTS : VIEWER_RAIL_SLOTS)}px`}
         >
           {isBroadcaster ? (
             <>
