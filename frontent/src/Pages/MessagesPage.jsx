@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useContext, useRef, useCallback } from 'react'
+import React, { useState, useEffect, useContext, useRef, useCallback, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Box,
@@ -54,7 +54,9 @@ import { MdDelete } from 'react-icons/md'
 import EmojiPicker from 'emoji-picker-react'
 import { compressVideo, needsCompression } from '../utils/videoCompress'
 import LiveShareChatCard from '../Components/LiveShareChatCard'
-import { parseLiveShareMessage, liveSharePreviewText } from '../utils/liveShareMessage'
+import { parseLiveShareMessage, liveSharePreviewText, resolveLiveShareFromMessage } from '../utils/liveShareMessage'
+
+const MSG_API_BASE = import.meta.env.VITE_API_URL || (import.meta.env.PROD ? window.location.origin : 'http://localhost:5000')
 
 /** Match socket `userId` strings to API user `_id` (string or ObjectId) — strict === fails and hides online friends. */
 const idStr = (id) => {
@@ -269,6 +271,23 @@ const MessagesPage = () => {
   const pointerStartPointRef = useRef({ x: 0, y: 0, active: false })
   const pointerDraggedRef = useRef(false)
   const lastPointerDragAtRef = useRef(0)
+
+  /** If fetch is empty but sidebar lastMessage is a live share, still show the card. */
+  const displayMessages = useMemo(() => {
+    if (messages.length > 0) return messages
+    const lm = selectedConversation?.lastMessage
+    if (!lm?.text || !selectedConversation?._id) return messages
+    const live = resolveLiveShareFromMessage(lm)
+    if (!live) return messages
+    return [{
+      _id: `preview-live-${selectedConversation._id}`,
+      text: lm.text,
+      sender: lm.sender,
+      createdAt: lm.createdAt || new Date().toISOString(),
+      seen: true,
+      delivered: true,
+    }]
+  }, [messages, selectedConversation])
 
   // Pre-flight check for group calls: warn about busy members BEFORE connecting to LiveKit
   const handleGroupCallStart = useCallback((type) => {
@@ -550,10 +569,9 @@ const MessagesPage = () => {
 
       try {
         // Build URL with pagination parameters
-        const base = import.meta.env.PROD ? window.location.origin : 'http://localhost:5000'
         let url = isGroupConv
-          ? `${base}/api/message/${selectedConversation._id}?limit=12&conversationId=${selectedConversation._id}`
-          : `${base}/api/message/${otherUser._id}?limit=12`
+          ? `${MSG_API_BASE}/api/message/${selectedConversation._id}?limit=12&conversationId=${selectedConversation._id}`
+          : `${MSG_API_BASE}/api/message/${otherUser._id}?limit=12`
         if (beforeId) {
           url += `&beforeId=${beforeId}`
         }
@@ -1498,8 +1516,15 @@ const MessagesPage = () => {
       const myConv = selectedConversation?._id != null ? String(selectedConversation._id) : ''
       if (conversationId && myConv && String(conversationId) !== myConv) return
       setMessages((prev) => prev.filter((m) => {
-        const live = parseLiveShareMessage(m?.text)
+        const live = resolveLiveShareFromMessage(m)
         return !live || String(live.streamerId) !== sid
+      }))
+      setConversations((prev) => prev.map((conv) => {
+        const convId = conv?._id != null ? String(conv._id) : ''
+        if (conversationId && convId !== String(conversationId)) return conv
+        const live = resolveLiveShareFromMessage(conv?.lastMessage)
+        if (!live || String(live.streamerId) !== sid) return conv
+        return { ...conv, lastMessage: { ...conv.lastMessage, text: '' } }
       }))
     }
     const handleLiveShareExpired = (data) => {
@@ -2948,7 +2973,7 @@ const MessagesPage = () => {
                     <Spinner size="sm" color="blue.500" />
                   </Flex>
                 )}
-                {messages.map((msg) => {
+                {displayMessages.map((msg) => {
                     // Better comparison for message ownership - handle all cases
                     let msgSenderId = ''
                     if (msg.sender?._id) {
@@ -3054,7 +3079,7 @@ const MessagesPage = () => {
                             </Box>
                           )}
                           {(() => {
-                            const liveShare = parseLiveShareMessage(msg.text)
+                            const liveShare = resolveLiveShareFromMessage(msg)
                             if (liveShare) {
                               return (
                                 <LiveShareChatCard
@@ -3231,7 +3256,7 @@ const MessagesPage = () => {
                           )}
                           {/* Text message bubble */}
                           {msg.text && (() => {
-                            const liveShareText = parseLiveShareMessage(msg.text)
+                            const liveShareText = resolveLiveShareFromMessage(msg)
                             const textWithoutSharedLink = liveShareText
                               ? ''
                               : extractSharedPostId(msg.text)

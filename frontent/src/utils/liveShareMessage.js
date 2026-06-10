@@ -34,3 +34,19 @@ export function liveSharePreviewText(text) {
   if (!live) return null;
   return `🔴 ${live.streamerName} is live`;
 }
+
+/** Parse live card from message document (text payload or liveShareStreamerId index). */
+export function resolveLiveShareFromMessage(msg) {
+  if (!msg) return null;
+  const fromText = parseLiveShareMessage(msg.text);
+  if (fromText) return fromText;
+  const sid = msg.liveShareStreamerId != null ? String(msg.liveShareStreamerId).trim() : '';
+  if (!sid) return null;
+  const sender = msg.sender && typeof msg.sender === 'object' ? msg.sender : null;
+  return {
+    streamerId: sid,
+    streamerName: String(sender?.name || sender?.username || 'User'),
+    streamerProfilePic: sender?.profilePic ? String(sender.profilePic) : '',
+    roomName: '',
+  };
+}
