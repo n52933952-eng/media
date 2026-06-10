@@ -2,7 +2,7 @@
  * LiveStreamPage — broadcaster uses LiveBroadcastContext; viewers watch camera stream.
  */
 
-import { useEffect, useRef, useState, useCallback, useContext } from 'react';
+import { useEffect, useRef, useState, useCallback, useContext, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   Box, Flex, Avatar, Text, VStack, HStack, Input, Button,
@@ -18,7 +18,9 @@ import ScreenShareViewer from '../Components/ScreenShareViewer';
 import HostCameraPipHost from '../Components/HostCameraPipHost';
 import LiveActionButton from '../Components/LiveActionButton';
 import LiveShareModal from '../Components/LiveShareModal';
-import { useLiveScreenMetrics, liveActionStyles } from '../utils/liveScreenLayout';
+import {
+  useLiveScreenMetrics, liveActionStyles, computeActionRailBottom,
+} from '../utils/liveScreenLayout';
 import {
   isScreenSharePublication,
   isVideoPublication,
@@ -566,11 +568,26 @@ const LiveStreamPage = () => {
 
   const remoteMainCamera = !isBroadcaster && !remoteScreenTrack ? remoteCameraTrack : null;
   const chatLogBottom = INPUT_BAR_H + 12;
-  const actionRailBottom = INPUT_BAR_H + 20 + (
-    isBroadcaster ? metrics.broadcasterRailBottomExtra : metrics.viewerRailBottomExtra
+  const railIconCount = useMemo(() => {
+    if (isBroadcaster) {
+      let n = 5;
+      if (!isSharing) n += 1;
+      if (isSharing) n += 1;
+      return n;
+    }
+    let n = 4;
+    if (remoteMainCamera) n += 1;
+    return n;
+  }, [isBroadcaster, isSharing, remoteMainCamera]);
+  const actionRailBottom = useMemo(
+    () => computeActionRailBottom(
+      metrics.viewportHeight,
+      railIconCount,
+      metrics,
+      isBroadcaster,
+    ),
+    [metrics, railIconCount, isBroadcaster],
   );
-  /** Icons live in this band only — never clip under browser chrome or End/Leave */
-  const actionRailTop = metrics.liveTopBarClear + 56;
   const endBtnRight = metrics.actionRailGutter + 8;
   const displayName = isBroadcaster
     ? (user?.name || user?.username)
@@ -855,18 +872,14 @@ const LiveStreamPage = () => {
         <Box
           position="fixed"
           zIndex={25}
-          top={`${actionRailTop}px`}
           bottom={`${actionRailBottom}px`}
           right={`${metrics.actionRailRight}px`}
           w={`${metrics.actionRailWidth}px`}
           display="flex"
           flexDirection="column"
-          justifyContent="flex-end"
           alignItems="center"
-          gap={2}
+          gap={1}
           pointerEvents="auto"
-          overflowY="auto"
-          css={{ scrollbarWidth: 'none', '&::-webkit-scrollbar': { display: 'none' } }}
         >
           {isBroadcaster ? (
             <>

@@ -27,7 +27,7 @@ export function buildLiveScreenMetrics(width, height) {
   return {
     scale,
     pillH: s(46, scale),
-    actionCircle: s(50, scale),
+    actionCircle: s(44, scale),
     /** Tighter on web — 82px phone slots push icons into the top bar on short viewports */
     actionSlotH: s(64, scale),
     actionRailWidth: s(76, scale),
@@ -48,7 +48,21 @@ export function buildLiveScreenMetrics(width, height) {
     viewerRailBottomExtra: s(112, scale),
     /** Web: rail sits above chat input — keep clear of bottom bar */
     broadcasterRailBottomExtra: s(72, scale),
+    viewportHeight: height,
   };
+}
+
+/** Bottom offset so the full icon stack fits below End/Leave on any viewport height. */
+export function computeActionRailBottom(viewportHeight, iconCount, metrics, isBroadcaster) {
+  const gap = 4;
+  const itemH = metrics.actionCircle + metrics.actionLabelSize + 12;
+  const stackH = iconCount * itemH + Math.max(0, iconCount - 1) * gap;
+  const safeTop = metrics.liveTopBarClear + 28;
+  const preferred = 64 + 12 + (
+    isBroadcaster ? metrics.broadcasterRailBottomExtra : metrics.viewerRailBottomExtra
+  );
+  const fitBottom = viewportHeight - stackH - safeTop;
+  return Math.min(preferred, Math.max(68, fitBottom));
 }
 
 export function useLiveScreenMetrics() {

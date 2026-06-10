@@ -54,10 +54,11 @@ const LiveActionButton = ({
       )}
     </Box>
     <Text
-      mt="5px"
+      mt="2px"
       color="white"
       fontWeight="600"
       textAlign="center"
+      lineHeight="1.15"
       textShadow="0 1px 3px rgba(0,0,0,0.8)"
       fontSize={ui?.actionLabel?.fontSize}
       maxW={ui?.actionLabel?.maxWidth}
