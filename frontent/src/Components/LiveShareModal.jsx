@@ -1,15 +1,18 @@
 /**
  * Share a live stream to people you follow (DM).
+ * Custom portal overlay — Chakra Modal content was hidden behind its own overlay on the live page.
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
-  Modal, ModalOverlay, ModalContent, ModalHeader, ModalBody, ModalCloseButton,
-  Box, Flex, Avatar, Text, Input, Spinner, useToast,
+  Box, Flex, Avatar, Text, Input, Spinner, IconButton, useToast,
 } from '@chakra-ui/react';
+import { CloseIcon } from '@chakra-ui/icons';
 import { buildLiveShareMessage } from '../utils/liveShareMessage';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
+const SHARE_MODAL_Z = 10000;
 
 const LiveShareModal = ({ isOpen, onClose, live }) => {
   const toast = useToast();
@@ -51,6 +54,13 @@ const LiveShareModal = ({ isOpen, onClose, live }) => {
     }
   }, [isOpen, fetchFollowing]);
 
+  useEffect(() => {
+    if (!isOpen) return undefined;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = prev; };
+  }, [isOpen]);
+
   const sendToUser = async (followUser) => {
     if (!live?.streamerId || sendingToId) return;
     const recipientId = String(followUser?._id || '');
@@ -78,21 +88,58 @@ const LiveShareModal = ({ isOpen, onClose, live }) => {
     }
   };
 
-  return (
-    <Modal
-      isOpen={isOpen}
-      onClose={onClose}
-      size="md"
-      isCentered
-      scrollBehavior="inside"
-      blockScrollOnMount={false}
-      portalProps={{ zIndex: 2000 }}
+  if (!isOpen) return null;
+
+  return createPortal(
+    <Box
+      position="fixed"
+      inset={0}
+      zIndex={SHARE_MODAL_Z}
+      display="flex"
+      alignItems="center"
+      justifyContent="center"
+      px={4}
     >
-      <ModalOverlay bg="blackAlpha.700" zIndex={2000} />
-      <ModalContent maxH="80vh" zIndex={2001}>
-        <ModalHeader>Share live</ModalHeader>
-        <ModalCloseButton />
-        <ModalBody pb={6}>
+      <Box
+        position="absolute"
+        inset={0}
+        bg="blackAlpha.700"
+        onClick={onClose}
+        aria-hidden
+      />
+      <Box
+        position="relative"
+        bg="white"
+        color="gray.800"
+        borderRadius="xl"
+        w="100%"
+        maxW="md"
+        maxH="80vh"
+        display="flex"
+        flexDirection="column"
+        boxShadow="2xl"
+        overflow="hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <Flex
+          align="center"
+          justify="space-between"
+          px={5}
+          py={4}
+          borderBottom="1px solid"
+          borderColor="gray.200"
+          flexShrink={0}
+        >
+          <Text fontWeight="bold" fontSize="lg">Share live</Text>
+          <IconButton
+            icon={<CloseIcon boxSize={3} />}
+            size="sm"
+            variant="ghost"
+            onClick={onClose}
+            aria-label="Close"
+          />
+        </Flex>
+        <Box px={5} py={4} overflowY="auto" flex={1}>
           <Input
             placeholder="Search…"
             mb={3}
@@ -135,9 +182,10 @@ const LiveShareModal = ({ isOpen, onClose, live }) => {
               })}
             </Box>
           )}
-        </ModalBody>
-      </ModalContent>
-    </Modal>
+        </Box>
+      </Box>
+    </Box>,
+    document.body,
   );
 };
 
