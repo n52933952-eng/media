@@ -218,6 +218,7 @@ export const LiveBroadcastProvider = ({ children }) => {
     }
     roomNameRef.current = '';
     setLiveRoomName('');
+    setIsMicMuted(false);
     await disconnect();
     setIsLive(false);
     setIsMinimized(false);
@@ -321,6 +322,16 @@ export const LiveBroadcastProvider = ({ children }) => {
   const registerChatHandler = useCallback((fn) => {
     onChatRef.current = fn;
   }, []);
+
+  const toggleMicMute = useCallback(async () => {
+    const room = roomRef.current;
+    if (!room || !isLive) return;
+    const next = !isMicMuted;
+    try {
+      await room.localParticipant.setMicrophoneEnabled(!next);
+      setIsMicMuted(next);
+    } catch (_) {}
+  }, [isLive, isMicMuted]);
 
   useEffect(() => {
     if (!socket || !isLive || !user?._id) return;
