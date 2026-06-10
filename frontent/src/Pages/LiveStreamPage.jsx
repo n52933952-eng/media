@@ -6,7 +6,7 @@ import { useEffect, useRef, useState, useCallback, useContext } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   Box, Flex, Avatar, Text, VStack, HStack, Input, Button,
-  Badge, IconButton, keyframes,
+  Badge, IconButton, keyframes, SimpleGrid,
 } from '@chakra-ui/react';
 import { CloseIcon } from '@chakra-ui/icons';
 import { css } from '@emotion/react';
@@ -16,6 +16,9 @@ import { SocketContext } from '../context/SocketContext';
 import { useLiveBroadcast } from '../context/LiveBroadcastContext';
 import ScreenShareViewer from '../Components/ScreenShareViewer';
 import HostCameraPipHost from '../Components/HostCameraPipHost';
+import LiveActionButton from '../Components/LiveActionButton';
+import LiveShareModal from '../Components/LiveShareModal';
+import { useLiveScreenMetrics, liveActionStyles } from '../utils/liveScreenLayout';
 import {
   isScreenSharePublication,
   isVideoPublication,
@@ -25,6 +28,27 @@ import {
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
 const MAX_VIEWER_RECONNECT = 2;
+const BROADCASTER_RAIL_SLOTS = 7;
+const VIEWER_RAIL_SLOTS = 5;
+const LIVE_EMOJIS = ['❤️', '😂', '🔥', '👏', '😍', '🎉', '💯', '🙌'];
+const INPUT_BAR_H = 72;
+const CHAT_PANEL_BG = 'rgba(20, 48, 82, 0.88)';
+const CHAT_PANEL_BORDER = 'rgba(59, 130, 246, 0.35)';
+
+const ActionRailSlot = ({ slotIndex, metrics, children }) => (
+  <Box
+    position="absolute"
+    left={0}
+    right={0}
+    bottom={`${metrics.actionSlotH * slotIndex}px`}
+    display="flex"
+    alignItems="center"
+    justifyContent="center"
+    py={1}
+  >
+    {children}
+  </Box>
+);
 
 const floatUp = keyframes`
   0%   { transform: translateY(0);   opacity: 1; }
@@ -56,7 +80,7 @@ const FloatingMessage = ({ msg }) => (
     position="absolute"
     bottom="16px"
     left="16px"
-    right="160px"
+    right="8px"
     pointerEvents="none"
     css={css`animation: ${floatUp} 4s ease-out forwards;`}
     zIndex={10}
@@ -96,7 +120,16 @@ const LiveStreamPage = () => {
     setLiveControlsFocused,
     registerChatHandler,
     sendChat: sendHostChat,
+    liveRoomName,
+    isMicMuted,
+    toggleMicMute,
   } = useLiveBroadcast();
+
+  const metrics = useLiveScreenMetrics();
+  const ui = liveActionStyles(metrics, isBroadcaster ? BROADCASTER_RAIL_SLOTS : VIEWER_RAIL_SLOTS);
+  const actionRailBottom = INPUT_BAR_H + (
+    isBroadcaster ? metrics.broadcasterRailBottomExtra : metrics.viewerRailBottomExtra
+  );
 
   const [viewerConnected, setViewerConnected] = useState(false);
   const [isReconnecting, setIsReconnecting] = useState(false);
@@ -108,8 +141,16 @@ const LiveStreamPage = () => {
   const [floatingMsgs, setFloatingMsgs] = useState([]);
   const [floatingReactions, setFloatingReactions] = useState([]);
   const [chatLog, setChatLog] = useState([]);
+  const [showLog, setShowLog] = useState(false);
+  const [shareLiveOpen, setShareLiveOpen] = useState(false);
+  const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
+  const [viewerMuted, setViewerMuted] = useState(false);
+  const [videoFitCover, setVideoFitCover] = useState(false);
+  const [hostInfo, setHostInfo] = useState({ name: 'User', profilePic: '', roomName: '' });
 
   const roomRef = useRef(null);
+  const viewerMutedRef = useRef(false);
+  const remoteAudioTrackRef = useRef(null);
   const chatLogRef = useRef(null);
   const localVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
@@ -138,6 +179,42 @@ const LiveStreamPage = () => {
 
   const isLive = isBroadcaster ? hostLive : viewerConnected;
   const displayViewers = isBroadcaster ? hostViewers : viewerCount;
+
+  useEffect(() => {
+    viewerMutedRef.current = viewerMuted;
+    const track = remoteAudioTrackRef.current;
+    if (track?.setVolume) {
+      try { track.setVolume(viewerMuted ? 0 : 1); } catch (_) {}
+    }
+  }, [viewerMuted]);
+
+  useEffect(() => {
+    if (isBroadcaster || !streamerId) return undefined;
+    let cancelled = false;
+    (async () => {
+      try {
+        const [profRes, statusRes] = await Promise.all([
+          fetch(`${API_BASE}/api/user/getUserPro/${encodeURIComponent(streamerId)}`, { credentials: 'include' }),
+          fetch(`${API_BASE}/api/call/livestream/${encodeURIComponent(streamerId)}/status`, { credentials: 'include' }),
+        ]);
+        if (cancelled) return;
+        let name = 'User';
+        let profilePic = '';
+        let roomName = '';
+        if (profRes.ok) {
+          const prof = await profRes.json().catch(() => ({}));
+          name = prof?.name || prof?.username || name;
+          profilePic = prof?.profilePic || '';
+        }
+        if (statusRes.ok) {
+          const st = await statusRes.json().catch(() => ({}));
+          roomName = st?.roomName || '';
+        }
+        setHostInfo({ name, profilePic, roomName });
+      } catch (_) {}
+    })();
+    return () => { cancelled = true; };
+  }, [isBroadcaster, streamerId]);
 
   const addMessage = useCallback((sender, text) => {
     const id = ++floatIdCounter.current;
@@ -260,6 +337,10 @@ const LiveStreamPage = () => {
       }
       if (track.kind === 'audio') {
         try {
+          remoteAudioTrackRef.current = track;
+          if (track.setVolume) {
+            try { track.setVolume(viewerMutedRef.current ? 0 : 1); } catch (_) {}
+          }
           const audioEl = track.attach();
           audioEl.autoplay = true;
           audioEl.style.display = 'none';
@@ -465,7 +546,38 @@ const LiveStreamPage = () => {
     setChatInput('');
   }, [chatInput, user, isBroadcaster, sendHostChat, addMessage]);
 
+  const sendEmojiReaction = useCallback((emoji) => {
+    if (!socket || !liveWatchStreamerId) return;
+    setEmojiPickerOpen(false);
+    const sender = user?.name || user?.username || 'Viewer';
+    socket.emit('livekit:liveReaction', {
+      streamerId: liveWatchStreamerId,
+      emoji,
+      sender,
+    });
+    addEmojiFloat(emoji);
+  }, [socket, liveWatchStreamerId, user, addEmojiFloat]);
+
+  const shareLivePayload = isBroadcaster
+    ? {
+      streamerId: String(user?._id || ''),
+      streamerName: user?.name || user?.username || 'User',
+      streamerProfilePic: user?.profilePic || '',
+      roomName: liveRoomName || '',
+    }
+    : {
+      streamerId: String(streamerId || ''),
+      streamerName: hostInfo.name,
+      streamerProfilePic: hostInfo.profilePic,
+      roomName: hostInfo.roomName,
+    };
+
   const remoteMainCamera = !isBroadcaster && !remoteScreenTrack ? remoteCameraTrack : null;
+  const chatLogBottom = INPUT_BAR_H + 12;
+  const displayName = isBroadcaster
+    ? (user?.name || user?.username)
+    : hostInfo.name;
+  const displayAvatar = isBroadcaster ? user?.profilePic : hostInfo.profilePic;
 
   return (
     <Box position="fixed" inset={0} w="100vw" h="100dvh" bg="black" zIndex={1600} overflow="hidden">
@@ -508,7 +620,10 @@ const LiveStreamPage = () => {
       ) : !isBroadcaster && remoteMainCamera ? (
         <Box as="video" ref={remoteVideoRef} autoPlay playsInline
           key={remoteMainCamera?.sid || 'cam'}
-          style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain', objectPosition: 'center' }}
+          style={{
+            position: 'absolute', inset: 0, width: '100%', height: '100%',
+            objectFit: videoFitCover ? 'cover' : 'contain', objectPosition: 'center',
+          }}
         />
       ) : (
         <Flex h="100%" alignItems="center" justifyContent="center" bg="gray.900" px={6}>
@@ -520,56 +635,100 @@ const LiveStreamPage = () => {
         </Flex>
       )}
 
-      <Flex position="absolute" top={0} left={0} right={0} zIndex={20} px={4} pt={4} pb={2}
+      <Flex
+        position="absolute" left={3} right={3} zIndex={20} px={2} py={2}
         bg="linear-gradient(to bottom, rgba(0,0,0,0.55) 0%, transparent 100%)"
         alignItems="center" justifyContent="space-between"
+        style={{ top: ui.topBar.top }}
       >
-        <HStack spacing={3}>
-          <Avatar src={user?.profilePic} name={user?.name || user?.username || 'User'} size="sm" />
-          <VStack spacing={0} align="flex-start">
-            <Text color="white" fontWeight="bold" fontSize="sm">{user?.name || user?.username}</Text>
-            {isLive && (
-              <HStack spacing={2}>
-                <Badge colorScheme="red" fontSize="xs" px={2} borderRadius="full">🔴 LIVE</Badge>
-                <ViewerBadge count={displayViewers} />
-              </HStack>
-            )}
-          </VStack>
-        </HStack>
-        <HStack spacing={2}>
-          {isBroadcaster && !isLive && (
-            <Button colorScheme="red" size="sm" borderRadius="full" onClick={goLive}
-              isLoading={startingLive} loadingText="Starting..." isDisabled={startingLive}>
-              Go Live
-            </Button>
+        {isBroadcaster ? (
+          <HStack spacing={3} flex={1} minW={0}>
+            <Avatar src={displayAvatar} name={displayName || 'User'} size="sm" />
+            <VStack spacing={0} align="flex-start" flex={1} minW={0}>
+              <Text color="white" fontWeight="bold" fontSize="sm" noOfLines={1}>{displayName}</Text>
+              {isLive && (
+                <HStack spacing={2}>
+                  <Badge colorScheme="red" fontSize="xs" px={2} borderRadius="full">🔴 LIVE</Badge>
+                  <ViewerBadge count={displayViewers} />
+                </HStack>
+              )}
+            </VStack>
+          </HStack>
+        ) : (
+          <HStack
+            spacing={2}
+            flex={1}
+            minW={0}
+            bg="rgba(29, 78, 216, 0.35)"
+            border="1px solid rgba(96, 165, 250, 0.35)"
+            borderRadius="full"
+            px={2}
+            py={1}
+            maxW="52%"
+          >
+            <Avatar src={displayAvatar} name={displayName || 'User'} size="xs" />
+            <Text color="white" fontWeight="bold" fontSize="sm" noOfLines={1}>{displayName}</Text>
+          </HStack>
+        )}
+        <HStack spacing={2} flexShrink={0}>
+          {!isBroadcaster && isLive && (
+            <Badge colorScheme="red" fontSize="xs" px={2} borderRadius="full">🔴 LIVE</Badge>
           )}
           {isBroadcaster && isLive && (
-            <>
-              <Button size="sm" borderRadius="full" colorScheme="teal" color="white" onClick={shareAndGoAppHome}>
-                🏠 Share app
-              </Button>
-              <Button size="sm" borderRadius="full" colorScheme="blue" color="white" onClick={shareWindow}>
-                🖥 Share window
-              </Button>
-              {isSharing && (
-                <Button size="sm" borderRadius="full" variant="outline" colorScheme="whiteAlpha" color="white"
-                  onClick={toggleShare}>
-                  Stop share
-                </Button>
-              )}
-              <Button variant="outline" colorScheme="whiteAlpha" size="sm" borderRadius="full" color="white"
-                onClick={async () => { await endLive(); exitLivePage(); }}>
-                End
-              </Button>
-            </>
+            <Button
+              size="sm"
+              borderRadius="full"
+              colorScheme="red"
+              variant="solid"
+              onClick={async () => { await endLive(); exitLivePage(); }}
+            >
+              End
+            </Button>
           )}
-          <IconButton icon={<CloseIcon boxSize={3} />} size="sm" variant="ghost"
-            colorScheme="whiteAlpha" color="white" onClick={safeClose} aria-label="Close"
-          />
+          {!isBroadcaster && isLive && (
+            <Button size="sm" borderRadius="full" colorScheme="red" onClick={safeClose}>
+              Leave
+            </Button>
+          )}
+          {(isBroadcaster && !isLive) || !isLive ? (
+            <IconButton
+              icon={<CloseIcon boxSize={3} />}
+              size="sm"
+              variant="ghost"
+              colorScheme="whiteAlpha"
+              color="white"
+              onClick={safeClose}
+              aria-label="Close"
+            />
+          ) : null}
         </HStack>
       </Flex>
 
-      <Box position="absolute" bottom="108px" left={0} right={0} pointerEvents="none" zIndex={15}>
+      {isBroadcaster && !isLive && (
+        <Flex position="absolute" left={0} right={0} bottom="12%" zIndex={18} justify="center" px={6}>
+          <Button
+            colorScheme="red"
+            size="lg"
+            borderRadius="full"
+            px={10}
+            onClick={goLive}
+            isLoading={startingLive}
+            loadingText="Starting..."
+            isDisabled={startingLive}
+          >
+            Go Live
+          </Button>
+        </Flex>
+      )}
+
+      <Box
+        position="absolute"
+        bottom={`${INPUT_BAR_H + 36}px`}
+        left={0}
+        pointerEvents="none"
+        zIndex={15}
+        style={{ right: ui.floatArea.right }}
+      >
         {floatingMsgs.map(m => <FloatingMessage key={m.id} msg={m} />)}
       </Box>
 
@@ -588,33 +747,246 @@ const LiveStreamPage = () => {
         {floatingReactions.map(r => <FloatingReaction key={r.id} reaction={r} />)}
       </Box>
 
-      <Box position="absolute" top="66px" bottom="96px" right={0} w={{ base: '0', md: '280px' }}
-        overflowY="auto" bg="blackAlpha.350" display={{ base: 'none', md: 'flex' }} flexDir="column"
-        ref={chatLogRef} css={{ scrollbarWidth: 'none', '&::-webkit-scrollbar': { display: 'none' } }}
-        px={3} py={2} gap={1} zIndex={15}
-      >
-        {chatLog.map(m => (
-          <Box key={m.id}>
-            <Text fontSize="sm" color="white">
-              <Text as="span" fontWeight="bold" color="yellow.300">{m.sender}: </Text>
-              {m.text}
-            </Text>
-          </Box>
-        ))}
-      </Box>
+      {showLog && isLive && (
+        <Box
+          position="absolute"
+          overflowY="auto"
+          display="flex"
+          flexDir="column"
+          ref={chatLogRef}
+          px={3}
+          py={2}
+          gap={1}
+          zIndex={15}
+          borderRadius="lg"
+          border="1px solid"
+          bg={isBroadcaster ? 'rgba(0,0,0,0.7)' : CHAT_PANEL_BG}
+          borderColor={isBroadcaster ? 'transparent' : CHAT_PANEL_BORDER}
+          style={{
+            bottom: `${chatLogBottom + metrics.chatLogH}px`,
+            right: ui.logPanel.right,
+            height: ui.logPanel.height,
+          }}
+          css={{ scrollbarWidth: 'none', '&::-webkit-scrollbar': { display: 'none' } }}
+        >
+          {chatLog.map(m => (
+            <Box key={m.id}>
+              <Text fontSize="sm" color="white">
+                <Text as="span" fontWeight="bold" color="yellow.300">{m.sender}: </Text>
+                {m.text}
+              </Text>
+            </Box>
+          ))}
+        </Box>
+      )}
 
-      <Flex position="absolute" bottom={0} left={0} right={0} zIndex={20} px={4} pt={2}
-        pb="calc(env(safe-area-inset-bottom, 0px) + 12px)"
-        bg="linear-gradient(to top, rgba(0,0,0,0.62) 0%, transparent 100%)"
-        gap={2} alignItems="center"
-      >
-        <Input flex={1} size="sm" borderRadius="full" bg="blackAlpha.600" color="white"
-          border="1px solid" borderColor="whiteAlpha.300" placeholder="Say something…"
-          _placeholder={{ color: 'gray.400' }} value={chatInput}
-          onChange={e => setChatInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && sendChat()}
-        />
-        <Button size="sm" colorScheme="blue" borderRadius="full" onClick={sendChat} flexShrink={0}>Send</Button>
-      </Flex>
+      {emojiPickerOpen && !isBroadcaster && isLive && (
+        <>
+          <Box position="fixed" inset={0} zIndex={24} onClick={() => setEmojiPickerOpen(false)} />
+          <Box
+            position="absolute"
+            zIndex={25}
+            bg="white"
+            borderRadius="2xl"
+            p={2}
+            boxShadow="lg"
+            style={{
+              bottom: `${actionRailBottom + metrics.actionSlotH * 2 + 10}px`,
+              right: ui.emojiPickerAnchor.right,
+              maxWidth: ui.emojiPickerAnchor.maxWidth,
+            }}
+          >
+            <SimpleGrid columns={4} spacing={2}>
+              {LIVE_EMOJIS.map((emoji) => (
+                <Box
+                  key={emoji}
+                  as="button"
+                  display="flex"
+                  alignItems="center"
+                  justifyContent="center"
+                  bg="gray.50"
+                  _hover={{ bg: 'gray.100' }}
+                  style={ui.emojiPickerBtn}
+                  onClick={() => sendEmojiReaction(emoji)}
+                >
+                  <Text fontSize={ui.emojiPickerEmoji.fontSize} lineHeight={1}>{emoji}</Text>
+                </Box>
+              ))}
+            </SimpleGrid>
+          </Box>
+        </>
+      )}
+
+      {isLive && (
+        <Box
+          position="absolute"
+          zIndex={25}
+          style={{ bottom: `${actionRailBottom}px`, ...ui.actionRail }}
+        >
+          {isBroadcaster ? (
+            <>
+              <ActionRailSlot slotIndex={6} metrics={metrics}>
+                <LiveActionButton
+                  ui={ui}
+                  icon={isMicMuted ? '🔇' : '🔊'}
+                  label={isMicMuted ? 'Unmute' : 'Mute'}
+                  onClick={() => { void toggleMicMute(); }}
+                />
+              </ActionRailSlot>
+              <ActionRailSlot slotIndex={5} metrics={metrics}>
+                <LiveActionButton
+                  ui={ui}
+                  icon="📤"
+                  label="Share live"
+                  primary
+                  onClick={() => setShareLiveOpen(true)}
+                />
+              </ActionRailSlot>
+              <ActionRailSlot slotIndex={4} metrics={metrics}>
+                <LiveActionButton
+                  ui={ui}
+                  icon="🏠"
+                  label="Share app"
+                  primary={!isSharing}
+                  disabled={isSharing}
+                  onClick={shareAndGoAppHome}
+                />
+              </ActionRailSlot>
+              <ActionRailSlot slotIndex={3} metrics={metrics}>
+                <LiveActionButton
+                  ui={ui}
+                  icon="🖥"
+                  label="Share window"
+                  disabled={isSharing}
+                  onClick={shareWindow}
+                />
+              </ActionRailSlot>
+              <ActionRailSlot slotIndex={2} metrics={metrics}>
+                <LiveActionButton
+                  ui={ui}
+                  icon="💬"
+                  label="Chat"
+                  highlight={showLog}
+                  onClick={() => setShowLog(v => !v)}
+                />
+              </ActionRailSlot>
+              <ActionRailSlot slotIndex={1} metrics={metrics}>
+                <Box w={ui.actionCircle.width} h={ui.actionCircle.height} />
+              </ActionRailSlot>
+              <ActionRailSlot slotIndex={0} metrics={metrics}>
+                {isSharing ? (
+                  <LiveActionButton
+                    ui={ui}
+                    icon="🛑"
+                    label="Stop"
+                    onClick={toggleShare}
+                    circleStyle={{ borderColor: 'red.400', borderWidth: '2px' }}
+                  />
+                ) : (
+                  <Box w={ui.actionCircle.width} h={ui.actionCircle.height} />
+                )}
+              </ActionRailSlot>
+            </>
+          ) : (
+            <>
+              {remoteCameraTrack && !remoteScreenTrack ? (
+                <ActionRailSlot slotIndex={4} metrics={metrics}>
+                  <LiveActionButton
+                    ui={ui}
+                    icon={videoFitCover ? '⊡' : '⊞'}
+                    label={videoFitCover ? 'Fit' : 'Fill'}
+                    highlight={videoFitCover}
+                    onClick={() => setVideoFitCover(v => !v)}
+                  />
+                </ActionRailSlot>
+              ) : null}
+              <ActionRailSlot slotIndex={3} metrics={metrics}>
+                <LiveActionButton
+                  ui={ui}
+                  icon={viewerMuted ? '🔇' : '🔊'}
+                  label={viewerMuted ? 'Unmute' : 'Mute'}
+                  onClick={() => setViewerMuted(v => !v)}
+                />
+              </ActionRailSlot>
+              <ActionRailSlot slotIndex={2} metrics={metrics}>
+                <LiveActionButton
+                  ui={ui}
+                  icon="📤"
+                  label="Share"
+                  primary
+                  onClick={() => setShareLiveOpen(true)}
+                />
+              </ActionRailSlot>
+              <ActionRailSlot slotIndex={1} metrics={metrics}>
+                <LiveActionButton
+                  ui={ui}
+                  icon="💬"
+                  label="Chat"
+                  highlight={showLog}
+                  onClick={() => setShowLog(v => !v)}
+                />
+              </ActionRailSlot>
+              <ActionRailSlot slotIndex={0} metrics={metrics}>
+                <LiveActionButton
+                  ui={ui}
+                  icon="♥"
+                  label="React"
+                  highlight={emojiPickerOpen}
+                  onClick={() => setEmojiPickerOpen(v => !v)}
+                />
+              </ActionRailSlot>
+            </>
+          )}
+        </Box>
+      )}
+
+      <LiveShareModal
+        isOpen={shareLiveOpen}
+        onClose={() => setShareLiveOpen(false)}
+        live={shareLivePayload}
+      />
+
+      {isLive && (
+        <Flex
+          position="absolute"
+          bottom={0}
+          left={0}
+          zIndex={20}
+          px={4}
+          pt={2}
+          pb="calc(env(safe-area-inset-bottom, 0px) + 12px)"
+          bg="linear-gradient(to top, rgba(0,0,0,0.62) 0%, transparent 100%)"
+          gap={2}
+          alignItems="center"
+          style={{ right: ui.floatArea.right }}
+        >
+          <Input
+            flex={1}
+            size="sm"
+            borderRadius="full"
+            bg="blackAlpha.600"
+            color="white"
+            border="1px solid"
+            borderColor="whiteAlpha.300"
+            placeholder="Say something…"
+            _placeholder={{ color: 'gray.400' }}
+            value={chatInput}
+            onChange={e => setChatInput(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && sendChat()}
+            style={{ height: ui.textInput.height }}
+          />
+          <Button
+            size="sm"
+            colorScheme="blue"
+            borderRadius="full"
+            onClick={sendChat}
+            flexShrink={0}
+            style={{ height: ui.sendBtn.height, minWidth: ui.sendBtn.minWidth }}
+          >
+            Send
+          </Button>
+        </Flex>
+      )}
     </Box>
   );
 };

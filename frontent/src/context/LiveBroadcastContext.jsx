@@ -35,6 +35,8 @@ export const LiveBroadcastProvider = ({ children }) => {
   const [isMinimized, setIsMinimized] = useState(false);
   const [isLiveControlsFocused, setIsLiveControlsFocused] = useState(false);
   const [hostPipVisible, setHostPipVisible] = useState(true);
+  const [isMicMuted, setIsMicMuted] = useState(false);
+  const [liveRoomName, setLiveRoomName] = useState('');
 
   const roomRef = useRef(null);
   const roomNameRef = useRef('');
@@ -215,6 +217,7 @@ export const LiveBroadcastProvider = ({ children }) => {
       });
     }
     roomNameRef.current = '';
+    setLiveRoomName('');
     await disconnect();
     setIsLive(false);
     setIsMinimized(false);
@@ -252,6 +255,7 @@ export const LiveBroadcastProvider = ({ children }) => {
       }
       const { token, roomName, livekitUrl } = await res.json();
       roomNameRef.current = roomName;
+      setLiveRoomName(roomName);
 
       const room = new Room(LIVE_ROOM_OPTIONS);
       roomRef.current = room;
@@ -363,6 +367,9 @@ export const LiveBroadcastProvider = ({ children }) => {
     setLiveControlsFocused,
     syncLocalTrack,
     getRoom: () => roomRef.current,
+    liveRoomName,
+    isMicMuted,
+    toggleMicMute,
     sendChat,
     registerChatHandler,
   };

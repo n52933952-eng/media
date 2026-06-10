@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useContext, useRef, useCallback } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
   Box,
   Flex,
@@ -52,6 +53,8 @@ import { BsCheck2All, BsReply, BsFillImageFill, BsTrash } from 'react-icons/bs'
 import { MdDelete } from 'react-icons/md'
 import EmojiPicker from 'emoji-picker-react'
 import { compressVideo, needsCompression } from '../utils/videoCompress'
+import LiveShareChatCard from '../Components/LiveShareChatCard'
+import { parseLiveShareMessage } from '../utils/liveShareMessage'
 
 /** Match socket `userId` strings to API user `_id` (string or ObjectId) — strict === fails and hides online friends. */
 const idStr = (id) => {
@@ -195,6 +198,7 @@ const SharedPostPreview = ({ postId, onOpen, onMessageClick }) => {
 }
 
 const MessagesPage = () => {
+  const navigate = useNavigate()
   const { user } = useContext(UserContext)
   const socketContext = useContext(SocketContext)
   const { socket, onlineUser, setSelectedConversationId } = socketContext || {}
@@ -1488,6 +1492,27 @@ const MessagesPage = () => {
     socket.on('removedFromGroup', handleRemovedFromGroup)
     socket.on('groupDeleted', handleGroupDeleted)
 
+    const removeLiveShareCards = (streamerId, conversationId) => {
+      const sid = String(streamerId || '')
+      if (!sid) return
+      const myConv = selectedConversation?._id != null ? String(selectedConversation._id) : ''
+      if (conversationId && myConv && String(conversationId) !== myConv) return
+      setMessages((prev) => prev.filter((m) => {
+        const live = parseLiveShareMessage(m?.text)
+        return !live || String(live.streamerId) !== sid
+      }))
+    }
+    const handleLiveShareExpired = (data) => {
+      if (data?.streamerId != null) {
+        removeLiveShareCards(String(data.streamerId), data.conversationId)
+      }
+    }
+    const handleLiveStreamEnded = (data) => {
+      if (data?.streamerId != null) removeLiveShareCards(String(data.streamerId))
+    }
+    socket.on('liveShareExpired', handleLiveShareExpired)
+    socket.on('livekit:streamEnded', handleLiveStreamEnded)
+
     return () => {
       socket.off("messageReactionUpdated", handleReactionUpdate)
       socket.off("messageDeleted", handleMessageDeleted)
@@ -1498,6 +1523,8 @@ const MessagesPage = () => {
       socket.off('groupMemberLeft', handleGroupMemberLeft)
       socket.off('removedFromGroup', handleRemovedFromGroup)
       socket.off('groupDeleted', handleGroupDeleted)
+      socket.off('liveShareExpired', handleLiveShareExpired)
+      socket.off('livekit:streamEnded', handleLiveStreamEnded)
     }
   }, [socket, selectedConversation?._id])
 
@@ -3026,6 +3053,16 @@ const MessagesPage = () => {
                             </Box>
                           )}
                           {(() => {
+                            const liveShare = parseLiveShareMessage(msg.text)
+                            if (liveShare) {
+                              return (
+                                <LiveShareChatCard
+                                  live={liveShare}
+                                  isOwn={isOwn}
+                                  onPress={() => navigate(`/live/${liveShare.streamerId}`)}
+                                />
+                              )
+                            }
                             const sharedPostId = extractSharedPostId(msg.text)
                             if (!sharedPostId) return null
                             return (
@@ -3193,9 +3230,12 @@ const MessagesPage = () => {
                           )}
                           {/* Text message bubble */}
                           {msg.text && (() => {
-                            const textWithoutSharedLink = extractSharedPostId(msg.text)
-                              ? String(msg.text).replace(/https?:\/\/[^\s]+/i, '').trim()
-                              : msg.text
+                            const liveShareText = parseLiveShareMessage(msg.text)
+                            const textWithoutSharedLink = liveShareText
+                              ? ''
+                              : extractSharedPostId(msg.text)
+                                ? String(msg.text).replace(/https?:\/\/[^\s]+/i, '').trim()
+                                : msg.text
                             if (!textWithoutSharedLink) return null
                             // Check if message is emoji-only (contains only emojis and whitespace)
                             const emojiOnlyRegex = /^[\s\p{Emoji}]+$/u
