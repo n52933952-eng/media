@@ -137,6 +137,7 @@ const LiveStreamPage = () => {
   const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
   const [viewerMuted, setViewerMuted] = useState(false);
   const [videoFitCover, setVideoFitCover] = useState(true);
+  const [hostVideoFitCover, setHostVideoFitCover] = useState(true);
   const [hostInfo, setHostInfo] = useState({ name: 'User', profilePic: '', roomName: '' });
 
   const roomRef = useRef(null);
@@ -590,7 +591,8 @@ const LiveStreamPage = () => {
             display={isSharing ? 'none' : 'block'}
             style={{
               position: 'absolute', inset: 0, width: '100%', height: '100%',
-              objectFit: 'cover', objectPosition: 'center', backgroundColor: '#000',
+              objectFit: hostVideoFitCover ? 'cover' : 'contain',
+              objectPosition: 'center', backgroundColor: '#000',
             }}
           />
           {isSharing && (
@@ -857,36 +859,35 @@ const LiveStreamPage = () => {
           w={`${metrics.actionRailWidth}px`}
           maxH={actionRailMaxH}
           display="flex"
-          flexDirection="column-reverse"
+          flexDirection="column"
+          justifyContent="flex-end"
           alignItems="center"
-          gap={1}
-          overflow="hidden"
+          gap={2}
           pointerEvents="auto"
         >
           {isBroadcaster ? (
             <>
-              {isSharing && (
+              <LiveActionButton
+                ui={ui}
+                icon={isMicMuted ? '🔇' : '🔊'}
+                label={isMicMuted ? 'Unmute' : 'Mute'}
+                onClick={() => { void toggleMicMute(); }}
+              />
+              {!isSharing && (
                 <LiveActionButton
                   ui={ui}
-                  icon="🛑"
-                  label="Stop"
-                  onClick={toggleShare}
-                  circleStyle={{ borderColor: 'red.400', borderWidth: '2px' }}
+                  icon={hostVideoFitCover ? '◫' : '◧'}
+                  label={hostVideoFitCover ? 'Fit' : 'Fill'}
+                  highlight={hostVideoFitCover}
+                  onClick={() => setHostVideoFitCover(v => !v)}
                 />
               )}
               <LiveActionButton
                 ui={ui}
-                icon="💬"
-                label="Chat"
-                primary={showLog}
-                onClick={() => setShowLog(v => !v)}
-              />
-              <LiveActionButton
-                ui={ui}
-                icon="🖥"
-                label="Share window"
-                disabled={isSharing}
-                onClick={shareWindow}
+                icon="📤"
+                label="Share live"
+                primary
+                onClick={() => setShareLiveOpen(true)}
               />
               <LiveActionButton
                 ui={ui}
@@ -898,26 +899,10 @@ const LiveStreamPage = () => {
               />
               <LiveActionButton
                 ui={ui}
-                icon="📤"
-                label="Share live"
-                primary
-                onClick={() => setShareLiveOpen(true)}
-              />
-              <LiveActionButton
-                ui={ui}
-                icon={isMicMuted ? '🔇' : '🔊'}
-                label={isMicMuted ? 'Unmute' : 'Mute'}
-                onClick={() => { void toggleMicMute(); }}
-              />
-            </>
-          ) : (
-            <>
-              <LiveActionButton
-                ui={ui}
-                icon="♥"
-                label="React"
-                highlight={emojiPickerOpen}
-                onClick={() => setEmojiPickerOpen(v => !v)}
+                icon="🖥"
+                label="Share window"
+                disabled={isSharing}
+                onClick={shareWindow}
               />
               <LiveActionButton
                 ui={ui}
@@ -925,6 +910,33 @@ const LiveStreamPage = () => {
                 label="Chat"
                 primary={showLog}
                 onClick={() => setShowLog(v => !v)}
+              />
+              {isSharing && (
+                <LiveActionButton
+                  ui={ui}
+                  icon="🛑"
+                  label="Stop"
+                  onClick={toggleShare}
+                  circleStyle={{ borderColor: 'red.400', borderWidth: '2px' }}
+                />
+              )}
+            </>
+          ) : (
+            <>
+              {remoteMainCamera && (
+                <LiveActionButton
+                  ui={ui}
+                  icon={videoFitCover ? '◫' : '◧'}
+                  label={videoFitCover ? 'Fit' : 'Fill'}
+                  highlight={videoFitCover}
+                  onClick={() => setVideoFitCover(v => !v)}
+                />
+              )}
+              <LiveActionButton
+                ui={ui}
+                icon={viewerMuted ? '🔇' : '🔊'}
+                label={viewerMuted ? 'Unmute' : 'Mute'}
+                onClick={() => setViewerMuted(v => !v)}
               />
               <LiveActionButton
                 ui={ui}
@@ -935,19 +947,18 @@ const LiveStreamPage = () => {
               />
               <LiveActionButton
                 ui={ui}
-                icon={viewerMuted ? '🔇' : '🔊'}
-                label={viewerMuted ? 'Unmute' : 'Mute'}
-                onClick={() => setViewerMuted(v => !v)}
+                icon="💬"
+                label="Chat"
+                primary={showLog}
+                onClick={() => setShowLog(v => !v)}
               />
-              {remoteCameraTrack && !remoteScreenTrack && (
-                <LiveActionButton
-                  ui={ui}
-                  icon={videoFitCover ? '⊡' : '⊞'}
-                  label={videoFitCover ? 'Fit' : 'Fill'}
-                  highlight={videoFitCover}
-                  onClick={() => setVideoFitCover(v => !v)}
-                />
-              )}
+              <LiveActionButton
+                ui={ui}
+                icon="♥"
+                label="React"
+                highlight={emojiPickerOpen}
+                onClick={() => setEmojiPickerOpen(v => !v)}
+              />
             </>
           )}
         </Box>
