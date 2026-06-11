@@ -53,14 +53,30 @@ function extFromMimetype(mimetype) {
   return 'bin'
 }
 
+function isKnownMediaHost(hostname) {
+  if (!hostname) return false
+  if (hostname.endsWith('.r2.dev')) return true
+  const extra = String(process.env.R2_MEDIA_HOSTS || '')
+    .split(',')
+    .map((h) => h.trim().toLowerCase())
+    .filter(Boolean)
+  if (extra.includes(hostname.toLowerCase())) return true
+  try {
+    const baseHost = new URL(publicBaseUrl()).hostname
+    if (baseHost && hostname.toLowerCase() === baseHost.toLowerCase()) return true
+  } catch {
+    /* ignore */
+  }
+  return false
+}
+
 export function isR2Url(url) {
   if (!url || typeof url !== 'string') return false
   const trimmed = url.trim()
   const base = publicBaseUrl()
   if (base && trimmed.startsWith(`${base}/`)) return true
   try {
-    const host = new URL(trimmed).hostname
-    return host.endsWith('.r2.dev')
+    return isKnownMediaHost(new URL(trimmed).hostname)
   } catch {
     return false
   }
@@ -75,7 +91,7 @@ export function extractKeyFromUrl(url) {
   }
   try {
     const u = new URL(trimmed)
-    if (u.hostname.endsWith('.r2.dev')) {
+    if (isKnownMediaHost(u.hostname)) {
       return decodeURIComponent(u.pathname.replace(/^\//, ''))
     }
   } catch {
@@ -100,6 +116,7 @@ export async function uploadBuffer(buffer, mimetype, folder = 'uploads') {
       Key: key,
       Body: buffer,
       ContentType: mimetype || 'application/octet-stream',
+      CacheControl: 'public, max-age=31536000, immutable',
     })
   )
   const url = buildPublicUrl(key)
