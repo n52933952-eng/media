@@ -1,9 +1,13 @@
 import * as r2 from './r2Storage.js'
 import { prepareUploadBuffer } from './imageOptimize.js'
+import { prepareVideoBuffer } from './videoOptimize.js'
 
-/** Upload a Multer memory file to R2 (images optimized on upload). */
+/** Upload a Multer memory file to R2 (images/videos optimized on upload). */
 export async function uploadMulterFile(file, folder) {
-  const prepared = await prepareUploadBuffer(file.buffer, file.mimetype, folder)
+  const isVideo = String(file.mimetype || '').toLowerCase().startsWith('video/')
+  const prepared = isVideo
+    ? await prepareVideoBuffer(file.buffer, file.mimetype)
+    : await prepareUploadBuffer(file.buffer, file.mimetype, folder)
   const result = await r2.uploadBuffer(prepared.buffer, prepared.mimetype, folder)
   return {
     url: result.url,
