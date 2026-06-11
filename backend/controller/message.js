@@ -1,11 +1,8 @@
 import Conversation from '../models/conversation.js'
 import Message from '../models/message.js'
 import { getRecipientSockedId, getIO, getUserSocket, isUserEffectivelyOnline, getUserSelfRoomId } from '../socket/socket.js'
-import { v2 as cloudinary } from 'cloudinary'
-import { Readable } from 'stream'
+import { uploadMulterFile, deleteMediaAsset, isManagedMediaUrl } from '../services/mediaStorage.js'
 import mongoose from 'mongoose'
-
-const CLOUDINARY_UPLOAD_QUALITY = (process.env.CLOUDINARY_UPLOAD_QUALITY || 'auto:eco').trim()
 
 // ── helpers ────────────────────────────────────────────────────────────────
 const idStr = (id) => (id != null ? id.toString() : '')
@@ -24,71 +21,23 @@ const notifySenderMessageDelivered = (senderStr, messageId, conversationId) => {
   }
 }
 
-/**
- * Best-effort delete of a Cloudinary image/video referenced by a chat message URL.
- * Same parsing rules as single-message delete (upload path + optional v123 version folder).
- */
-async function destroyCloudinaryAssetForMessageImgUrl(imgUrl) {
-  try {
-    if (!imgUrl || typeof imgUrl !== 'string') return
-    const trimmed = imgUrl.trim()
-    if (!trimmed.includes('cloudinary') || !trimmed.includes('res.cloudinary.com')) return
-
-    const isVideo =
-      trimmed.includes('/video/upload/') ||
-      /\.(mp4|webm|ogg|mov)$/i.test(trimmed) ||
-      (trimmed.includes('cloudinary') && trimmed.includes('video'))
-
-    const urlParts = trimmed.split('/')
-    const uploadIndex = urlParts.findIndex((part) => part === 'upload')
-
-    if (uploadIndex !== -1 && uploadIndex < urlParts.length - 1) {
-      let publicIdParts = urlParts.slice(uploadIndex + 1)
-      if (publicIdParts.length > 0 && /^v\d+$/.test(publicIdParts[0])) {
-        publicIdParts = publicIdParts.slice(1)
-      }
-      let publicId = publicIdParts.join('/')
-      try {
-        publicId = decodeURIComponent(publicId)
-      } catch (_) {
-        /* keep raw */
-      }
-      publicId = publicId.replace(/\.(jpg|jpeg|png|gif|webp|bmp|mp4|webm|ogg|mov)$/i, '')
-      if (publicId) {
-        await cloudinary.uploader.destroy(publicId, {
-          resource_type: isVideo ? 'video' : 'image',
-        })
-        console.log(`🗑️ [message] Cloudinary deleted ${isVideo ? 'video' : 'image'}: ${publicId}`)
-      }
-      return
-    }
-
-    const filename = urlParts[urlParts.length - 1]
-    const base = filename.split('.')[0]
-    if (base) {
-      await cloudinary.uploader.destroy(base, {
-        resource_type: isVideo ? 'video' : 'image',
-      })
-      console.log(`🗑️ [message] Cloudinary deleted (fallback): ${base}`)
-    }
-  } catch (e) {
-    console.warn('⚠️ [message] Cloudinary destroy failed:', imgUrl?.slice?.(0, 80), e?.message || e)
-  }
+async function destroyMediaAssetForMessageImgUrl(imgUrl) {
+  if (!imgUrl) return
+  await deleteMediaAsset(imgUrl)
 }
 
-/** Delete all unique Cloudinary assets attached to messages in a conversation, then callers remove Mongo docs. */
-async function destroyCloudinaryAssetsForConversation(conversationId) {
+async function destroyMediaAssetsForConversation(conversationId) {
   const msgs = await Message.find({ conversationId }).select('img').lean()
   const urls = [
     ...new Set(
       msgs
         .map((m) => (m?.img && String(m.img).trim()) || '')
-        .filter((u) => u.includes('cloudinary'))
+        .filter((u) => isManagedMediaUrl(u))
     ),
   ]
   if (!urls.length) return
-  await Promise.all(urls.map((u) => destroyCloudinaryAssetForMessageImgUrl(u)))
-  console.log(`🧹 [message] Cloudinary cleanup for conversation ${idStr(conversationId)}: ${urls.length} unique asset(s)`)
+  await Promise.all(urls.map((u) => destroyMediaAssetForMessageImgUrl(u)))
+  console.log(`🧹 [message] storage cleanup for conversation ${idStr(conversationId)}: ${urls.length} unique asset(s)`)
 }
 
 /**
@@ -358,59 +307,22 @@ export const sendMessaeg = async(req,res) => {
       }
     }
 
-    // ── File upload path ───────────────────────────────────────────────────
     if (req.file) {
-      return new Promise((resolve, reject) => {
-        const stream = cloudinary.uploader.upload_stream(
-          {
-            resource_type: req.file.mimetype.startsWith('video/') ? 'video' : 'image',
-            folder: 'messages',
-            timeout: 1200000,
-            chunk_size: 6000000,
-            ...(req.file.mimetype.startsWith('video/')
-              ? {
-                  transformation: [
-                    {
-                      width: 1080,
-                      crop: 'limit',
-                      quality: CLOUDINARY_UPLOAD_QUALITY,
-                      fetch_format: 'mp4',
-                      video_codec: 'auto',
-                      audio_codec: 'aac',
-                    },
-                  ],
-                }
-              : {
-                  transformation: [
-                    {
-                      quality: CLOUDINARY_UPLOAD_QUALITY,
-                      fetch_format: 'auto',
-                    },
-                  ],
-                }),
-          },
-          async (error, result) => {
-            if (error) {
-              console.error('Cloudinary upload error:', error)
-              if (!res.headersSent) res.status(500).json({ error: 'Failed to upload file', details: error.message })
-              return reject(error)
-            }
-            img = result.secure_url
-            try {
-              const { responseData } = await _persistAndBroadcastMessage({ conversation, senderId, message, img, replyTo })
-              if (!res.headersSent) res.status(201).json(responseData)
-              resolve()
-            } catch (e) {
-              if (!res.headersSent) res.status(500).json({ error: e.message || 'Failed to send message' })
-              reject(e)
-            }
-          }
-        )
-        const bufferStream = new Readable()
-        bufferStream.push(req.file.buffer)
-        bufferStream.push(null)
-        bufferStream.pipe(stream)
-      })
+      try {
+        const result = await uploadMulterFile(req.file, 'messages')
+        img = result.secure_url
+        const { responseData } = await _persistAndBroadcastMessage({
+          conversation,
+          senderId,
+          message,
+          img,
+          replyTo,
+        })
+        return res.status(201).json(responseData)
+      } catch (error) {
+        console.error('Media upload error:', error)
+        return res.status(500).json({ error: 'Failed to upload file', details: error.message })
+      }
     }
 
     // ── Plain text/media path ──────────────────────────────────────────────
@@ -645,9 +557,9 @@ export const deletconversation = async (req, res) => {
   try {
     const convId = req.params.id
     const conv = await Conversation.findById(convId).select('groupAvatar').lean()
-    await destroyCloudinaryAssetsForConversation(convId)
-    if (conv?.groupAvatar && String(conv.groupAvatar).includes('cloudinary')) {
-      await destroyCloudinaryAssetForMessageImgUrl(conv.groupAvatar)
+    await destroyMediaAssetsForConversation(convId)
+    if (conv?.groupAvatar && isManagedMediaUrl(String(conv.groupAvatar))) {
+      await destroyMediaAssetForMessageImgUrl(conv.groupAvatar)
     }
     await Message.deleteMany({ conversationId: convId })
     await Conversation.findByIdAndDelete(convId)
@@ -683,11 +595,11 @@ export const deleteMessage = async (req, res) => {
       return res.status(403).json({ error: 'You can only delete messages in conversations you are part of' })
     }
 
-    if (message.img && String(message.img).includes('cloudinary')) {
+    if (message.img && isManagedMediaUrl(String(message.img))) {
       try {
-        await destroyCloudinaryAssetForMessageImgUrl(message.img)
-      } catch (cloudinaryError) {
-        console.error('Error deleting file from Cloudinary:', cloudinaryError)
+        await destroyMediaAssetForMessageImgUrl(message.img)
+      } catch (deleteError) {
+        console.error('Error deleting message media:', deleteError)
       }
     }
 
@@ -960,9 +872,9 @@ export const deleteGroup = async (req, res) => {
       io.to(conversationId).emit('groupDeleted', { conversationId })
     }
 
-    await destroyCloudinaryAssetsForConversation(conversation._id)
-    if (conversation.groupAvatar && String(conversation.groupAvatar).includes('cloudinary')) {
-      await destroyCloudinaryAssetForMessageImgUrl(conversation.groupAvatar)
+    await destroyMediaAssetsForConversation(conversation._id)
+    if (conversation.groupAvatar && isManagedMediaUrl(String(conversation.groupAvatar))) {
+      await destroyMediaAssetForMessageImgUrl(conversation.groupAvatar)
     }
     await Message.deleteMany({ conversationId: conversation._id })
     await Conversation.findByIdAndDelete(conversation._id)
@@ -992,9 +904,9 @@ export const leaveGroup = async (req, res) => {
 
     if (conversation.participants.length === 0) {
       const emptyConvId = conversation._id
-      await destroyCloudinaryAssetsForConversation(emptyConvId)
-      if (conversation.groupAvatar && String(conversation.groupAvatar).includes('cloudinary')) {
-        await destroyCloudinaryAssetForMessageImgUrl(conversation.groupAvatar)
+      await destroyMediaAssetsForConversation(emptyConvId)
+      if (conversation.groupAvatar && isManagedMediaUrl(String(conversation.groupAvatar))) {
+        await destroyMediaAssetForMessageImgUrl(conversation.groupAvatar)
       }
       await Message.deleteMany({ conversationId: emptyConvId })
       await Conversation.findByIdAndDelete(emptyConvId)

@@ -12,8 +12,7 @@ import ChessBusy from '../models/chessBusy.js'
 import bcryptjs from 'bcryptjs' 
 import GenerateToken from '../utils/GenerateToken.js'
 import mongoose from 'mongoose'
-import { v2 as cloudinary } from 'cloudinary'
-import { Readable } from 'stream'
+import { uploadMulterFile, deleteMediaAsset } from '../services/mediaStorage.js'
 import { LIVE_CHANNELS } from '../config/channels.js'
 import * as redisService from '../services/redis.js'
 import { getIO, getUserSelfRoomId } from '../socket/socket.js'
@@ -39,50 +38,6 @@ async function getFollowGraphIdsForUser(userId) {
   }
   return { following, followers }
 }
-
-function extractCloudinaryPublicId(url) {
-  try {
-    if (!url || typeof url !== 'string') return ''
-    if (!url.includes('cloudinary')) return ''
-    const urlParts = url.split('/')
-    const uploadIndex = urlParts.findIndex((part) => part === 'upload')
-    if (uploadIndex === -1) return ''
-    let publicIdParts = urlParts.slice(uploadIndex + 1)
-    if (publicIdParts.length > 0 && /^v\\d+$/.test(publicIdParts[0])) {
-      publicIdParts = publicIdParts.slice(1)
-    }
-    let publicId = publicIdParts.join('/')
-    publicId = publicId.replace(/\\.(jpg|jpeg|png|gif|webp|bmp|mp4|webm|ogg|mov)$/i, '')
-    return publicId || ''
-  } catch {
-    return ''
-  }
-}
-
-async function safeCloudinaryDestroyByUrl(url) {
-  const publicId = extractCloudinaryPublicId(url)
-  if (!publicId) return
-  const isVideo =
-    (typeof url === 'string' && url.includes('/video/upload/')) ||
-    /\\.(mp4|webm|ogg|mov)$/i.test(String(url || ''))
-  try {
-    await cloudinary.uploader.destroy(publicId, { resource_type: isVideo ? 'video' : 'image' })
-  } catch (e) {
-    console.error('⚠️ Cloudinary destroy failed:', e?.message || e)
-  }
-}
-
-async function safeCloudinaryDestroyPublicId(publicId, resourceType = 'image') {
-  try {
-    if (!publicId) return
-    await cloudinary.uploader.destroy(String(publicId), { resource_type: resourceType })
-  } catch (e) {
-    console.error('⚠️ Cloudinary destroy failed:', e?.message || e)
-  }
-}
-
-
-
 
 
 export const SignUp = async(req,res) => {
@@ -478,25 +433,20 @@ export const DeleteMyAccount = async (req, res) => {
     const user = await User.findById(userId).select('googleId profilePic').lean()
     if (!user) return res.status(404).json({ error: 'User not found' })
 
-    // 1) Cloudinary cleanup (best-effort; never block deletion)
     if (user.profilePic) {
-      await safeCloudinaryDestroyByUrl(String(user.profilePic))
+      await deleteMediaAsset(String(user.profilePic))
     }
 
     const myPosts = await Post.find({ postedBy: userId }).select('_id img').lean()
     for (const p of myPosts) {
-      if (p?.img) await safeCloudinaryDestroyByUrl(String(p.img))
+      if (p?.img) await deleteMediaAsset(String(p.img))
     }
 
     const myStories = await Story.find({ user: userId }).select('_id slides').lean()
     for (const st of myStories) {
       const slides = Array.isArray(st?.slides) ? st.slides : []
       for (const s of slides) {
-        if (s?.publicId) {
-          await safeCloudinaryDestroyPublicId(String(s.publicId), s?.type === 'video' ? 'video' : 'image')
-        } else if (s?.url) {
-          await safeCloudinaryDestroyByUrl(String(s.url))
-        }
+        await deleteMediaAsset(s?.url, s?.publicId)
       }
     }
 
@@ -514,7 +464,7 @@ export const DeleteMyAccount = async (req, res) => {
         .select('_id img')
         .lean()
       for (const m of msgsWithMedia) {
-        if (m?.img) await safeCloudinaryDestroyByUrl(String(m.img))
+        if (m?.img) await deleteMediaAsset(String(m.img))
       }
     }
 
@@ -620,7 +570,7 @@ export const DeleteMyAccount = async (req, res) => {
           .select('img')
           .lean()
         for (const m of toDeleteMedia) {
-          if (m?.img) await safeCloudinaryDestroyByUrl(String(m.img))
+          if (m?.img) await deleteMediaAsset(String(m.img))
         }
         await Message.deleteMany({ conversationId: { $in: convIdsToDelete } })
         await Conversation.deleteMany({ _id: { $in: convIdsToDelete } })
@@ -677,94 +627,58 @@ export const UpdateUser = async(req,res) => {
         user.password = hashPassword
       }
        
-      // Handle file upload via Multer to Cloudinary
-      if(req.file) {
-        return new Promise((resolve, reject) => {
-          
-          const stream = cloudinary.uploader.upload_stream(
-            {
-              resource_type: 'image',
-              folder: 'profile-pics',
-            },
-            async (error, result) => {
-              if (error) {
-                console.error('Cloudinary upload error:', error)
-                if (!res.headersSent) {
-                  res.status(500).json({ 
-                    error: 'Failed to upload profile picture',
-                    details: error.message 
-                  })
-                }
-                reject(error)
-                return
-              }
-              
-              profilePic = result.secure_url
-              
-              try {
-                user.name = name || user.name
-                user.username = username || user.username 
-                user.email = email || user.email 
-                user.profilePic = profilePic || user.profilePic 
-                user.bio = bio || user.bio
-                user.country = country !== undefined ? country : user.country
-                user.instagram = instagram !== undefined ? instagram : user.instagram
+      if (req.file) {
+        try {
+          if (user.profilePic) {
+            await deleteMediaAsset(String(user.profilePic))
+          }
+          const result = await uploadMulterFile(req.file, 'profile-pics')
+          profilePic = result.secure_url
 
-                user = await user.save()
+          user.name = name || user.name
+          user.username = username || user.username
+          user.email = email || user.email
+          user.profilePic = profilePic || user.profilePic
+          user.bio = bio || user.bio
+          user.country = country !== undefined ? country : user.country
+          user.instagram = instagram !== undefined ? instagram : user.instagram
 
-                // Update all existing comments with new profile picture and username
-                // This ensures all comments show the updated profile picture immediately
-                try {
-                  await Post.updateMany(
-                    { "replies.userId": userId },
-                    {
-                      $set: {
-                        "replies.$[reply].username": user.username,
-                        "replies.$[reply].userProfilePic": user.profilePic,
-                      },
-                    },
-                    { arrayFilters: [{ "reply.userId": userId }] }
-                  )
-                  console.log(`✅ Updated all comments for user ${user.username} with new profile picture`)
-                } catch (updateError) {
-                  // Log error but don't fail the profile update
-                  console.error('Error updating comments with new profile picture:', updateError)
-                }
+          user = await user.save()
 
-                // Return safe fields only (exclude password)
-                // Include followers and following to preserve them in frontend
-                if (!res.headersSent) {
-                  res.status(200).json({
-                    _id: user._id,
-                    name: user.name,
-                    username: user.username,
-                    email: user.email,
-                    bio: user.bio,
-                    profilePic: user.profilePic,
-                    country: user.country,
-                    instagram: user.instagram,
-                    followers: user.followers || [],
-                    following: user.following || []
-                  })
-                }
-                resolve()
-              } catch (error) {
-                console.error('Error updating user after upload:', error)
-                if (!res.headersSent) {
-                  res.status(500).json({ 
-                    error: error.message || 'Failed to update profile' 
-                  })
-                }
-                reject(error)
-              }
-            }
-          )
-          
-          const bufferStream = new Readable()
-          bufferStream.push(req.file.buffer)
-          bufferStream.push(null)
-          bufferStream.pipe(stream)
-        })
+          try {
+            await Post.updateMany(
+              { 'replies.userId': userId },
+              {
+                $set: {
+                  'replies.$[reply].username': user.username,
+                  'replies.$[reply].userProfilePic': user.profilePic,
+                },
+              },
+              { arrayFilters: [{ 'reply.userId': userId }] }
+            )
+          } catch (updateError) {
+            console.error('Error updating comments with new profile picture:', updateError)
+          }
+
+          return res.status(200).json({
+            _id: user._id,
+            name: user.name,
+            username: user.username,
+            email: user.email,
+            bio: user.bio,
+            profilePic: user.profilePic,
+            country: user.country,
+            instagram: user.instagram,
+            followers: user.followers || [],
+            following: user.following || [],
+          })
+        } catch (error) {
+          console.error('Profile picture upload error:', error)
+          return res.status(500).json({
+            error: 'Failed to upload profile picture',
+            details: error.message,
+          })
+        }
       }
 
       // No file upload - update user immediately

@@ -5,7 +5,6 @@ import cookieParser from 'cookie-parser'
 import cors from 'cors'
 import UserRoute from './routes/user.js'
 import PostRoute from './routes/post.js'
-import{v2 as cloudinary} from 'cloudinary'
 import MessageRoute from './routes/message.js'
 import FootballRoute from './routes/football.js'
 import WeatherRoute from './routes/weather.js'
@@ -35,13 +34,6 @@ const __dirname = path.dirname(__filename)
 dotenv.config()
 
 const app = express()
-
-cloudinary.config({
-     cloud_name:process.env.CLOUDINARY_CLOUD_NAME,
-     api_key:process.env.CLOUDINARY_API_KEY,
-     api_secret:process.env.CLOUDINARY_API_SECRET
-
-})
 
 app.use(express.json({ limit: "500mb" })); // Increased for other endpoints
 app.use(express.urlencoded({ limit: "500mb", extended: true })); // Increased for other endpoints
@@ -283,7 +275,7 @@ initializeSocket(app).then((result) => {
         // Initialize Activity Cleanup Cron Job
         initializeActivityCleanup()
 
-        // Expired stories: MongoDB + Cloudinary
+        // Expired stories: MongoDB + R2 storage cleanup
         initializeStoryCleanup()
 
         // Moment Capsule: frequent due-check for accurate short reminders (1m/5m).

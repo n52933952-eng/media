@@ -3,15 +3,11 @@ import User from '../models/user.js'
 import Post from '../models/post.js'
 import Follow from '../models/follow.js'
 import LiveStream from '../models/liveStream.js'
-import { v2 as cloudinary } from 'cloudinary'
-import { Readable } from 'stream'
+import { uploadMulterFile, deleteMediaAsset } from '../services/mediaStorage.js'
 import { getIO, getUserSocket, getAllUserSockets } from '../socket/socket.js'
 import { dedupeGamePostsForFeed } from '../utils/dedupeGameFeedPosts.js'
 import { enrichGoFishPostsForFeed } from '../utils/enrichGoFishFeedPosts.js'
 import { normalizeGamePlayers } from '../utils/gameFeedPostUtils.js'
-
-const CLOUDINARY_UPLOAD_QUALITY = (process.env.CLOUDINARY_UPLOAD_QUALITY || 'auto:eco').trim()
-
 
 /** Notify everyone listed as contributor except the poster when a collaborative post is created. */
 async function notifyContributorsOnCollaborativeCreate(newPost, posterId) {
@@ -82,117 +78,61 @@ export const createPost = async(req,res) => {
         return res.status(500).json({error:"post text must be 500 or less"})
        }
 
-       // Handle file upload via Multer to Cloudinary
-       if(req.file) {
-         return new Promise((resolve, reject) => {
-           const stream = cloudinary.uploader.upload_stream(
-             {
-              resource_type: req.file.mimetype.startsWith('video/') ? 'video' : 'image',
-               folder: 'posts',
-               timeout: 1200000,
-               chunk_size: 6000000,
-              ...(req.file.mimetype.startsWith('video/')
-                ? {
-                    // Upload-side optimization so feed playback starts faster on mobile networks.
-                    transformation: [
-                      {
-                        width: 1080,
-                        crop: 'limit',
-                        quality: CLOUDINARY_UPLOAD_QUALITY,
-                        fetch_format: 'mp4',
-                        video_codec: 'auto',
-                        audio_codec: 'aac',
-                      },
-                    ],
-                  }
-                : {}),
-             },
-             async (error, result) => {
-               if (error) {
-                 console.error('Cloudinary upload error:', error)
-                 if (!res.headersSent) {
-                   res.status(500).json({ 
-                     error: 'Failed to upload file to Cloudinary',
-                     details: error.message 
-                   })
-                 }
-                 reject(error)
-                 return
-               }
-               
-               img = result.secure_url
-               
-               try {
-                 const postData = {postedBy,text:textTrim,img}
-                 if (wantCollaborative) {
-                   postData.isCollaborative = true
-                   postData.contributors = contributorsParsed && Array.isArray(contributorsParsed) ? contributorsParsed : [postedBy]
-                 }
-                 const newPost = new Post(postData)
-                 await newPost.save()
-                 
-                 // Populate postedBy for socket emission
-                 await newPost.populate("postedBy", "username profilePic name")
-                 
-                 await notifyContributorsOnCollaborativeCreate(newPost, postedBy)
+       if (req.file) {
+         try {
+           const result = await uploadMulterFile(req.file, 'posts')
+           img = result.secure_url
 
-                 // OPTIMIZED: Emit new post only to online followers (not all users)
-                 const io = getIO()
-                 if (io) {
-                   // Read-from-Follow: Get poster's followers (cap for safety)
-                   const followerDocs = await Follow.find({ followeeId: postedBy })
-                     .select('followerId')
-                     .limit(10000)
-                     .lean()
-                   if (followerDocs && followerDocs.length > 0) {
-                     const socketMap = await getAllUserSockets()
-                     const onlineFollowers = []
-                     
-                     followerDocs.forEach(d => {
-                       const followerIdStr = d.followerId?.toString?.() ?? String(d.followerId)
-                       const socketData = socketMap[followerIdStr]
-                       if (socketData && socketData.socketId) {
-                         onlineFollowers.push(socketData.socketId)
-                       }
-                     })
-                     
-                     // Only emit to online followers (not all users)
-                     if (onlineFollowers.length > 0) {
-                       io.to(onlineFollowers).emit("newPost", newPost)
-                     }
-                   }
+           const postData = { postedBy, text: textTrim, img }
+           if (wantCollaborative) {
+             postData.isCollaborative = true
+             postData.contributors =
+               contributorsParsed && Array.isArray(contributorsParsed) ? contributorsParsed : [postedBy]
+           }
+           const newPost = new Post(postData)
+           await newPost.save()
+
+           await newPost.populate('postedBy', 'username profilePic name')
+           await notifyContributorsOnCollaborativeCreate(newPost, postedBy)
+
+           const io = getIO()
+           if (io) {
+             const followerDocs = await Follow.find({ followeeId: postedBy })
+               .select('followerId')
+               .limit(10000)
+               .lean()
+             if (followerDocs && followerDocs.length > 0) {
+               const socketMap = await getAllUserSockets()
+               const onlineFollowers = []
+               followerDocs.forEach((d) => {
+                 const followerIdStr = d.followerId?.toString?.() ?? String(d.followerId)
+                 const socketData = socketMap[followerIdStr]
+                 if (socketData && socketData.socketId) {
+                   onlineFollowers.push(socketData.socketId)
                  }
-               
-               // Create activity for activity feed
-               const { createActivity } = await import('./activity.js')
-               createActivity(postedBy, 'post', {
-                   postId: newPost._id,
-                   metadata: { text: (textTrim || '').substring(0, 50), hasImage: !!img }
-               }).catch(err => {
-                   console.error('Error creating activity:', err)
                })
-               
-               if (!res.headersSent) {
-                 res.status(200).json({message:"post created sufully", post: newPost})
-               }
-               resolve()
-              } catch (error) {
-                 console.error('Error creating post after upload:', error)
-                 if (!res.headersSent) {
-                   res.status(500).json({ 
-                     error: error.message || 'Failed to create post. Please try again.' 
-                   })
-                 }
-                 reject(error)
+               if (onlineFollowers.length > 0) {
+                 io.to(onlineFollowers).emit('newPost', newPost)
                }
              }
-           )
-           
-           const bufferStream = new Readable()
-           bufferStream.push(req.file.buffer)
-           bufferStream.push(null)
-           bufferStream.pipe(stream)
-         })
+           }
+
+           const { createActivity } = await import('./activity.js')
+           createActivity(postedBy, 'post', {
+             postId: newPost._id,
+             metadata: { text: (textTrim || '').substring(0, 50), hasImage: !!img },
+           }).catch((err) => {
+             console.error('Error creating activity:', err)
+           })
+
+           return res.status(200).json({ message: 'post created sufully', post: newPost })
+         } catch (error) {
+           console.error('Media upload / create post error:', error)
+           return res.status(500).json({
+             error: 'Failed to upload file',
+             details: error.message,
+           })
+         }
        }
 
        // No file - create post immediately
@@ -345,71 +285,14 @@ export const updatePost = async(req,res) => {
         let img = post.img // Keep existing image by default
         
         if(req.file) {
-            // Delete old image/video from Cloudinary if it exists
-            if(post.img && post.img.includes('cloudinary')){
-                try {
-                    const isVideo = post.img.includes('/video/upload/') || 
-                                   post.img.match(/\.(mp4|webm|ogg|mov)$/i) ||
-                                   (post.img.includes('cloudinary') && post.img.includes('video'))
-                    
-                    const urlParts = post.img.split('/')
-                    const uploadIndex = urlParts.findIndex(part => part === 'upload')
-                    
-                    if(uploadIndex !== -1 && uploadIndex < urlParts.length - 1){
-                        let publicIdParts = urlParts.slice(uploadIndex + 1)
-                        // Remove file extension for public ID
-                        const publicId = publicIdParts.join('/').replace(/\.[^/.]+$/, '')
-                        
-                        await cloudinary.uploader.destroy(publicId, {
-                            resource_type: isVideo ? 'video' : 'image'
-                        })
-                        console.log(`✅ Deleted old ${isVideo ? 'video' : 'image'} from Cloudinary: ${publicId}`)
-                    }
-                } catch (cloudinaryError) {
-                    console.error('Error deleting old file from Cloudinary:', cloudinaryError)
-                    // Continue with update even if old file deletion fails
-                }
+            if (post.img) {
+                await deleteMediaAsset(post.img)
             }
-            
-            // Upload new file
-            return new Promise((resolve, reject) => {
-                const stream = cloudinary.uploader.upload_stream(
-                    {
-                        resource_type: req.file.mimetype.startsWith('video/') ? 'video' : 'image',
-                        folder: 'posts',
-                        timeout: 1200000,
-                        chunk_size: 6000000,
-                        ...(req.file.mimetype.startsWith('video/')
-                            ? {
-                                // Keep the same optimization path on edit/replace media.
-                                transformation: [
-                                    {
-                                        width: 1080,
-                                        crop: 'limit',
-                                        quality: CLOUDINARY_UPLOAD_QUALITY,
-                                        fetch_format: 'mp4',
-                                        video_codec: 'auto',
-                                        audio_codec: 'aac',
-                                    },
-                                ],
-                              }
-                            : {}),
-                    },
-                    async (error, result) => {
-                        if (error) {
-                            console.error('Cloudinary upload error:', error)
-                            if (!res.headersSent) {
-                                res.status(500).json({ 
-                                    error: 'Failed to upload file to Cloudinary',
-                                    details: error.message 
-                                })
-                            }
-                            reject(error)
-                            return
-                        }
-                        
-                        img = result.secure_url
-                        
+
+            try {
+                const result = await uploadMulterFile(req.file, 'posts')
+                img = result.secure_url
+
                         // Update post
                         post.text = text !== undefined && text !== null ? text : post.text
                         post.img = img
@@ -517,18 +400,14 @@ export const updatePost = async(req,res) => {
                             }
                         }
                         
-                        if (!res.headersSent) {
-                            res.status(200).json({message:"Post updated successfully", post})
-                        }
-                        resolve()
-                    }
-                )
-                
-                const bufferStream = new Readable()
-                bufferStream.push(req.file.buffer)
-                bufferStream.push(null)
-                bufferStream.pipe(stream)
-            })
+                return res.status(200).json({ message: 'Post updated successfully', post })
+            } catch (uploadError) {
+                console.error('Media upload / update post error:', uploadError)
+                return res.status(500).json({
+                    error: 'Failed to upload file',
+                    details: uploadError.message,
+                })
+            }
         }
         
         // No file upload - just update text
@@ -663,58 +542,8 @@ export const deletePost = async(req,res) => {
         return res.status(400).json({message:"you cant delete other users post"})
       }
 
-      // Delete image/video from Cloudinary if it exists
-      if(post.img && post.img.includes('cloudinary')){
-        try {
-          // Determine resource type (image or video)
-          const isVideo = post.img.includes('/video/upload/') || 
-                         post.img.match(/\.(mp4|webm|ogg|mov)$/i) ||
-                         (post.img.includes('cloudinary') && post.img.includes('video'))
-          
-          // Extract public ID from Cloudinary URL
-          // URL format: https://res.cloudinary.com/{cloud_name}/{resource_type}/upload/{version}/{folder}/{filename}.{ext}
-          // We need to extract: {folder}/{filename} (public ID)
-          const urlParts = post.img.split('/')
-          const uploadIndex = urlParts.findIndex(part => part === 'upload')
-          
-          if(uploadIndex !== -1 && uploadIndex < urlParts.length - 1){
-            // Get everything after 'upload' (skip version if present)
-            let publicIdParts = urlParts.slice(uploadIndex + 1)
-            
-            // Remove version if it's a numeric v{timestamp}
-            if(publicIdParts.length > 0 && /^v\d+$/.test(publicIdParts[0])){
-              publicIdParts = publicIdParts.slice(1)
-            }
-            
-            // Join remaining parts to get public ID
-            let publicId = publicIdParts.join('/')
-            
-            // Remove file extension
-            publicId = publicId.replace(/\.(jpg|jpeg|png|gif|webp|bmp|mp4|webm|ogg|mov)$/i, '')
-            
-            // Delete from Cloudinary
-            if(publicId){
-              await cloudinary.uploader.destroy(publicId, {
-                resource_type: isVideo ? 'video' : 'image'
-              })
-              console.log(`Deleted ${isVideo ? 'video' : 'image'} from Cloudinary: ${publicId}`)
-            }
-          } else {
-            // Fallback: try to extract public ID using simpler method
-            const filename = urlParts[urlParts.length - 1]
-            const publicId = filename.split('.')[0]
-            if(publicId){
-              await cloudinary.uploader.destroy(publicId, {
-                resource_type: isVideo ? 'video' : 'image'
-              })
-              console.log(`Deleted ${isVideo ? 'video' : 'image'} from Cloudinary (fallback): ${publicId}`)
-            }
-          }
-        } catch (cloudinaryError) {
-          // Log error but don't fail the post deletion
-          console.error('Error deleting file from Cloudinary:', cloudinaryError)
-          // Continue with post deletion even if Cloudinary deletion fails
-        }
+      if (post.img) {
+        await deleteMediaAsset(post.img)
       }
 
       // OPTIMIZED: Get followers before deleting post

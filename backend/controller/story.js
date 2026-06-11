@@ -1,11 +1,8 @@
-import { v2 as cloudinary } from 'cloudinary'
-import { Readable } from 'stream'
+import { uploadMulterFile, deleteMediaAsset } from '../services/mediaStorage.js'
 import Story from '../models/story.js'
 import User from '../models/user.js'
 import Follow from '../models/follow.js'
 import { getIO, getAllUserSockets } from '../socket/socket.js'
-
-const CLOUDINARY_UPLOAD_QUALITY = (process.env.CLOUDINARY_UPLOAD_QUALITY || 'auto:eco').trim()
 
 /** Tell followers + author (socket) to refetch `/api/story/feed-strip` so rings / red vs gray stay in sync. */
 async function emitStoryStripChanged(authorUserId) {
@@ -48,46 +45,6 @@ const STORY_MAX_VIDEO_SEC = 20
 const STORY_TTL_MS = 24 * 60 * 60 * 1000
 /** Max slides in one active story (across multiple “Share” sessions until 24h expiry) */
 const STORY_MAX_TOTAL_SLIDES = 50
-
-function uploadBufferToCloudinary(buffer, mimetype) {
-  const isVideo = mimetype.startsWith('video/')
-  return new Promise((resolve, reject) => {
-    const stream = cloudinary.uploader.upload_stream(
-      {
-        resource_type: isVideo ? 'video' : 'image',
-        folder: 'stories',
-        timeout: 1200000,
-        chunk_size: 6000000,
-        ...(isVideo
-          ? {
-              transformation: [
-                {
-                  width: 1080,
-                  crop: 'limit',
-                  quality: CLOUDINARY_UPLOAD_QUALITY,
-                  fetch_format: 'mp4',
-                  video_codec: 'auto',
-                  audio_codec: 'aac',
-                },
-              ],
-            }
-          : {
-              transformation: [
-                {
-                  quality: CLOUDINARY_UPLOAD_QUALITY,
-                  fetch_format: 'auto',
-                },
-              ],
-            }),
-      },
-      (error, result) => {
-        if (error) reject(error)
-        else resolve(result)
-      }
-    )
-    Readable.from(buffer).pipe(stream)
-  })
-}
 
 /** POST — multipart field `files` (array) */
 export const createStory = async (req, res) => {
@@ -132,14 +89,14 @@ export const createStory = async (req, res) => {
     for (let i = 0; i < files.length; i++) {
       const file = files[i]
       const isVideo = file.mimetype.startsWith('video/')
-      const result = await uploadBufferToCloudinary(file.buffer, file.mimetype)
+      const result = await uploadMulterFile(file, 'stories')
       const slideText = (texts && typeof texts[i] === 'string' ? texts[i] : textAll) || ''
 
       if (isVideo) {
         const dur = typeof result.duration === 'number' ? result.duration : parseFloat(result.duration) || 0
         if (dur > STORY_MAX_VIDEO_SEC + 0.5) {
           try {
-            await cloudinary.uploader.destroy(result.public_id, { resource_type: 'video' })
+            await deleteMediaAsset(result.secure_url, result.public_id)
           } catch (_) {}
           return res.status(400).json({ error: `Each video must be ${STORY_MAX_VIDEO_SEC} seconds or less` })
         }
@@ -205,9 +162,7 @@ export const deleteMyStory = async (req, res) => {
     for (const s of active.slides || []) {
       if (s.publicId) {
         try {
-          await cloudinary.uploader.destroy(s.publicId, {
-            resource_type: s.type === 'video' ? 'video' : 'image',
-          })
+          await deleteMediaAsset(s.url, s.publicId)
         } catch (_) {}
       }
     }
@@ -272,9 +227,7 @@ export const deleteMyStorySlide = async (req, res) => {
     const target = slides[deleteIdx]
     if (target?.publicId) {
       try {
-        await cloudinary.uploader.destroy(String(target.publicId), {
-          resource_type: target.type === 'video' ? 'video' : 'image',
-        })
+        await deleteMediaAsset(target.url, target.publicId)
       } catch (_) {}
     }
 
@@ -444,7 +397,7 @@ export const getStoryViewers = async (req, res) => {
 }
 
 /**
- * Remove expired stories from MongoDB and delete slide assets on Cloudinary.
+ * Remove expired stories from MongoDB and delete slide assets from storage.
  * Safe to run on a schedule; API already hides expired docs via expiresAt > now.
  */
 export async function cleanupExpiredStories() {
@@ -467,9 +420,7 @@ export async function cleanupExpiredStories() {
       for (const s of doc.slides || []) {
         if (s?.publicId) {
           try {
-            await cloudinary.uploader.destroy(String(s.publicId), {
-              resource_type: s.type === 'video' ? 'video' : 'image',
-            })
+            await deleteMediaAsset(s.url, s.publicId)
           } catch (_) {}
         }
       }
@@ -487,6 +438,6 @@ export async function cleanupExpiredStories() {
   }
 
   if (totalDeleted > 0) {
-    console.log(`🧹 [story] cleanupExpiredStories: removed ${totalDeleted} expired stor(y/ies) from DB + Cloudinary`)
+    console.log(`🧹 [story] cleanupExpiredStories: removed ${totalDeleted} expired stor(y/ies) from DB + storage`)
   }
 }

@@ -1,7 +1,7 @@
 import cron from 'node-cron'
 import { cleanupExpiredStories } from '../controller/story.js'
 
-/** Expired stories: delete MongoDB docs + Cloudinary assets (hourly + once after startup). */
+/** Expired stories: delete MongoDB docs + R2 assets (hourly + once after startup). */
 export const initializeStoryCleanup = () => {
   console.log('🧹 Initializing Story expiry cleanup cron...')
 
