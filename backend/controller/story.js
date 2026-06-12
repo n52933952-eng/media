@@ -1,4 +1,4 @@
-import { uploadMulterFile, deleteMediaAsset } from '../services/mediaStorage.js'
+import { uploadMulterFile, deleteMediaAsset, respondToUploadError } from '../services/mediaStorage.js'
 import Story from '../models/story.js'
 import User from '../models/user.js'
 import Follow from '../models/follow.js'
@@ -147,6 +147,9 @@ export const createStory = async (req, res) => {
     return res.status(201).json({ story, appended: false })
   } catch (e) {
     console.error('❌ [createStory]', e)
+    if (e?.code === 'VIDEO_TOO_LONG') {
+      return respondToUploadError(res, e, 'Failed to create story')
+    }
     return res.status(500).json({ error: e.message || 'Failed to create story' })
   }
 }

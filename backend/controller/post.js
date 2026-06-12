@@ -3,7 +3,7 @@ import User from '../models/user.js'
 import Post from '../models/post.js'
 import Follow from '../models/follow.js'
 import LiveStream from '../models/liveStream.js'
-import { uploadMulterFile, deleteMediaAsset } from '../services/mediaStorage.js'
+import { uploadMulterFile, deleteMediaAsset, respondToUploadError } from '../services/mediaStorage.js'
 import { getIO, getUserSocket, getAllUserSockets } from '../socket/socket.js'
 import { dedupeGamePostsForFeed } from '../utils/dedupeGameFeedPosts.js'
 import { enrichGoFishPostsForFeed } from '../utils/enrichGoFishFeedPosts.js'
@@ -128,10 +128,7 @@ export const createPost = async(req,res) => {
            return res.status(200).json({ message: 'post created sufully', post: newPost })
          } catch (error) {
            console.error('Media upload / create post error:', error)
-           return res.status(500).json({
-             error: 'Failed to upload file',
-             details: error.message,
-           })
+           return respondToUploadError(res, error)
          }
        }
 
@@ -403,10 +400,7 @@ export const updatePost = async(req,res) => {
                 return res.status(200).json({ message: 'Post updated successfully', post })
             } catch (uploadError) {
                 console.error('Media upload / update post error:', uploadError)
-                return res.status(500).json({
-                    error: 'Failed to upload file',
-                    details: uploadError.message,
-                })
+                return respondToUploadError(res, uploadError)
             }
         }
         

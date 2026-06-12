@@ -12,7 +12,7 @@ import ChessBusy from '../models/chessBusy.js'
 import bcryptjs from 'bcryptjs' 
 import GenerateToken from '../utils/GenerateToken.js'
 import mongoose from 'mongoose'
-import { uploadMulterFile, deleteMediaAsset } from '../services/mediaStorage.js'
+import { uploadMulterFile, deleteMediaAsset, respondToUploadError } from '../services/mediaStorage.js'
 import { LIVE_CHANNELS } from '../config/channels.js'
 import * as redisService from '../services/redis.js'
 import { getIO, getUserSelfRoomId } from '../socket/socket.js'
@@ -674,10 +674,7 @@ export const UpdateUser = async(req,res) => {
           })
         } catch (error) {
           console.error('Profile picture upload error:', error)
-          return res.status(500).json({
-            error: 'Failed to upload profile picture',
-            details: error.message,
-          })
+          return respondToUploadError(res, error, 'Failed to upload profile picture')
         }
       }
 

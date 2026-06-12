@@ -1,7 +1,7 @@
 import Conversation from '../models/conversation.js'
 import Message from '../models/message.js'
 import { getRecipientSockedId, getIO, getUserSocket, isUserEffectivelyOnline, getUserSelfRoomId } from '../socket/socket.js'
-import { uploadMulterFile, deleteMediaAsset, isManagedMediaUrl } from '../services/mediaStorage.js'
+import { uploadMulterFile, deleteMediaAsset, isManagedMediaUrl, respondToUploadError } from '../services/mediaStorage.js'
 import mongoose from 'mongoose'
 
 // ── helpers ────────────────────────────────────────────────────────────────
@@ -321,7 +321,7 @@ export const sendMessaeg = async(req,res) => {
         return res.status(201).json(responseData)
       } catch (error) {
         console.error('Media upload error:', error)
-        return res.status(500).json({ error: 'Failed to upload file', details: error.message })
+        return respondToUploadError(res, error)
       }
     }
 
