@@ -41,7 +41,7 @@ const initFFmpeg = async () => {
  */
 export const compressVideo = async (videoFile, options = {}) => {
   const {
-    maxSizeMB = 95, // Target max size (leave room under 100MB Cloudinary limit)
+    maxSizeMB = 95, // Target max size (leave room under 100MB upload limit)
     quality = 'medium', // 'low', 'medium', 'high'
     progressCallback = null,
     timeout = 110000 // 110 seconds timeout (slightly less than UI timeout)
@@ -221,11 +221,11 @@ export const compressVideo = async (videoFile, options = {}) => {
 export const needsCompression = (file) => {
   if (!file) return false
   
-  // Compress videos over 50MB (close to Cloudinary's 100MB limit)
+  // Compress videos over 50MB (close to 100MB upload limit)
   // Videos under 50MB can be uploaded directly without compression
   if (file.type.startsWith('video/')) {
     const sizeMB = file.size / (1024 * 1024)
-    // Only compress if video is over 50MB (leaves room for Cloudinary's 100MB limit)
+    // Only compress if video is over 50MB
     return sizeMB > 50
   }
   

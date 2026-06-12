@@ -77,7 +77,7 @@ const EditPost = ({post, isOpen, onClose, onUpdate}) => {
     const fileSizeMB = file.size / (1024 * 1024)
     
     if (file.size > maxSize) {
-      showToast("File too large", `File (${fileSizeMB.toFixed(1)}MB) exceeds Cloudinary's 100MB limit. Please compress the file or use a smaller one.`, "error")
+      showToast("File too large", `File (${fileSizeMB.toFixed(1)}MB) exceeds the 100MB limit. Please compress the file or use a smaller one.`, "error")
       if (imageInput.current) {
         imageInput.current.value = ''
       }

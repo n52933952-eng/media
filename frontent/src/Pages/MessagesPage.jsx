@@ -53,6 +53,7 @@ import { BsCheck2All, BsReply, BsFillImageFill, BsTrash } from 'react-icons/bs'
 import { MdDelete } from 'react-icons/md'
 import EmojiPicker from 'emoji-picker-react'
 import { compressVideo, needsCompression } from '../utils/videoCompress'
+import { isVideoUrl } from '../utils/mediaUrl'
 import LiveShareChatCard from '../Components/LiveShareChatCard'
 import { parseLiveShareMessage, liveSharePreviewText, resolveLiveShareFromMessage } from '../utils/liveShareMessage'
 
@@ -1986,7 +1987,7 @@ const MessagesPage = () => {
     // For images, check size immediately (no compression)
     if (file.type.startsWith("image/")) {
       if (file.size > maxSize) {
-        showToast("File too large", `Image (${fileSizeMB.toFixed(1)}MB) exceeds Cloudinary's 100MB limit. Please use a smaller image.`, "error")
+        showToast("File too large", `Image (${fileSizeMB.toFixed(1)}MB) exceeds the 100MB limit. Please use a smaller image.`, "error")
         if (imageInputRef.current) {
           imageInputRef.current.value = ''
         }
@@ -1994,47 +1995,6 @@ const MessagesPage = () => {
       }
     }
     
-    // For videos, check duration and warn (Cloudinary free tier only allows 10 seconds)
-    if (file.type.startsWith('video/')) {
-      // Check video duration and warn user (don't block - let them try)
-      try {
-        const video = document.createElement('video')
-        video.preload = 'metadata'
-        const videoUrl = URL.createObjectURL(file)
-        video.src = videoUrl
-        
-        await new Promise((resolve, reject) => {
-          video.onloadedmetadata = () => {
-            URL.revokeObjectURL(videoUrl)
-            const duration = video.duration
-            if (duration > 10) {
-              // Warn but don't block - user can still try to upload
-              showToast(
-                "Warning: Video Duration", 
-                `Your video is ${duration.toFixed(1)} seconds. Cloudinary free tier only supports videos up to 10 seconds. The upload may fail. Consider upgrading Cloudinary or trimming the video.`, 
-                "warning", 
-                8000
-              )
-            }
-            resolve() // Always resolve - don't block upload
-          }
-          video.onerror = () => {
-            URL.revokeObjectURL(videoUrl)
-            // Don't block on metadata error, just continue
-            resolve()
-          }
-          // Timeout after 3 seconds - don't block upload
-          setTimeout(() => {
-            URL.revokeObjectURL(videoUrl)
-            resolve() // Resolve anyway, don't block
-          }, 3000)
-        })
-      } catch (error) {
-        // Don't block on error, just log it
-        console.warn('Could not check video duration:', error)
-      }
-    }
-
     // Store file for preview
     setImage(file)
     const previewURL = URL.createObjectURL(file)
@@ -2042,10 +2002,10 @@ const MessagesPage = () => {
     setUploadProgress(0)
     setIsProcessing(false)
 
-    // Compress videos only if they're over 100MB (Cloudinary's limit)
+    // Compress videos only if they're over 100MB
     // Videos under 100MB can upload directly without compression (faster)
     if (file.type.startsWith('video/')) {
-      // Only compress if file is over Cloudinary's 100MB limit
+      // Only compress if file is over 100MB
       if (fileSizeMB > 95) {
         setIsProcessing(true)
         setUploadProgress(10) // Show initial progress
@@ -2061,7 +2021,7 @@ const MessagesPage = () => {
           
           const compressedFile = await Promise.race([
             compressVideo(file, {
-              maxSizeMB: 95, // Target under 100MB Cloudinary limit
+              maxSizeMB: 95, // Target under 100MB upload limit
               quality: fileSizeMB > 100 ? 'low' : 'medium',
               timeout: 120000, // 2 minutes timeout
               progressCallback: (progress) => {
@@ -2255,7 +2215,7 @@ const MessagesPage = () => {
         return false
       }
       
-      // Upload file via Multer to Cloudinary (backend handles upload)
+      // Upload file via backend (R2 storage)
       const formData = new FormData()
       if (isGroup) {
         formData.append('conversationId', selectedConversation._id)
@@ -3124,17 +3084,8 @@ const MessagesPage = () => {
                                 const imgUrl = typeof msg.img === 'string' ? msg.img : msg.img?.url || ''
                                 if (!imgUrl) return null
                                 
-                                // Check if it's a video (Cloudinary videos have /video/upload/ in URL)
-                                const isVideo = imgUrl.includes('/video/upload/') ||
-                                                imgUrl.includes('/v1/video/upload/') ||
-                                                imgUrl.match(/\.(mp4|webm|ogg|mov)$/i) ||
-                                                (imgUrl.includes('cloudinary.com') && imgUrl.includes('/video/'))
-                                
-                                // Check if it's an image (Cloudinary images have /image/upload/ or /upload/)
-                                const isImage = imgUrl.includes('/image/upload/') ||
-                                                (imgUrl.includes('cloudinary.com') && !imgUrl.includes('/video/') && !isVideo) ||
-                                                imgUrl.match(/\.(jpg|jpeg|png|gif|webp|bmp|svg)$/i) ||
-                                                !isVideo // Default to image if not video
+                                const isVideo = isVideoUrl(imgUrl)
+                                const isImage = !isVideo
                                 
                                 if (isVideo) {
                                   return (
@@ -3679,7 +3630,7 @@ const MessagesPage = () => {
                     <Text fontSize="sm" color={useColorModeValue('blue.700', 'blue.300')} fontWeight="semibold" flex={1}>
                       {uploadProgress === 100 && isProcessing
                         ? `Processing file on server...` 
-                        : `Uploading to Cloudinary... ${uploadProgress}%`}
+                        : `Uploading... ${uploadProgress}%`}
                     </Text>
                   </Flex>
                   <Box w="100%" bg={useColorModeValue('blue.200', 'blue.700')} borderRadius="full" h={2} overflow="hidden">
@@ -3817,7 +3768,7 @@ const MessagesPage = () => {
                   </Box>
                 )}
               </Box>
-              {/* Image/Video upload button - Uploads to Cloudinary via backend */}
+              {/* Image/Video upload button */}
               <IconButton
                 aria-label="Upload image or video"
                 icon={<BsFillImageFill size={18} />}

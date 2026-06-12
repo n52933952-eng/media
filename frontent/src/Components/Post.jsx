@@ -22,10 +22,9 @@ import {
   getCardGameDataForPost,
   getChessGameDataForPost,
 } from '../utils/gameFeedPostUtils.js'
+import { isVideoUrl, mediaDisplayUrl } from '../utils/mediaUrl.js'
 
 const apiBaseUrl = () => (import.meta.env.PROD ? window.location.origin : 'http://localhost:5000')
-const CLOUDINARY_DELIVERY_QUALITY = (import.meta.env.VITE_CLOUDINARY_DELIVERY_QUALITY || 'eco').trim()
-const ENABLE_CLOUDINARY_DPR_AUTO = (import.meta.env.VITE_CLOUDINARY_IMAGE_DPR_AUTO || 'true') !== 'false'
 
 const Post = ({post: initialPost, postedBy, onDelete, visibleVideoOnly = false, autoPlayMedia, showFeedExtras = true}) => {
     
@@ -36,23 +35,9 @@ const Post = ({post: initialPost, postedBy, onDelete, visibleVideoOnly = false, 
   const post = localPost || initialPost
   const videoRef = useRef(null)
   const [isVideoInView, setIsVideoInView] = useState(!visibleVideoOnly)
-  const optimizeCloudinaryMediaUrl = useCallback((rawUrl, kind) => {
-    const url = String(rawUrl || '')
-    if (!url.includes('res.cloudinary.com')) return url
-    if (kind === 'video') {
-      if (!url.includes('/video/upload/')) return url
-      return url.replace('/video/upload/', `/video/upload/f_auto,q_auto:${CLOUDINARY_DELIVERY_QUALITY},vc_auto/`)
-    }
-    if (!url.includes('/image/upload/')) return url
-    return url.replace(
-      '/image/upload/',
-      `/image/upload/f_auto,q_auto:${CLOUDINARY_DELIVERY_QUALITY}${ENABLE_CLOUDINARY_DPR_AUTO ? ',dpr_auto' : ''}/`
-    )
-  }, [])
   const rawMediaUrl = String(post?.img || '')
-  const optimizedImageUrl = optimizeCloudinaryMediaUrl(rawMediaUrl, 'image')
-  const optimizedVideoUrl = optimizeCloudinaryMediaUrl(rawMediaUrl, 'video')
-  const isVideoMedia = rawMediaUrl.match(/\.(mp4|webm|ogg|mov)$/i) || rawMediaUrl.includes('/video/upload/')
+  const mediaUrl = mediaDisplayUrl(rawMediaUrl)
+  const isVideoMedia = isVideoUrl(rawMediaUrl)
   
   // Update local post when initialPost changes (e.g., from parent re-fetch)
   useEffect(() => {
@@ -1399,7 +1384,7 @@ const showToast = useShowToast()
         <Box
           as="video"
           ref={videoRef}
-          src={optimizedVideoUrl}
+          src={mediaUrl}
           controls
           autoPlay={typeof autoPlayMedia === 'boolean' ? autoPlayMedia : (visibleVideoOnly ? isVideoInView : true)}
           muted
@@ -1417,7 +1402,7 @@ const showToast = useShowToast()
         />
       ) : (
         <Image 
-          src={optimizedImageUrl} 
+          src={mediaUrl} 
           w="full" 
           objectFit="contain" 
           maxH="400px"

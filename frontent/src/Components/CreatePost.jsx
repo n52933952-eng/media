@@ -92,12 +92,12 @@ const CreatePost = () => {
       return
     }
 
-    // Check file size (100MB limit for Cloudinary free tier)
+    // Check file size (100MB upload limit)
     const maxSize = 100 * 1024 * 1024 // 100MB
     const fileSizeMB = file.size / (1024 * 1024)
     
     if (file.size > maxSize) {
-      showToast("File too large", `File (${fileSizeMB.toFixed(1)}MB) exceeds Cloudinary's 100MB limit. Please compress the file or use a smaller one.`, "error")
+      showToast("File too large", `File (${fileSizeMB.toFixed(1)}MB) exceeds the 100MB limit. Please compress the file or use a smaller one.`, "error")
       if (imageInput.current) {
         imageInput.current.value = ''
       }
@@ -159,7 +159,7 @@ const CreatePost = () => {
         setIsUploading(false)
         
         // Don't clear the image - allow user to post original file
-        // Only clear if file is too large for Cloudinary (100MB limit)
+        // Only clear if file is too large (100MB limit)
         if (file.size > 100 * 1024 * 1024) {
           setImage(null)
           setImagePreview('')
@@ -215,7 +215,7 @@ const CreatePost = () => {
      setUploadProgress(0)
      
   try{
-    // Upload file via Multer to Cloudinary (backend handles upload)
+    // Upload file via backend (R2 storage)
     const formData = new FormData()
     formData.append('postedBy', user._id)
     formData.append('text', postText)

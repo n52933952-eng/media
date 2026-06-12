@@ -76,7 +76,7 @@ const handleImageChange = async (event) => {
   if (!file) return;
 
   if (file && file.type.startsWith("image/")) {
-    // Check file size (100MB limit for Cloudinary)
+    // Check file size (100MB upload limit)
     const maxSize = 100 * 1024 * 1024 // 100MB
     if (file.size > maxSize) {
       showToast("File too large", "Please select an image smaller than 100MB", "error")
