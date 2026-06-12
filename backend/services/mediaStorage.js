@@ -1,12 +1,22 @@
+import { readFile, unlink } from 'fs/promises'
 import * as r2 from './r2Storage.js'
 import { prepareUploadBuffer } from './imageOptimize.js'
-import { prepareVideoBuffer, DEFAULT_MAX_VIDEO_DURATION_SEC } from './videoOptimize.js'
+import { prepareVideoFromPath, DEFAULT_MAX_VIDEO_DURATION_SEC } from './videoOptimize.js'
 
 const STORY_MAX_VIDEO_SEC = 20
 
 function maxVideoDurationForFolder(folder) {
   if (folder === 'stories') return STORY_MAX_VIDEO_SEC
   return DEFAULT_MAX_VIDEO_DURATION_SEC
+}
+
+async function deleteTempPaths(paths) {
+  const seen = new Set()
+  for (const p of paths) {
+    if (!p || seen.has(p)) continue
+    seen.add(p)
+    await unlink(p).catch(() => {})
+  }
 }
 
 /** Map upload errors (e.g. video too long) to HTTP responses for controllers. */
@@ -18,25 +28,62 @@ export function respondToUploadError(res, err, fallback = 'Failed to upload file
       maxDurationSec: err.maxDurationSec,
     })
   }
+  if (err?.code === 'LIMIT_FILE_SIZE') {
+    return res.status(400).json({
+      error: 'File is too large. Maximum upload size is 100MB.',
+      code: 'FILE_TOO_LARGE',
+    })
+  }
   return res.status(500).json({ error: fallback, details: err.message })
 }
 
-/** Upload a Multer memory file to R2 (images/videos optimized on upload). */
+/** Upload a Multer file to R2 (images/videos optimized on upload). */
 export async function uploadMulterFile(file, folder) {
   const isVideo = String(file.mimetype || '').toLowerCase().startsWith('video/')
-  const prepared = isVideo
-    ? await prepareVideoBuffer(file.buffer, file.mimetype, {
+  const diskPath = file.path || null
+  const tempPaths = diskPath ? [diskPath] : []
+
+  try {
+    if (isVideo && diskPath) {
+      const prepared = await prepareVideoFromPath(diskPath, file.mimetype, {
         maxDurationSec: maxVideoDurationForFolder(folder),
       })
-    : await prepareUploadBuffer(file.buffer, file.mimetype, folder)
-  const result = await r2.uploadBuffer(prepared.buffer, prepared.mimetype, folder)
-  return {
-    url: result.url,
-    key: result.key,
-    secure_url: result.url,
-    public_id: result.key,
-    publicId: result.key,
-    duration: isVideo ? (prepared.durationSec ?? 0) : 0,
+      tempPaths.push(...(prepared.cleanupPaths || []), prepared.filePath)
+
+      const result = await r2.uploadFromPath(prepared.filePath, prepared.mimetype, folder)
+      return {
+        url: result.url,
+        key: result.key,
+        secure_url: result.url,
+        public_id: result.key,
+        publicId: result.key,
+        duration: prepared.durationSec ?? 0,
+      }
+    }
+
+    const buffer = file.buffer ?? (diskPath ? await readFile(diskPath) : null)
+    if (!buffer?.length) throw new Error('Empty upload file')
+
+    const prepared = isVideo
+      ? await (async () => {
+          const { prepareVideoBuffer } = await import('./videoOptimize.js')
+          return prepareVideoBuffer(buffer, file.mimetype, {
+            maxDurationSec: maxVideoDurationForFolder(folder),
+          })
+        })()
+      : await prepareUploadBuffer(buffer, file.mimetype, folder)
+
+    const result = await r2.uploadBuffer(prepared.buffer, prepared.mimetype, folder)
+    return {
+      url: result.url,
+      key: result.key,
+      secure_url: result.url,
+      public_id: result.key,
+      publicId: result.key,
+      duration: isVideo ? (prepared.durationSec ?? 0) : 0,
+    }
+  } finally {
+    await deleteTempPaths(tempPaths)
   }
 }
 

@@ -1,9 +1,22 @@
 import multer from 'multer'
+import { tmpdir } from 'os'
+import { randomUUID } from 'crypto'
 
-// Configure multer for memory storage (files will be in memory, not saved to disk)
-const storage = multer.memoryStorage()
+/** Keep uploads small on Render (512MB RAM). Override with MAX_UPLOAD_MB env if you upgrade the plan. */
+export const MAX_UPLOAD_BYTES = (Number(process.env.MAX_UPLOAD_MB) || 100) * 1024 * 1024
 
-// File filter to accept only images and videos
+// Disk storage — avoids holding entire video in RAM (memoryStorage caused OOM on large uploads).
+const storage = multer.diskStorage({
+  destination: (_req, _file, cb) => cb(null, tmpdir()),
+  filename: (_req, file, cb) => {
+    const mt = String(file.mimetype || '').toLowerCase()
+    let ext = 'bin'
+    if (mt.startsWith('video/')) ext = mt.includes('quicktime') ? 'mov' : 'mp4'
+    else if (mt.startsWith('image/')) ext = mt.split('/')[1]?.replace(/[^a-z0-9]/gi, '') || 'jpg'
+    cb(null, `upload-${randomUUID()}.${ext}`)
+  },
+})
+
 const fileFilter = (req, file, cb) => {
   if (file.mimetype.startsWith('image/') || file.mimetype.startsWith('video/')) {
     cb(null, true)
@@ -12,14 +25,12 @@ const fileFilter = (req, file, cb) => {
   }
 }
 
-// Configure multer
 const upload = multer({
-  storage: storage,
-  fileFilter: fileFilter,
+  storage,
+  fileFilter,
   limits: {
-    fileSize: 500 * 1024 * 1024 // 500MB limit (for videos)
-  }
+    fileSize: MAX_UPLOAD_BYTES,
+  },
 })
 
 export default upload
-

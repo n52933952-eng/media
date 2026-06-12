@@ -1,11 +1,14 @@
 import { spawn } from 'child_process'
-import { writeFile, readFile, unlink } from 'fs/promises'
+import { writeFile, readFile, unlink, stat } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { randomUUID } from 'crypto'
 
 /** Default max length for post/message videos (10 minutes). Stories use a shorter limit in mediaStorage. */
 export const DEFAULT_MAX_VIDEO_DURATION_SEC = Number(process.env.MAX_VIDEO_DURATION_SEC) || 600
+
+/** Above this size, only faststart remux (no heavy transcode) to stay within Render RAM. */
+const LARGE_VIDEO_BYTES = (Number(process.env.LARGE_VIDEO_MB) || 35) * 1024 * 1024
 
 let ffmpegPath = null
 
@@ -69,42 +72,48 @@ function runFfmpeg(args) {
   })
 }
 
-async function writeTempVideo(buffer, mimetype, prefix) {
-  const id = randomUUID()
-  const inPath = join(tmpdir(), `${prefix}-${id}.${extForMimetype(mimetype)}`)
-  await writeFile(inPath, buffer)
-  return inPath
+async function ffmpegProbeStderr(inPath) {
+  const bin = await getFfmpegPath()
+  if (!bin) return null
+  return new Promise((resolve, reject) => {
+    const child = spawn(bin, ['-i', inPath], { stdio: ['ignore', 'ignore', 'pipe'] })
+    let err = ''
+    child.stderr.on('data', (d) => {
+      err += String(d)
+    })
+    child.on('error', reject)
+    child.on('close', () => resolve(err))
+  })
 }
 
-/** Read video length in seconds (null if ffmpeg cannot probe). */
+/** Read video length in seconds from a file on disk. */
+export async function probeVideoDurationFromPath(inPath) {
+  if (!inPath) return null
+  try {
+    const stderr = await ffmpegProbeStderr(inPath)
+    return parseDurationFromFfmpegStderr(stderr)
+  } catch {
+    return null
+  }
+}
+
+/** Read video length in seconds from a buffer (legacy — prefer disk path on server). */
 export async function probeVideoDurationSeconds(buffer, mimetype) {
   if (!buffer?.length || !String(mimetype || '').toLowerCase().startsWith('video/')) {
     return null
   }
-
-  const bin = await getFfmpegPath()
-  if (!bin) return null
-
-  const inPath = await writeTempVideo(buffer, mimetype, 'vid-probe')
+  const inPath = join(tmpdir(), `vid-probe-${randomUUID()}.${extForMimetype(mimetype)}`)
   try {
-    const stderr = await new Promise((resolve, reject) => {
-      const child = spawn(bin, ['-i', inPath], { stdio: ['ignore', 'ignore', 'pipe'] })
-      let err = ''
-      child.stderr.on('data', (d) => {
-        err += String(d)
-      })
-      child.on('error', reject)
-      child.on('close', () => resolve(err))
-    })
-    return parseDurationFromFfmpegStderr(stderr)
+    await writeFile(inPath, buffer)
+    return await probeVideoDurationFromPath(inPath)
   } finally {
     await unlink(inPath).catch(() => {})
   }
 }
 
 /** Throws VideoTooLongError when duration exceeds maxDurationSec. Returns probed duration. */
-export async function assertVideoDurationWithinLimit(buffer, mimetype, maxDurationSec) {
-  const duration = await probeVideoDurationSeconds(buffer, mimetype)
+export async function assertVideoDurationWithinLimit(inPath, maxDurationSec) {
+  const duration = await probeVideoDurationFromPath(inPath)
   if (duration == null) {
     console.warn('[videoOptimize] could not probe video duration, allowing upload')
     return null
@@ -116,48 +125,43 @@ export async function assertVideoDurationWithinLimit(buffer, mimetype, maxDurati
 }
 
 /**
- * Remux/transcode so moov atom is at file start (fast playback) and size is mobile-friendly.
- * Cloudinary did this automatically; R2 stores raw uploads without it.
+ * Process video on disk (low RAM). Returns path to upload + temp paths to delete after.
  */
-export async function prepareVideoBuffer(buffer, mimetype, options = {}) {
-  if (!buffer?.length || !String(mimetype || '').toLowerCase().startsWith('video/')) {
-    return { buffer, mimetype }
-  }
-
+export async function prepareVideoFromPath(inPath, mimetype, options = {}) {
   const maxDurationSec = options.maxDurationSec
   let durationSec = null
   if (maxDurationSec != null && maxDurationSec > 0) {
-    durationSec = await assertVideoDurationWithinLimit(buffer, mimetype, maxDurationSec)
+    durationSec = await assertVideoDurationWithinLimit(inPath, maxDurationSec)
   } else {
-    durationSec = await probeVideoDurationSeconds(buffer, mimetype)
+    durationSec = await probeVideoDurationFromPath(inPath)
   }
 
+  const fileSize = (await stat(inPath)).size
+  const largeFile = fileSize > LARGE_VIDEO_BYTES
   const bin = await getFfmpegPath()
   if (!bin) {
-    console.warn('[videoOptimize] ffmpeg-static missing, uploading original video')
-    return { buffer, mimetype, durationSec: durationSec ?? undefined }
+    return {
+      filePath: inPath,
+      mimetype,
+      durationSec: durationSec ?? undefined,
+      cleanupPaths: [],
+    }
   }
 
-  const id = randomUUID()
-  const inPath = join(tmpdir(), `vid-in-${id}.${extForMimetype(mimetype)}`)
-  const outPath = join(tmpdir(), `vid-out-${id}.mp4`)
-
+  const outPath = join(tmpdir(), `vid-out-${randomUUID()}.mp4`)
   try {
-    await writeFile(inPath, buffer)
+    if (largeFile) {
+      await runFfmpeg([bin, '-y', '-i', inPath, '-c', 'copy', '-movflags', '+faststart', outPath])
+      return {
+        filePath: outPath,
+        mimetype: 'video/mp4',
+        durationSec: durationSec ?? undefined,
+        cleanupPaths: [inPath, outPath],
+      }
+    }
 
-    // Fast remux when possible; otherwise compress to 1080p H.264 MP4.
     try {
-      await runFfmpeg([
-        bin,
-        '-y',
-        '-i',
-        inPath,
-        '-c',
-        'copy',
-        '-movflags',
-        '+faststart',
-        outPath,
-      ])
+      await runFfmpeg([bin, '-y', '-i', inPath, '-c', 'copy', '-movflags', '+faststart', outPath])
     } catch {
       await runFfmpeg([
         bin,
@@ -182,14 +186,42 @@ export async function prepareVideoBuffer(buffer, mimetype, options = {}) {
       ])
     }
 
-    const out = await readFile(outPath)
-    if (!out?.length) throw new Error('empty ffmpeg output')
-    return { buffer: out, mimetype: 'video/mp4', durationSec: durationSec ?? undefined }
+    return {
+      filePath: outPath,
+      mimetype: 'video/mp4',
+      durationSec: durationSec ?? undefined,
+      cleanupPaths: [inPath, outPath],
+    }
   } catch (e) {
-    console.warn('[videoOptimize] fallback to original:', e?.message || e)
-    return { buffer, mimetype, durationSec: durationSec ?? undefined }
-  } finally {
-    await unlink(inPath).catch(() => {})
+    console.warn('[videoOptimize] ffmpeg failed, uploading original:', e?.message || e)
     await unlink(outPath).catch(() => {})
+    return {
+      filePath: inPath,
+      mimetype,
+      durationSec: durationSec ?? undefined,
+      cleanupPaths: [inPath],
+    }
+  }
+}
+
+/**
+ * Legacy buffer path — writes to disk immediately then uses prepareVideoFromPath.
+ */
+export async function prepareVideoBuffer(buffer, mimetype, options = {}) {
+  if (!buffer?.length || !String(mimetype || '').toLowerCase().startsWith('video/')) {
+    return { buffer, mimetype }
+  }
+
+  const inPath = join(tmpdir(), `vid-in-${randomUUID()}.${extForMimetype(mimetype)}`)
+  await writeFile(inPath, buffer)
+  const prepared = await prepareVideoFromPath(inPath, mimetype, options)
+  const out = await readFile(prepared.filePath)
+  for (const p of prepared.cleanupPaths || []) {
+    await unlink(p).catch(() => {})
+  }
+  return {
+    buffer: out,
+    mimetype: prepared.mimetype,
+    durationSec: prepared.durationSec,
   }
 }

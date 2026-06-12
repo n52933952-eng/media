@@ -1,4 +1,6 @@
 import { S3Client, PutObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3'
+import { createReadStream } from 'fs'
+import { stat } from 'fs/promises'
 import { randomUUID } from 'crypto'
 
 const MIME_EXT = {
@@ -115,6 +117,28 @@ export async function uploadBuffer(buffer, mimetype, folder = 'uploads') {
       Bucket: bucketName(),
       Key: key,
       Body: buffer,
+      ContentType: mimetype || 'application/octet-stream',
+      CacheControl: 'public, max-age=31536000, immutable',
+    })
+  )
+  const url = buildPublicUrl(key)
+  return { url, key }
+}
+
+/** Stream a file from disk to R2 (low RAM — safe for videos on small Render instances). */
+export async function uploadFromPath(filePath, mimetype, folder = 'uploads') {
+  if (!filePath) throw new Error('Empty upload path')
+  const info = await stat(filePath)
+  if (!info.isFile() || info.size <= 0) throw new Error('Empty upload file')
+
+  const safeFolder = String(folder || 'uploads').replace(/^\/+|\/+$/g, '')
+  const key = `${safeFolder}/${Date.now()}-${randomUUID()}.${extFromMimetype(mimetype)}`
+  await getClient().send(
+    new PutObjectCommand({
+      Bucket: bucketName(),
+      Key: key,
+      Body: createReadStream(filePath),
+      ContentLength: info.size,
       ContentType: mimetype || 'application/octet-stream',
       CacheControl: 'public, max-age=31536000, immutable',
     })
