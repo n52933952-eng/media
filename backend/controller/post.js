@@ -2133,7 +2133,7 @@ export const deleteComment = async(req,res) => {
         // Delete the comment itself
         post.replies.pull(replyId)
         
-        await post.save()
+        await post.save({ timestamps: false })
 
         res.status(200).json({
             message: "Comment deleted successfully",

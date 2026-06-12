@@ -654,7 +654,7 @@ export const UpdateUser = async(req,res) => {
                   'replies.$[reply].userProfilePic': user.profilePic,
                 },
               },
-              { arrayFilters: [{ 'reply.userId': userId }] }
+              { arrayFilters: [{ 'reply.userId': userId }], timestamps: false }
             )
           } catch (updateError) {
             console.error('Error updating comments with new profile picture:', updateError)
@@ -708,7 +708,7 @@ export const UpdateUser = async(req,res) => {
                 "replies.$[reply].userProfilePic": user.profilePic,
               },
             },
-            { arrayFilters: [{ "reply.userId": userId }] }
+            { arrayFilters: [{ "reply.userId": userId }], timestamps: false }
           )
           console.log(`✅ Updated all comments for user ${user.username} with new profile picture/username`)
         } catch (updateError) {
