@@ -8,6 +8,12 @@ import { getIO, getUserSocket, getAllUserSockets } from '../socket/socket.js'
 import { dedupeGamePostsForFeed } from '../utils/dedupeGameFeedPosts.js'
 import { enrichGoFishPostsForFeed } from '../utils/enrichGoFishFeedPosts.js'
 import { normalizeGamePlayers } from '../utils/gameFeedPostUtils.js'
+import {
+    addHiddenFeedPostForUser,
+    getHiddenFeedPostObjectIds,
+    getHiddenFeedPostIdStrings,
+    hiddenPostQueryFilter,
+} from '../services/feedHiddenPosts.js'
 
 /** Posts that belong on a user's profile: authored by them or collaborative posts they contribute to. */
 function profilePostsQuery(userId) {
@@ -803,6 +809,8 @@ export const ReplyPost = async(req,res) => {
 export const getFeedPost = async(req,res) => {
     try{
         const userId = req.user._id 
+        const hiddenObjectIds = await getHiddenFeedPostObjectIds(userId)
+        const hiddenFilter = hiddenPostQueryFilter(hiddenObjectIds)
         // Read-from-Follow: get following list (cap for safety)
         const followingDocs = await Follow.find({ followerId: userId })
             .select('followeeId')
@@ -831,7 +839,8 @@ export const getFeedPost = async(req,res) => {
                 $or: [
                     { postedBy: { $in: normalFollowedIds } },
                     { isCollaborative: true, contributors: { $in: normalFollowedIds } }
-                ]
+                ],
+                ...hiddenFilter,
             })
                 .populate("postedBy", "-password")
                 .populate("contributors", "username profilePic name")
@@ -853,7 +862,8 @@ export const getFeedPost = async(req,res) => {
         // Collaborative posts where the current user is a contributor (even if they don't follow the author)
         const contributorPostsPromise = Post.find({
             isCollaborative: true,
-            contributors: userId
+            contributors: userId,
+            ...hiddenFilter,
         })
             .populate("postedBy", "-password")
             .populate("contributors", "username profilePic name")
@@ -983,7 +993,7 @@ export const getFeedPost = async(req,res) => {
         return res.status(200).json({ 
             posts: paginatedNormal,
             hasMore,
-            totalCount
+            totalCount,
         })
     }
     catch(error){
@@ -1954,6 +1964,11 @@ export const removeContributorFromPost = async(req, res) => {
         post.updatedAt = new Date()
         await post.save()
 
+        const isSelfLeave = contributorId === userId.toString()
+        if (isSelfLeave) {
+            await addHiddenFeedPostForUser(userId, postId)
+        }
+
         await post.populate("contributors", "username profilePic name")
         await post.populate("postedBy", "username profilePic name")
 
@@ -2019,11 +2034,46 @@ export const removeContributorFromPost = async(req, res) => {
 
         res.status(200).json({
             message: "Contributor removed successfully",
-            post: post
+            post: post,
+            hiddenPostId: isSelfLeave ? String(postId) : null,
         })
     } catch (error) {
         console.log(error)
         res.status(500).json(error)
+    }
+}
+
+/** Viewer-only: hide a post from this user's feed without affecting the post for others. */
+export const hidePostFromFeed = async (req, res) => {
+    try {
+        const { postId } = req.params
+        const userId = req.user._id
+
+        const post = await Post.findById(postId).select('_id')
+        if (!post) {
+            return res.status(404).json({ message: 'Post not found' })
+        }
+
+        await addHiddenFeedPostForUser(userId, postId)
+
+        res.status(200).json({
+            message: 'Post hidden from feed',
+            postId: String(postId),
+        })
+    } catch (error) {
+        console.error('Error in hidePostFromFeed:', error)
+        res.status(500).json({ error: error.message || 'Failed to hide post from feed' })
+    }
+}
+
+/** Login sync only: ids this viewer hid from feed (capped). Not sent on every feed page. */
+export const getHiddenFeedPostIds = async (req, res) => {
+    try {
+        const postIds = await getHiddenFeedPostIdStrings(req.user._id)
+        res.status(200).json({ postIds })
+    } catch (error) {
+        console.error('Error in getHiddenFeedPostIds:', error)
+        res.status(500).json({ error: error.message || 'Failed to load hidden feed posts' })
     }
 }
 
