@@ -9,6 +9,16 @@ import { dedupeGamePostsForFeed } from '../utils/dedupeGameFeedPosts.js'
 import { enrichGoFishPostsForFeed } from '../utils/enrichGoFishFeedPosts.js'
 import { normalizeGamePlayers } from '../utils/gameFeedPostUtils.js'
 
+/** Posts that belong on a user's profile: authored by them or collaborative posts they contribute to. */
+function profilePostsQuery(userId) {
+    return {
+        $or: [
+            { postedBy: userId },
+            { isCollaborative: true, contributors: userId },
+        ],
+    }
+}
+
 /** Notify everyone listed as contributor except the poster when a collaborative post is created. */
 async function notifyContributorsOnCollaborativeCreate(newPost, posterId) {
     if (!newPost?.isCollaborative || !Array.isArray(newPost.contributors)) return
@@ -1002,7 +1012,7 @@ export const getUserPostsById = async(req,res)=>{
         const limit = parseInt(req.query.limit) || 3 // Default to 3 posts (for feed)
         const skip = parseInt(req.query.skip) || 0
         
-        const posts = await Post.find({postedBy:userId})
+        const posts = await Post.find(profilePostsQuery(userId))
             .populate("postedBy","-password")
             .populate("contributors", "username profilePic name")
             .sort({createdAt:-1})
@@ -1036,7 +1046,9 @@ export const getUserPosts = async(req,res)=>{
          const limit = parseInt(req.query.limit) || 10 // Default to 10 posts per page
          const skip = parseInt(req.query.skip) || 0 // Skip for pagination
          
-         const posts = await Post.find({postedBy:user._id})
+         const profileFilter = profilePostsQuery(user._id)
+
+         const posts = await Post.find(profileFilter)
             .populate("postedBy","-password")
             .populate("contributors", "username profilePic name")
             .sort({createdAt:-1})
@@ -1044,7 +1056,7 @@ export const getUserPosts = async(req,res)=>{
             .skip(skip)
             
          // Check if there are more posts
-         const totalCount = await Post.countDocuments({postedBy:user._id})
+         const totalCount = await Post.countDocuments(profileFilter)
          const hasMore = (skip + limit) < totalCount
 
          res.status(200).json({ 
@@ -1055,6 +1067,7 @@ export const getUserPosts = async(req,res)=>{
 
     }catch(error){
         console.log(error)
+        res.status(500).json({ error: error.message || 'Failed to fetch user posts' })
     }
 }
 
