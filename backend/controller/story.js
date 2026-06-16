@@ -1,7 +1,7 @@
 import { uploadMulterFile, deleteMediaAsset, respondToUploadError } from '../services/mediaStorage.js'
 import Story from '../models/story.js'
-import User from '../models/user.js'
 import Follow from '../models/follow.js'
+import { getFollowGraphIdsForUser } from '../services/followGraph.js'
 import { getIO, getAllUserSockets } from '../socket/socket.js'
 
 /** Tell followers + author (socket) to refetch `/api/story/feed-strip` so rings / red vs gray stay in sync. */
@@ -287,12 +287,12 @@ export const getStoryStatus = async (req, res) => {
   }
 }
 
-/** GET — followers + self with active stories + unviewed flag */
+/** GET — people you follow + self with active stories + unviewed flag */
 export const getFeedStrip = async (req, res) => {
   try {
-    const me = await User.findById(req.user._id).select('following').lean()
-    const following = (me?.following || []).map((id) => id.toString())
-    const ids = [...new Set([...following, req.user._id.toString()])]
+    const { following } = await getFollowGraphIdsForUser(req.user._id)
+    const followingIds = following.map((id) => id.toString())
+    const ids = [...new Set([...followingIds, req.user._id.toString()])]
 
     const stories = await Story.find({
       user: { $in: ids },
