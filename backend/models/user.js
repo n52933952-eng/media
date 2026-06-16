@@ -39,17 +39,6 @@ const UserSchema = mongoose.Schema({
         default:""
     },
 
-
-    followers:{
-        type:[String],
-        default:[]
-    },
-
-    following:{
-        type:[String],
-        default:[]
-    },
-   
     bio:{
         type:String,
         default:""
@@ -89,12 +78,7 @@ const UserSchema = mongoose.Schema({
 
 },{timestamps:true})
 
-// CRITICAL: Add indexes for performance - essential for production scaling
-// Index on followers for fast follower queries
-UserSchema.index({ followers: 1 })
-// Index on following for fast following queries
-UserSchema.index({ following: 1 })
-// Note: username and email already have indexes from unique: true, no need to duplicate
+// Note: username and email already have indexes from unique: true
 
 
 
