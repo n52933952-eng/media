@@ -10,6 +10,7 @@ const FeedHiddenPostSchema = mongoose.Schema(
 
 FeedHiddenPostSchema.index({ userId: 1, postId: 1 }, { unique: true })
 FeedHiddenPostSchema.index({ userId: 1, createdAt: -1 })
+FeedHiddenPostSchema.index({ createdAt: 1 })
 
 const FeedHiddenPost = mongoose.model('FeedHiddenPost', FeedHiddenPostSchema)
 

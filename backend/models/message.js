@@ -56,6 +56,8 @@ const MessageSchema = new mongoose.Schema({
 // CRITICAL: Add indexes for performance - essential for production
 // Index on conversationId + createdAt for fast message queries
 MessageSchema.index({ conversationId: 1, createdAt: -1 })
+// Retention cleanup scans by age across all chats
+MessageSchema.index({ createdAt: 1 })
 // Index on sender for fast lookups
 MessageSchema.index({ sender: 1 })
 // Index on seen + conversationId for unread count queries

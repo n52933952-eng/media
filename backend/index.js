@@ -22,6 +22,7 @@ import { initializeWeatherCron } from './services/weatherCron.js'
 import { initializeChessPostCleanup } from './services/chessPostCleanup.js'
 import { initializeActivityCleanup } from './services/activityCleanup.js'
 import { initializeStoryCleanup } from './services/storyCleanup.js'
+import { initializeDataRetentionCleanup } from './services/dataRetentionCleanup.js'
 import { initRedis, isRedisAvailable } from './services/redis.js'
 import { initializeFCM, getFCMStatus } from './services/fcmNotifications.js'
 import { logEmailTransportStatus } from './services/emailNotifications.js'
@@ -295,6 +296,9 @@ initializeSocket(app).then((result) => {
 
         // Expired stories: MongoDB + R2 storage cleanup
         initializeStoryCleanup()
+
+        // Old notifications (14d) + chat messages (100d) — batched, capped per run
+        initializeDataRetentionCleanup()
 
         // Moment Capsule: frequent due-check for accurate short reminders (1m/5m).
         // Tunable via env; default 10s for near-real-time without heavy load.

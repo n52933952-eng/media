@@ -338,20 +338,20 @@ export const deleteFollowNotification = async (userId, fromUserId) => {
 
         if (deleted.deletedCount > 0) {
             console.log(`🗑️ [deleteFollowNotification] Deleted ${deleted.deletedCount} follow notification(s) for user ${userId} from ${fromUserId}`)
-            
-            // Emit notification deletion to user if online
-            const io = getIO()
-            if (io) {
-                const userSocketMap = getUserSocketMap()
-                const userSocketData = userSocketMap[userId.toString()]
-                
-                if (userSocketData) {
-                    io.to(userSocketData.socketId).emit('notificationDeleted', {
+
+            // Emit notification deletion to user if online (same socket lookup as createNotification)
+            try {
+                const io = getIO()
+                const socketId = await getRecipientSockedId(userId)
+                if (io && socketId) {
+                    io.to(socketId).emit('notificationDeleted', {
                         type: 'follow',
-                        from: fromUserId.toString()
+                        from: fromUserId.toString(),
                     })
                     console.log(`📤 [deleteFollowNotification] Emitted notificationDeleted to user ${userId}`)
                 }
+            } catch (emitErr) {
+                console.error(`❌ [deleteFollowNotification] Socket emit failed for ${userId}:`, emitErr?.message)
             }
         }
 
