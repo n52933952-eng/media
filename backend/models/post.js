@@ -43,6 +43,14 @@ const PostSchema = mongoose.Schema({
         type:String // JSON string of card game data: {player1, player2, roomId, gameStatus, gameType}
     },
 
+    /** Indexed lookup for chess/card post cleanup (avoids full collection scans). */
+    gameRoomId: {
+        type: String,
+        default: null,
+        index: true,
+        sparse: true,
+    },
+
     channelAddedBy:{
         type:String // User ID who added this channel post (for tracking and deletion)
     },
@@ -175,7 +183,12 @@ PostSchema.index({ weatherData: 1 }, { sparse: true })
 // CRITICAL: Index on replies.userId for fast profile picture updates
 // This is essential for the UpdateUser function that updates all comments when profile changes
 PostSchema.index({ "replies.userId": 1 })
+PostSchema.index({ gameRoomId: 1 }, { sparse: true })
 
-const Post = mongoose.model("Post",PostSchema)
+const MAX_REPLIES_PER_POST = Number(process.env.MAX_REPLIES_PER_POST || 2000)
+
+export { MAX_REPLIES_PER_POST }
+
+const Post = mongoose.model('Post', PostSchema)
 
 export default Post

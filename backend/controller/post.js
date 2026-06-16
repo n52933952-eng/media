@@ -1,6 +1,6 @@
 
 import User from '../models/user.js'
-import Post from '../models/post.js'
+import Post, { MAX_REPLIES_PER_POST } from '../models/post.js'
 import Follow from '../models/follow.js'
 import LiveStream from '../models/liveStream.js'
 import { uploadMulterFile, deleteMediaAsset, respondToUploadError } from '../services/mediaStorage.js'
@@ -15,6 +15,8 @@ import {
     getHiddenFeedPostIdStrings,
     hiddenPostQueryFilter,
 } from '../services/feedHiddenPosts.js'
+import { getCachedFeed, setCachedFeed, invalidateUserFeedCache } from '../services/feedCache.js'
+import { findPostsByGameRoomId } from '../services/gamePostLookup.js'
 
 async function emitNewPostToAuthorFollowers(io, authorId, post) {
     if (!io || !authorId) return
@@ -617,6 +619,10 @@ export const ReplyPost = async(req,res) => {
             return res.status(400).json({message:"no post"})
         }
 
+        if (Array.isArray(post.replies) && post.replies.length >= MAX_REPLIES_PER_POST) {
+            return res.status(400).json({ error: 'This post has reached the maximum number of comments.' })
+        }
+
         let footballMatchId = null
         if (footballMatchIdRaw != null && String(footballMatchIdRaw).trim() !== '') {
             footballMatchId = String(footballMatchIdRaw).trim().slice(0, 128)
@@ -704,6 +710,12 @@ export const ReplyPost = async(req,res) => {
 export const getFeedPost = async(req,res) => {
     try{
         const userId = req.user._id 
+        const limit = parseInt(req.query.limit) || 10
+        const skip = parseInt(req.query.skip) || 0
+
+        const cached = await getCachedFeed(userId, skip, limit)
+        if (cached) return res.status(200).json(cached)
+
         const hiddenObjectIds = await getHiddenFeedPostObjectIds(userId)
         const hiddenFilter = hiddenPostQueryFilter(hiddenObjectIds)
         // Read-from-Follow: get following list (cap for safety)
@@ -718,8 +730,7 @@ export const getFeedPost = async(req,res) => {
         // Previously this caused "Fetched 0 posts" after adding a channel with no other follows.
         
         // Pagination parameters
-        const limit = parseInt(req.query.limit) || 10 // Default to 10 posts per page
-        const skip = parseInt(req.query.skip) || 0 // Skip for pagination
+        // limit/skip already parsed above for cache key
         
         // Strategy: First page = live + channel cards + normal slice; later pages = normal only.
         
@@ -868,12 +879,14 @@ export const getFeedPost = async(req,res) => {
             
             const hasMore = feedNormalPosts.length > 12
             
-            return res.status(200).json({ 
+            const payload = { 
                 posts: combinedPosts,
                 hasMore,
                 totalCount: feedNormalPosts.length,
                 liveStreams: livePseudoPosts,
-            })
+            }
+            await setCachedFeed(userId, skip, limit, payload)
+            return res.status(200).json(payload)
         }
         
         // Subsequent pages: normal posts only (channel cards already on page 1)
@@ -885,11 +898,13 @@ export const getFeedPost = async(req,res) => {
         
         console.log(`📄 [getFeedPost] Page ${Math.floor(skip / limit) + 1}: Returning ${paginatedNormal.length} posts (skip: ${skip}, hasMore: ${hasMore})`)
         
-        return res.status(200).json({ 
+        const payload = { 
             posts: paginatedNormal,
             hasMore,
             totalCount,
-        })
+        }
+        await setCachedFeed(userId, skip, limit, payload)
+        return res.status(200).json(payload)
     }
     catch(error){
         console.error('Error in getFeedPost:', error)
@@ -1004,6 +1019,10 @@ export const ReplyToComment = async(req, res) => {
         
         if(!post) {
             return res.status(400).json({message: "no post"})
+        }
+
+        if (Array.isArray(post.replies) && post.replies.length >= MAX_REPLIES_PER_POST) {
+            return res.status(400).json({ error: 'This post has reached the maximum number of comments.' })
         }
 
         // NEW: Extract mentioned user - if replying to a comment, mention that person
@@ -1161,7 +1180,8 @@ export const createChessGamePost = async (player1Id, player2Id, roomId) => {
         const post1 = new Post({
             postedBy: player1Id,
             text: `Playing chess with ${player2.name} ♟️`,
-            chessGameData: JSON.stringify(chessGameData)
+            chessGameData: JSON.stringify(chessGameData),
+            gameRoomId: roomId,
         })
         await post1.save()
         await post1.populate("postedBy", "username profilePic name")
@@ -1172,7 +1192,8 @@ export const createChessGamePost = async (player1Id, player2Id, roomId) => {
             const post2 = new Post({
                 postedBy: player2Id,
                 text: `Playing chess with ${player1.name} ♟️`,
-                chessGameData: JSON.stringify(chessGameData)
+                chessGameData: JSON.stringify(chessGameData),
+                gameRoomId: roomId,
             })
             await post2.save()
             await post2.populate("postedBy", "username profilePic name")
@@ -1190,88 +1211,28 @@ export const createChessGamePost = async (player1Id, player2Id, roomId) => {
         const p2Str = player2Id?.toString?.() ?? String(player2Id)
 
         if (io) {
-            // Emit each post only to followers of that post's author
             for (const post of posts) {
-                // Get the author ID - handle both ObjectId and populated object
-                // Since we populated postedBy above, it's an object with _id
                 let postAuthorId
                 if (post.postedBy && typeof post.postedBy === 'object') {
-                    // If postedBy is populated (object with _id)
                     postAuthorId = post.postedBy._id ? post.postedBy._id.toString() : post.postedBy.toString()
                 } else {
-                    // If postedBy is just an ObjectId
                     postAuthorId = post.postedBy.toString()
                 }
-                
-                if (!postAuthorId) {
-                    console.error(`❌ [createChessGamePost] Post ${post._id} has invalid postedBy field:`, post.postedBy)
-                    continue
-                }
-                
-                console.log(`🔍 [createChessGamePost] Post author ID: ${postAuthorId}`)
-                
-                // Get followers of this specific post's author
+                if (!postAuthorId) continue
+
                 const followerDocs = await Follow.find({ followeeId: postAuthorId })
                   .select('followerId')
                   .limit(10000)
                   .lean()
-                
-                if (!followerDocs || followerDocs.length === 0) {
-                    console.log(`ℹ️ [createChessGamePost] Post author ${postAuthorId} has no followers`)
-                    continue
-                }
-
-                // Per-user Redis lookup (avoids stale bulk SCAN + always include both co-players)
-                const targetSocketIds = new Set()
-                console.log(`🔍 [createChessGamePost] Checking ${followerDocs.length} followers of ${postAuthorId} (getUserSocket each)`)
-
-                for (const d of followerDocs) {
-                    const followerIdStr = d.followerId?.toString?.() ?? String(d.followerId)
-                    try {
-                        const sock = await getUserSocket(followerIdStr)
-                        if (sock?.socketId) {
-                            targetSocketIds.add(sock.socketId)
-                            console.log(`✅ [createChessGamePost] Online follower of ${postAuthorId}: ${followerIdStr} (${sock.socketId})`)
-                        } else {
-                            console.log(`⚠️ [createChessGamePost] Follower ${followerIdStr} has no socket (offline / reconnect)`)
-                        }
-                    } catch (e) {
-                        console.warn(`⚠️ [createChessGamePost] getUserSocket failed for follower ${followerIdStr}:`, e?.message)
-                    }
-                }
-
-                for (const pid of [p1Str, p2Str]) {
-                    if (!pid || pid === 'undefined') continue
-                    try {
-                        const sock = await getUserSocket(pid)
-                        if (sock?.socketId) targetSocketIds.add(sock.socketId)
-                    } catch (_) {
-                        /* ignore */
-                    }
-                }
-
-                if (targetSocketIds.size > 0) {
-                    const postObject = post.toObject ? post.toObject() : post
-                    console.log(`📤 [createChessGamePost] Emitting newPost to ${targetSocketIds.size} socket(s) for author ${postAuthorId}, post: ${post._id}`)
-                    console.log(`📤 [createChessGamePost] Post data:`, {
-                        _id: postObject._id,
-                        postedBy: postObject.postedBy,
-                        text: postObject.text,
-                        hasChessGameData: !!postObject.chessGameData,
-                    })
-                    for (const socketId of targetSocketIds) {
-                        io.to(socketId).emit('newPost', postObject)
-                        console.log(`✅ [createChessGamePost] Emitted newPost to socket: ${socketId}`)
-                    }
-                    console.log(`✅ [createChessGamePost] Done post ${post._id}`)
-                } else {
-                    console.log(`ℹ️ [createChessGamePost] No sockets for post author ${postAuthorId} (followers + players offline?)`)
-                    console.log(`🔍 [createChessGamePost] All followers:`, followerDocs.map(d => d.followerId?.toString?.() ?? String(d.followerId)))
-                    if (roomId && typeof roomId === 'string' && roomId.startsWith('chess_')) {
-                        const postObject = post.toObject ? post.toObject() : post
-                        io.to(roomId).emit('newPost', postObject)
-                        console.log(`📤 [createChessGamePost] Fallback: newPost only to room ${roomId}`)
-                    }
+                const recipientIds = [
+                  ...followerDocs.map((d) => d.followerId).filter(Boolean),
+                  p1Str,
+                  p2Str,
+                ]
+                const postObject = post.toObject ? post.toObject() : post
+                const emitted = await emitToUserIds(io, recipientIds, 'newPost', postObject)
+                if (emitted === 0 && roomId?.startsWith?.('chess_')) {
+                    io.to(roomId).emit('newPost', postObject)
                 }
             }
         } else {
@@ -1324,7 +1285,8 @@ export const createCardGamePost = async (player1Id, player2Id, roomId) => {
         const post1 = new Post({
             postedBy: player1Id,
             text: `Playing Go Fish with ${player2.name} 🃏`,
-            cardGameData: JSON.stringify(cardGameData)
+            cardGameData: JSON.stringify(cardGameData),
+            gameRoomId: roomId,
         })
         await post1.save()
         await post1.populate("postedBy", "username profilePic name")
@@ -1335,7 +1297,8 @@ export const createCardGamePost = async (player1Id, player2Id, roomId) => {
             const post2 = new Post({
                 postedBy: player2Id,
                 text: `Playing Go Fish with ${player1.name} 🃏`,
-                cardGameData: JSON.stringify(cardGameData)
+                cardGameData: JSON.stringify(cardGameData),
+                gameRoomId: roomId,
             })
             await post2.save()
             await post2.populate("postedBy", "username profilePic name")
@@ -1352,56 +1315,23 @@ export const createCardGamePost = async (player1Id, player2Id, roomId) => {
         if (io) {
             for (const post of posts) {
                 const postAuthorId = post.postedBy?._id?.toString() || post.postedBy?.toString()
-                if (!postAuthorId) {
-                    console.error(`❌ [createCardGamePost] Post ${post._id} has invalid postedBy field:`, post.postedBy)
-                    continue
-                }
+                if (!postAuthorId) continue
 
-                try {
-                    const followerDocs = await Follow.find({ followeeId: postAuthorId })
-                        .select('followerId')
-                        .limit(10000)
-                        .lean()
-
-                    if (followerDocs.length === 0) {
-                        console.log(`ℹ️ [createCardGamePost] Post author ${postAuthorId} has no followers`)
-                        continue
-                    }
-
-                    const targetSocketIds = new Set()
-                    for (const d of followerDocs) {
-                        const followerIdStr = d.followerId?.toString?.() ?? String(d.followerId)
-                        try {
-                            const sock = await getUserSocket(followerIdStr)
-                            if (sock?.socketId) targetSocketIds.add(sock.socketId)
-                        } catch (_) {
-                            /* ignore */
-                        }
-                    }
-                    for (const pid of [cardP1, cardP2]) {
-                        if (!pid || pid === 'undefined') continue
-                        try {
-                            const sock = await getUserSocket(pid)
-                            if (sock?.socketId) targetSocketIds.add(sock.socketId)
-                        } catch (_) {
-                            /* ignore */
-                        }
-                    }
-
-                    const postObject = post.toObject()
-                    postObject.cardGameData = post.cardGameData
-                    const wrapped = { postId: post._id, post: postObject }
-
-                    if (targetSocketIds.size > 0) {
-                        for (const socketId of targetSocketIds) {
-                            io.to(socketId).emit('newPost', wrapped)
-                        }
-                    } else if (roomId && typeof roomId === 'string' && roomId.startsWith('card_')) {
-                        io.to(roomId).emit('newPost', wrapped)
-                        console.log(`📤 [createCardGamePost] Fallback newPost to room ${roomId}`)
-                    }
-                } catch (err) {
-                    console.error(`❌ [createCardGamePost] Error emitting post ${post._id}:`, err)
+                const followerDocs = await Follow.find({ followeeId: postAuthorId })
+                    .select('followerId')
+                    .limit(10000)
+                    .lean()
+                const recipientIds = [
+                    ...followerDocs.map((d) => d.followerId).filter(Boolean),
+                    cardP1,
+                    cardP2,
+                ]
+                const postObject = post.toObject()
+                postObject.cardGameData = post.cardGameData
+                const wrapped = { postId: post._id, post: postObject }
+                const emitted = await emitToUserIds(io, recipientIds, 'newPost', wrapped)
+                if (emitted === 0 && roomId?.startsWith?.('card_')) {
+                    io.to(roomId).emit('newPost', wrapped)
                 }
             }
         }
@@ -1432,54 +1362,17 @@ export const deleteCardGamePost = async (roomId) => {
             }
         }
 
-        // Find all posts with this roomId in cardGameData
-        const posts = await Post.find({
-            $or: [
-                { cardGameData: { $exists: true, $ne: null } },
-                // Fallback: also search by text pattern if cardGameData is missing
-                ...(player1Id && player2Id ? [
-                    { text: { $regex: /Playing Go Fish with.*🃏/i }, postedBy: { $in: [player1Id, player2Id] } }
-                ] : [])
-            ]
-        })
+        const posts = await findPostsByGameRoomId(roomId)
 
         let deletedCount = 0
         for (const post of posts) {
             try {
-                let shouldDelete = false
-                
-                // Method 1: Check cardGameData
-                if (post.cardGameData) {
-                    const cardData = JSON.parse(post.cardGameData)
-                    if (cardData.roomId === roomId) {
-                        shouldDelete = true
-                    }
-                }
-                
-                // Method 2: Fallback - match by text pattern and players
-                if (!shouldDelete && player1Id && player2Id) {
-                    const postAuthorId = post.postedBy?.toString?.() ?? String(post.postedBy)
-                    if ((postAuthorId === player1Id || postAuthorId === player2Id) &&
-                        post.text && post.text.includes('Playing Go Fish with') && post.text.includes('🃏')) {
-                        // Additional check: make sure this post is recent (within last hour)
-                        const postDate = new Date(post.createdAt || post.updatedAt)
-                        const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000)
-                        if (postDate > oneHourAgo) {
-                            shouldDelete = true
-                            console.log(`🔄 [deleteCardGamePost] Using fallback method to delete post: ${post._id}`)
-                        }
-                    }
-                }
-                
-                if (shouldDelete) {
-                    // Get followers before deleting
                     const postAuthorId = post.postedBy?.toString?.() ?? String(post.postedBy)
                     const followerDocs = await Follow.find({ followeeId: postAuthorId })
                       .select('followerId')
                       .limit(10000)
                       .lean()
                     
-                    // Get cardData for player info (if available)
                     let cardData = null
                     if (post.cardGameData) {
                         try {
@@ -1489,10 +1382,7 @@ export const deleteCardGamePost = async (roomId) => {
                         }
                     }
                     
-                    // Store post ID before deleting
                     const deletedPostId = post._id.toString()
-                    
-                    // Delete the post
                     await Post.findByIdAndDelete(post._id)
                     deletedCount++
                     console.log(`🗑️ Deleted card game post: ${deletedPostId} for roomId: ${roomId}`)
@@ -1533,7 +1423,6 @@ export const deleteCardGamePost = async (roomId) => {
                     } else {
                         console.log(`⚠️ [deleteCardGamePost] IO instance not available`)
                     }
-                }
             } catch (parseError) {
                 console.error(`Error parsing cardGameData for post ${post._id}:`, parseError)
             }
@@ -1558,29 +1447,22 @@ export const deleteChessGamePost = async (roomId) => {
             return
         }
 
-        // Find all posts with this roomId in chessGameData
-        const posts = await Post.find({
-            chessGameData: { $exists: true, $ne: null }
-        })
+        const posts = await findPostsByGameRoomId(roomId)
 
         let deletedCount = 0
         for (const post of posts) {
             try {
-                if (post.chessGameData) {
-                    const chessData = JSON.parse(post.chessGameData)
-                    if (chessData.roomId === roomId) {
-                        // Get followers before deleting
-                        const postAuthorId = post.postedBy.toString()
-                        const followerDocs = await Follow.find({ followeeId: postAuthorId })
-                          .select('followerId')
-                          .limit(10000)
-                          .lean()
-                        
-                        // Delete the post
-                        const deletedPostId = post._id.toString()
-                        await Post.findByIdAndDelete(post._id)
-                        deletedCount++
-                        console.log(`🗑️ Deleted chess game post: ${post._id} for roomId: ${roomId}`)
+                const chessData = post.chessGameData ? JSON.parse(post.chessGameData) : null
+                const postAuthorId = post.postedBy?.toString?.() ?? String(post.postedBy)
+                const followerDocs = await Follow.find({ followeeId: postAuthorId })
+                  .select('followerId')
+                  .limit(10000)
+                  .lean()
+                
+                const deletedPostId = post._id.toString()
+                await Post.findByIdAndDelete(post._id)
+                deletedCount++
+                console.log(`🗑️ Deleted chess game post: ${post._id} for roomId: ${roomId}`)
 
                         // Emit post deleted to post author, other player, and all followers
                         const io = getIO()
@@ -1610,8 +1492,6 @@ export const deleteChessGamePost = async (roomId) => {
                                 console.log(`📤 Emitted postDeleted to ${socketIds.size} recipient socket(s) for post: ${deletedPostId}`)
                             }
                         }
-                    }
-                }
             } catch (parseError) {
                 console.error(`Error parsing chessGameData for post ${post._id}:`, parseError)
             }
@@ -1763,6 +1643,7 @@ export const removeContributorFromPost = async(req, res) => {
         const isSelfLeave = contributorId === userId.toString()
         if (isSelfLeave) {
             await addHiddenFeedPostForUser(userId, postId)
+            await invalidateUserFeedCache(userId)
         }
 
         await post.populate("contributors", "username profilePic name")
@@ -1803,6 +1684,7 @@ export const hidePostFromFeed = async (req, res) => {
         }
 
         await addHiddenFeedPostForUser(userId, postId)
+        await invalidateUserFeedCache(userId)
 
         res.status(200).json({
             message: 'Post hidden from feed',

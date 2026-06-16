@@ -4447,22 +4447,20 @@ export const initializeSocket = async (app) => {
                 }, 10000) // Wait 10 seconds before ending game
             }
             
-            // Remove socket from chess rooms
-            // Get all chess rooms from Redis
-            const allChessRooms = await getAllChessRooms()
-            for (const [roomId, room] of Object.entries(allChessRooms)) {
+            // Remove socket from chess rooms (only rooms this socket joined — no full Redis SCAN)
+            for (const roomId of socket.rooms) {
+                if (!roomId.startsWith('chess_')) continue
+                const room = await getChessRoom(roomId)
+                if (!room || !Array.isArray(room)) continue
                 const index = room.indexOf(socket.id)
-                if (index !== -1) {
-                    room.splice(index, 1)
-                    console.log(`👁️ Removed socket ${socket.id} from chess room ${roomId}`)
-                    // Clean up empty rooms
-                    if (room.length === 0) {
-                        await deleteChessRoom(roomId)
-                        console.log(`🗑️ Deleted empty chess room: ${roomId}`)
-                    } else {
-                        // Update room in Redis
-                        await setChessRoom(roomId, room)
-                    }
+                if (index === -1) continue
+                room.splice(index, 1)
+                console.log(`👁️ Removed socket ${socket.id} from chess room ${roomId}`)
+                if (room.length === 0) {
+                    await deleteChessRoom(roomId)
+                    console.log(`🗑️ Deleted empty chess room: ${roomId}`)
+                } else {
+                    await setChessRoom(roomId, room)
                 }
             }
 

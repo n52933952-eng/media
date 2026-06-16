@@ -18,6 +18,7 @@ import * as redisService from '../services/redis.js'
 import { getIO, getUserSelfRoomId } from '../socket/socket.js'
 import { getFollowGraphIdsForUser, attachFollowGraphToUser, isViewerFollowingFollowee } from '../services/followGraph.js'
 import { invalidateUserAuthCache } from '../services/userAuthCache.js'
+import { invalidateUserFeedCache } from '../services/feedCache.js'
 
 
 export const SignUp = async(req,res) => {
@@ -294,6 +295,8 @@ export const FollowAndUnfollow = async(req,res) => {
 
            res.status(200).json({action:"unfollow",current:updatecurrent,target:targetUser,deletedConversationId})
 
+           invalidateUserFeedCache(req.user._id).catch(() => {})
+
          }else{
            // Scalable: Follow collection only (no User.followers/following array growth)
            try {
@@ -397,6 +400,8 @@ export const FollowAndUnfollow = async(req,res) => {
             })
 
            res.status(200).json({action:"follow",current:updatecurrent,target:targetUser})
+
+           invalidateUserFeedCache(req.user._id).catch(() => {})
          }
           
   
