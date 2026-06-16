@@ -250,6 +250,14 @@ export const FollowAndUnfollow = async(req,res) => {
            deleteFollowNotification(id, req.user._id).catch(err => {
                console.error('Error deleting follow notification:', err)
            })
+
+           let deletedConversationId = null
+           try {
+             const { deleteDirectConversationBetweenUsers } = await import('./message.js')
+             deletedConversationId = await deleteDirectConversationBetweenUsers(req.user._id, id)
+           } catch (dmErr) {
+             console.error('❌ [FollowAndUnfollow] Error deleting DM on unfollow:', dmErr)
+           }
           
            // If unfollowing Football account, emit postDeleted events for all Football posts
            // This ensures the posts are removed from the user's feed immediately
@@ -282,7 +290,7 @@ export const FollowAndUnfollow = async(req,res) => {
              await User.findById(id).select('-password'),
            )
 
-           res.status(200).json({action:"unfollow",current:updatecurrent,target:targetUser})
+           res.status(200).json({action:"unfollow",current:updatecurrent,target:targetUser,deletedConversationId})
 
          }else{
            // Scalable: Follow collection only (no User.followers/following array growth)

@@ -1503,6 +1503,13 @@ const MessagesPage = () => {
         setMessages([])
       }
     }
+    const handleConversationDeleted = ({ conversationId }) => {
+      setConversations(prev => prev.filter(c => c._id !== conversationId))
+      if (selectedConversation?._id === conversationId) {
+        setSelectedConversation(null)
+        setMessages([])
+      }
+    }
     socket.on('groupCreated', handleGroupCreated)
     socket.on('groupInfoUpdated', handleGroupInfoUpdated)
     socket.on('groupMemberAdded', handleGroupMemberAdded)
@@ -1510,6 +1517,7 @@ const MessagesPage = () => {
     socket.on('groupMemberLeft', handleGroupMemberLeft)
     socket.on('removedFromGroup', handleRemovedFromGroup)
     socket.on('groupDeleted', handleGroupDeleted)
+    socket.on('conversationDeleted', handleConversationDeleted)
 
     const removeLiveShareCards = (streamerId, conversationId) => {
       const sid = String(streamerId || '')
@@ -1549,6 +1557,7 @@ const MessagesPage = () => {
       socket.off('groupMemberLeft', handleGroupMemberLeft)
       socket.off('removedFromGroup', handleRemovedFromGroup)
       socket.off('groupDeleted', handleGroupDeleted)
+      socket.off('conversationDeleted', handleConversationDeleted)
       socket.off('liveShareExpired', handleLiveShareExpired)
       socket.off('livekit:streamEnded', handleLiveStreamEnded)
     }

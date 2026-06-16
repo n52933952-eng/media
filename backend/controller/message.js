@@ -40,6 +40,45 @@ async function destroyMediaAssetsForConversation(conversationId) {
   console.log(`🧹 [message] storage cleanup for conversation ${idStr(conversationId)}: ${urls.length} unique asset(s)`)
 }
 
+/** Delete 1:1 DM + all messages for both participants (e.g. on unfollow). Returns conversation id or null. */
+export async function deleteDirectConversationBetweenUsers(userIdA, userIdB) {
+  const aStr = idStr(userIdA)
+  const bStr = idStr(userIdB)
+  if (!aStr || !bStr || aStr === bStr) return null
+
+  const aOid = mongoose.Types.ObjectId.isValid(aStr) ? new mongoose.Types.ObjectId(aStr) : userIdA
+  const bOid = mongoose.Types.ObjectId.isValid(bStr) ? new mongoose.Types.ObjectId(bStr) : userIdB
+
+  const conversation = await Conversation.findOne({
+    isGroup: { $ne: true },
+    participants: { $all: [aOid, bOid] },
+  })
+
+  if (!conversation || conversation.isGroup || conversation.participants?.length !== 2) {
+    return null
+  }
+
+  const convIdStr = idStr(conversation._id)
+
+  const io = getIO()
+  if (io) {
+    io.to(convIdStr).emit('conversationDeleted', { conversationId: convIdStr })
+    for (const uid of [aStr, bStr]) {
+      const selfRoom = getUserSelfRoomId(uid)
+      if (selfRoom) {
+        io.to(selfRoom).emit('conversationDeleted', { conversationId: convIdStr })
+      }
+    }
+  }
+
+  await destroyMediaAssetsForConversation(conversation._id)
+  await Message.deleteMany({ conversationId: conversation._id })
+  await Conversation.findByIdAndDelete(conversation._id)
+
+  console.log(`🗑️ [message] Deleted DM ${convIdStr} between ${aStr} and ${bStr}`)
+  return convIdStr
+}
+
 /**
  * Broadcast to a Socket.IO conversation room (all online members) and send
  * FCM push to participants who are NOT currently in the room (offline).
