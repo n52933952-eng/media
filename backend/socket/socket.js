@@ -1204,14 +1204,30 @@ export const initializeSocket = async (app) => {
             }
             console.log(`✅ [socket] User ${userId} added to socket map (socket: ${socket.id})`)
 
-            // Join all conversation rooms so group (and 1-to-1) messages are received via room broadcast.
+            // Join recent conversation rooms (not every historical chat) + all groups.
             try {
                 const { default: Conversation } = await import('../models/conversation.js')
-                const convs = await Conversation.find({ participants: userId }).select('_id').lean()
-                for (const c of convs) {
-                    socket.join(c._id.toString())
+                const RECENT_ROOM_JOIN_LIMIT = Number(process.env.SOCKET_RECENT_CONV_JOIN_LIMIT || 100)
+                const [recentConvs, groupConvs] = await Promise.all([
+                    Conversation.find({ participants: userId })
+                        .sort({ updatedAt: -1 })
+                        .limit(RECENT_ROOM_JOIN_LIMIT)
+                        .select('_id')
+                        .lean(),
+                    Conversation.find({ participants: userId, isGroup: true })
+                        .select('_id')
+                        .lean(),
+                ])
+                const roomIds = new Set([
+                    ...recentConvs.map((c) => c._id.toString()),
+                    ...groupConvs.map((c) => c._id.toString()),
+                ])
+                for (const roomId of roomIds) {
+                    socket.join(roomId)
                 }
-                if (convs.length) console.log(`📬 [socket] ${userId} joined ${convs.length} conversation room(s)`)
+                if (roomIds.size) {
+                    console.log(`📬 [socket] ${userId} joined ${roomIds.size} conversation room(s)`)
+                }
             } catch (e) {
                 console.error('❌ [socket] Failed to join conversation rooms:', e.message)
             }
@@ -2598,17 +2614,10 @@ export const initializeSocket = async (app) => {
                     if (currentUserSocketId) {
                         io.to(currentUserSocketId).emit("conversationMarkedRead", { conversationId })
 
-                        // 2 queries instead of N+1:
-                        //   1. distinct() on conversations index → array of IDs
-                        //   2. single countDocuments() using compound index { conversationId, seen, sender }
                         try {
-                            const convIds = await Conversation.distinct('_id', { participants: currentUserId })
-                            const totalUnreadCount = await Message.countDocuments({
-                                conversationId: { $in: convIds },
-                                seen: false,
-                                sender: { $ne: currentUserId },
-                            })
-                            io.to(currentUserSocketId).emit("unreadCountUpdate", { totalUnread: totalUnreadCount })
+                            const { clearConversationUnread, emitUnreadCountUpdate } = await import('../services/unreadCounter.js')
+                            await clearConversationUnread(currentUserId, conversationId)
+                            await emitUnreadCountUpdate(io, currentUserId, getUserSocket)
                         } catch (error) {
                             console.log('Error calculating unread count:', error)
                         }

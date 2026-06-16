@@ -2,6 +2,7 @@ import Conversation from '../models/conversation.js'
 import Message from '../models/message.js'
 import { getRecipientSockedId, getIO, getUserSocket, isUserEffectivelyOnline, getUserSelfRoomId } from '../socket/socket.js'
 import { uploadMulterFile, deleteMediaAsset, isManagedMediaUrl, respondToUploadError } from '../services/mediaStorage.js'
+import { incrementUnread, clearConversationUnreadForUsers, emitUnreadCountUpdate, getTotalUnread } from '../services/unreadCounter.js'
 import mongoose from 'mongoose'
 
 // ── helpers ────────────────────────────────────────────────────────────────
@@ -74,6 +75,7 @@ export async function deleteDirectConversationBetweenUsers(userIdA, userIdB) {
   await destroyMediaAssetsForConversation(conversation._id)
   await Message.deleteMany({ conversationId: conversation._id })
   await Conversation.findByIdAndDelete(conversation._id)
+  await clearConversationUnreadForUsers([aStr, bStr], convIdStr)
 
   console.log(`🗑️ [message] Deleted DM ${convIdStr} between ${aStr} and ${bStr}`)
   return convIdStr
@@ -88,6 +90,23 @@ async function broadcastToConversation(conversationId, event, payload, excludeSe
   const roomId = idStr(conversationId)
   if (io) {
     io.to(roomId).emit(event, payload)
+    // Also fan-out to each member's self room so they receive group events even if
+    // they haven't joined the conversation room yet (lighter socket connect).
+    if (event === 'newMessage') {
+      const { getUserSelfRoomId } = await import('../socket/socket.js')
+      const room = io?.sockets?.adapter?.rooms?.get(roomId)
+      const onlineSids = room ? [...room] : []
+      for (const pid of participantIds) {
+        const pidStr = idStr(pid)
+        if (!pidStr || pidStr === idStr(excludeSenderId)) continue
+        const recipSocket = await getUserSocket(pidStr)
+        const inRoom = recipSocket?.socketId && onlineSids.includes(recipSocket.socketId)
+        if (!inRoom) {
+          const selfRoom = getUserSelfRoomId(pidStr)
+          if (selfRoom) io.to(selfRoom).emit(event, payload)
+        }
+      }
+    }
   }
 
   // Push to offline members (those not in the socket room)
@@ -142,21 +161,10 @@ async function deliverOutboundMessage(newMessage, conversation, recipientId) {
         }
         io.to(recipientSocketId).emit('newMessage', messageWithTimestamp)
         try {
-          const recipientConversations = await Conversation.find({ participants: recipientId })
-          const totalUnread = await Promise.all(
-            recipientConversations.map(async (conv) => {
-              const unreadCount = await Message.countDocuments({
-                conversationId: conv._id,
-                seen: false,
-                sender: { $ne: recipientId },
-              })
-              return unreadCount || 0
-            })
-          )
-          const totalUnreadCount = totalUnread.reduce((sum, count) => sum + count, 0)
-          io.to(recipientSocketId).emit('unreadCountUpdate', { totalUnread: totalUnreadCount })
+          await incrementUnread(recipientId, conversation._id)
+          await emitUnreadCountUpdate(io, recipientId, getUserSocket)
         } catch (error) {
-          console.log('Error calculating unread count:', error)
+          console.log('Error updating unread count:', error)
         }
         return false
       }
@@ -313,6 +321,17 @@ async function _persistAndBroadcastMessage({ conversation, senderId, message, im
       newMessage.sender,
       conversation.groupName
     )
+    const io = getIO()
+    if (io) {
+      for (const pid of conversation.participants) {
+        const pidStr = idStr(pid)
+        if (!pidStr || pidStr === idStr(senderId)) continue
+        try {
+          await incrementUnread(pidStr, conversation._id)
+          await emitUnreadCountUpdate(io, pidStr, getUserSocket)
+        } catch (_) {}
+      }
+    }
     return { responseData: { ...msgObj, delivered: false }, delivered: false }
   } else {
     // 1-to-1: existing delivery path
@@ -564,29 +583,12 @@ export const mycon = async(req,res) => {
 }
 
 
-// Get total unread message count — single aggregation (no N+1 queries)
+// Get total unread message count — Redis cache with DB fallback
 export const getTotalUnreadCount = async (req, res) => {
   try {
     const userId = req.user._id
-    const result = await Message.aggregate([
-      {
-        $lookup: {
-          from: 'conversations',
-          localField: 'conversationId',
-          foreignField: '_id',
-          as: 'conv',
-        },
-      },
-      {
-        $match: {
-          seen: false,
-          sender: { $ne: new mongoose.Types.ObjectId(String(userId)) },
-          'conv.participants': new mongoose.Types.ObjectId(String(userId)),
-        },
-      },
-      { $count: 'totalUnread' },
-    ])
-    res.status(200).json({ totalUnread: result[0]?.totalUnread ?? 0 })
+    const totalUnread = await getTotalUnread(userId)
+    res.status(200).json({ totalUnread })
   } catch (error) {
     res.status(500).json({ error: error.message })
   }

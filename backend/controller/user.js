@@ -17,6 +17,7 @@ import { LIVE_CHANNELS } from '../config/channels.js'
 import * as redisService from '../services/redis.js'
 import { getIO, getUserSelfRoomId } from '../socket/socket.js'
 import { getFollowGraphIdsForUser, attachFollowGraphToUser, isViewerFollowingFollowee } from '../services/followGraph.js'
+import { invalidateUserAuthCache } from '../services/userAuthCache.js'
 
 
 export const SignUp = async(req,res) => {
@@ -198,6 +199,7 @@ export const LogOut = async(req,res) => {
     // Clear FCM token for the logged-out account (protectRoute ensures req.user is available).
     if (req.user?._id) {
       await User.findByIdAndUpdate(req.user._id, { fcmToken: null });
+      await invalidateUserAuthCache(req.user._id)
     }
 
    res.cookie("jwt","",{maxAge:1})
@@ -580,6 +582,7 @@ export const DeleteMyAccount = async (req, res) => {
     } catch {}
 
     // Finally delete user
+    await invalidateUserAuthCache(userId)
     await User.deleteOne({ _id: userId })
 
     // Clear session cookie
@@ -651,6 +654,7 @@ export const UpdateUser = async(req,res) => {
           }
 
           const { following, followers } = await getFollowGraphIdsForUser(user._id)
+          await invalidateUserAuthCache(userId)
           return res.status(200).json({
             _id: user._id,
             name: user.name,
@@ -708,6 +712,7 @@ export const UpdateUser = async(req,res) => {
       // Return safe fields only (exclude password)
       // Include followers and following to preserve them in frontend
       const { following, followers } = await getFollowGraphIdsForUser(user._id)
+      await invalidateUserAuthCache(userId)
       res.status(200).json({
         _id: user._id,
         name: user.name,

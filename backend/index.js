@@ -24,6 +24,7 @@ import { initializeActivityCleanup } from './services/activityCleanup.js'
 import { initializeStoryCleanup } from './services/storyCleanup.js'
 import { initializeDataRetentionCleanup } from './services/dataRetentionCleanup.js'
 import { initRedis, isRedisAvailable } from './services/redis.js'
+import { apiRateLimit } from './middlware/rateLimit.js'
 import { initializeFCM, getFCMStatus } from './services/fcmNotifications.js'
 import { logEmailTransportStatus } from './services/emailNotifications.js'
 import path from 'path'
@@ -157,6 +158,7 @@ app.get('/health', async (req, res) => {
 })
 
 // API routes - must be registered before static files and catch-all
+app.use(apiRateLimit)
 app.use("/api/user",UserRoute)
 app.use("/api/post",PostRoute)
 app.use("/api/message",MessageRoute)
