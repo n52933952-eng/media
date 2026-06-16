@@ -44,3 +44,12 @@ export async function attachFollowGraphToUser(user) {
   const { following, followers } = await getFollowGraphIdsForUser(obj._id)
   return { ...obj, following, followers }
 }
+
+/** Follow collection only — legacy User.followers[] is not updated on unfollow and must not be used here. */
+export async function isViewerFollowingFollowee(viewerId, followeeId) {
+  if (!viewerId || !followeeId) return false
+  const row = await Follow.findOne({ followerId: viewerId, followeeId })
+    .select('_id')
+    .lean()
+  return !!row
+}

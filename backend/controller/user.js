@@ -16,7 +16,7 @@ import { uploadMulterFile, deleteMediaAsset, respondToUploadError } from '../ser
 import { LIVE_CHANNELS } from '../config/channels.js'
 import * as redisService from '../services/redis.js'
 import { getIO, getUserSelfRoomId } from '../socket/socket.js'
-import { getFollowGraphIdsForUser, attachFollowGraphToUser } from '../services/followGraph.js'
+import { getFollowGraphIdsForUser, attachFollowGraphToUser, isViewerFollowingFollowee } from '../services/followGraph.js'
 
 
 export const SignUp = async(req,res) => {
@@ -787,14 +787,7 @@ export const getUserProfile = async(req,res) => {
 
       let isFollowedByMe = false
       if (viewerId) {
-        const exists = await Follow.findOne({ followerId: viewerId, followeeId: user._id })
-          .select('_id')
-          .lean()
-        isFollowedByMe = !!exists
-        if (!isFollowedByMe && legacyFollowers.length > 0) {
-          const vid = viewerId.toString()
-          isFollowedByMe = legacyFollowers.some((id) => (id?.toString?.() ?? String(id)) === vid)
-        }
+        isFollowedByMe = await isViewerFollowingFollowee(viewerId, user._id)
       }
 
       const { followers: _omitFollowers, following: _omitFollowing, ...userWithoutFollowLists } = userObj
@@ -890,14 +883,9 @@ export const searchUsers = async(req, res) => {
             followDocs.forEach(d => followedSet.add(d.followeeId.toString()))
         }
 
-        const vid = viewerId ? viewerId.toString() : ''
         const result = users.map((u) => {
             const uo = u.toObject ? u.toObject() : { ...u }
-            const legacyFollowers = Array.isArray(uo.followers) ? uo.followers : []
-            let isFollowedByMe = followedSet.has(u._id.toString())
-            if (viewerId && !isFollowedByMe && legacyFollowers.length > 0 && vid) {
-                isFollowedByMe = legacyFollowers.some((id) => (id?.toString?.() ?? String(id)) === vid)
-            }
+            const isFollowedByMe = followedSet.has(u._id.toString())
             const { followers: _omitFollowers, following: _omitFollowing, ...rest } = uo
             return {
                 ...rest,
