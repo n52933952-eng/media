@@ -1,5 +1,6 @@
 import Activity from '../models/activity.js'
-import { getIO, getAllUserSockets } from '../socket/socket.js'
+import { getIO } from '../socket/socket.js'
+import { emitToUserIds } from '../services/postSocketEmit.js'
 import User from '../models/user.js'
 import Follow from '../models/follow.js'
 
@@ -59,16 +60,11 @@ export const createActivity = async (userId, type, options = {}) => {
         if (io) {
             // Read-from-Follow: get follower ids (cap to reduce worst-case load)
             const followerDocs = await Follow.find({ followeeId: userId }).select('followerId').limit(5000).lean()
-            if (followerDocs && followerDocs.length > 0) {
-                const socketMap = await getAllUserSockets()
-                
-                followerDocs.forEach(d => {
-                    const followerIdStr = d.followerId?.toString?.() ?? String(d.followerId)
-                    const socketData = socketMap[followerIdStr]
-                    if (socketData && socketData.socketId) {
-                        io.to(socketData.socketId).emit('newActivity', activityPayload)
-                    }
-                })
+            if (followerDocs?.length > 0) {
+                const followerIds = followerDocs.map(
+                    (d) => d.followerId?.toString?.() ?? String(d.followerId),
+                )
+                await emitToUserIds(io, followerIds, 'newActivity', activityPayload)
             }
         }
 

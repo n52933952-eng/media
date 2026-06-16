@@ -4,7 +4,8 @@ import Post from '../models/post.js'
 import Follow from '../models/follow.js'
 import LiveStream from '../models/liveStream.js'
 import { uploadMulterFile, deleteMediaAsset, respondToUploadError } from '../services/mediaStorage.js'
-import { getIO, getUserSocket, getAllUserSockets } from '../socket/socket.js'
+import { getIO, getUserSocket } from '../socket/socket.js'
+import { emitToUserIds, collectSocketIdsForUserIds } from '../services/postSocketEmit.js'
 import { dedupeGamePostsForFeed } from '../utils/dedupeGameFeedPosts.js'
 import { enrichGoFishPostsForFeed } from '../utils/enrichGoFishFeedPosts.js'
 import { normalizeGamePlayers } from '../utils/gameFeedPostUtils.js'
@@ -15,7 +16,56 @@ import {
     hiddenPostQueryFilter,
 } from '../services/feedHiddenPosts.js'
 
-/** Posts that belong on a user's profile: authored by them or collaborative posts they contribute to. */
+async function emitNewPostToAuthorFollowers(io, authorId, post) {
+    if (!io || !authorId) return
+    const followerDocs = await Follow.find({ followeeId: authorId })
+        .select('followerId')
+        .limit(10000)
+        .lean()
+    const followerIds = followerDocs.map((d) => d.followerId).filter(Boolean)
+    await emitToUserIds(io, followerIds, 'newPost', post)
+}
+
+async function emitPostDeletedToAuthorFollowers(io, authorId, postId) {
+    if (!io || !authorId) return
+    const followerDocs = await Follow.find({ followeeId: authorId })
+        .select('followerId')
+        .limit(10000)
+        .lean()
+    const followerIds = followerDocs.map((d) => d.followerId).filter(Boolean)
+    await emitToUserIds(io, followerIds, 'postDeleted', { postId: String(postId) })
+}
+
+async function collectPostUpdateRecipientIds(post, postOwnerId) {
+    const ids = new Set([String(postOwnerId)])
+    if (post.contributors?.length) {
+        post.contributors.forEach((contributor) => {
+            const contributorId = (contributor._id || contributor).toString()
+            if (contributorId) ids.add(contributorId)
+        })
+    }
+    const followerDocs = await Follow.find({ followeeId: postOwnerId })
+        .select('followerId')
+        .limit(10000)
+        .lean()
+    followerDocs.forEach((d) => {
+        const followerIdStr = d.followerId?.toString?.() ?? String(d.followerId)
+        if (followerIdStr) ids.add(followerIdStr)
+    })
+    return [...ids]
+}
+
+async function emitPostUpdatedToRecipients(io, post, postOwnerId) {
+    if (!io || !post) return 0
+    const recipientIds = await collectPostUpdateRecipientIds(post, postOwnerId)
+    const postObj = post.toObject ? post.toObject() : JSON.parse(JSON.stringify(post))
+    return emitToUserIds(io, recipientIds, 'postUpdated', {
+        postId: post._id.toString(),
+        post: postObj,
+    })
+}
+
+/** Profile posts query for a user's authored + collaborative posts. */
 function profilePostsQuery(userId) {
     return {
         $or: [
@@ -113,24 +163,7 @@ export const createPost = async(req,res) => {
 
            const io = getIO()
            if (io) {
-             const followerDocs = await Follow.find({ followeeId: postedBy })
-               .select('followerId')
-               .limit(10000)
-               .lean()
-             if (followerDocs && followerDocs.length > 0) {
-               const socketMap = await getAllUserSockets()
-               const onlineFollowers = []
-               followerDocs.forEach((d) => {
-                 const followerIdStr = d.followerId?.toString?.() ?? String(d.followerId)
-                 const socketData = socketMap[followerIdStr]
-                 if (socketData && socketData.socketId) {
-                   onlineFollowers.push(socketData.socketId)
-                 }
-               })
-               if (onlineFollowers.length > 0) {
-                 io.to(onlineFollowers).emit('newPost', newPost)
-               }
-             }
+             await emitNewPostToAuthorFollowers(io, postedBy, newPost)
            }
 
            const { createActivity } = await import('./activity.js')
@@ -162,31 +195,9 @@ export const createPost = async(req,res) => {
        
        await notifyContributorsOnCollaborativeCreate(newPost, postedBy)
 
-       // OPTIMIZED: Emit new post only to online followers (not all users)
        const io = getIO()
        if (io) {
-         // Read-from-Follow: Get poster's followers (cap for safety)
-         const followerDocs = await Follow.find({ followeeId: postedBy })
-           .select('followerId')
-           .limit(10000)
-           .lean()
-         if (followerDocs && followerDocs.length > 0) {
-           const socketMap = await getAllUserSockets()
-           const onlineFollowers = []
-           
-           followerDocs.forEach(d => {
-             const followerIdStr = d.followerId?.toString?.() ?? String(d.followerId)
-             const socketData = socketMap[followerIdStr]
-             if (socketData && socketData.socketId) {
-               onlineFollowers.push(socketData.socketId)
-             }
-           })
-           
-           // Only emit to online followers (not all users)
-           if (onlineFollowers.length > 0) {
-             io.to(onlineFollowers).emit("newPost", newPost)
-           }
-         }
+         await emitNewPostToAuthorFollowers(io, postedBy, newPost)
        }
        
        res.status(200).json({message:"post created sufully", post: newPost})
@@ -194,7 +205,7 @@ export const createPost = async(req,res) => {
     }
     catch(error){
         console.log(error)
-        res.status(500).json(error)
+        res.status(500).json({ error: error.message })
     }
 }
 
@@ -220,7 +231,7 @@ export const getPost = async(req,res) => {
 
     }
     catch(error){
-        res.status(500).json(error)
+        res.status(500).json({ error: error.message })
     }
 
 
@@ -353,63 +364,13 @@ export const updatePost = async(req,res) => {
                             }
                         }
                         
-                        // Emit update to followers, post owner, and all contributors
                         const io = getIO()
                         if (io) {
-                            const userSocketMap = await getAllUserSockets()
-                            const recipients = [] // Socket IDs to receive the update
-                            
-                            // 1. Add post owner (always include them) - use postOwnerId we got earlier
-                            const ownerSocketData = userSocketMap[postOwnerId]
-                            if (ownerSocketData) {
-                                recipients.push(ownerSocketData.socketId)
-                                console.log(`📤 [updatePost] Adding post owner ${postOwnerId} to postUpdated recipients`)
-                            }
-                            
-                            // 2. Add all contributors
-                            if (post.contributors && post.contributors.length > 0) {
-                                post.contributors.forEach(contributor => {
-                                    const contributorId = (contributor._id || contributor).toString()
-                                    if (contributorId !== postOwnerId) { // Don't duplicate owner
-                                        const contributorSocketData = userSocketMap[contributorId]
-                                        if (contributorSocketData) {
-                                            recipients.push(contributorSocketData.socketId)
-                                            console.log(`📤 [updatePost] Adding contributor ${contributorId} to postUpdated recipients`)
-                                        }
-                                    }
-                                })
-                            }
-                            
-                            // 3. Add followers
-                            const followerDocs = await Follow.find({ followeeId: postOwnerId })
-                              .select('followerId')
-                              .limit(10000)
-                              .lean()
-                            if (followerDocs && followerDocs.length > 0) {
-                                followerDocs.forEach(d => {
-                                    const followerIdStr = d.followerId?.toString?.() ?? String(d.followerId)
-                                    // Don't duplicate owner/contributors
-                                    if (followerIdStr !== postOwnerId && 
-                                        !post.contributors?.some(c => (c._id || c).toString() === followerIdStr)) {
-                                        const followerSocketData = userSocketMap[followerIdStr]
-                                        if (followerSocketData) {
-                                            recipients.push(followerSocketData.socketId)
-                                        }
-                                    }
-                                })
-                            }
-                            
-                            // Emit to all recipients (owner, contributors, followers)
-                            const uniqueRecipients = [...new Set(recipients)] // Remove duplicates
-                            if (uniqueRecipients.length > 0) {
-                                // Convert Mongoose document to plain object for socket emission
-                                const postObj = post.toObject ? post.toObject() : JSON.parse(JSON.stringify(post))
-                                uniqueRecipients.forEach(socketId => {
-                                    io.to(socketId).emit("postUpdated", { postId: post._id.toString(), post: postObj })
-                                })
-                                console.log(`📤 [updatePost] Emitted postUpdated to ${uniqueRecipients.length} recipients (owner, contributors, followers)`)
+                            const sent = await emitPostUpdatedToRecipients(io, post, postOwnerId)
+                            if (sent > 0) {
+                                console.log(`📤 [updatePost] Emitted postUpdated to ${sent} recipient socket(s)`)
                             } else {
-                                console.log(`⚠️ [updatePost] No recipients found for post update (post owner ${postOwnerId} might not be online)`)
+                                console.log(`⚠️ [updatePost] No online recipients for post update (owner ${postOwnerId})`)
                             }
                         }
                         
@@ -466,63 +427,11 @@ export const updatePost = async(req,res) => {
             }
         }
         
-        // Emit update to followers, post owner, and all contributors
         const io = getIO()
         if (io) {
-            const userSocketMap = await getAllUserSockets()
-            const recipients = [] // Socket IDs to receive the update
-            
-            // 1. Add post owner (always include them) - use postOwnerId we got earlier
-            const ownerSocketData = userSocketMap[postOwnerId]
-            if (ownerSocketData) {
-                recipients.push(ownerSocketData.socketId)
-                console.log(`📤 [updatePost] Adding post owner ${postOwnerId} to postUpdated recipients`)
-            }
-            
-            // 2. Add all contributors
-            if (post.contributors && post.contributors.length > 0) {
-                post.contributors.forEach(contributor => {
-                    const contributorId = (contributor._id || contributor).toString()
-                    if (contributorId !== postOwnerId) { // Don't duplicate owner
-                        const contributorSocketData = userSocketMap[contributorId]
-                        if (contributorSocketData) {
-                            recipients.push(contributorSocketData.socketId)
-                            console.log(`📤 [updatePost] Adding contributor ${contributorId} to postUpdated recipients`)
-                        }
-                    }
-                })
-            }
-            
-            // 3. Add followers
-            const followerDocs = await Follow.find({ followeeId: postOwnerId })
-              .select('followerId')
-              .limit(10000)
-              .lean()
-            if (followerDocs && followerDocs.length > 0) {
-                followerDocs.forEach(d => {
-                    const followerIdStr = d.followerId?.toString?.() ?? String(d.followerId)
-                    // Don't duplicate owner/contributors
-                    if (followerIdStr !== postOwnerId && 
-                        !post.contributors?.some(c => (c._id || c).toString() === followerIdStr)) {
-                        const followerSocketData = userSocketMap[followerIdStr]
-                        if (followerSocketData) {
-                            recipients.push(followerSocketData.socketId)
-                        }
-                    }
-                })
-            }
-            
-            // Emit to all recipients (owner, contributors, followers)
-            const uniqueRecipients = [...new Set(recipients)] // Remove duplicates
-            if (uniqueRecipients.length > 0) {
-                // Convert Mongoose document to plain object for socket emission
-                const postObj = post.toObject ? post.toObject() : JSON.parse(JSON.stringify(post))
-                uniqueRecipients.forEach(socketId => {
-                    io.to(socketId).emit("postUpdated", { postId: post._id.toString(), post: postObj })
-                })
-                console.log(`📤 [updatePost] Emitted postUpdated to ${uniqueRecipients.length} recipients (owner, contributors, followers)`)
-            } else {
-                console.log(`⚠️ [updatePost] No recipients found for post update (post owner ${postOwnerId} might not be online)`)
+            const sent = await emitPostUpdatedToRecipients(io, post, postOwnerId)
+            if (sent > 0) {
+                console.log(`📤 [updatePost] Emitted postUpdated to ${sent} recipient socket(s)`)
             }
         }
         
@@ -558,37 +467,19 @@ export const deletePost = async(req,res) => {
 
       // OPTIMIZED: Get followers before deleting post
       const postAuthorId = post.postedBy.toString()
-      const followerDocs = await Follow.find({ followeeId: postAuthorId })
-        .select('followerId')
-        .limit(10000)
-        .lean()
       
-      // Delete the post from MongoDB
       await Post.findByIdAndDelete(req.params.id)
 
-      // OPTIMIZED: Emit post deleted only to online followers
       const io = getIO()
-      if (io && followerDocs && followerDocs.length > 0) {
-        const userSocketMap = await getAllUserSockets()
-        const onlineFollowers = []
-        
-        followerDocs.forEach(d => {
-          const followerIdStr = d.followerId?.toString?.() ?? String(d.followerId)
-          if (userSocketMap[followerIdStr]) {
-            onlineFollowers.push(userSocketMap[followerIdStr].socketId)
-          }
-        })
-        
-        if (onlineFollowers.length > 0) {
-          io.to(onlineFollowers).emit("postDeleted", { postId: req.params.id })
-        }
+      if (io) {
+        await emitPostDeletedToAuthorFollowers(io, postAuthorId, req.params.id)
       }
 
       res.status(200).json({message:"post has deleted sucsfully"})
     }
     catch(error){
         console.log(error)
-        res.status(500).json(error)
+        res.status(500).json({ error: error.message })
     }
 }
 
@@ -697,7 +588,7 @@ export const LikePost = async(req,res) => {
     }
     catch(error){
         console.log(error)
-        res.status(500).json(error)
+        res.status(500).json({ error: error.message })
     }
 }
 
@@ -711,6 +602,10 @@ export const ReplyPost = async(req,res) => {
     try{
   
         const { text, footballMatchId: footballMatchIdRaw } = req.body
+        const trimmedText = String(text || '').trim()
+        if (!trimmedText) {
+            return res.status(400).json({ error: 'Comment text is required', message: 'Comment text is required' })
+        }
         const username = req.user.username
         const userId = req.user._id 
         const id = req.params.id 
@@ -728,7 +623,7 @@ export const ReplyPost = async(req,res) => {
         }
      
         const reply = {
-            text,
+            text: trimmedText,
             username,
             userId,
             userProfilePic,
@@ -751,7 +646,7 @@ export const ReplyPost = async(req,res) => {
         if (post.postedBy.toString() !== userId.toString()) {
             createNotification(post.postedBy, 'comment', userId, {
                 postId: post._id,
-                commentText: text
+                commentText: trimmedText
             }).catch(err => {
                 console.error('Error creating comment notification:', err)
             })
@@ -762,14 +657,14 @@ export const ReplyPost = async(req,res) => {
         createActivity(userId, 'comment', {
             postId: post._id,
             targetUser: post.postedBy,
-            metadata: { commentText: text.substring(0, 50) }
+            metadata: { commentText: trimmedText.substring(0, 50) }
         }).catch(err => {
             console.error('Error creating activity:', err)
         })
         
         // 2. Check for @mentions in the comment text (e.g., @username)
         const mentionRegex = /@(\w+)/g
-        const mentions = text.match(mentionRegex)
+        const mentions = trimmedText.match(mentionRegex)
         if (mentions) {
             const mentionedUsernames = [...new Set(mentions.map(m => m.substring(1)))] // Remove @ and get unique usernames
             
@@ -780,7 +675,7 @@ export const ReplyPost = async(req,res) => {
                         // Don't notify if they're the commenter or post owner (already notified above)
                         createNotification(mentionedUser._id, 'mention', userId, {
                             postId: post._id,
-                            commentText: text
+                            commentText: trimmedText
                         }).catch(err => {
                             console.error('Error creating mention notification:', err)
                         })
@@ -796,7 +691,7 @@ export const ReplyPost = async(req,res) => {
     }
     catch(error){
         console.log(error)
-        res.status(500).json(error)
+        res.status(500).json({ error: error.message })
     }
 }
 
@@ -1096,6 +991,10 @@ export const getUserPosts = async(req,res)=>{
 export const ReplyToComment = async(req, res) => {
     try {
         const { text, parentReplyId } = req.body  // parentReplyId is the _id of the comment being replied to
+        const trimmedText = String(text || '').trim()
+        if (!trimmedText) {
+            return res.status(400).json({ error: 'Comment text is required', message: 'Comment text is required' })
+        }
         const { id } = req.params  // This is the post ID
         const username = req.user.username
         const userId = req.user._id
@@ -1137,7 +1036,7 @@ export const ReplyToComment = async(req, res) => {
 
         // Create the reply object
         const reply = {
-            text,
+            text: trimmedText,
             username,
             userId,
             userProfilePic,
@@ -1166,7 +1065,7 @@ export const ReplyToComment = async(req, res) => {
             notifiedUsers.add(post.postedBy.toString())
             createNotification(post.postedBy, 'comment', userId, {
                 postId: post._id,
-                commentText: text
+                commentText: trimmedText
             }).catch(err => {
                 console.error('Error creating comment notification:', err)
             })
@@ -1178,7 +1077,7 @@ export const ReplyToComment = async(req, res) => {
                 notifiedUsers.add(mentionedUser.userId.toString())
                 createNotification(mentionedUser.userId, 'mention', userId, {
                     postId: post._id,
-                    commentText: text
+                    commentText: trimmedText
                 }).catch(err => {
                     console.error('Error creating mention notification:', err)
                 })
@@ -1187,7 +1086,7 @@ export const ReplyToComment = async(req, res) => {
         
         // 3. Check for @mentions in the comment text (e.g., @username)
         const mentionRegex = /@(\w+)/g
-        const mentions = text.match(mentionRegex)
+        const mentions = trimmedText.match(mentionRegex)
         if (mentions) {
             const mentionedUsernames = [...new Set(mentions.map(m => m.substring(1)))] // Remove @ and get unique usernames
             
@@ -1198,7 +1097,7 @@ export const ReplyToComment = async(req, res) => {
                         notifiedUsers.add(mentionedUser._id.toString())
                         createNotification(mentionedUser._id, 'mention', userId, {
                             postId: post._id,
-                            commentText: text
+                            commentText: trimmedText
                         }).catch(err => {
                             console.error('Error creating mention notification:', err)
                         })
@@ -1213,7 +1112,7 @@ export const ReplyToComment = async(req, res) => {
     }
     catch(error) {
         console.log(error)
-        res.status(500).json(error)
+        res.status(500).json({ error: error.message })
     }
 }
 
@@ -1606,56 +1505,28 @@ export const deleteCardGamePost = async (roomId) => {
                         } catch (emitErr) {
                             console.warn('⚠️ [deleteCardGamePost] Global postDeleted emit failed:', emitErr?.message)
                         }
-                        const userSocketMap = await getAllUserSockets()
-                        const recipients = new Set() // Use Set to avoid duplicates
-                        
-                        // Add post author (player who created this post)
-                        const postAuthorSocket = userSocketMap[postAuthorId]
-                        if (postAuthorSocket) {
-                            recipients.add(postAuthorSocket.socketId)
-                            console.log(`✅ [deleteCardGamePost] Added post author ${postAuthorId} to recipients (socket: ${postAuthorSocket.socketId})`)
-                        } else {
-                            console.log(`⚠️ [deleteCardGamePost] Post author ${postAuthorId} not found in socket map`)
-                        }
-                        
-                        // Add other player (if different from post author)
                         let otherPlayerId = null
                         if (cardData) {
-                            otherPlayerId = cardData.player1?._id === postAuthorId 
-                                ? cardData.player2?._id 
+                            otherPlayerId = cardData.player1?._id === postAuthorId
+                                ? cardData.player2?._id
                                 : cardData.player1?._id
                         } else if (player1Id && player2Id) {
-                            // Fallback: use extracted IDs from roomId
                             otherPlayerId = postAuthorId === player1Id ? player2Id : player1Id
                         }
-                        
-                        if (otherPlayerId) {
-                            const otherPlayerSocket = userSocketMap[otherPlayerId]
-                            if (otherPlayerSocket) {
-                                recipients.add(otherPlayerSocket.socketId)
-                                console.log(`✅ [deleteCardGamePost] Added other player ${otherPlayerId} to recipients (socket: ${otherPlayerSocket.socketId})`)
-                            } else {
-                                console.log(`⚠️ [deleteCardGamePost] Other player ${otherPlayerId} not found in socket map`)
+                        const recipientUserIds = [postAuthorId]
+                        if (otherPlayerId) recipientUserIds.push(otherPlayerId)
+                        if (followerDocs?.length) {
+                            followerDocs.forEach((d) => {
+                                const fid = d.followerId?.toString?.() ?? String(d.followerId)
+                                if (fid) recipientUserIds.push(fid)
+                            })
+                        }
+                        const socketIds = await collectSocketIdsForUserIds(recipientUserIds)
+                        if (socketIds.size > 0) {
+                            for (const socketId of socketIds) {
+                                io.to(socketId).emit('postDeleted', { postId: deletedPostId })
                             }
-                        }
-                        
-                        // Add all followers
-                        if (followerDocs && followerDocs.length > 0) {
-                            followerDocs.forEach(d => {
-                                const followerIdStr = d.followerId?.toString?.() ?? String(d.followerId)
-                                if (userSocketMap[followerIdStr]) {
-                                    recipients.add(userSocketMap[followerIdStr].socketId)
-                                }
-                            })
-                        }
-                        
-                        // Emit to all recipients
-                        if (recipients.size > 0) {
-                            recipients.forEach(socketId => {
-                                io.to(socketId).emit("postDeleted", { postId: deletedPostId })
-                                console.log(`📤 [deleteCardGamePost] Emitted postDeleted for post ${deletedPostId} to socket: ${socketId}`)
-                            })
-                            console.log(`📤 [deleteCardGamePost] Emitted postDeleted to ${recipients.size} recipients (author, other player, and followers) for post: ${deletedPostId}`)
+                            console.log(`📤 [deleteCardGamePost] Emitted postDeleted to ${socketIds.size} recipient socket(s)`)
                         } else {
                             console.log(`⚠️ [deleteCardGamePost] No recipients found for post ${deletedPostId}`)
                         }
@@ -1720,38 +1591,23 @@ export const deleteChessGamePost = async (roomId) => {
                             } catch (emitErr) {
                                 console.warn('⚠️ [deleteChessGamePost] Global postDeleted emit failed:', emitErr?.message)
                             }
-                            const userSocketMap = await getAllUserSockets()
-                            const recipients = new Set() // Use Set to avoid duplicates
-                            
-                            // Add post author (player who created this post)
-                            if (userSocketMap[postAuthorId]) {
-                                recipients.add(userSocketMap[postAuthorId].socketId)
-                            }
-                            
-                            // Add other player (if different from post author)
-                            const otherPlayerId = chessData.player1?._id === postAuthorId 
-                                ? chessData.player2?._id 
+                            const otherPlayerId = chessData.player1?._id === postAuthorId
+                                ? chessData.player2?._id
                                 : chessData.player1?._id
-                            if (otherPlayerId && userSocketMap[otherPlayerId]) {
-                                recipients.add(userSocketMap[otherPlayerId].socketId)
-                            }
-                            
-                            // Add all followers
-                            if (followerDocs && followerDocs.length > 0) {
-                                followerDocs.forEach(d => {
-                                    const followerIdStr = d.followerId?.toString?.() ?? String(d.followerId)
-                                    if (userSocketMap[followerIdStr]) {
-                                        recipients.add(userSocketMap[followerIdStr].socketId)
-                                    }
+                            const recipientUserIds = [postAuthorId]
+                            if (otherPlayerId) recipientUserIds.push(otherPlayerId)
+                            if (followerDocs?.length) {
+                                followerDocs.forEach((d) => {
+                                    const fid = d.followerId?.toString?.() ?? String(d.followerId)
+                                    if (fid) recipientUserIds.push(fid)
                                 })
                             }
-                            
-                            // Emit to all recipients
-                            if (recipients.size > 0) {
-                                recipients.forEach(socketId => {
-                                    io.to(socketId).emit("postDeleted", { postId: post._id })
-                                })
-                                console.log(`📤 Emitted postDeleted to ${recipients.size} recipients (author, other player, and followers) for post: ${post._id}`)
+                            const socketIds = await collectSocketIdsForUserIds(recipientUserIds)
+                            if (socketIds.size > 0) {
+                                for (const socketId of socketIds) {
+                                    io.to(socketId).emit('postDeleted', { postId: deletedPostId })
+                                }
+                                console.log(`📤 Emitted postDeleted to ${socketIds.size} recipient socket(s) for post: ${deletedPostId}`)
                             }
                         }
                     }
@@ -1841,74 +1697,14 @@ export const addContributorToPost = async (req, res) => {
             console.error('❌ [addContributorToPost] Error creating collaboration notification:', err)
         }
 
-        // Emit real-time post update to post owner, all contributors, and followers
         const io = getIO()
         if (io) {
-            const userSocketMap = await getAllUserSockets()
-                            const recipients = [] // Socket IDs to receive the update
-                            
-                            // 1. Add post owner (always include them) - use postOwnerId we got earlier
-                            const ownerSocketData = userSocketMap[postOwnerId]
-            if (ownerSocketData) {
-                recipients.push(ownerSocketData.socketId)
-                console.log(`📤 [addContributorToPost] Adding post owner ${postOwnerId} to postUpdated recipients`)
-            }
-            
-            // 2. Add all contributors (including the newly added one)
-            if (post.contributors && post.contributors.length > 0) {
-                post.contributors.forEach(contributor => {
-                    const contributorId = (contributor._id || contributor).toString()
-                    if (contributorId !== postOwnerId) { // Don't duplicate owner
-                        const contributorSocketData = userSocketMap[contributorId]
-                        if (contributorSocketData) {
-                            recipients.push(contributorSocketData.socketId)
-                            console.log(`📤 [addContributorToPost] Adding contributor ${contributorId} to postUpdated recipients`)
-                        }
-                    }
-                })
-            }
-            
-            // 3. Add followers
-            const followerDocs = await Follow.find({ followeeId: post.postedBy })
-              .select('followerId')
-              .limit(10000)
-              .lean()
-            if (followerDocs && followerDocs.length > 0) {
-                followerDocs.forEach(d => {
-                    const followerIdStr = d.followerId?.toString?.() ?? String(d.followerId)
-                    // Don't duplicate owner/contributors
-                    if (followerIdStr !== postOwnerId && 
-                        !post.contributors?.some(c => {
-                            const cId = (c._id || c).toString()
-                            return cId === followerIdStr
-                        })) {
-                        const followerSocketData = userSocketMap[followerIdStr]
-                        if (followerSocketData) {
-                            recipients.push(followerSocketData.socketId)
-                        }
-                    }
-                })
-            }
-            
-            // Emit to all recipients (owner, contributors, followers)
-            const uniqueRecipients = [...new Set(recipients)] // Remove duplicates
-            if (uniqueRecipients.length > 0) {
-                uniqueRecipients.forEach(socketId => {
-                    io.to(socketId).emit("postUpdated", { postId: post._id.toString(), post })
-                })
-                console.log(`📤 [addContributorToPost] Emitted postUpdated to ${uniqueRecipients.length} recipients (owner, contributors, followers)`)
+            const postOwnerId = post.postedBy._id?.toString() || post.postedBy.toString()
+            const sent = await emitPostUpdatedToRecipients(io, post, postOwnerId)
+            if (sent > 0) {
+                console.log(`📤 [addContributorToPost] Emitted postUpdated to ${sent} recipient socket(s)`)
             }
         }
-
-        // Final check: Log what we're sending back
-        console.log('📤 [addContributorToPost] Sending response with contributors:', post.contributors?.length)
-        console.log('📤 [addContributorToPost] Response contributors data:', JSON.stringify(post.contributors.map(c => ({
-            id: c._id?.toString()?.substring(0, 8) || (typeof c === 'string' ? c.substring(0, 8) : 'unknown'),
-            name: c.name || 'NO NAME',
-            username: c.username || 'NO USERNAME',
-            type: typeof c,
-            isString: typeof c === 'string'
-        })), null, 2))
 
         res.status(200).json({
             message: "Contributor added successfully",
@@ -1916,7 +1712,7 @@ export const addContributorToPost = async (req, res) => {
         })
     } catch (error) {
         console.log(error)
-        res.status(500).json(error)
+        res.status(500).json({ error: error.message })
     }
 }
 
@@ -1975,60 +1771,12 @@ export const removeContributorFromPost = async(req, res) => {
         // Emit real-time post update to post owner, all contributors, and followers
         const io = getIO()
         if (io) {
-            const userSocketMap = await getAllUserSockets()
-            const recipients = [] // Socket IDs to receive the update
-            
-            // 1. Add post owner
             const postOwnerId = post.postedBy._id?.toString() || post.postedBy.toString()
-            const ownerSocketData = userSocketMap[postOwnerId]
-            if (ownerSocketData) {
-                recipients.push(ownerSocketData.socketId)
-                console.log(`📤 [removeContributorFromPost] Adding post owner ${postOwnerId} to postUpdated recipients`)
-            }
-            
-            // 2. Add all remaining contributors
-            if (post.contributors && post.contributors.length > 0) {
-                post.contributors.forEach(c => {
-                    const cId = (c._id || c).toString()
-                    if (cId !== postOwnerId) { // Don't duplicate owner
-                        const contributorSocketData = userSocketMap[cId]
-                        if (contributorSocketData) {
-                            recipients.push(contributorSocketData.socketId)
-                            console.log(`📤 [removeContributorFromPost] Adding contributor ${cId} to postUpdated recipients`)
-                        }
-                    }
-                })
-            }
-            
-            // 3. Add followers of the post owner
-            const followerDocs = await Follow.find({ followeeId: postOwnerId })
-              .select('followerId')
-              .limit(10000)
-              .lean()
-            if (followerDocs && followerDocs.length > 0) {
-                followerDocs.forEach(d => {
-                    const followerIdStr = d.followerId?.toString?.() ?? String(d.followerId)
-                    // Don't duplicate owner/contributors
-                    if (followerIdStr !== postOwnerId && 
-                        !post.contributors.some(c => (c._id || c).toString() === followerIdStr)) {
-                        const followerSocketData = userSocketMap[followerIdStr]
-                        if (followerSocketData) {
-                            recipients.push(followerSocketData.socketId)
-                        }
-                    }
-                })
-            }
-            
-            // Emit to all recipients (owner, contributors, followers)
-            const uniqueRecipients = [...new Set(recipients)] // Remove duplicates
-            if (uniqueRecipients.length > 0) {
-                const postObject = post.toObject() // Convert Mongoose document to plain object
-                uniqueRecipients.forEach(socketId => {
-                    io.to(socketId).emit("postUpdated", { postId: postObject._id.toString(), post: postObject })
-                })
-                console.log(`📤 [removeContributorFromPost] Emitted postUpdated to ${uniqueRecipients.length} recipients (owner, contributors, followers)`)
+            const sent = await emitPostUpdatedToRecipients(io, post, postOwnerId)
+            if (sent > 0) {
+                console.log(`📤 [removeContributorFromPost] Emitted postUpdated to ${sent} recipient socket(s)`)
             } else {
-                console.log(`⚠️ [removeContributorFromPost] No online recipients found for postUpdated event for post ${post._id}`)
+                console.log(`⚠️ [removeContributorFromPost] No online recipients for post ${post._id}`)
             }
         }
 
@@ -2039,7 +1787,7 @@ export const removeContributorFromPost = async(req, res) => {
         })
     } catch (error) {
         console.log(error)
-        res.status(500).json(error)
+        res.status(500).json({ error: error.message })
     }
 }
 
@@ -2268,7 +2016,7 @@ export const LikeComent = async(req,res) => {
     }
     catch(error){
         console.log(error)
-        res.status(500).json(error)
+        res.status(500).json({ error: error.message })
     }
 }
 

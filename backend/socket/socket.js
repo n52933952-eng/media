@@ -2258,8 +2258,8 @@ export const initializeSocket = async (app) => {
                     { upsert: true, new: true }
                 )
                 // Notify followers: in-app socket when online; FCM push when not in app
-                const streamer = await User.findById(streamerId).select('followers').lean()
-                const followerList = streamer?.followers || []
+                const { getFollowerIdsForUser } = await import('../services/followGraph.js')
+                const followerList = await getFollowerIdsForUser(streamerId)
                 if (followerList.length) {
                     const livePayload = {
                         streamerId: streamerNorm,
@@ -2293,9 +2293,10 @@ export const initializeSocket = async (app) => {
                             const streamerNorm = normalizeUserId(streamerId) || String(streamerId)
                             scheduleLiveSharePurge(streamerNorm)
                             const endPayload = { streamerId: streamerNorm, roomName, reason: 'timeout' }
-                            const streamerDoc = await User.findById(streamerId).select('followers').lean()
-                            if (streamerDoc?.followers?.length) {
-                                for (const followerId of streamerDoc.followers) {
+                            const { getFollowerIdsForUser } = await import('../services/followGraph.js')
+                            const timeoutFollowers = await getFollowerIdsForUser(streamerId)
+                            if (timeoutFollowers.length) {
+                                for (const followerId of timeoutFollowers) {
                                     const fid = normalizeUserId(followerId) || String(followerId)
                                     emitToUserSelf(fid, 'livekit:streamEnded', endPayload)
                                 }
@@ -2329,9 +2330,10 @@ export const initializeSocket = async (app) => {
                 const streamerNorm = normalizeUserId(streamerId) || String(streamerId)
                 scheduleLiveSharePurge(streamerNorm)
                 const endPayload = { streamerId: streamerNorm, roomName }
-                const streamer = await User.findById(streamerId).select('followers').lean()
-                if (streamer?.followers?.length) {
-                    for (const followerId of streamer.followers) {
+                const { getFollowerIdsForUser } = await import('../services/followGraph.js')
+                const endFollowers = await getFollowerIdsForUser(streamerId)
+                if (endFollowers.length) {
+                    for (const followerId of endFollowers) {
                         const fid = normalizeUserId(followerId) || String(followerId)
                         emitToUserSelf(fid, 'livekit:streamEnded', endPayload)
                     }
@@ -4104,9 +4106,10 @@ export const initializeSocket = async (app) => {
                                 const streamerNorm = normalizeUserId(lsUid) || String(lsUid)
                                 scheduleLiveSharePurge(streamerNorm)
                                 const endPayload = { streamerId: streamerNorm, roomName: roomNm, reason: 'disconnect' }
-                                const streamerDoc = await User.findById(lsUid).select('followers').lean()
-                                if (streamerDoc?.followers?.length) {
-                                    for (const followerId of streamerDoc.followers) {
+                                const { getFollowerIdsForUser } = await import('../services/followGraph.js')
+                                const disconnectFollowers = await getFollowerIdsForUser(lsUid)
+                                if (disconnectFollowers.length) {
+                                    for (const followerId of disconnectFollowers) {
                                         const fid = normalizeUserId(followerId) || String(followerId)
                                         emitToUserSelf(fid, 'livekit:streamEnded', endPayload)
                                     }

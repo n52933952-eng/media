@@ -16,28 +16,7 @@ import { uploadMulterFile, deleteMediaAsset, respondToUploadError } from '../ser
 import { LIVE_CHANNELS } from '../config/channels.js'
 import * as redisService from '../services/redis.js'
 import { getIO, getUserSelfRoomId } from '../socket/socket.js'
-
-/** Source of truth for follow graph (web + mobile). Falls back to User arrays if Follow rows missing. */
-async function getFollowGraphIdsForUser(userId) {
-  const uid = userId
-  const cap = 500
-  const [followingDocs, followerDocs] = await Promise.all([
-    Follow.find({ followerId: uid }).select('followeeId').sort({ createdAt: -1 }).limit(cap).lean(),
-    Follow.find({ followeeId: uid }).select('followerId').sort({ createdAt: -1 }).limit(cap).lean(),
-  ])
-  let following = followingDocs.map((d) => d.followeeId).filter(Boolean)
-  let followers = followerDocs.map((d) => d.followerId).filter(Boolean)
-  if (following.length === 0 || followers.length === 0) {
-    const legacy = await User.findById(uid).select('following followers').lean()
-    if (following.length === 0 && Array.isArray(legacy?.following) && legacy.following.length > 0) {
-      following = legacy.following
-    }
-    if (followers.length === 0 && Array.isArray(legacy?.followers) && legacy.followers.length > 0) {
-      followers = legacy.followers
-    }
-  }
-  return { following, followers }
-}
+import { getFollowGraphIdsForUser, attachFollowGraphToUser } from '../services/followGraph.js'
 
 
 export const SignUp = async(req,res) => {
@@ -63,13 +42,14 @@ export const SignUp = async(req,res) => {
        
           if(newUser){
             GenerateToken(newUser._id,res)
+            const { following, followers } = await getFollowGraphIdsForUser(newUser._id)
                 res.status(200).json({id:newUser._id,name:newUser.name,
                 username:newUser.username,email:newUser.email,
                bio:newUser.bio,
                profilePic:newUser.profilePic,
                country:newUser.country,
-               followers:newUser.followers,
-               following:newUser.following
+               followers,
+               following
               })
           }else{
             res.status(400).json({error:"no user"})
@@ -77,7 +57,7 @@ export const SignUp = async(req,res) => {
 
       }
         catch(error){
-        res.status(500).json(error)
+        res.status(500).json({ error: error.message })
     }
 }
 
@@ -101,19 +81,20 @@ export const LoginUser = async(req,res) => {
    
       GenerateToken(user._id,res)
 
+      const { following, followers } = await getFollowGraphIdsForUser(user._id)
       res.status(200).json({_id:user._id,username:user.username,name:user.name,email:user.email,
         bio:user.bio,
         profilePic:user.profilePic,
         country:user.country,
-        followers:user.followers,
-               following:user.following
+        followers,
+               following
       })
      
 
     }
     catch(error){
         console.log(error)
-        res.status(500).json(error)
+        res.status(500).json({ error: error.message })
     }
 }
 
@@ -167,6 +148,7 @@ export const GoogleLogin = async (req, res) => {
     }
 
     GenerateToken(user._id, res)
+    const { following, followers } = await getFollowGraphIdsForUser(user._id)
     res.status(200).json({
       _id: user._id,
       username: user.username,
@@ -175,8 +157,8 @@ export const GoogleLogin = async (req, res) => {
       bio: user.bio,
       profilePic: user.profilePic,
       country: user.country,
-      followers: user.followers,
-      following: user.following,
+      followers,
+      following,
     })
   } catch (error) {
     console.error('GoogleLogin error:', error)
@@ -223,7 +205,7 @@ export const LogOut = async(req,res) => {
 
     }
     catch(error){
-        res.status(500).json(error)
+        res.status(500).json({ error: error.message })
     }
 }
 
@@ -256,10 +238,7 @@ export const FollowAndUnfollow = async(req,res) => {
          const isFollowing = !!followExists
 
          if(isFollowing){
-             
-           await User.findByIdAndUpdate(req.user._id,{$pull:{following:id}})
-           await User.findByIdAndUpdate(id,{$pull:{followers:req.user._id}})
-          // Dual-write: remove from follows collection (ignore errors to stay non-breaking)
+          // Scalable: Follow collection only (no User.followers/following array growth)
           try {
             await Follow.deleteOne({ followerId: req.user._id, followeeId: id })
           } catch (e) {
@@ -296,15 +275,17 @@ export const FollowAndUnfollow = async(req,res) => {
                }
            }
           
-           const updatecurrent = await User.findById(req.user._id)
-           const targetUser = await User.findById(id)
+           const updatecurrent = await attachFollowGraphToUser(
+             await User.findById(req.user._id).select('-password'),
+           )
+           const targetUser = await attachFollowGraphToUser(
+             await User.findById(id).select('-password'),
+           )
 
            res.status(200).json({action:"unfollow",current:updatecurrent,target:targetUser})
 
          }else{
-            await User.findByIdAndUpdate(req.user._id,{$push:{following:id}})
-            await User.findByIdAndUpdate(id,{$push:{followers:req.user._id}})
-           // Dual-write: add to follows collection (ignore errors to stay non-breaking)
+           // Scalable: Follow collection only (no User.followers/following array growth)
            try {
              await Follow.create({ followerId: req.user._id, followeeId: id })
            } catch (e) {
@@ -371,10 +352,13 @@ export const FollowAndUnfollow = async(req,res) => {
             // Feed already filters by following list, so user will see Football posts in feed.
             // Frontend triggers post creation when following Football (in SuggestedChannels.jsx)
           
-            const updatecurrent = await User.findById(req.user._id)
-            const targetUser = await User.findById(id)
+           const updatecurrent = await attachFollowGraphToUser(
+             await User.findById(req.user._id).select('-password'),
+           )
+           const targetUser = await attachFollowGraphToUser(
+             await User.findById(id).select('-password'),
+           )
 
-            // Create notification for the user being followed (in-app + FCM when offline)
             const { createNotification } = await import('./notification.js')
             const { getFollowClientType, sendWebFollowEmailToUser } = await import('../services/emailNotifications.js')
             const followClientType = getFollowClientType(req)
@@ -384,7 +368,6 @@ export const FollowAndUnfollow = async(req,res) => {
                     const deliveredInApp = result?.deliveredInApp === true
                     console.log(`👤 [follow] client=${followClientType} followee=${id} deliveredInApp=${deliveredInApp}`)
 
-                    // Web: follow email via Resend. Mobile: push/in-app only.
                     if (followClientType === 'web') {
                         const emailResult = await sendWebFollowEmailToUser(id, req.user._id)
                         console.log(`📧 [follow] email result:`, emailResult)
@@ -396,7 +379,6 @@ export const FollowAndUnfollow = async(req,res) => {
                 }
             })()
             
-            // Create activity for activity feed
             const { createActivity } = await import('./activity.js')
             createActivity(req.user._id, 'follow', {
                 targetUser: id
@@ -411,7 +393,7 @@ export const FollowAndUnfollow = async(req,res) => {
     }
     catch(error){
         console.log(error)
-        res.status(500).json(error)
+        res.status(500).json({ error: error.message })
     }
 }
 
@@ -660,6 +642,7 @@ export const UpdateUser = async(req,res) => {
             console.error('Error updating comments with new profile picture:', updateError)
           }
 
+          const { following, followers } = await getFollowGraphIdsForUser(user._id)
           return res.status(200).json({
             _id: user._id,
             name: user.name,
@@ -669,8 +652,8 @@ export const UpdateUser = async(req,res) => {
             profilePic: user.profilePic,
             country: user.country,
             instagram: user.instagram,
-            followers: user.followers || [],
-            following: user.following || [],
+            followers,
+            following,
           })
         } catch (error) {
           console.error('Profile picture upload error:', error)
@@ -716,6 +699,7 @@ export const UpdateUser = async(req,res) => {
 
       // Return safe fields only (exclude password)
       // Include followers and following to preserve them in frontend
+      const { following, followers } = await getFollowGraphIdsForUser(user._id)
       res.status(200).json({
         _id: user._id,
         name: user.name,
@@ -725,13 +709,13 @@ export const UpdateUser = async(req,res) => {
         profilePic: user.profilePic,
         country: user.country,
         instagram: user.instagram,
-        followers: user.followers || [],
-        following: user.following || []
+        followers,
+        following,
       })
     }
     catch(error){
    
-        res.status(500).json(error)
+        res.status(500).json({ error: error.message })
            console.log(error)
     }
 }
@@ -927,7 +911,7 @@ export const searchUsers = async(req, res) => {
     }
     catch(error) {
         console.log(error)
-        res.status(500).json(error)
+        res.status(500).json({ error: error.message })
     }
 }
 
@@ -1465,17 +1449,9 @@ export const removeFollower = async (req, res) => {
         }
 
         const deleted = await Follow.deleteOne({ followerId: id, followeeId: meId })
-        await User.findByIdAndUpdate(meId, { $pull: { followers: id } })
-        await User.findByIdAndUpdate(id, { $pull: { following: meId } })
 
-        if (deleted.deletedCount === 0) {
-            // Legacy-only follow: still try to clean arrays
-            await User.findByIdAndUpdate(meId, { $pull: { followers: id } })
-            await User.findByIdAndUpdate(id, { $pull: { following: meId } })
-        }
-
-        const current = await User.findById(meId).select('-password')
-        return res.status(200).json({ success: true, current })
+        const current = await attachFollowGraphToUser(await User.findById(meId).select('-password'))
+        return res.status(200).json({ success: true, current, removed: deleted.deletedCount > 0 })
     } catch (error) {
         console.error('Error removing follower:', error)
         return res.status(500).json({ error: error.message || 'Failed to remove follower' })

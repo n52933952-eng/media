@@ -382,7 +382,7 @@ export const getMessage = async(req,res) => {
 
     res.status(200).json({ messages: messagesToReturn, hasMore })
   } catch(error) {
-    res.status(500).json(error)
+    res.status(500).json({ error: error.message })
     console.log(error)
   }
 }
@@ -565,7 +565,7 @@ export const deletconversation = async (req, res) => {
     await Conversation.findByIdAndDelete(convId)
     res.status(200).json('all deleted')
   } catch (error) {
-    res.status(500).json(error)
+    res.status(500).json({ error: error.message })
     console.log(error)
   }
 }
