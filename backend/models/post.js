@@ -103,6 +103,14 @@ const PostSchema = mongoose.Schema({
     ],
 
 
+    /** Denormalized count — source of truth is Comment collection. */
+    replyCount: {
+        type: Number,
+        default: 0,
+        min: 0,
+    },
+
+    /** Legacy embedded replies — use Comment collection; kept for migration fallback reads. */
     replies:[
         {
             userId:{

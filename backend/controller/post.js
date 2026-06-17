@@ -16,6 +16,29 @@ import {
     hiddenPostQueryFilter,
 } from '../services/feedHiddenPosts.js'
 import { getCachedFeed, setCachedFeed, invalidateUserFeedCache } from '../services/feedCache.js'
+import {
+    encodeFeedCursor,
+    decodeFeedCursor,
+    FEED_FIRST_PAGE_NORMAL_COUNT,
+    storeFeedNormalIndex,
+} from '../services/feedCursor.js'
+import {
+    getFeedNormalIndex,
+    populateFeedPostsByIds,
+    fetchChannelPostsForUser,
+    feedSortTime,
+} from '../services/feedAssembly.js'
+import {
+    createComment,
+    findCommentById,
+    findCommentThreadRoot,
+    deleteCommentTree,
+    toggleCommentLike,
+    attachRepliesToPost,
+    attachReplyCountsToPosts,
+    getUserCommentsPaginated,
+    deleteCommentsForPost,
+} from '../services/commentService.js'
 import { findPostsByGameRoomId } from '../services/gamePostLookup.js'
 
 async function emitNewPostToAuthorFollowers(io, authorId, post) {
@@ -228,8 +251,9 @@ export const getPost = async(req,res) => {
         if(!post){
             return res.status(500).json({message:"no post"})
         }
-  
-      res.status(200).json(post)
+
+        const withReplies = await attachRepliesToPost(post)
+      res.status(200).json(withReplies)
 
     }
     catch(error){
@@ -471,6 +495,7 @@ export const deletePost = async(req,res) => {
       const postAuthorId = post.postedBy.toString()
       
       await Post.findByIdAndDelete(req.params.id)
+      await deleteCommentsForPost(req.params.id)
 
       const io = getIO()
       if (io) {
@@ -619,30 +644,27 @@ export const ReplyPost = async(req,res) => {
             return res.status(400).json({message:"no post"})
         }
 
-        if (Array.isArray(post.replies) && post.replies.length >= MAX_REPLIES_PER_POST) {
-            return res.status(400).json({ error: 'This post has reached the maximum number of comments.' })
-        }
-
         let footballMatchId = null
         if (footballMatchIdRaw != null && String(footballMatchIdRaw).trim() !== '') {
             footballMatchId = String(footballMatchIdRaw).trim().slice(0, 128)
         }
-     
-        const reply = {
-            text: trimmedText,
-            username,
-            userId,
-            userProfilePic,
-            likes: [],  // Initialize likes array
-            ...(footballMatchId ? { footballMatchId } : {}),
+
+        let savedReply
+        try {
+            savedReply = await createComment({
+                postId: id,
+                userId,
+                username,
+                userProfilePic,
+                text: trimmedText,
+                footballMatchId,
+            })
+        } catch (err) {
+            if (err.status === 400) {
+                return res.status(400).json({ error: err.message })
+            }
+            throw err
         }
-
-        post.replies.push(reply)
-
-        await post.save()
-
-        // Return the saved reply (it will have _id and all fields after saving)
-        const savedReply = post.replies[post.replies.length - 1]
         
         // Create notifications
         const { createNotification } = await import('./notification.js')
@@ -710,156 +732,69 @@ export const ReplyPost = async(req,res) => {
 export const getFeedPost = async(req,res) => {
     try{
         const userId = req.user._id 
-        const limit = parseInt(req.query.limit) || 10
-        const skip = parseInt(req.query.skip) || 0
+        const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 10, 1), 50)
+        const skip = parseInt(req.query.skip, 10) || 0
+        const cursorRaw = req.query.cursor != null ? String(req.query.cursor).trim() : ''
+        const decodedCursor = decodeFeedCursor(cursorRaw)
+        const isFirstPage = !cursorRaw && skip === 0
+        const pageKey = cursorRaw || (skip === 0 ? '0' : String(skip))
 
-        const cached = await getCachedFeed(userId, skip, limit)
+        const cached = await getCachedFeed(userId, pageKey, limit)
         if (cached) return res.status(200).json(cached)
 
         const hiddenObjectIds = await getHiddenFeedPostObjectIds(userId)
-        const hiddenFilter = hiddenPostQueryFilter(hiddenObjectIds)
-        // Read-from-Follow: get following list (cap for safety)
-        const followingDocs = await Follow.find({ followerId: userId })
-            .select('followeeId')
-            .limit(5000)
-            .lean()
-        const following = followingDocs.map(d => d.followeeId)
-        
-        // Do NOT return empty when following.length === 0 — users can still have
-        // channel posts (channelAddedBy) and may follow Football/Weather via Follow later.
-        // Previously this caused "Fetched 0 posts" after adding a channel with no other follows.
-        
-        // Pagination parameters
-        // limit/skip already parsed above for cache key
-        
-        // Strategy: First page = live + channel cards + normal slice; later pages = normal only.
-        
-        // SCALABLE: Single $in query replaces N per-user queries
-        const followedUserIds = following.filter(id => id.toString() !== userId.toString())
-        const normalFollowedIds = followedUserIds
 
-        // ONE query instead of N queries, then cap to 3 posts per user in JS
-        let normalPostsPromise = Promise.resolve([])
-        if (normalFollowedIds.length > 0) {
-            normalPostsPromise = Post.find({
-                $or: [
-                    { postedBy: { $in: normalFollowedIds } },
-                    { isCollaborative: true, contributors: { $in: normalFollowedIds } }
-                ],
-                ...hiddenFilter,
-            })
-                .populate("postedBy", "-password")
-                .populate("contributors", "username profilePic name")
-                .sort({ updatedAt: -1, createdAt: -1 })
-                .limit(normalFollowedIds.length * 3 + 50) // safety cap: 3 per user + buffer
-                .lean()
-        }
+        const normalIds = await getFeedNormalIndex(userId, hiddenObjectIds)
+        await storeFeedNormalIndex(userId, normalIds)
+        const totalCount = normalIds.length
 
-        // Get channel posts that this user added
-        const channelPostsPromise = Post.find({ 
-            channelAddedBy: userId.toString() 
-        })
-            .populate("postedBy", "-password")
-            .populate("contributors", "username profilePic name")
-            .sort({ createdAt: -1 })
-            .limit(20) // Get all channel posts user added
-            .lean()
-        
-        // Collaborative posts where the current user is a contributor (even if they don't follow the author)
-        const contributorPostsPromise = Post.find({
-            isCollaborative: true,
-            contributors: userId,
-            ...hiddenFilter,
-        })
-            .populate("postedBy", "-password")
-            .populate("contributors", "username profilePic name")
-            .sort({ updatedAt: -1, createdAt: -1 })
-            .limit(40)
-            .lean()
-
-        const [normalPosts, channelPosts, contributorPosts] = await Promise.all([
-            normalPostsPromise,
-            channelPostsPromise,
-            contributorPostsPromise
-        ])
-        
-        // 1) Cap to 3 newest posts per followed user (after single DB query)
-        // 2) Merge with contributor posts, dedupe, sort by activity
-        // 3) Page 1: live + channel cards + first slice of normals; page 2+: normals only
-        
-        // Cap to 3 newest posts per user (in JS, after single DB query)
-        const perUserMap = new Map()
-        for (const post of normalPosts) {
-            const pb = post.postedBy
-            const uid = pb && pb._id != null ? pb._id.toString() : String(pb)
-            if (!perUserMap.has(uid)) perUserMap.set(uid, [])
-            if (perUserMap.get(uid).length < 3) perUserMap.get(uid).push(post)
-        }
-        const cappedNormalPosts = [...perUserMap.values()].flat()
-
-        // Merge capped normal posts + collaborative contributor posts, remove duplicates
-        let allNormalPosts = [...cappedNormalPosts, ...contributorPosts]
-        
-        // Sort by last activity
-        allNormalPosts.sort((a, b) => {
-            const dateA = new Date(a.updatedAt || a.createdAt).getTime()
-            const dateB = new Date(b.updatedAt || b.createdAt).getTime()
-            return dateB - dateA
-        })
-        
-        // Remove duplicates
-        const uniqueNormalPosts = []
-        const seenPostIds = new Set()
-        for (const post of allNormalPosts) {
-            const postId = post._id.toString()
-            if (!seenPostIds.has(postId)) {
-                uniqueNormalPosts.push(post)
-                seenPostIds.add(postId)
+        const resolveOffset = () => {
+            if (decodedCursor) {
+                let offset = decodedCursor.offset
+                if (decodedCursor.postId) {
+                    const idx = normalIds.indexOf(String(decodedCursor.postId))
+                    if (idx >= 0) offset = idx + 1
+                }
+                return Math.min(Math.max(offset, 0), totalCount)
             }
+            if (skip > 0) return Math.min(skip, totalCount)
+            return 0
         }
 
-        // Legacy Go Fish posts may lack cardGameData — attach from Redis when game is still active
-        await enrichGoFishPostsForFeed(uniqueNormalPosts)
-
-        // One feed row per chess/card game (same roomId) when viewer follows both players
-        const dedupedNormalPosts = dedupeGamePostsForFeed(uniqueNormalPosts)
-
-        // Hide own solo posts from feed (show only if collaborative with another contributor)
-        const viewerIdStr = userId.toString()
-        const hasAnotherContributor = (post, authorIdStr) => {
-            if (!post.isCollaborative || !Array.isArray(post.contributors)) return false
-            return post.contributors.some((c) => {
-                const cid = c && c._id != null ? c._id.toString() : String(c)
-                return cid && cid !== authorIdStr
+        const buildNextCursor = (nextOffset, lastPost) => {
+            if (nextOffset >= totalCount || !lastPost) return null
+            return encodeFeedCursor({
+                offset: nextOffset,
+                postId: lastPost._id,
+                updatedAtMs: feedSortTime(lastPost),
             })
         }
-        const feedNormalPosts = dedupedNormalPosts.filter((post) => {
-            const pb = post.postedBy
-            if (!pb) return false
-            const aid = pb._id != null ? pb._id.toString() : String(pb)
-            if (aid !== viewerIdStr) return true
-            return hasAnotherContributor(post, viewerIdStr)
-        })
 
-        // Pinned strip on page 1: user-added channel posts only (not Football/Weather — those have their own screens)
-        const pinnedPosts = [...channelPosts]
+        if (isFirstPage) {
+            const followingDocs = await Follow.find({ followerId: userId })
+                .select('followeeId')
+                .limit(5000)
+                .lean()
+            const following = followingDocs.map((d) => d.followeeId)
 
-        // Page 1: live streams + pinned + first 12 normal posts
-        if (skip === 0) {
-            // Fetch active live streams from followed users (+ own)
+            const [channelPosts, firstNormalIds] = await Promise.all([
+                fetchChannelPostsForUser(userId),
+                Promise.resolve(normalIds.slice(0, FEED_FIRST_PAGE_NORMAL_COUNT)),
+            ])
+            const topNormalPosts = await populateFeedPostsByIds(firstNormalIds)
+
             const liveFollowIds = [...following.map(String), String(userId)]
             const activeStreams = await LiveStream.find({
                 streamer: { $in: liveFollowIds },
                 active: true,
             })
-            .populate('streamer', 'name username profilePic')
-            .sort({ startedAt: -1 })
-            .lean()
+                .populate('streamer', 'name username profilePic')
+                .sort({ startedAt: -1 })
+                .lean()
 
-            // Shape live streams as pseudo-posts so the frontend renders them uniformly
-            const livePseudoPosts = activeStreams.map(s => ({
-                _id:      `live_${s._id}`,
-                isLive:   true,
+            const livePseudoPosts = activeStreams.map((s) => ({
+                _id: `live_${s._id}`,
+                isLive: true,
                 liveStreamId: String(s._id),
                 roomName: s.roomName,
                 postedBy: s.streamer,
@@ -867,43 +802,47 @@ export const getFeedPost = async(req,res) => {
                 updatedAt: s.startedAt,
             }))
 
-            const topNormalPosts = feedNormalPosts.slice(0, 12)
-            // Pinned (channels only) vs normals: sort each group separately; live prepended.
-            const feedSortKey = (a) => {
-                const boost = a && typeof a.__viewerSortBoostMs === 'number' ? a.__viewerSortBoostMs : 0
-                return Math.max(new Date(a.updatedAt || a.createdAt).getTime(), boost)
-            }
-            const pinnedSorted = [...pinnedPosts].sort((a, b) => feedSortKey(b) - feedSortKey(a))
-            const normalsSorted = [...topNormalPosts].sort((a, b) => feedSortKey(b) - feedSortKey(a))
+            const pinnedSorted = (await attachReplyCountsToPosts([...channelPosts])).sort(
+                (a, b) => feedSortTime(b) - feedSortTime(a),
+            )
+            const normalsSorted = [...topNormalPosts].sort((a, b) => feedSortTime(b) - feedSortTime(a))
             const combinedPosts = [...livePseudoPosts, ...pinnedSorted, ...normalsSorted]
-            
-            const hasMore = feedNormalPosts.length > 12
-            
-            const payload = { 
+
+            const nextOffset = firstNormalIds.length
+            const hasMore = nextOffset < totalCount
+            const lastNormal = normalsSorted[normalsSorted.length - 1]
+
+            const payload = {
                 posts: combinedPosts,
                 hasMore,
-                totalCount: feedNormalPosts.length,
+                totalCount,
                 liveStreams: livePseudoPosts,
+                nextCursor: buildNextCursor(nextOffset, lastNormal),
+                nextSkip: nextOffset,
             }
-            await setCachedFeed(userId, skip, limit, payload)
+            await setCachedFeed(userId, pageKey, limit, payload)
             return res.status(200).json(payload)
         }
-        
-        // Subsequent pages: normal posts only (channel cards already on page 1)
-        const startIndex = skip
-        const endIndex = startIndex + limit
-        const paginatedNormal = feedNormalPosts.slice(startIndex, endIndex)
-        const hasMore = endIndex < feedNormalPosts.length
-        const totalCount = feedNormalPosts.length
-        
-        console.log(`📄 [getFeedPost] Page ${Math.floor(skip / limit) + 1}: Returning ${paginatedNormal.length} posts (skip: ${skip}, hasMore: ${hasMore})`)
-        
-        const payload = { 
+
+        const startIndex = resolveOffset()
+        const pageIds = normalIds.slice(startIndex, startIndex + limit)
+        const paginatedNormal = await populateFeedPostsByIds(pageIds)
+        const nextOffset = startIndex + paginatedNormal.length
+        const hasMore = nextOffset < totalCount
+        const lastPost = paginatedNormal[paginatedNormal.length - 1]
+
+        console.log(
+            `📄 [getFeedPost] Cursor page: ${paginatedNormal.length} posts (offset: ${startIndex}, hasMore: ${hasMore})`,
+        )
+
+        const payload = {
             posts: paginatedNormal,
             hasMore,
             totalCount,
+            nextCursor: buildNextCursor(nextOffset, lastPost),
+            nextSkip: nextOffset,
         }
-        await setCachedFeed(userId, skip, limit, payload)
+        await setCachedFeed(userId, pageKey, limit, payload)
         return res.status(200).json(payload)
     }
     catch(error){
@@ -968,12 +907,15 @@ export const getUserPosts = async(req,res)=>{
          
          const profileFilter = profilePostsQuery(user._id)
 
-         const posts = await Post.find(profileFilter)
+         const postsRaw = await Post.find(profileFilter)
             .populate("postedBy","-password")
             .populate("contributors", "username profilePic name")
             .sort({createdAt:-1})
             .limit(limit)
             .skip(skip)
+            .lean()
+
+         const posts = await attachReplyCountsToPosts(postsRaw)
             
          // Check if there are more posts
          const totalCount = await Post.countDocuments(profileFilter)
@@ -1021,55 +963,40 @@ export const ReplyToComment = async(req, res) => {
             return res.status(400).json({message: "no post"})
         }
 
-        if (Array.isArray(post.replies) && post.replies.length >= MAX_REPLIES_PER_POST) {
-            return res.status(400).json({ error: 'This post has reached the maximum number of comments.' })
-        }
-
-        // NEW: Extract mentioned user - if replying to a comment, mention that person
-        // This stores who was mentioned (like @username on Facebook)
         let mentionedUser = null
-        /** Inherit match scope from the root of the thread (for Football per-match comments). */
         let inheritedFootballMatchId = null
         if (parentReplyId) {
-            // Find the parent comment/reply that's being replied to
-            let threadReply = post.replies.id(parentReplyId)
+            const threadReply = await findCommentById(parentReplyId, id)
             if (threadReply) {
-                // The person being replied to is automatically mentioned
                 mentionedUser = {
                     userId: threadReply.userId,
-                    username: threadReply.username
+                    username: threadReply.username,
                 }
-                let root = threadReply
-                let guard = 0
-                while (root && root.parentReplyId && guard < 50) {
-                    const pr = post.replies.id(root.parentReplyId)
-                    if (!pr) break
-                    root = pr
-                    guard++
-                }
+                const root = await findCommentThreadRoot(parentReplyId, id)
                 if (root?.footballMatchId) {
                     inheritedFootballMatchId = String(root.footballMatchId).slice(0, 128)
                 }
             }
         }
 
-        // Create the reply object
-        const reply = {
-            text: trimmedText,
-            username,
-            userId,
-            userProfilePic,
-            parentReplyId: parentReplyId || null,  // If parentReplyId exists, it's a nested reply
-            mentionedUser: mentionedUser,  // NEW: Save who was mentioned (@username)
-            likes: [],  // Initialize likes array
-            ...(inheritedFootballMatchId ? { footballMatchId: inheritedFootballMatchId } : {}),
+        let newReply
+        try {
+            newReply = await createComment({
+                postId: id,
+                userId,
+                username,
+                userProfilePic,
+                text: trimmedText,
+                parentReplyId: parentReplyId || null,
+                mentionedUser,
+                footballMatchId: inheritedFootballMatchId,
+            })
+        } catch (err) {
+            if (err.status === 400) {
+                return res.status(400).json({ error: err.message })
+            }
+            throw err
         }
-
-        post.replies.push(reply)
-        await post.save()
-
-        // Return the newly created reply (it will have _id after saving)
-        const newReply = post.replies[post.replies.length - 1]
         
         // Create notifications
         const { createNotification } = await import('./notification.js')
@@ -1713,62 +1640,13 @@ export const getUserComments = async(req,res) => {
         const { username } = req.params
         const { limit = 20, skip = 0 } = req.query
         
-        // Find user by username
         const user = await User.findOne({ username })
         if (!user) {
             return res.status(404).json({ error: "User not found" })
         }
         
-        const userId = user._id
-        const limitNum = parseInt(limit)
-        const skipNum = parseInt(skip)
-        
-        // Find all posts that have replies from this user
-        const posts = await Post.find({
-            "replies.userId": userId
-        })
-        .populate('postedBy', 'name username profilePic')
-        .sort({ createdAt: -1 })
-        .limit(1000) // Get a large batch, then filter
-        
-        // Extract all comments made by this user from all posts
-        const allComments = []
-        posts.forEach(post => {
-            post.replies.forEach(reply => {
-                if (reply.userId.toString() === userId.toString()) {
-                    allComments.push({
-                        _id: reply._id,
-                        text: reply.text,
-                        userId: reply.userId,
-                        username: reply.username,
-                        userProfilePic: reply.userProfilePic,
-                        date: reply.date,
-                        parentReplyId: reply.parentReplyId,
-                        likes: reply.likes || [],
-                        post: {
-                            _id: post._id,
-                            text: post.text,
-                            img: post.img,
-                            postedBy: post.postedBy,
-                            createdAt: post.createdAt
-                        }
-                    })
-                }
-            })
-        })
-        
-        // Sort by date (newest first)
-        allComments.sort((a, b) => new Date(b.date) - new Date(a.date))
-        
-        // Apply pagination
-        const paginatedComments = allComments.slice(skipNum, skipNum + limitNum)
-        const hasMore = allComments.length > skipNum + limitNum
-        
-        res.status(200).json({
-            comments: paginatedComments,
-            total: allComments.length,
-            hasMore
-        })
+        const result = await getUserCommentsPaginated(user._id, { limit, skip })
+        res.status(200).json(result)
     } catch (error) {
         console.error('Error fetching user comments:', error)
         res.status(500).json({ error: error.message })
@@ -1786,13 +1664,12 @@ export const deleteComment = async(req,res) => {
             return res.status(404).json({error:"Post not found"})
         }
 
-        const reply = post.replies.id(replyId) 
+        const reply = await findCommentById(replyId, postId)
         
         if(!reply){
             return res.status(404).json({error:"Comment not found"})
         }
 
-        // Check permissions: user must be either post owner OR comment owner
         const isPostOwner = post.postedBy.toString() === userId.toString()
         const isCommentOwner = reply.userId && reply.userId.toString() === userId.toString()
 
@@ -1800,27 +1677,7 @@ export const deleteComment = async(req,res) => {
             return res.status(403).json({error:"You can only delete your own comments or comments on your posts"})
         }
 
-        // Helper function to recursively delete nested replies
-        const deleteNestedReplies = (parentReplyId) => {
-            const nestedReplies = post.replies.filter(r => 
-                r.parentReplyId && r.parentReplyId.toString() === parentReplyId.toString()
-            )
-            
-            nestedReplies.forEach(nestedReply => {
-                // Recursively delete nested replies
-                deleteNestedReplies(nestedReply._id)
-                // Remove the nested reply
-                post.replies.pull(nestedReply._id)
-            })
-        }
-
-        // Delete all nested replies first
-        deleteNestedReplies(replyId)
-
-        // Delete the comment itself
-        post.replies.pull(replyId)
-        
-        await post.save({ timestamps: false })
+        await deleteCommentTree(postId, replyId)
 
         res.status(200).json({
             message: "Comment deleted successfully",
@@ -1848,51 +1705,31 @@ export const LikeComent = async(req,res) => {
             return res.status(400).json({message:"no post found"})
         }
 
-     
-        const reply = post.replies.id(replyId) 
-        
-        if(!reply){
+        const toggled = await toggleCommentLike(postId, replyId, userId)
+        if (!toggled) {
             return res.status(400).json({message:"no comment found"})
         }
 
-        // Initialize likes array if it doesn't exist (for old comments created before likes feature)
-        if(!reply.likes) {
-            reply.likes = []
-        }
-      
-        // Check if user already liked this comment
-        const isLiked = reply.likes.includes(userId)
+        const { doc: reply, isLiked, likesCount } = toggled
 
-        if(isLiked){
-            // Unlike: remove userId from likes array
-            reply.likes.pull(userId)  
-        }else{
-            // Like: add userId to likes array
-            reply.likes.push(userId)  
-            
-            // Create notification for comment/reply owner when someone likes their comment or reply
-            // Don't notify if user is liking their own comment/reply
+        if (isLiked) {
             if (reply.userId && reply.userId.toString() !== userId.toString()) {
                 const { createNotification } = await import('./notification.js')
-                // Check if it's a reply (has parentReplyId) or a top-level comment
                 const isReply = reply.parentReplyId !== null && reply.parentReplyId !== undefined
                 createNotification(reply.userId, 'like', userId, {
                     postId: post._id,
                     commentText: reply.text,
-                    isReply: isReply // Pass flag to distinguish reply from comment
+                    isReply: isReply
                 }).catch(err => {
                     console.error('Error creating comment/reply like notification:', err)
                 })
             }
         }
 
-   
-        await post.save()
-
         res.status(200).json({
-            message: isLiked ? "comment unliked successfully" : "comment liked successfully",
-            likesCount: reply.likes.length,
-            isLiked: !isLiked
+            message: isLiked ? "comment liked successfully" : "comment unliked successfully",
+            likesCount,
+            isLiked
         })
 
     }

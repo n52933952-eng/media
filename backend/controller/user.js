@@ -19,6 +19,7 @@ import { getIO, getUserSelfRoomId } from '../socket/socket.js'
 import { getFollowGraphIdsForUser, attachFollowGraphToUser, isViewerFollowingFollowee } from '../services/followGraph.js'
 import { invalidateUserAuthCache } from '../services/userAuthCache.js'
 import { invalidateUserFeedCache } from '../services/feedCache.js'
+import { updateCommentDenormForUser, deleteCommentsByUser } from '../services/commentService.js'
 
 
 export const SignUp = async(req,res) => {
@@ -577,6 +578,7 @@ export const DeleteMyAccount = async (req, res) => {
     // Notifications & activities
     await Notification.deleteMany({ $or: [{ user: userId }, { from: userId }] })
     await Activity.deleteMany({ $or: [{ userId: userId }, { targetUser: userId }] })
+    await deleteCommentsByUser(userId)
 
     // Chess busy state
     await ChessBusy.deleteMany({ $or: [{ userId: userId }, { opponentId: userId }] })
@@ -644,6 +646,10 @@ export const UpdateUser = async(req,res) => {
           user = await user.save()
 
           try {
+            await updateCommentDenormForUser(userId, {
+              username: user.username,
+              profilePic: user.profilePic,
+            })
             await Post.updateMany(
               { 'replies.userId': userId },
               {
@@ -697,6 +703,10 @@ export const UpdateUser = async(req,res) => {
       
       if (profilePicChanged || usernameChanged) {
         try {
+          await updateCommentDenormForUser(userId, {
+            username: user.username,
+            profilePic: user.profilePic,
+          })
           await Post.updateMany(
             { "replies.userId": userId },
             {

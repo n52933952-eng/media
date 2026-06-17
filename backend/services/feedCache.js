@@ -3,8 +3,9 @@ import { getRedis, redisGet, redisSet } from './redis.js'
 const TTL_SEC = Number(process.env.FEED_CACHE_TTL_SEC || 45)
 
 const versionKey = (userId) => `feed:ver:${String(userId)}`
-const cacheKey = (userId, skip, limit, ver) =>
-  `feed:${String(userId)}:${ver}:${skip}:${limit}`
+/** pageKey: "0" for first page, cursor string, or legacy skip number. */
+const cacheKey = (userId, pageKey, limit, ver) =>
+  `feed:${String(userId)}:${ver}:${String(pageKey)}:${limit}`
 
 export async function getFeedCacheVersion(userId) {
   try {
@@ -16,20 +17,20 @@ export async function getFeedCacheVersion(userId) {
   }
 }
 
-export async function getCachedFeed(userId, skip, limit) {
+export async function getCachedFeed(userId, pageKey, limit) {
   try {
     const ver = await getFeedCacheVersion(userId)
-    const key = cacheKey(userId, skip, limit, ver)
+    const key = cacheKey(userId, pageKey, limit, ver)
     return redisGet(key)
   } catch {
     return null
   }
 }
 
-export async function setCachedFeed(userId, skip, limit, payload) {
+export async function setCachedFeed(userId, pageKey, limit, payload) {
   try {
     const ver = await getFeedCacheVersion(userId)
-    const key = cacheKey(userId, skip, limit, ver)
+    const key = cacheKey(userId, pageKey, limit, ver)
     await redisSet(key, payload, TTL_SEC)
   } catch {
     /* best-effort */
