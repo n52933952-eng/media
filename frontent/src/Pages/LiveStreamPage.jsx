@@ -50,7 +50,7 @@ const floatReactionUp = keyframes`
   100% { transform: translateY(-220px) scale(1); opacity: 0; }
 `;
 
-const FloatingReaction = ({ reaction }) => (
+const FloatingReaction = ({ reaction, emojiSize = 42 }) => (
   <Box
     position="absolute"
     bottom={0}
@@ -59,11 +59,11 @@ const FloatingReaction = ({ reaction }) => (
     style={{ transform: `translateX(${reaction.driftX}px)` }}
     zIndex={12}
   >
-    <Text fontSize="42px" lineHeight={1} userSelect="none">{reaction.emoji}</Text>
+    <Text fontSize={`${emojiSize}px`} lineHeight={1} userSelect="none">{reaction.emoji}</Text>
   </Box>
 );
 
-const FloatingMessage = ({ msg }) => (
+const FloatingMessage = ({ msg, fontSize = 'sm' }) => (
   <Box
     position="absolute"
     bottom={0}
@@ -83,8 +83,8 @@ const FloatingMessage = ({ msg }) => (
       gap={2}
       border="1px solid rgba(255,255,255,0.12)"
     >
-      <Text as="span" fontWeight="bold" color="yellow.300" fontSize="sm" noOfLines={1}>{msg.sender}</Text>
-      <Text as="span" color="white" fontSize="sm" noOfLines={2}>{msg.text}</Text>
+      <Text as="span" fontWeight="bold" color="yellow.300" fontSize={fontSize} noOfLines={1}>{msg.sender}</Text>
+      <Text as="span" color="white" fontSize={fontSize} noOfLines={2}>{msg.text}</Text>
     </Box>
   </Box>
 );
@@ -120,6 +120,7 @@ const LiveStreamPage = () => {
     liveRoomName,
     isMicMuted,
     toggleMicMute,
+    addLiveChatMessage,
   } = useLiveBroadcast();
 
   const metrics = useLiveScreenMetrics();
@@ -211,11 +212,12 @@ const LiveStreamPage = () => {
   }, [isBroadcaster, streamerId]);
 
   const addMessage = useCallback((sender, text) => {
+    addLiveChatMessage(sender, text);
     const id = ++floatIdCounter.current;
     setChatLog(prev => [...prev.slice(-100), { id, sender, text }]);
     setFloatingMsgs(prev => [...prev.slice(-5), { id, sender, text }]);
     setTimeout(() => setFloatingMsgs(prev => prev.filter(m => m.id !== id)), FLOAT_MSG_MS + 200);
-  }, []);
+  }, [addLiveChatMessage]);
 
   const addEmojiFloat = useCallback((emoji) => {
     const id = ++reactionIdCounter.current;
@@ -772,13 +774,15 @@ const LiveStreamPage = () => {
 
       <Box
         position="absolute"
-        bottom={`${INPUT_BAR_H + 36}px`}
+        bottom={`${INPUT_BAR_H + Math.round(36 * metrics.scale)}px`}
         left={0}
         pointerEvents="none"
         zIndex={15}
-        style={{ right: ui.floatArea.right }}
+        style={{ right: ui.floatArea.right, maxHeight: `${metrics.floatChatStackH}px` }}
       >
-        {floatingMsgs.map(m => <FloatingMessage key={m.id} msg={m} />)}
+        {floatingMsgs.map(m => (
+          <FloatingMessage key={m.id} msg={m} fontSize={metrics.scale >= 1 ? 'sm' : 'xs'} />
+        ))}
       </Box>
 
       <Box
@@ -786,14 +790,16 @@ const LiveStreamPage = () => {
         top="40%"
         left={0}
         right={0}
-        h="280px"
+        h={`${metrics.reactionAreaHeight}px`}
         display="flex"
         alignItems="flex-end"
         justifyContent="center"
         pointerEvents="none"
         zIndex={14}
       >
-        {floatingReactions.map(r => <FloatingReaction key={r.id} reaction={r} />)}
+        {floatingReactions.map(r => (
+          <FloatingReaction key={r.id} reaction={r} emojiSize={metrics.floatReactionEmoji} />
+        ))}
       </Box>
 
       {showLog && isLive && (

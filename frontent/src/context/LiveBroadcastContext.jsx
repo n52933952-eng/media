@@ -10,6 +10,11 @@ import { SocketContext } from './SocketContext';
 import { resignActiveGames } from '../utils/liveGameResign';
 import { liveBroadcastNav } from '../services/liveBroadcastNav';
 import { restoreCameraForViewers } from '../utils/liveBroadcastCamera';
+import {
+  canSendLiveChat,
+  createLiveChatBatchSink,
+  LIVE_CHAT_MAX_MESSAGES,
+} from '../utils/liveChatThrottle';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
 
@@ -37,6 +42,7 @@ export const LiveBroadcastProvider = ({ children }) => {
   const [hostPipVisible, setHostPipVisible] = useState(true);
   const [isMicMuted, setIsMicMuted] = useState(false);
   const [liveRoomName, setLiveRoomName] = useState('');
+  const [liveChatMessages, setLiveChatMessages] = useState([]);
 
   const roomRef = useRef(null);
   const roomNameRef = useRef('');
@@ -45,6 +51,42 @@ export const LiveBroadcastProvider = ({ children }) => {
   const onChatRef = useRef(null);
   const isSharingRef = useRef(false);
   const hostPreviewTrackRef = useRef(null);
+  const chatMsgIdRef = useRef(0);
+  const lastChatSendAtRef = useRef(0);
+  const flushIncomingChatRef = useRef(() => {});
+  const incomingChatBatchRef = useRef(createLiveChatBatchSink((items) => flushIncomingChatRef.current(items)));
+
+  const addLiveChatMessage = useCallback((sender, text) => {
+    const trimmed = String(text || '').trim();
+    if (!trimmed) return;
+    const id = `msg_${++chatMsgIdRef.current}_${Date.now()}`;
+    setLiveChatMessages((prev) => [...prev.slice(-(LIVE_CHAT_MAX_MESSAGES - 1)), {
+      id,
+      sender: String(sender || 'User'),
+      text: trimmed,
+    }]);
+  }, []);
+
+  useEffect(() => {
+    flushIncomingChatRef.current = (items) => {
+      if (!items?.length) return;
+      setLiveChatMessages((prev) => {
+        const next = [...prev];
+        for (const item of items) {
+          const id = `msg_${++chatMsgIdRef.current}_${Date.now()}`;
+          next.push({ id, sender: item.sender, text: item.text });
+        }
+        return next.slice(-LIVE_CHAT_MAX_MESSAGES);
+      });
+    };
+  }, []);
+
+  const clearLiveChatMessages = useCallback(() => {
+    chatMsgIdRef.current = 0;
+    lastChatSendAtRef.current = 0;
+    incomingChatBatchRef.current.clear();
+    setLiveChatMessages([]);
+  }, []);
 
   const syncLocalTrack = useCallback(() => {
     const room = roomRef.current;
@@ -108,7 +150,8 @@ export const LiveBroadcastProvider = ({ children }) => {
     setIsMinimized(false);
     setIsLiveControlsFocused(false);
     setViewerCount(0);
-  }, [stopAllPublishedTracks]);
+    clearLiveChatMessages();
+  }, [stopAllPublishedTracks, clearLiveChatMessages]);
 
   const ensureScreenShare = useCallback(async ({ preferCurrentTab = false } = {}) => {
     const room = roomRef.current;
@@ -283,7 +326,10 @@ export const LiveBroadcastProvider = ({ children }) => {
       room.on(RoomEvent.DataReceived, (payload) => {
         try {
           const msg = JSON.parse(new TextDecoder().decode(payload));
-          if (msg.type === 'chat') onChatRef.current?.(msg.sender, msg.text);
+          if (msg.type === 'chat' && msg.sender && msg.text) {
+            incomingChatBatchRef.current.push(msg.sender, msg.text);
+            onChatRef.current?.(msg.sender, msg.text);
+          }
         } catch (_) {}
       });
 
@@ -313,10 +359,14 @@ export const LiveBroadcastProvider = ({ children }) => {
   const sendChat = useCallback(async (text, senderName) => {
     const trimmed = String(text || '').trim();
     const room = roomRef.current;
-    if (!trimmed || !room) return;
+    if (!trimmed || !room) return false;
+    const now = Date.now();
+    if (!canSendLiveChat(lastChatSendAtRef.current, now)) return false;
     const msg = { type: 'chat', sender: senderName, text: trimmed };
     const encoded = new TextEncoder().encode(JSON.stringify(msg));
     await room.localParticipant.publishData(encoded, { reliable: true });
+    lastChatSendAtRef.current = now;
+    return true;
   }, []);
 
   const registerChatHandler = useCallback((fn) => {
@@ -383,6 +433,9 @@ export const LiveBroadcastProvider = ({ children }) => {
     toggleMicMute,
     sendChat,
     registerChatHandler,
+    liveChatMessages,
+    addLiveChatMessage,
+    clearLiveChatMessages,
   };
 
   return (

@@ -4,9 +4,11 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Box, Flex, Text, Button, keyframes } from '@chakra-ui/react';
+import { Box, Flex, Text, Button, IconButton, keyframes } from '@chakra-ui/react';
+import { ChatIcon } from '@chakra-ui/icons';
 import { useLocation } from 'react-router-dom';
 import { useLiveBroadcast } from '../context/LiveBroadcastContext';
+import LiveViewerChatModal from './LiveViewerChatModal';
 import { liveBroadcastNav } from '../services/liveBroadcastNav';
 import {
   clampMiniBarPosition,
@@ -27,7 +29,23 @@ const LiveStreamMiniBar = () => {
   const {
     isLive, isMinimized, isSharing, viewerCount, hostPipVisible,
     returnToLiveControls, endLive, showHostPip,
+    liveChatMessages,
   } = useLiveBroadcast();
+
+  const [chatOpen, setChatOpen] = useState(false);
+  const [seenChatCount, setSeenChatCount] = useState(0);
+  const unreadChat = Math.max(0, liveChatMessages.length - seenChatCount);
+
+  useEffect(() => {
+    if (chatOpen) setSeenChatCount(liveChatMessages.length);
+  }, [chatOpen, liveChatMessages.length]);
+
+  useEffect(() => {
+    if (!isLive) {
+      setChatOpen(false);
+      setSeenChatCount(0);
+    }
+  }, [isLive]);
 
   const onLivePage = location.pathname === '/live/broadcast';
   const isGamePage = GAME_PATH_RE.test(location.pathname);
@@ -211,6 +229,39 @@ const LiveStreamMiniBar = () => {
           </Text>
         </Box>
       </Flex>
+      <Box position="relative" flexShrink={0} data-live-bar-ctrl>
+        <IconButton
+          aria-label="Live chat"
+          icon={<ChatIcon />}
+          colorScheme="red"
+          variant="solid"
+          borderRadius="2xl"
+          minH="52px"
+          minW="52px"
+          onClick={(e) => { e.stopPropagation(); setChatOpen(true); }}
+        />
+        {unreadChat > 0 ? (
+          <Box
+            position="absolute"
+            top="-4px"
+            right="-4px"
+            minW="18px"
+            h="18px"
+            px={1}
+            borderRadius="full"
+            bg="white"
+            color="red.600"
+            fontSize="10px"
+            fontWeight="bold"
+            display="flex"
+            alignItems="center"
+            justifyContent="center"
+            pointerEvents="none"
+          >
+            {unreadChat > 9 ? '9+' : unreadChat}
+          </Box>
+        ) : null}
+      </Box>
       <Button
         data-live-bar-ctrl
         colorScheme="red"
@@ -223,6 +274,7 @@ const LiveStreamMiniBar = () => {
       >
         End
       </Button>
+      <LiveViewerChatModal isOpen={chatOpen} onClose={() => setChatOpen(false)} />
     </Flex>
   );
 };

@@ -10,6 +10,10 @@ import{useNavigate} from 'react-router-dom'
 import { formatDistanceToNow, format } from 'date-fns'
 import{UserContext} from '../context/UserContext'
 import{PostContext} from '../context/PostContext'
+import { SocketContext } from '../context/SocketContext'
+import { FiMail } from 'react-icons/fi'
+import { followIdToString } from '../utils/postUtils.js'
+import { isUserInOnlineList } from '../utils/presenceUtils.js'
 import AddContributorModal from './AddContributorModal'
 import ManageContributorsModal from './ManageContributorsModal'
 import EditPost from './EditPost'
@@ -123,7 +127,8 @@ const showToast = useShowToast()
   }, [post?.isCollaborative, post?.contributors, post?._id]) // Added post._id to force re-run
 
   const{user}=useContext(UserContext)
-  const{followPost,setFollowPost}=useContext(PostContext)
+  const{followPost,setFollowPost,hideFeedPostFromFeed,hideFeedSourceFromFeed}=useContext(PostContext)
+  const { socket, onlineUser } = useContext(SocketContext) || {}
   const { isOpen: isAddContributorOpen, onOpen: onAddContributorOpen, onClose: onAddContributorClose } = useDisclosure()
   const { isOpen: isManageContributorsOpen, onOpen: onManageContributorsOpen, onClose: onManageContributorsClose } = useDisclosure()
   const { isOpen: isEditPostOpen, onOpen: onEditPostOpen, onClose: onEditPostClose } = useDisclosure()
@@ -840,6 +845,156 @@ const showToast = useShowToast()
       navigate(`/${postedBy?.username}`)
     }
   }
+
+  const postedById =
+    (typeof post.postedBy === 'string' ? post.postedBy : post.postedBy?._id)?.toString?.() ??
+    String(typeof post.postedBy === 'string' ? post.postedBy : post.postedBy?._id ?? '')
+  const currentUserId = user?._id?.toString?.() ?? (user?._id ? String(user._id) : '')
+  const isOwner = !!postedById && !!currentUserId && postedById === currentUserId
+  const isContributor = post.contributors?.some((c) => {
+    const cId = (typeof c === 'string' ? c : c?._id)?.toString?.() ?? String(typeof c === 'string' ? c : c?._id ?? '')
+    return !!cId && !!currentUserId && cId === currentUserId
+  })
+
+  const isMyChannelFeedCard =
+    !!post?.channelAddedBy && String(post.channelAddedBy) === String(user?._id)
+
+  const canHideRegularUserPost =
+    showFeedExtras &&
+    !!user &&
+    !isOwner &&
+    !isChannelPost &&
+    !isFootballPost &&
+    !isWeatherPost &&
+    !isChessPost &&
+    !isCardPost &&
+    !post?.isLive &&
+    !!post?._id &&
+    /^[0-9a-fA-F]{24}$/.test(String(post._id))
+
+  const showFeedPostMenu =
+    showFeedExtras &&
+    !!user &&
+    !isChessPost &&
+    !isCardPost &&
+    !post?.isLive &&
+    !isFootballPost &&
+    !isOwner &&
+    (canHideRegularUserPost || isWeatherPost || isMyChannelFeedCard)
+
+  const canMessagePostOwner =
+    showFeedExtras &&
+    !!user &&
+    !isOwner &&
+    !isChannelPost &&
+    !isFootballPost &&
+    !isWeatherPost &&
+    !isChessPost &&
+    !isCardPost &&
+    !post?.isLive &&
+    !!postedById &&
+    /^[0-9a-fA-F]{24}$/.test(postedById)
+
+  const isFollowedAuthor = useMemo(() => {
+    if (!showFeedExtras || !user?.following?.length || !postedById || isOwner) return false
+    return user.following.some((entry) => followIdToString(entry) === postedById)
+  }, [showFeedExtras, user?.following, postedById, isOwner])
+
+  const showAuthorPresenceDot =
+    isFollowedAuthor &&
+    !isChannelPost &&
+    !isFootballPost &&
+    !isWeatherPost &&
+    !isChessPost &&
+    !isCardPost &&
+    !post?.isLive
+
+  const authorIsOnline = showAuthorPresenceDot && isUserInOnlineList(onlineUser, postedById)
+
+  useEffect(() => {
+    if (!socket || !showAuthorPresenceDot || !postedById) return
+    socket.emit('presenceSubscribe', { userIds: [postedById] })
+  }, [socket, showAuthorPresenceDot, postedById])
+
+  const onMessagePostOwner = (e) => {
+    e?.preventDefault?.()
+    e?.stopPropagation?.()
+    if (!canMessagePostOwner) return
+    const author = typeof post.postedBy === 'object' && post.postedBy ? post.postedBy : postedBy
+    navigate('/messages', {
+      state: {
+        openDmUserId: postedById,
+        openDmUser: {
+          _id: postedById,
+          name: author?.name || author?.username || 'User',
+          username: author?.username,
+          profilePic: author?.profilePic,
+        },
+      },
+    })
+  }
+
+  const hideRegularPostFromFeed = async () => {
+    const isSelfContributor = !!post.isCollaborative && !!isContributor && !isOwner && !!currentUserId
+    if (isSelfContributor) {
+      if (!window.confirm('Leave this collaborative post? It will be removed from your feed.')) return
+      try {
+        const res = await fetch(
+          `${apiBaseUrl()}/api/post/collaborative/${String(post._id)}/contributor/${currentUserId}`,
+          { method: 'DELETE', credentials: 'include' },
+        )
+        if (!res.ok) throw new Error('Failed to leave post')
+        setFollowPost((prev) => prev.filter((p) => String(p._id) !== String(post._id)))
+        onDelete?.(post._id)
+        showToast('Success', 'Removed from feed', 'success')
+      } catch (e) {
+        showToast('Error', e?.message || 'Failed', 'error')
+      }
+      return
+    }
+    if (!window.confirm('Not interested? This post will be hidden from your feed.')) return
+    try {
+      await hideFeedPostFromFeed(String(post._id))
+      onDelete?.(post._id)
+      showToast('Success', 'Removed from feed', 'success')
+    } catch (e) {
+      showToast('Error', e?.message || 'Failed', 'error')
+    }
+  }
+
+  const hideChannelOrWeatherFromFeed = async () => {
+    if (!window.confirm('Remove this from your feed?')) return
+    try {
+      if (isMyChannelFeedCard && post?._id) {
+        const res = await fetch(`${apiBaseUrl()}/api/post/${String(post._id)}`, {
+          method: 'DELETE',
+          credentials: 'include',
+        })
+        if (!res.ok) throw new Error('Failed to delete')
+        setFollowPost((prev) => prev.filter((p) => String(p._id) !== String(post._id)))
+        onDelete?.(post._id)
+      } else {
+        const uname = post?.postedBy?.username
+        if (uname === 'Football' || uname === 'Weather') {
+          hideFeedSourceFromFeed(String(uname))
+        } else {
+          await hideFeedPostFromFeed(String(post._id))
+        }
+        onDelete?.(post._id)
+      }
+      showToast('Success', 'Removed from feed', 'success')
+    } catch (e) {
+      showToast('Error', e?.message || 'Failed', 'error')
+    }
+  }
+
+  const handleFeedPostMenuPress = () => {
+    if (isWeatherPost || isMyChannelFeedCard) {
+      hideChannelOrWeatherFromFeed()
+      return
+    }
+    if (canHideRegularUserPost) hideRegularPostFromFeed()
+  }
   
   const postContent = (
     <Flex gap={3} mb="4" py={5} w="100%" maxW="100%" px={{ base: 3, md: 0 }}>
@@ -852,14 +1007,30 @@ const showToast = useShowToast()
                 <FootballIcon size="48px" />
               </Box>
             ) : (
-            <Avatar 
-              size="md" 
-              src={postedBy?.profilePic} 
-              name={postedBy?.name}
-              loading="lazy"
+            <Box position="relative" display="inline-block">
+              <Avatar 
+                size="md" 
+                src={postedBy?.profilePic} 
+                name={postedBy?.name}
+                loading="lazy"
                 cursor="pointer"
                 onClick={handleAvatarOrNameClick}
               />
+              {showAuthorPresenceDot ? (
+                <Box
+                  position="absolute"
+                  bottom="2px"
+                  left="2px"
+                  w="14px"
+                  h="14px"
+                  borderRadius="full"
+                  bg={authorIsOnline ? 'green.400' : 'gray.400'}
+                  border="2px solid"
+                  borderColor={cardBg}
+                  title={authorIsOnline ? 'Online' : 'Offline'}
+                />
+              ) : null}
+            </Box>
             )}
            
             <Box w="1px" h="full" bg="gray.light" my="2"></Box>
@@ -916,6 +1087,35 @@ const showToast = useShowToast()
     
     
      <Flex alignItems="center" gap={2}>
+        {canMessagePostOwner ? (
+          <Tooltip label="Message" hasArrow>
+            <IconButton
+              aria-label="Message author"
+              icon={<FiMail />}
+              size="sm"
+              variant="ghost"
+              colorScheme="blue"
+              onClick={onMessagePostOwner}
+            />
+          </Tooltip>
+        ) : null}
+        {showFeedPostMenu ? (
+          <Menu>
+            <MenuButton
+              as={IconButton}
+              aria-label="Post options"
+              icon={<HiOutlineDotsHorizontal />}
+              size="sm"
+              variant="ghost"
+              onClick={(e) => e.stopPropagation()}
+            />
+            <MenuList onClick={(e) => e.stopPropagation()}>
+              <MenuItem onClick={handleFeedPostMenuPress}>
+                {isWeatherPost || isMyChannelFeedCard ? 'Remove from feed' : 'Not interested'}
+              </MenuItem>
+            </MenuList>
+          </Menu>
+        ) : null}
         {/* Timestamp: relative on top, Edited on second line if needed */}
         {(() => {
           const createdAt = post?.createdAt ? new Date(post.createdAt) : null

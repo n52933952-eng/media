@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useContext, useRef, useCallback, useMemo } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useLocation } from 'react-router-dom'
 import {
   Box,
   Flex,
@@ -202,6 +202,7 @@ const SharedPostPreview = ({ postId, onOpen, onMessageClick }) => {
 
 const MessagesPage = () => {
   const navigate = useNavigate()
+  const location = useLocation()
   const { user } = useContext(UserContext)
   const socketContext = useContext(SocketContext)
   const { socket, onlineUser, setSelectedConversationId } = socketContext || {}
@@ -1784,7 +1785,8 @@ const MessagesPage = () => {
       }
     } else {
       // Create a temporary conversation object
-      const recipientUser = followedUsers.find((u) => u._id === recipientId)
+      const recipientUser = followedUsers.find((u) => idStr(u._id) === idStr(recipientId))
+        || (idStr(location.state?.openDmUserId) === idStr(recipientId) ? location.state.openDmUser : null)
       if (recipientUser) {
         // Reset refs to force useEffect to trigger
         currentConversationIdRef.current = null
@@ -1805,6 +1807,15 @@ const MessagesPage = () => {
       }
     }
   }
+
+  // Open DM when navigating from feed post message icon (Post.jsx → /messages with state)
+  useEffect(() => {
+    const targetId = idStr(location.state?.openDmUserId)
+    if (!targetId || !user?._id) return
+    startConversation(targetId)
+    navigate(location.pathname, { replace: true, state: {} })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.state?.openDmUserId, user?._id])
 
   // Handle reaction toggle
   const handleReaction = async (messageId, emoji) => {

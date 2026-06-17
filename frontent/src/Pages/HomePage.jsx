@@ -27,6 +27,7 @@ import { isFollowingUserId } from '../utils/postUtils.js'
 const HomePage = () => {
   const location = useLocation()
   const{followPost,setFollowPost}=useContext(PostContext)
+  const filterFeedPosts = useContext(PostContext)?.filterFeedPosts ?? ((list) => list)
   const {socket, liveStreams} = useContext(SocketContext) || {}
   const {user} = useContext(UserContext) || {}
   const { isLive } = useLiveBroadcast()
@@ -88,10 +89,10 @@ const HomePage = () => {
             return dateB - dateA // Newest first
           })
           
-          // Update ref with new count
-          followPostCountRef.current = dedupedGame.length
+          const filtered = filterFeedPosts(dedupedGame)
+          followPostCountRef.current = filtered.length
           
-          return dedupedGame
+          return filtered
         })
         
         // Restore scroll position after state update to prevent page jumping
@@ -103,7 +104,7 @@ const HomePage = () => {
       // Silently fail - don't show error for background fetch
       console.error('Error fetching user posts:', error)
     }
-  }, [setFollowPost])
+  }, [setFollowPost, filterFeedPosts])
 
   const getFeedPost = useCallback(async(loadMore = false, options = {}) => {
     const silent = options.silent === true
@@ -179,7 +180,7 @@ const HomePage = () => {
             
             const updated = dedupeGamePostsForFeed([...prev, ...newPosts])
             followPostCountRef.current = updated.length
-            return updated
+            return filterFeedPosts(updated)
           })
         } else {
           const uniquePosts = batch.filter((post, index, self) => 
@@ -187,7 +188,7 @@ const HomePage = () => {
           )
           const dedupedPosts = dedupeGamePostsForFeed(uniquePosts)
           console.log(`📥 [getFeedPost] Initial load: received ${batch.length} posts, ${dedupedPosts.length} after dedupe`)
-          setFollowPost(dedupedPosts)
+          setFollowPost(filterFeedPosts(dedupedPosts))
           followPostCountRef.current = dedupedPosts.length
         }
         
@@ -205,7 +206,7 @@ const HomePage = () => {
       setLoadingMore(false)
       isLoadingRef.current = false
     }
-  }, [showToast, setFollowPost])
+  }, [showToast, setFollowPost, filterFeedPosts])
 
   // Same as mobile FeedScreen: when user returns to the tab, refresh feed for latest Football/Weather posts
   useEffect(() => {
@@ -382,10 +383,11 @@ const HomePage = () => {
         })
         
         const dedupedFeed = dedupeGamePostsForFeed(updatedFeed)
-        followPostCountRef.current = dedupedFeed.length
+        const filtered = filterFeedPosts(dedupedFeed)
+        followPostCountRef.current = filtered.length
         
         console.log(`✅ [HomePage] Added new post to feed (maintained 3 newest per user rule):`, newPost._id)
-        return dedupedFeed
+        return filtered
       })
     }
 
@@ -527,7 +529,7 @@ const HomePage = () => {
       socket.off('livekit:streamStarted', handleStreamStarted)
       socket.off('livekit:streamEnded',   handleStreamEnded)
     }
-  }, [socket, setFollowPost, getFeedPost, user, myUserId, isLive])
+  }, [socket, setFollowPost, getFeedPost, user, myUserId, isLive, filterFeedPosts])
 
  
 
