@@ -7,7 +7,7 @@ import { deleteMediaAsset, isManagedMediaUrl } from './mediaStorage.js'
 
 const DAY_MS = 24 * 60 * 60 * 1000
 
-const NOTIFICATION_RETENTION_DAYS = Math.max(
+export const NOTIFICATION_RETENTION_DAYS = Math.max(
   1,
   parseInt(process.env.NOTIFICATION_RETENTION_DAYS || '14', 10) || 14,
 )

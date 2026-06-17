@@ -2,6 +2,12 @@ import Notification from '../models/notification.js'
 import User from '../models/user.js'
 import Post from '../models/post.js'
 import { getIO, getRecipientSockedId } from '../socket/socket.js'
+import {
+    decodeNotificationCursor,
+    encodeNotificationCursor,
+    NOTIFICATION_PAGE_SIZE,
+} from '../services/notificationCursor.js'
+import { NOTIFICATION_RETENTION_DAYS } from '../services/dataRetentionCleanup.js'
 import { 
     sendLikeNotification, 
     sendCommentNotification, 
@@ -207,34 +213,69 @@ export const createNotification = async (userId, type, fromUserId, options = {})
     }
 }
 
-// Get all notifications for a user
+const NOTIFICATION_RETENTION_MS = NOTIFICATION_RETENTION_DAYS * 24 * 60 * 60 * 1000
+
+function notificationRetentionCutoff() {
+    return new Date(Date.now() - NOTIFICATION_RETENTION_MS)
+}
+
+const notificationPopulate = [
+    { path: 'from', select: 'username name profilePic' },
+    {
+        path: 'post',
+        select: 'text img postedBy',
+        populate: { path: 'postedBy', select: 'username' },
+    },
+]
+
+// Get notifications for a user (cursor-paginated; retention window matches DB cleanup)
 export const getNotifications = async (req, res) => {
     try {
         const userId = req.user._id
-        
-        // Get unread count
-        const unreadCount = await Notification.countDocuments({ 
-            user: userId, 
-            read: false 
+        const limit = Math.min(
+            50,
+            Math.max(1, parseInt(req.query.limit, 10) || NOTIFICATION_PAGE_SIZE),
+        )
+        const cursor = decodeNotificationCursor(req.query.cursor)
+        const retentionCutoff = notificationRetentionCutoff()
+
+        const baseFilter = {
+            user: userId,
+            createdAt: { $gte: retentionCutoff },
+        }
+
+        const unreadCount = await Notification.countDocuments({
+            ...baseFilter,
+            read: false,
         })
 
-        // Get notifications (most recent first)
-        const notifications = await Notification.find({ user: userId })
-            .populate('from', 'username name profilePic')
-            .populate({
-                path: 'post',
-                select: 'text img postedBy',
-                populate: {
-                    path: 'postedBy',
-                    select: 'username'
-                }
-            })
-            .sort({ createdAt: -1 })
-            .limit(50) // Limit to 50 most recent
+        const pageFilter = { ...baseFilter }
+        if (cursor) {
+            pageFilter.$or = [
+                { createdAt: { $lt: cursor.createdAt } },
+                { createdAt: cursor.createdAt, _id: { $lt: cursor.id } },
+            ]
+        }
+
+        const rows = await Notification.find(pageFilter)
+            .populate(notificationPopulate)
+            .sort({ createdAt: -1, _id: -1 })
+            .limit(limit + 1)
+            .lean()
+
+        const hasMore = rows.length > limit
+        const notifications = hasMore ? rows.slice(0, limit) : rows
+        const last = notifications[notifications.length - 1]
+        const nextCursor = hasMore && last
+            ? encodeNotificationCursor({ createdAt: last.createdAt, id: last._id })
+            : null
 
         res.status(200).json({
             notifications,
-            unreadCount
+            unreadCount,
+            hasMore,
+            nextCursor,
+            retentionDays: NOTIFICATION_RETENTION_DAYS,
         })
     } catch (error) {
         console.error('Error fetching notifications:', error)

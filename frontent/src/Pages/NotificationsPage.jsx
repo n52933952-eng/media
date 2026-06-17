@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useContext } from 'react'
+import React, { useState, useEffect, useContext, useRef } from 'react'
 import { Box, Container, Heading, Text, VStack, HStack, Avatar, Flex, Button, Spinner, useColorModeValue, Badge, IconButton } from '@chakra-ui/react'
 import { Link, useNavigate } from 'react-router-dom'
 import { formatDistanceToNow } from 'date-fns'
@@ -15,34 +15,92 @@ const NotificationsPage = () => {
     
     const [notifications, setNotifications] = useState([])
     const [loading, setLoading] = useState(true)
+    const [loadingMore, setLoadingMore] = useState(false)
+    const [hasMore, setHasMore] = useState(true)
+    const notifCursorRef = useRef(null)
+    const isFetchingRef = useRef(false)
+    const notificationsRef = useRef([])
+    const hasMoreRef = useRef(true)
+    const NOTIFICATION_PAGE_LIMIT = 25
     const { socket, notificationCount, setNotificationCount } = useContext(SocketContext) || {}
     const { user } = useContext(UserContext)
     const navigate = useNavigate()
 
-    // Fetch notifications
-    useEffect(() => {
-        const fetchNotifications = async () => {
-            try {
-                const baseUrl = import.meta.env.PROD ? window.location.origin : "http://localhost:5000"
-                const res = await fetch(`${baseUrl}/api/notification`, {
-                    credentials: 'include'
-                })
-                const data = await res.json()
-                if (res.ok) {
-                    setNotifications(data.notifications || [])
-                    // Update notification count
-                    if (setNotificationCount) {
-                        setNotificationCount(data.unreadCount || 0)
-                    }
+    notificationsRef.current = notifications
+    hasMoreRef.current = hasMore
+
+    const fetchNotifications = async (loadMore = false) => {
+        if (isFetchingRef.current) return
+        if (loadMore && (!hasMoreRef.current || loadingMore)) return
+        if (loadMore && notificationsRef.current.length === 0) return
+
+        isFetchingRef.current = true
+
+        try {
+            const baseUrl = import.meta.env.PROD ? window.location.origin : "http://localhost:5000"
+            let url = `${baseUrl}/api/notification?limit=${NOTIFICATION_PAGE_LIMIT}`
+            if (loadMore) {
+                const token = notifCursorRef.current
+                if (!token) {
+                    isFetchingRef.current = false
+                    setLoadingMore(false)
+                    return
                 }
-            } catch (error) {
-                console.error('Error fetching notifications:', error)
-            } finally {
+                url += `&cursor=${encodeURIComponent(token)}`
+            } else {
+                notifCursorRef.current = null
+            }
+
+            const res = await fetch(url, { credentials: 'include' })
+            const data = await res.json()
+            if (res.ok) {
+                const page = data.notifications || []
+                const responseHasMore = data.hasMore === true
+
+                if (data.nextCursor) {
+                    notifCursorRef.current = data.nextCursor
+                } else {
+                    notifCursorRef.current = null
+                }
+
+                if (loadMore) {
+                    setNotifications(prev => {
+                        const seen = new Set(prev.map(n => n._id))
+                        const merged = [...prev]
+                        for (const n of page) {
+                            if (n?._id && !seen.has(n._id)) {
+                                seen.add(n._id)
+                                merged.push(n)
+                            }
+                        }
+                        return merged
+                    })
+                } else {
+                    setNotifications(page)
+                }
+
+                setHasMore(responseHasMore)
+
+                if (setNotificationCount && typeof data.unreadCount === 'number') {
+                    setNotificationCount(data.unreadCount)
+                }
+            }
+        } catch (error) {
+            console.error('Error fetching notifications:', error)
+        } finally {
+            isFetchingRef.current = false
+            if (loadMore) {
+                setLoadingMore(false)
+            } else {
                 setLoading(false)
             }
         }
-        fetchNotifications()
-    }, [setNotificationCount])
+    }
+
+    useEffect(() => {
+        fetchNotifications(false)
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [])
 
     // Listen for new notifications via socket
     useEffect(() => {
@@ -318,6 +376,21 @@ const NotificationsPage = () => {
                                 </HStack>
                             </Box>
                         ))
+                    )}
+                    {!loading && hasMore && notifications.length > 0 && (
+                        <Flex justify="center" py={4}>
+                            <Button
+                                size="sm"
+                                variant="outline"
+                                isLoading={loadingMore}
+                                onClick={() => {
+                                    setLoadingMore(true)
+                                    fetchNotifications(true)
+                                }}
+                            >
+                                Load more
+                            </Button>
+                        </Flex>
                     )}
                 </VStack>
             </Container>
