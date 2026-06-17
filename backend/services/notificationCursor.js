@@ -1,6 +1,6 @@
 export const NOTIFICATION_PAGE_SIZE = Math.min(
   50,
-  Math.max(10, parseInt(process.env.NOTIFICATION_PAGE_SIZE || '25', 10) || 25),
+  Math.max(10, parseInt(process.env.NOTIFICATION_PAGE_SIZE || '12', 10) || 12),
 )
 
 export function encodeNotificationCursor({ createdAt, id }) {

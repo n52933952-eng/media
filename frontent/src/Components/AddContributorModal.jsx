@@ -21,6 +21,7 @@ import {
 } from '@chakra-ui/react'
 import { UserContext } from '../context/UserContext'
 import useShowToast from '../hooks/useShowToast'
+import { parsePostFromApiResponse, postDetailApiUrl } from '../utils/postUtils.js'
 
 const AddContributorModal = ({ isOpen, onClose, post, onContributorAdded }) => {
   const [searchQuery, setSearchQuery] = useState('')
@@ -290,14 +291,12 @@ const AddContributorModal = ({ isOpen, onClose, post, onContributorAdded }) => {
           // Fallback: Fetch updated post if not in response
           try {
             console.log('🔵 [AddContributorModal] Fetching updated post from API...')
-            const postRes = await fetch(
-              `${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/post/getPost/${post._id}`,
-              { credentials: 'include' }
-            )
+            const postRes = await fetch(postDetailApiUrl(post._id), { credentials: 'include' })
             const postData = await postRes.json()
             
-            if (postRes.ok && postData.post) {
-              console.log('✅ [AddContributorModal] Fetched updated post, contributors:', postData.post.contributors?.length)
+            const fetchedPost = parsePostFromApiResponse(postData)
+            if (postRes.ok && fetchedPost) {
+              console.log('✅ [AddContributorModal] Fetched updated post, contributors:', fetchedPost.contributors?.length)
               
               // Show success toast
               showToast(
@@ -308,7 +307,7 @@ const AddContributorModal = ({ isOpen, onClose, post, onContributorAdded }) => {
               
               // Call callback with updated post data
               if (onContributorAdded) {
-                onContributorAdded(postData.post)
+                onContributorAdded(fetchedPost)
               }
               
               // Close modal and reset

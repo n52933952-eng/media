@@ -28,6 +28,7 @@ import useShowToast from '../hooks/useShowToast.js'
 
 
 import { isChessFeedPost, isGoFishFeedPost } from '../utils/gameFeedPostUtils.js'
+import { getReplyCount, withReplyCountDelta } from '../utils/postUtils.js'
 
 const Actions = ({ post, showFeedExtras = true }) => {
 	const isEphemeralGamePost = isChessFeedPost(post) || isGoFishFeedPost(post)
@@ -326,12 +327,12 @@ const Actions = ({ post, showFeedExtras = true }) => {
 	 if(res.ok){
 		const updatedReply = followPost.map((p) => {
 			if(p._id === post._id){
-				// Ensure the new reply has likes array initialized
 				const replyWithLikes = {
 					...data,
 					likes: data.likes || []
 				}
-				return {...p,replies:[...p.replies,replyWithLikes]}
+				const replies = Array.isArray(p.replies) ? [...p.replies, replyWithLikes] : [replyWithLikes]
+				return { ...withReplyCountDelta(p, 1), replies }
 			}
 			return p 
 		})
@@ -444,7 +445,7 @@ return (
 
 			<Flex gap={2} alignItems={"center"}>
 				<Text color={"gray.light"} fontSize='sm'>
-				{post?.replies?.length} Comment
+				{getReplyCount(post)} Comment
 				</Text>
 				<Box w={0.5} h={0.5} borderRadius={"full"} bg={"gray.light"}></Box>
 				<Text color={"gray.light"} fontSize='sm'>

@@ -7,12 +7,7 @@ import { formatDistanceToNow, isValid, parseISO } from 'date-fns'
 import { CloseIcon } from '@chakra-ui/icons'
 import API_BASE_URL from '../config/api'
 
-/** Normalize a following entry (ObjectId, string, or { _id }) to string id */
-function followIdToString(f) {
-    if (f == null) return ''
-    if (typeof f === 'object' && f._id != null) return String(f._id)
-    return String(f)
-}
+import { followIdToString } from '../utils/postUtils.js'
 
 /** Normalize API/socket createdAt (ISO string, ms, Date, or Mongo-style { $date }) for relative labels */
 function parseActivityCreatedAt(value) {

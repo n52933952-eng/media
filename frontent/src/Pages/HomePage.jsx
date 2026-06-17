@@ -20,6 +20,7 @@ import {
   mergeGameFeedPostData,
   isChessFeedPost,
 } from '../utils/gameFeedPostUtils.js'
+import { isFollowingUserId } from '../utils/postUtils.js'
 
 
 
@@ -48,8 +49,8 @@ const HomePage = () => {
   const isLoadingRef = useRef(false) // Prevent duplicate requests
   const hasLoadedRef = useRef(false) // Track if initial load happened
   const followPostCountRef = useRef(0) // Total posts in UI (socket / follow inserts)
-  /** Matches backend `getFeedPost`: `skip` indexes `feedNormalPosts` only (excludes pinned Football/Weather/channels on page 1). */
-  const normalFeedOffsetRef = useRef(0)
+  const feedCursorRef = useRef(null)
+  const footballUserIdRef = useRef(null)
 
 
 
@@ -118,13 +119,28 @@ const HomePage = () => {
     }
     
     try{
-      // Backend: skip=0 returns pinned + up to 12 normal; skip>0 slices feedNormalPosts only.
-      // Do NOT use total UI post count as skip (would skip normal rows when pinned exist).
-      const skip = loadMore ? normalFeedOffsetRef.current : 0
+      const limit = 10
+      let url = `${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/post/feed/feedpost?limit=${limit}`
+
+      if (loadMore) {
+        const token = feedCursorRef.current
+        if (!token) {
+          isLoadingRef.current = false
+          setLoadingMore(false)
+          return
+        }
+        if (token.startsWith('skip:')) {
+          url += `&skip=${encodeURIComponent(token.slice(5))}`
+        } else {
+          url += `&cursor=${encodeURIComponent(token)}`
+        }
+      } else {
+        feedCursorRef.current = null
+      }
+
+      console.log(`📥 [getFeedPost] Fetching posts: loadMore=${loadMore}, cursor=${feedCursorRef.current || 'none'}`)
       
-      console.log(`📥 [getFeedPost] Fetching posts: loadMore=${loadMore}, skip=${skip}, normalOffset=${normalFeedOffsetRef.current}`)
-      
-      const res = await fetch(`${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/post/feed/feedpost?limit=10&skip=${skip}`,{
+      const res = await fetch(url, {
         credentials:"include",
       })
 
@@ -136,19 +152,24 @@ const HomePage = () => {
       }
 
       if(res.ok){
+        const batch = Array.isArray(data.posts) ? data.posts : []
+        const responseHasMore = data.hasMore !== undefined ? data.hasMore : batch.length === limit
+
+        if (data.nextCursor != null && String(data.nextCursor).trim() !== '') {
+          feedCursorRef.current = String(data.nextCursor)
+        } else if (responseHasMore && typeof data.nextSkip === 'number') {
+          feedCursorRef.current = `skip:${data.nextSkip}`
+        } else {
+          feedCursorRef.current = null
+        }
+
         if (loadMore) {
-          const batch = Array.isArray(data.posts) ? data.posts : []
-          // Advance normal-feed cursor by what the server returned (page 2+ is normal-only)
-          if (batch.length > 0) {
-            normalFeedOffsetRef.current += batch.length
-          }
           setFollowPost(prev => {
             const existingIds = new Set(prev.map(p => p._id?.toString()))
             const newPosts = batch.filter(p => !existingIds.has(p._id?.toString()))
             
             console.log(`📥 [getFeedPost] LoadMore: received ${batch.length} posts, ${newPosts.length} new posts, current feed has ${prev.length} posts`)
             
-            // All duplicates (e.g. already inserted via socket): keep paging if server says hasMore
             if (newPosts.length === 0) {
               if (batch.length === 0) {
                 setHasMore(false)
@@ -161,24 +182,17 @@ const HomePage = () => {
             return updated
           })
         } else {
-          // Initial load: Remove duplicates from the response itself (in case backend returns duplicates)
-          const posts = data.posts || []
-          const uniquePosts = posts.filter((post, index, self) => 
+          const uniquePosts = batch.filter((post, index, self) => 
             index === self.findIndex(p => p._id?.toString() === post._id?.toString())
           )
           const dedupedPosts = dedupeGamePostsForFeed(uniquePosts)
-          console.log(`📥 [getFeedPost] Initial load: received ${posts.length} posts, ${dedupedPosts.length} after dedupe`)
+          console.log(`📥 [getFeedPost] Initial load: received ${batch.length} posts, ${dedupedPosts.length} after dedupe`)
           setFollowPost(dedupedPosts)
           followPostCountRef.current = dedupedPosts.length
-          // Page 1 includes up to 12 normal posts from feedNormalPosts; totalCount is full normal list length
-          const totalNormal = Number(data.totalCount)
-          const safeTotal = Number.isFinite(totalNormal) ? totalNormal : 0
-          normalFeedOffsetRef.current = Math.min(12, safeTotal)
         }
         
-        const hasMoreValue = data.hasMore !== undefined ? data.hasMore : false
-        console.log(`📥 [getFeedPost] Setting hasMore to: ${hasMoreValue}, totalCount: ${data.totalCount || 'N/A'}, normalOffset: ${normalFeedOffsetRef.current}`)
-        setHasMore(hasMoreValue)
+        console.log(`📥 [getFeedPost] Setting hasMore to: ${responseHasMore}, cursor: ${feedCursorRef.current || 'none'}`)
+        setHasMore(responseHasMore)
       }
 
     }
@@ -191,7 +205,7 @@ const HomePage = () => {
       setLoadingMore(false)
       isLoadingRef.current = false
     }
-  }, [showToast, setFollowPost]) // Removed followPost.length to prevent unnecessary re-renders
+  }, [showToast, setFollowPost])
 
   // Same as mobile FeedScreen: when user returns to the tab, refresh feed for latest Football/Weather posts
   useEffect(() => {
@@ -213,6 +227,19 @@ const HomePage = () => {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []) // Only run once on mount
+
+  // Cache Football account id for follow checks (following[] is id list, not { username })
+  useEffect(() => {
+    if (footballUserIdRef.current) return
+    const base = import.meta.env.PROD ? window.location.origin : 'http://localhost:5000'
+    fetch(`${base}/api/user/getUserPro/Football`, { credentials: 'include' })
+      .then((r) => r.json())
+      .then((data) => {
+        const id = data?._id || data?.user?._id
+        if (id) footballUserIdRef.current = String(id)
+      })
+      .catch(() => {})
+  }, [])
 
   // Keep feed synced with global live stream state (no manual refresh needed)
   useEffect(() => {
@@ -370,14 +397,16 @@ const HomePage = () => {
         const isFootballPost = postToDelete?.postedBy?.username === 'Football' || postToDelete?.footballData || postToDelete?.text?.includes('Football Live')
         
         if (isFootballPost) {
-          // Check if user still follows Football
+          const footballUserId =
+            postToDelete?.postedBy?._id?.toString() ||
+            footballUserIdRef.current ||
+            null
+          if (footballUserId) footballUserIdRef.current = footballUserId
+
           const userInfo = user || JSON.parse(localStorage.getItem('userInfo') || '{}')
-          const followsFootball = userInfo?.following?.some(f => {
-            if (typeof f === 'object' && f.username) {
-              return f.username === 'Football'
-            }
-            return false
-          }) || false
+          const followsFootball = footballUserId
+            ? isFollowingUserId(userInfo?.following, footballUserId)
+            : false
           
           // Only remove if user doesn't follow Football (unfollow action)
           if (!followsFootball) {

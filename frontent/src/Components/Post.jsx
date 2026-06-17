@@ -23,6 +23,7 @@ import {
   getChessGameDataForPost,
 } from '../utils/gameFeedPostUtils.js'
 import { isVideoUrl, mediaDisplayUrl } from '../utils/mediaUrl.js'
+import { parsePostFromApiResponse, postDetailApiUrl } from '../utils/postUtils.js'
 
 const apiBaseUrl = () => (import.meta.env.PROD ? window.location.origin : 'http://localhost:5000')
 
@@ -866,16 +867,16 @@ const showToast = useShowToast()
       
        <Box position="relative" w="full">
        
-      {post?.replies?.length === 0 && <Text textAlign="center">🥱</Text>}
+      {(!post?.replies || post.replies.length === 0) && <Text textAlign="center">🥱</Text>}
       
-       {post.replies[0] && (
+       {post?.replies?.[0] && (
           <Avatar 
         src={post?.replies[0]?.userProfilePic}
         size="sm" name={post?.replies[0]?.username} position="absolute" top="0px" left="15px" padding="2px"/>
        )}
       
          
-         {post.replies[1] && (
+         {post?.replies?.[1] && (
           <Avatar 
         src={post?.replies[1]?.userProfilePic}
         size="sm" name={post?.replies[1]?.username} position="absolute" bottom="0px" right="-5px" padding="2px"/>
@@ -1627,15 +1628,13 @@ const showToast = useShowToast()
           }, 100)
         } else {
           console.log('⚠️ [Post] No updated post provided, fetching...')
-          fetch(
-            `${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/post/getPost/${post._id}`,
-            { credentials: 'include' }
-          )
+          fetch(postDetailApiUrl(post._id), { credentials: 'include' })
           .then(res => res.json())
           .then(data => {
-            if (data.post) {
+            const fetched = parsePostFromApiResponse(data)
+            if (fetched) {
               console.log('✅ [Post] Fetched and updating post')
-              setFollowPost(prev => prev.map(p => p._id === post._id ? { ...data.post } : p))
+              setFollowPost(prev => prev.map(p => p._id === post._id ? { ...fetched } : p))
             }
           })
           .catch(error => console.error('❌ [Post] Error refreshing post:', error))
@@ -1683,20 +1682,16 @@ const showToast = useShowToast()
           console.log('✅ [Post] Updated post after removing contributor:', updatedPost.contributors?.length)
         } else {
           // Fallback: fetch post data if not provided
-          fetch(
-            `${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/post/getPost/${post._id}`,
-            { credentials: 'include' }
-          )
+          fetch(postDetailApiUrl(post._id), { credentials: 'include' })
           .then(res => res.json())
           .then(data => {
-            if (data.post) {
-              // Update local state immediately
+            const fetched = parsePostFromApiResponse(data)
+            if (fetched) {
               console.log('🔄 [Post] Fetched post, updating local state')
-              setLocalPost({ ...data.post })
+              setLocalPost({ ...fetched })
               
-              // Also update feed if post is in it
               setFollowPost(prev => {
-                const updated = prev.map(p => p._id === post._id ? data.post : p)
+                const updated = prev.map(p => p._id === post._id ? fetched : p)
                 return updated
               })
             }

@@ -22,6 +22,7 @@ import { MdPersonRemove } from "react-icons/md"
 import { FaCrown } from "react-icons/fa"
 import useShowToast from '../hooks/useShowToast'
 import { UserContext } from '../context/UserContext'
+import { parsePostFromApiResponse, postDetailApiUrl } from '../utils/postUtils.js'
 
 const ManageContributorsModal = ({ isOpen, onClose, post, onContributorRemoved }) => {
   const [removing, setRemoving] = useState(null)
@@ -60,21 +61,19 @@ const ManageContributorsModal = ({ isOpen, onClose, post, onContributorRemoved }
       if (contributorsAreStrings || !firstContributor?.name) {
         console.log('⚠️ [ManageContributorsModal] Contributors not populated, fetching...')
         setLoadingPost(true)
-        fetch(
-          `${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/post/getPost/${post._id}`,
-          { credentials: 'include' }
-        )
+        fetch(postDetailApiUrl(post._id), { credentials: 'include' })
         .then(res => res.json())
         .then(data => {
-          if (data.post) {
+          const fetched = parsePostFromApiResponse(data)
+          if (fetched) {
             console.log('✅ [ManageContributorsModal] Fetched populated post:', {
-              contributors: data.post.contributors?.map(c => ({
+              contributors: fetched.contributors?.map(c => ({
                 id: c._id?.substring(0, 8),
                 name: c.name,
                 username: c.username
               }))
             })
-            setPopulatedPost(data.post)
+            setPopulatedPost(fetched)
           }
         })
         .catch(error => console.error('❌ [ManageContributorsModal] Error fetching post:', error))
@@ -107,15 +106,12 @@ const ManageContributorsModal = ({ isOpen, onClose, post, onContributorRemoved }
         
         // Fetch the updated post with populated contributors
         try {
-          const postRes = await fetch(
-            `${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/post/getPost/${currentPost._id}`,
-            { credentials: 'include' }
-          )
+          const postRes = await fetch(postDetailApiUrl(currentPost._id), { credentials: 'include' })
           const postData = await postRes.json()
           
-          if (postRes.ok && postData.post) {
-            // Call callback with updated post data
-            onContributorRemoved?.(postData.post)
+          const fetchedPost = parsePostFromApiResponse(postData)
+          if (postRes.ok && fetchedPost) {
+            onContributorRemoved?.(fetchedPost)
           } else {
             // Still call callback even if fetch fails
             onContributorRemoved?.()

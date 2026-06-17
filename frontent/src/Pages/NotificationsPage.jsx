@@ -21,7 +21,7 @@ const NotificationsPage = () => {
     const isFetchingRef = useRef(false)
     const notificationsRef = useRef([])
     const hasMoreRef = useRef(true)
-    const NOTIFICATION_PAGE_LIMIT = 25
+    const NOTIFICATION_PAGE_LIMIT = 12
     const { socket, notificationCount, setNotificationCount } = useContext(SocketContext) || {}
     const { user } = useContext(UserContext)
     const navigate = useNavigate()
