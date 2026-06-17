@@ -35,6 +35,7 @@ const LiveStreamMiniBar = () => {
   const [chatOpen, setChatOpen] = useState(false);
   const [seenChatCount, setSeenChatCount] = useState(0);
   const unreadChat = Math.max(0, liveChatMessages.length - seenChatCount);
+  const suppressTapReturnRef = useRef(false);
 
   useEffect(() => {
     if (chatOpen) setSeenChatCount(liveChatMessages.length);
@@ -46,6 +47,19 @@ const LiveStreamMiniBar = () => {
       setSeenChatCount(0);
     }
   }, [isLive]);
+
+  const openChat = useCallback((e) => {
+    e?.stopPropagation?.();
+    suppressTapReturnRef.current = true;
+    setChatOpen(true);
+    window.setTimeout(() => { suppressTapReturnRef.current = false; }, 400);
+  }, []);
+
+  const closeChat = useCallback(() => {
+    suppressTapReturnRef.current = true;
+    setChatOpen(false);
+    window.setTimeout(() => { suppressTapReturnRef.current = false; }, 400);
+  }, []);
 
   const onLivePage = location.pathname === '/live/broadcast';
   const isGamePage = GAME_PATH_RE.test(location.pathname);
@@ -133,31 +147,27 @@ const LiveStreamMiniBar = () => {
     const wasDrag = dragState.current.moved;
     dragState.current.dragging = false;
     dragState.current.moved = false;
+    if (suppressTapReturnRef.current || chatOpen) return;
     if (!wasDrag && !e.target.closest('[data-live-bar-ctrl]')) {
       onReturn();
     }
-  }, [onReturn]);
+  }, [onReturn, chatOpen]);
 
   const anchoredBottom = pos == null;
 
   if (!onLivePageVisible) return null;
 
   return (
+    <>
     <Flex
       ref={barRef}
       position="fixed"
       zIndex={1700}
       gap={2}
       align="stretch"
-      pointerEvents="auto"
-      cursor={anchoredBottom ? 'default' : 'grab'}
-      touchAction="none"
+      pointerEvents={chatOpen ? 'none' : 'auto'}
       w={{ base: 'calc(100% - 20px)', sm: 'auto' }}
       maxW="520px"
-      onPointerDown={onDragDown}
-      onPointerMove={onDragMove}
-      onPointerUp={onDragUp}
-      onPointerCancel={onDragUp}
       sx={anchoredBottom
         ? {
           left: '50%',
@@ -186,6 +196,12 @@ const LiveStreamMiniBar = () => {
         _hover={{ bg: 'red.500' }}
         minH="52px"
         userSelect="none"
+        cursor={anchoredBottom ? 'default' : 'grab'}
+        touchAction="none"
+        onPointerDown={onDragDown}
+        onPointerMove={onDragMove}
+        onPointerUp={onDragUp}
+        onPointerCancel={onDragUp}
       >
         <Box position="relative" w="10px" h="10px" flexShrink={0} mt={1} alignSelf="flex-start">
           <Box w="10px" h="10px" borderRadius="full" bg="white" />
@@ -238,7 +254,7 @@ const LiveStreamMiniBar = () => {
           borderRadius="2xl"
           minH="52px"
           minW="52px"
-          onClick={(e) => { e.stopPropagation(); setChatOpen(true); }}
+          onClick={openChat}
         />
         {unreadChat > 0 ? (
           <Box
@@ -274,8 +290,9 @@ const LiveStreamMiniBar = () => {
       >
         End
       </Button>
-      <LiveViewerChatModal isOpen={chatOpen} onClose={() => setChatOpen(false)} />
     </Flex>
+    <LiveViewerChatModal isOpen={chatOpen} onClose={closeChat} />
+    </>
   );
 };
 

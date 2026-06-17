@@ -35,9 +35,9 @@ const LiveViewerChatModal = ({ isOpen, onClose }) => {
   }
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} isCentered size="md">
-      <ModalOverlay bg="blackAlpha.700" />
-      <ModalContent maxH="52vh" display="flex" flexDirection="column">
+    <Modal isOpen={isOpen} onClose={onClose} isCentered size="md" blockScrollOnMount={false}>
+      <ModalOverlay bg="blackAlpha.700" zIndex={1800} />
+      <ModalContent maxH="52vh" display="flex" flexDirection="column" zIndex={1801}>
         <ModalHeader pb={2}>Live messages</ModalHeader>
         <ModalCloseButton />
         <ModalBody pb={4} display="flex" flexDirection="column" flex={1} minH={0}>
