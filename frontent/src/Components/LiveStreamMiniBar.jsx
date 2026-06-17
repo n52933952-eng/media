@@ -157,15 +157,18 @@ const LiveStreamMiniBar = () => {
 
   if (!onLivePageVisible) return null;
 
+  if (chatOpen) {
+    return <LiveViewerChatModal isOpen onClose={closeChat} />;
+  }
+
   return (
-    <>
     <Flex
       ref={barRef}
       position="fixed"
       zIndex={1700}
       gap={2}
       align="stretch"
-      pointerEvents={chatOpen ? 'none' : 'auto'}
+      pointerEvents="auto"
       w={{ base: 'calc(100% - 20px)', sm: 'auto' }}
       maxW="520px"
       sx={anchoredBottom
@@ -291,8 +294,6 @@ const LiveStreamMiniBar = () => {
         End
       </Button>
     </Flex>
-    <LiveViewerChatModal isOpen={chatOpen} onClose={closeChat} />
-    </>
   );
 };
 
