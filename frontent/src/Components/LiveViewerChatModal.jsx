@@ -16,8 +16,11 @@ const LiveViewerChatModal = ({ isOpen, onClose }) => {
   const showToast = useShowToast()
   const [input, setInput] = useState('')
   const listRef = useRef(null)
+  const inputRef = useRef(null)
   const panelBg = useColorModeValue('white', 'gray.800')
   const borderColor = useColorModeValue('gray.200', 'whiteAlpha.200')
+  const footerBg = useColorModeValue('gray.50', 'gray.900')
+  const mutedText = useColorModeValue('gray.500', 'gray.400')
 
   useEffect(() => {
     if (!isOpen) return
@@ -30,7 +33,8 @@ const LiveViewerChatModal = ({ isOpen, onClose }) => {
     if (!isOpen) return
     const t = setTimeout(() => {
       listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: 'smooth' })
-    }, 80)
+      inputRef.current?.focus()
+    }, 120)
     return () => clearTimeout(t)
   }, [isOpen, liveChatMessages.length])
 
@@ -44,6 +48,7 @@ const LiveViewerChatModal = ({ isOpen, onClose }) => {
       return
     }
     setInput('')
+    inputRef.current?.focus()
   }
 
   if (!isOpen) return null
@@ -54,74 +59,117 @@ const LiveViewerChatModal = ({ isOpen, onClose }) => {
       inset={0}
       zIndex={MODAL_Z}
       bg="blackAlpha.750"
-      display="flex"
-      alignItems="center"
-      justifyContent="center"
-      px={4}
       onClick={onClose}
       role="dialog"
       aria-modal="true"
       aria-label="Live messages"
     >
       <Box
-        bg={panelBg}
-        borderRadius="xl"
+        position="absolute"
+        left={0}
+        right={0}
+        bottom={{ base: 0, sm: 4 }}
+        mx="auto"
         w="full"
-        maxW="md"
-        maxH="52vh"
-        display="flex"
-        flexDirection="column"
+        maxW={{ base: 'full', sm: 'md' }}
+        maxH={{ base: '72vh', sm: '65vh' }}
+        minH="280px"
+        bg={panelBg}
+        borderTopRadius={{ base: '2xl', sm: 'xl' }}
+        borderBottomRadius={{ base: 0, sm: 'xl' }}
         boxShadow="2xl"
         border="1px solid"
         borderColor={borderColor}
+        borderBottom={{ base: 'none', sm: '1px solid' }}
+        borderBottomColor={borderColor}
+        display="flex"
+        flexDirection="column"
         overflow="hidden"
         onClick={(e) => e.stopPropagation()}
+        pb="env(safe-area-inset-bottom, 0px)"
       >
-        <Flex align="center" justify="space-between" px={4} pt={4} pb={2}>
-          <Text fontWeight="bold" fontSize="lg">Live messages</Text>
+        {/* Header */}
+        <Flex
+          align="center"
+          justify="space-between"
+          px={4}
+          py={3}
+          borderBottom="1px solid"
+          borderColor={borderColor}
+          flexShrink={0}
+        >
+          <Text fontWeight="bold" fontSize="md">Live messages</Text>
           <IconButton
             aria-label="Close live messages"
-            icon={<CloseIcon />}
+            icon={<CloseIcon boxSize={3} />}
             size="sm"
             variant="ghost"
             onClick={onClose}
           />
         </Flex>
-        <Box px={4} pb={4} display="flex" flexDirection="column" flex={1} minH={0}>
-          <Box
-            ref={listRef}
-            flex={1}
-            overflowY="auto"
-            mb={3}
-            pr={1}
-            minH="200px"
-            maxH="280px"
-          >
-            {liveChatMessages.length === 0 ? (
-              <Text color="gray.500" fontSize="sm" textAlign="center" py={8}>
-                No messages yet
-              </Text>
-            ) : (
-              <VStack align="stretch" spacing={2}>
-                {liveChatMessages.map((item) => (
-                  <Box key={item.id}>
-                    <Text fontSize="sm" fontWeight="bold" color="blue.400">{item.sender}</Text>
-                    <Text fontSize="sm">{item.text}</Text>
-                  </Box>
-                ))}
-              </VStack>
-            )}
-          </Box>
-          <Flex gap={2}>
-            <Input
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              placeholder="Say something…"
-              onKeyDown={(e) => { if (e.key === 'Enter') onSend() }}
-            />
-            <Button colorScheme="blue" onClick={onSend}>Send</Button>
-          </Flex>
+
+        {/* Messages — fills space between header and input */}
+        <Box
+          ref={listRef}
+          flex={1}
+          minH={0}
+          overflowY="auto"
+          px={4}
+          py={3}
+        >
+          {liveChatMessages.length === 0 ? (
+            <Flex align="center" justify="center" h="full" minH="120px">
+              <Text color={mutedText} fontSize="sm">No messages yet</Text>
+            </Flex>
+          ) : (
+            <VStack align="stretch" spacing={3}>
+              {liveChatMessages.map((item) => (
+                <Box key={item.id}>
+                  <Text fontSize="xs" fontWeight="bold" color="blue.400" mb={0.5}>
+                    {item.sender}
+                  </Text>
+                  <Text fontSize="sm" lineHeight="short">{item.text}</Text>
+                </Box>
+              ))}
+            </VStack>
+          )}
         </Box>
+
+        {/* Input row — pinned to bottom */}
+        <Flex
+          as="form"
+          px={4}
+          py={3}
+          gap={2}
+          align="center"
+          borderTop="1px solid"
+          borderColor={borderColor}
+          bg={footerBg}
+          flexShrink={0}
+          onSubmit={(e) => { e.preventDefault(); void onSend() }}
+        >
+          <Input
+            ref={inputRef}
+            flex={1}
+            size="md"
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            placeholder="Say something…"
+            borderRadius="full"
+            bg={panelBg}
+            px={4}
+          />
+          <Button
+            type="submit"
+            colorScheme="blue"
+            borderRadius="full"
+            px={5}
+            flexShrink={0}
+            isDisabled={!input.trim()}
+          >
+            Send
+          </Button>
+        </Flex>
       </Box>
     </Box>,
     document.body,
