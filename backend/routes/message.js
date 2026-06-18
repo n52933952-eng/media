@@ -5,6 +5,7 @@ import {
   getMessage,
   mycon,
   searchConversations,
+  getConversationById,
   deletconversation,
   toggleReaction,
   deleteMessage,
@@ -32,6 +33,7 @@ router.get('/undelivered-ids', protectRoute, getUndeliveredIncomingMessageIds)
 // ── Conversations list ─────────────────────────────────────────────────────
 router.get('/conversations/search', protectRoute, searchConversations)
 router.get('/conversations', protectRoute, mycon)
+router.get('/conversation/:id', protectRoute, getConversationById)
 
 // ── Unread count ───────────────────────────────────────────────────────────
 router.get('/unread/count', protectRoute, getTotalUnreadCount)

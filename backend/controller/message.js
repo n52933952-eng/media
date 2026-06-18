@@ -651,6 +651,44 @@ export const mycon = async(req,res) => {
 	}
 }
 
+/** Fetch a single conversation the user belongs to (for push deep-links / group hydrate). */
+export const getConversationById = async (req, res) => {
+  try {
+    const userId = req.user._id
+    const convIdRaw = req.params.id != null ? String(req.params.id).trim() : ''
+    if (!mongoose.isValidObjectId(convIdRaw)) {
+      return res.status(400).json({ error: 'Invalid conversation id' })
+    }
+
+    const convOid = new mongoose.Types.ObjectId(convIdRaw)
+    const userOid = new mongoose.Types.ObjectId(userId)
+
+    const conversationsAgg = await Conversation.aggregate([
+      { $match: { _id: convOid, participants: userOid } },
+      {
+        $lookup: {
+          from: 'users',
+          localField: 'participants',
+          foreignField: '_id',
+          as: 'participants',
+          pipeline: [
+            { $project: { username: 1, profilePic: 1, name: 1, inCall: 1 } },
+          ],
+        },
+      },
+      ...buildConversationListEnrichmentStages(userId),
+    ])
+
+    if (!conversationsAgg.length) {
+      return res.status(404).json({ error: 'Conversation not found' })
+    }
+
+    res.status(200).json({ conversation: conversationsAgg[0] })
+  } catch (error) {
+    res.status(500).json({ error: error.message })
+  }
+}
+
 /** Search user's conversations by group name or DM partner name/username. */
 export const searchConversations = async (req, res) => {
   try {
