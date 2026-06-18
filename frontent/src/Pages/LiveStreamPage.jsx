@@ -27,6 +27,12 @@ import {
   collectRemoteVideoTracks,
   applyRemoteVideoTrack,
 } from '../utils/liveKitTracks';
+import {
+  canSendLiveChat,
+  createLiveChatBatchSink,
+  LIVE_CHAT_MAX_MESSAGES,
+} from '../utils/liveChatThrottle';
+import useShowToast from '../hooks/useShowToast';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
 const MAX_VIEWER_RECONNECT = 2;
@@ -100,6 +106,7 @@ const LiveStreamPage = () => {
   const navigate = useNavigate();
   const { user } = useContext(UserContext);
   const { socket } = useContext(SocketContext) || {};
+  const showToast = useShowToast();
 
   const isBroadcaster = !streamerId || streamerId === String(user?._id);
 
@@ -154,8 +161,13 @@ const LiveStreamPage = () => {
   const intentionalLeaveRef = useRef(false);
   const reconnectAttemptsRef = useRef(0);
   const reconnectTimerRef = useRef(null);
-  let floatIdCounter = useRef(0);
-  let reactionIdCounter = useRef(0);
+  const floatIdCounter = useRef(0);
+  const reactionIdCounter = useRef(0);
+  const lastChatSendAtRef = useRef(0);
+  const flushIncomingChatRef = useRef(() => {});
+  const incomingChatBatchRef = useRef(
+    createLiveChatBatchSink((items) => flushIncomingChatRef.current(items)),
+  );
 
   const verifyStreamStillActive = useCallback(async () => {
     if (!streamerId) return false;
@@ -211,13 +223,38 @@ const LiveStreamPage = () => {
     return () => { cancelled = true; };
   }, [isBroadcaster, streamerId]);
 
-  const addMessage = useCallback((sender, text) => {
-    addLiveChatMessage(sender, text);
+  const spawnFloatForChat = useCallback((sender, text) => {
     const id = ++floatIdCounter.current;
-    setChatLog(prev => [...prev.slice(-100), { id, sender, text }]);
     setFloatingMsgs(prev => [...prev.slice(-5), { id, sender, text }]);
     setTimeout(() => setFloatingMsgs(prev => prev.filter(m => m.id !== id)), FLOAT_MSG_MS + 200);
-  }, [addLiveChatMessage]);
+  }, []);
+
+  const appendChatLogEntries = useCallback((entries) => {
+    if (!entries.length) return;
+    setChatLog(prev => {
+      const added = entries.map((entry) => ({
+        id: `msg_${++floatIdCounter.current}_${Date.now()}`,
+        sender: entry.sender,
+        text: entry.text,
+      }));
+      return [...prev, ...added].slice(-LIVE_CHAT_MAX_MESSAGES);
+    });
+  }, []);
+
+  useEffect(() => {
+    flushIncomingChatRef.current = (items) => {
+      if (!items.length) return;
+      appendChatLogEntries(items);
+      const last = items[items.length - 1];
+      spawnFloatForChat(last.sender, last.text);
+    };
+  }, [appendChatLogEntries, spawnFloatForChat]);
+
+  const addMessage = useCallback((sender, text) => {
+    if (isBroadcaster) addLiveChatMessage(sender, text);
+    appendChatLogEntries([{ sender, text }]);
+    spawnFloatForChat(sender, text);
+  }, [isBroadcaster, addLiveChatMessage, appendChatLogEntries, spawnFloatForChat]);
 
   const addEmojiFloat = useCallback((emoji) => {
     const id = ++reactionIdCounter.current;
@@ -417,7 +454,9 @@ const LiveStreamPage = () => {
       room.on(RoomEvent.DataReceived, (payload) => {
         try {
           const msg = JSON.parse(new TextDecoder().decode(payload));
-          if (msg.type === 'chat') addMessage(msg.sender, msg.text);
+          if (msg.type === 'chat' && msg.sender && msg.text) {
+            incomingChatBatchRef.current.push(String(msg.sender), String(msg.text));
+          }
         } catch (_) {}
       });
     };
@@ -491,9 +530,11 @@ const LiveStreamPage = () => {
         clearTimeout(reconnectTimerRef.current);
         reconnectTimerRef.current = null;
       }
+      incomingChatBatchRef.current.clear();
+      lastChatSendAtRef.current = 0;
       disconnectViewerRoom();
     };
-  }, [isBroadcaster, streamerId, socket, disconnectViewerRoom, exitLivePage, addMessage, verifyStreamStillActive]);
+  }, [isBroadcaster, streamerId, socket, disconnectViewerRoom, exitLivePage, verifyStreamStillActive]);
 
   useEffect(() => {
     if (!socket || !liveWatchStreamerId) return undefined;
@@ -528,19 +569,37 @@ const LiveStreamPage = () => {
   }, [socket, isBroadcaster, streamerId, exitLivePage, disconnectViewerRoom, verifyStreamStillActive]);
 
   const sendChat = useCallback(async () => {
-    if (!chatInput.trim()) return;
-    const sender = user?.name || user?.username || (isBroadcaster ? 'Streamer' : 'Viewer');
     const text = chatInput.trim();
+    if (!text) return;
+    const sender = user?.name || user?.username || (isBroadcaster ? 'Streamer' : 'Viewer');
+
     if (isBroadcaster) {
-      await sendHostChat(text, sender);
-    } else if (roomRef.current) {
+      const sent = await sendHostChat(text, sender);
+      if (!sent) {
+        showToast('Slow down', 'Wait a moment before sending another message', 'warning');
+        return;
+      }
+      setChatInput('');
+      return;
+    }
+
+    if (!roomRef.current) return;
+    if (!canSendLiveChat(lastChatSendAtRef.current)) {
+      showToast('Slow down', 'Wait a moment before sending another message', 'warning');
+      return;
+    }
+
+    try {
       const msg = { type: 'chat', sender, text };
       const encoded = new TextEncoder().encode(JSON.stringify(msg));
       await roomRef.current.localParticipant.publishData(encoded, { reliable: true });
+      lastChatSendAtRef.current = Date.now();
+      addMessage(sender, text);
+      setChatInput('');
+    } catch (_) {
+      // keep input so user can retry
     }
-    addMessage(sender, text);
-    setChatInput('');
-  }, [chatInput, user, isBroadcaster, sendHostChat, addMessage]);
+  }, [chatInput, user, isBroadcaster, sendHostChat, addMessage, showToast]);
 
   const sendEmojiReaction = useCallback((emoji) => {
     if (!socket || !liveWatchStreamerId) return;

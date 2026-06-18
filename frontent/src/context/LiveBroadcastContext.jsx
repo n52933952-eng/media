@@ -18,6 +18,9 @@ import {
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
 
+/** End live if broadcaster leaves the tab/app without Share + minimize (matches mobile). */
+const BROADCASTER_BACKGROUND_END_MS = 15000;
+
 /** Match group-call room settings — proven to work web → mobile screen share. */
 const LIVE_ROOM_OPTIONS = {
   adaptiveStream: true,
@@ -50,6 +53,7 @@ export const LiveBroadcastProvider = ({ children }) => {
   const endLiveRef = useRef(async () => {});
   const onChatRef = useRef(null);
   const isSharingRef = useRef(false);
+  const isMinimizedRef = useRef(false);
   const hostPreviewTrackRef = useRef(null);
   const chatMsgIdRef = useRef(0);
   const lastChatSendAtRef = useRef(0);
@@ -187,18 +191,23 @@ export const LiveBroadcastProvider = ({ children }) => {
 
   const minimizeLive = useCallback(() => {
     setIsMinimized(true);
+    isMinimizedRef.current = true;
     setIsLiveControlsFocused(false);
     liveBroadcastNav.minimize?.();
   }, []);
 
   const returnToLiveControls = useCallback(() => {
     setIsMinimized(false);
+    isMinimizedRef.current = false;
     setIsLiveControlsFocused(true);
   }, []);
 
   const setLiveControlsFocused = useCallback((focused) => {
     setIsLiveControlsFocused(focused);
-    if (focused) setIsMinimized(false);
+    if (focused) {
+      setIsMinimized(false);
+      isMinimizedRef.current = false;
+    }
   }, []);
 
   /** Share this browser tab, then go to app home (feed / games). */
@@ -265,10 +274,62 @@ export const LiveBroadcastProvider = ({ children }) => {
     await disconnect();
     setIsLive(false);
     setIsMinimized(false);
+    isMinimizedRef.current = false;
     setIsLiveControlsFocused(false);
   }, [socket, user, disconnect]);
 
+  /** End live for viewers without extra navigation (call / game interrupt). */
+  const endLiveForCall = useCallback(async () => {
+    await endLive();
+  }, [endLive]);
+
   endLiveRef.current = endLive;
+
+  useEffect(() => {
+    isMinimizedRef.current = isMinimized;
+  }, [isMinimized]);
+
+  /** Tab hidden / browser minimized without intentional share+minimize — end live after 15s. */
+  useEffect(() => {
+    if (!isLive) return undefined;
+
+    let backgroundTimer = null;
+
+    const clearBackgroundTimer = () => {
+      if (backgroundTimer) {
+        clearTimeout(backgroundTimer);
+        backgroundTimer = null;
+      }
+    };
+
+    const scheduleBackgroundEnd = () => {
+      clearBackgroundTimer();
+      if (isMinimizedRef.current || isSharingRef.current) return;
+      backgroundTimer = setTimeout(() => {
+        backgroundTimer = null;
+        if (liveEndedRef.current) return;
+        if (isMinimizedRef.current || isSharingRef.current) return;
+        console.warn('[LiveBroadcast] Tab hidden >15s without minimize — ending live');
+        void endLiveRef.current?.();
+      }, BROADCASTER_BACKGROUND_END_MS);
+    };
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        clearBackgroundTimer();
+        return;
+      }
+      if (document.visibilityState === 'hidden') {
+        scheduleBackgroundEnd();
+      }
+    };
+
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      clearBackgroundTimer();
+    };
+  }, [isLive]);
 
   const goLive = useCallback(async () => {
     if (!user || !socket || startingLive) return;
@@ -420,6 +481,7 @@ export const LiveBroadcastProvider = ({ children }) => {
     hideHostPip,
     goLive,
     endLive,
+    endLiveForCall,
     toggleShare,
     shareAndGoAppHome,
     shareWindow,

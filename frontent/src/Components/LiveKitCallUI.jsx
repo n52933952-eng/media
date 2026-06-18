@@ -16,6 +16,7 @@ import {
 import { PhoneIcon } from '@chakra-ui/icons';
 import { RoomEvent, Track } from 'livekit-client';
 import { useLiveKit } from '../context/LiveKitContext';
+import { useLiveBroadcast } from '../context/LiveBroadcastContext';
 import ScreenShareViewer from './ScreenShareViewer';
 import CallVideoFrame from './CallVideoFrame';
 
@@ -148,7 +149,13 @@ const ShareStageLayout = ({
 // ── Incoming call overlay ─────────────────────────────────────────────────────
 const IncomingCallOverlay = () => {
   const { incomingCall, answerCall, declineCall } = useLiveKit();
+  const { isLive, endLiveForCall } = useLiveBroadcast();
   if (!incomingCall) return null;
+
+  const handleAnswer = async () => {
+    if (isLive) await endLiveForCall();
+    await answerCall();
+  };
 
   return (
     <Box
@@ -166,6 +173,11 @@ const IncomingCallOverlay = () => {
           <Badge colorScheme={incomingCall.callType === 'audio' ? 'green' : 'purple'}>
             Incoming {incomingCall.callType === 'audio' ? 'Voice' : 'Video'} Call
           </Badge>
+          {isLive ? (
+            <Text color="orange.300" fontSize="sm" textAlign="center" mt={1}>
+              Answer ends your live stream
+            </Text>
+          ) : null}
         </VStack>
 
         <HStack spacing={8}>
@@ -185,7 +197,7 @@ const IncomingCallOverlay = () => {
             <IconButton
               icon={<PhoneIcon />}
               colorScheme="green" borderRadius="full" size="lg"
-              onClick={answerCall}
+              onClick={() => { void handleAnswer(); }}
               aria-label="Answer call"
             />
             <Text color="gray.400" fontSize="sm">Answer</Text>

@@ -12,9 +12,11 @@ import {
 import { FaChessPawn } from 'react-icons/fa'
 import { useNavigate } from 'react-router-dom'
 import { SocketContext } from '../context/SocketContext'
+import { useLiveBroadcast } from '../context/LiveBroadcastContext'
 
 const ChessChallengeNotification = () => {
   const { chessChallenge, acceptChessChallenge, declineChessChallenge } = useContext(SocketContext)
+  const { isLive, isMinimized, isSharing, endLiveForCall } = useLiveBroadcast()
   const navigate = useNavigate()
 
   const bgColor = useColorModeValue('white', '#1a1a1a')
@@ -25,10 +27,11 @@ const ChessChallengeNotification = () => {
     return null
   }
 
-  const handleAccept = () => {
-    // Navigate first, then accept (this ensures navigation happens)
+  const handleAccept = async () => {
+    if (isLive && !isMinimized && !isSharing) {
+      await endLiveForCall();
+    }
     navigate(`/chess/${chessChallenge.from}`)
-    // Small delay to ensure navigation starts, then accept
     setTimeout(() => {
       acceptChessChallenge()
     }, 100)
@@ -89,7 +92,7 @@ const ChessChallengeNotification = () => {
             colorScheme="green"
             size="md"
             flex={1}
-            onClick={handleAccept}
+            onClick={() => { void handleAccept(); }}
           >
             Accept
           </Button>

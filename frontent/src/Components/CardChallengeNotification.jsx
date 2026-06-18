@@ -11,9 +11,11 @@ import {
 } from '@chakra-ui/react'
 import { useNavigate } from 'react-router-dom'
 import { SocketContext } from '../context/SocketContext'
+import { useLiveBroadcast } from '../context/LiveBroadcastContext'
 
 const CardChallengeNotification = () => {
     const { cardChallenge, acceptCardChallenge, declineCardChallenge } = useContext(SocketContext)
+    const { isLive, isMinimized, isSharing, endLiveForCall } = useLiveBroadcast()
     const navigate = useNavigate()
 
     const bgColor = useColorModeValue('white', '#1a1a1a')
@@ -21,12 +23,11 @@ const CardChallengeNotification = () => {
 
     if (!cardChallenge || !cardChallenge.isReceivingChallenge) return null
 
-    const handleAccept = () => {
-        // IMPORTANT: call acceptCardChallenge() FIRST so localStorage.cardRoomId is set
-        // synchronously before CardGamePage mounts.  The old pattern (navigate → 100ms
-        // timeout → acceptCardChallenge) caused roomId to be empty on mount, leaving the
-        // accepter stuck on "Waiting for the game to start..." forever.
-        const fromId = cardChallenge.from  // capture before acceptCardChallenge clears state
+    const handleAccept = async () => {
+        const fromId = cardChallenge.from
+        if (isLive && !isMinimized && !isSharing) {
+            await endLiveForCall()
+        }
         acceptCardChallenge()
         navigate(`/card/${fromId}`)
     }
@@ -74,7 +75,7 @@ const CardChallengeNotification = () => {
                 </Box>
 
                 <HStack spacing={2} w="full">
-                    <Button colorScheme="green" size="md" flex={1} onClick={handleAccept}>
+                    <Button colorScheme="green" size="md" flex={1} onClick={() => { void handleAccept(); }}>
                         ✅ Accept
                     </Button>
                     <Button colorScheme="red" size="md" flex={1} onClick={declineCardChallenge}>
