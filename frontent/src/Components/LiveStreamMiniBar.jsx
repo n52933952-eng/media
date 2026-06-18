@@ -36,6 +36,7 @@ const LiveStreamMiniBar = () => {
   const [seenChatCount, setSeenChatCount] = useState(0);
   const unreadChat = Math.max(0, liveChatMessages.length - seenChatCount);
   const suppressTapReturnRef = useRef(false);
+  const chatButtonRef = useRef(null);
 
   useEffect(() => {
     if (chatOpen) setSeenChatCount(liveChatMessages.length);
@@ -51,7 +52,7 @@ const LiveStreamMiniBar = () => {
   const openChat = useCallback((e) => {
     e?.stopPropagation?.();
     suppressTapReturnRef.current = true;
-    setChatOpen(true);
+    setChatOpen((open) => !open);
     window.setTimeout(() => { suppressTapReturnRef.current = false; }, 400);
   }, []);
 
@@ -157,10 +158,6 @@ const LiveStreamMiniBar = () => {
 
   if (!onLivePageVisible) return null;
 
-  if (chatOpen) {
-    return <LiveViewerChatModal isOpen onClose={closeChat} />;
-  }
-
   return (
     <Flex
       ref={barRef}
@@ -248,7 +245,7 @@ const LiveStreamMiniBar = () => {
           </Text>
         </Box>
       </Flex>
-      <Box position="relative" flexShrink={0} data-live-bar-ctrl>
+      <Box ref={chatButtonRef} position="relative" flexShrink={0} data-live-bar-ctrl>
         <IconButton
           aria-label="Live chat"
           icon={<ChatIcon />}
@@ -258,6 +255,7 @@ const LiveStreamMiniBar = () => {
           minH="52px"
           minW="52px"
           onClick={openChat}
+          aria-expanded={chatOpen}
         />
         {unreadChat > 0 ? (
           <Box
@@ -293,6 +291,12 @@ const LiveStreamMiniBar = () => {
       >
         End
       </Button>
+      <LiveViewerChatModal
+        isOpen={chatOpen}
+        onClose={closeChat}
+        anchorRef={chatButtonRef}
+        layoutKey={`${pos?.x ?? 'bottom'}-${pos?.y ?? 'bottom'}`}
+      />
     </Flex>
   );
 };
