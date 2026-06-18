@@ -18,6 +18,91 @@ import {
 // ── helpers ────────────────────────────────────────────────────────────────
 const idStr = (id) => (id != null ? id.toString() : '')
 
+function escapeRegexLiteral(value) {
+  return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+/** Shared lookups after participants are populated on each conversation row. */
+function buildConversationListEnrichmentStages(userId) {
+  const userOid = new mongoose.Types.ObjectId(userId)
+  return [
+    {
+      $addFields: {
+        participants: {
+          $cond: {
+            if: { $eq: ['$isGroup', true] },
+            then: '$participants',
+            else: {
+              $filter: {
+                input: '$participants',
+                as: 'p',
+                cond: { $ne: ['$$p._id', userOid] },
+              },
+            },
+          },
+        },
+      },
+    },
+    {
+      $lookup: {
+        from: 'messages',
+        let: { convId: '$_id' },
+        as: '__lastMessageDoc',
+        pipeline: [
+          { $match: { $expr: { $eq: ['$conversationId', '$$convId'] } } },
+          { $sort: { createdAt: -1 } },
+          { $limit: 1 },
+          {
+            $lookup: {
+              from: 'users',
+              localField: 'sender',
+              foreignField: '_id',
+              as: 'sender',
+              pipeline: [{ $project: { username: 1, name: 1, profilePic: 1 } }],
+            },
+          },
+          { $addFields: { sender: { $arrayElemAt: ['$sender', 0] } } },
+          { $project: { text: 1, sender: 1, createdAt: 1 } },
+        ],
+      },
+    },
+    {
+      $addFields: {
+        lastMessage: { $arrayElemAt: ['$__lastMessageDoc', 0] },
+      },
+    },
+    {
+      $lookup: {
+        from: 'messages',
+        let: { convId: '$_id' },
+        as: '__unread',
+        pipeline: [
+          {
+            $match: {
+              $expr: {
+                $and: [
+                  { $eq: ['$conversationId', '$$convId'] },
+                  { $eq: ['$seen', false] },
+                  { $ne: ['$sender', userOid] },
+                ],
+              },
+            },
+          },
+          { $count: 'count' },
+        ],
+      },
+    },
+    {
+      $addFields: {
+        unreadCount: {
+          $ifNull: [{ $arrayElemAt: ['$__unread.count', 0] }, 0],
+        },
+      },
+    },
+    { $project: { __lastMessageDoc: 0, __unread: 0 } },
+  ]
+}
+
 const notifySenderMessageDelivered = (senderStr, messageId, conversationId) => {
   try {
     const io = getIO()
@@ -543,84 +628,7 @@ export const mycon = async(req,res) => {
           ],
         },
       },
-      // For 1-on-1 conversations remove current user so participants[0] is the other person.
-      // For group conversations keep everyone so the group info shows all members.
-      {
-        $addFields: {
-          participants: {
-            $cond: {
-              if: { $eq: ['$isGroup', true] },
-              then: '$participants',
-              else: {
-                $filter: {
-                  input: '$participants',
-                  as: 'p',
-                  cond: { $ne: ['$$p._id', new mongoose.Types.ObjectId(userId)] },
-                },
-              },
-            },
-          },
-        },
-      },
-      // Lookup last message (newest by createdAt) and populate sender
-      {
-        $lookup: {
-          from: 'messages',
-          let: { convId: '$_id' },
-          as: '__lastMessageDoc',
-          pipeline: [
-            { $match: { $expr: { $eq: ['$conversationId', '$$convId'] } } },
-            { $sort: { createdAt: -1 } },
-            { $limit: 1 },
-            {
-              $lookup: {
-                from: 'users',
-                localField: 'sender',
-                foreignField: '_id',
-                as: 'sender',
-                pipeline: [{ $project: { username: 1, name: 1, profilePic: 1 } }],
-              },
-            },
-            { $addFields: { sender: { $arrayElemAt: ['$sender', 0] } } },
-            { $project: { text: 1, sender: 1, createdAt: 1 } },
-          ],
-        },
-      },
-      {
-        $addFields: {
-          lastMessage: { $arrayElemAt: ['$__lastMessageDoc', 0] },
-        },
-      },
-      // Lookup unread count (seen=false AND sender != current user)
-      {
-        $lookup: {
-          from: 'messages',
-          let: { convId: '$_id' },
-          as: '__unread',
-          pipeline: [
-            {
-              $match: {
-                $expr: {
-                  $and: [
-                    { $eq: ['$conversationId', '$$convId'] },
-                    { $eq: ['$seen', false] },
-                    { $ne: ['$sender', new mongoose.Types.ObjectId(userId)] },
-                  ],
-                },
-              },
-            },
-            { $count: 'count' },
-          ],
-        },
-      },
-      {
-        $addFields: {
-          unreadCount: {
-            $ifNull: [{ $arrayElemAt: ['$__unread.count', 0] }, 0],
-          },
-        },
-      },
-      { $project: { __lastMessageDoc: 0, __unread: 0 } },
+      ...buildConversationListEnrichmentStages(userId),
     ])
 
     const hasMore = conversationsAgg.length > limit
@@ -641,6 +649,62 @@ export const mycon = async(req,res) => {
 	} catch (error) {
 		res.status(500).json({ error: error.message });
 	}
+}
+
+/** Search user's conversations by group name or DM partner name/username. */
+export const searchConversations = async (req, res) => {
+  try {
+    const userId = req.user._id
+    const rawQ = req.query.q != null ? String(req.query.q).trim() : ''
+    if (rawQ.length < 2) {
+      return res.status(200).json({ conversations: [] })
+    }
+
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 20, 1), 30)
+    const pattern = escapeRegexLiteral(rawQ)
+    const userOid = new mongoose.Types.ObjectId(userId)
+
+    const conversationsAgg = await Conversation.aggregate([
+      { $match: { participants: userOid } },
+      {
+        $lookup: {
+          from: 'users',
+          localField: 'participants',
+          foreignField: '_id',
+          as: 'participants',
+          pipeline: [
+            { $project: { username: 1, profilePic: 1, name: 1, inCall: 1 } },
+          ],
+        },
+      },
+      {
+        $match: {
+          $or: [
+            { isGroup: true, groupName: { $regex: pattern, $options: 'i' } },
+            {
+              isGroup: { $ne: true },
+              participants: {
+                $elemMatch: {
+                  _id: { $ne: userOid },
+                  $or: [
+                    { name: { $regex: pattern, $options: 'i' } },
+                    { username: { $regex: pattern, $options: 'i' } },
+                  ],
+                },
+              },
+            },
+          ],
+        },
+      },
+      { $sort: { updatedAt: -1, _id: -1 } },
+      { $limit: limit },
+      ...buildConversationListEnrichmentStages(userId),
+    ])
+
+    res.status(200).json({ conversations: conversationsAgg })
+  } catch (error) {
+    res.status(500).json({ error: error.message })
+  }
 }
 
 

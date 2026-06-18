@@ -4,6 +4,7 @@ import {
   sendMessaeg,
   getMessage,
   mycon,
+  searchConversations,
   deletconversation,
   toggleReaction,
   deleteMessage,
@@ -29,6 +30,7 @@ router.post('/ack-delivered', ackMessageDeliveredHttp)
 router.get('/undelivered-ids', protectRoute, getUndeliveredIncomingMessageIds)
 
 // ── Conversations list ─────────────────────────────────────────────────────
+router.get('/conversations/search', protectRoute, searchConversations)
 router.get('/conversations', protectRoute, mycon)
 
 // ── Unread count ───────────────────────────────────────────────────────────
