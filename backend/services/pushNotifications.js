@@ -54,12 +54,16 @@ async function sendCommentNotification(postOwnerId, commenterName, postId, image
 /**
  * Send notification when someone follows you
  */
-async function sendFollowNotification(userId, followerName, followerId, images = {}) {
+async function sendFollowNotification(userId, followerName, followerId, images = {}, followerUsername = '') {
   return await sendNotificationToUser(
     userId,
     followerName,
     'started following you',
-    { type: 'follow', userId: followerId },
+    {
+      type: 'follow',
+      userId: String(followerId || ''),
+      username: String(followerUsername || ''),
+    },
     images
   );
 }

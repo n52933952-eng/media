@@ -180,7 +180,13 @@ export const createNotification = async (userId, type, fromUserId, options = {})
                     break
                 
                 case 'follow':
-                    await sendFollowNotification(userId.toString(), fromUserName, fromUserId.toString(), images)
+                    await sendFollowNotification(
+                      userId.toString(),
+                      fromUserName,
+                      fromUserId.toString(),
+                      images,
+                      fromUser.username || ''
+                    )
                     console.log(`📤 [createNotification] Sent FCM follow notification to ${userId}`)
                     break
                 
