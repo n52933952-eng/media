@@ -4,6 +4,16 @@ import { getRecipientSockedId, getIO, getUserSocket, isUserEffectivelyOnline, ge
 import { uploadMulterFile, deleteMediaAsset, isManagedMediaUrl, respondToUploadError } from '../services/mediaStorage.js'
 import { incrementUnread, clearConversationUnreadForUsers, emitUnreadCountUpdate, getTotalUnread } from '../services/unreadCounter.js'
 import mongoose from 'mongoose'
+import {
+  encodeConversationCursor,
+  decodeConversationCursor,
+  CONVERSATIONS_PAGE_SIZE_DEFAULT,
+} from '../services/conversationCursor.js'
+import {
+  encodeMessageCursor,
+  decodeMessageCursor,
+  MESSAGES_PAGE_SIZE_DEFAULT,
+} from '../services/messageCursor.js'
 
 // ── helpers ────────────────────────────────────────────────────────────────
 const idStr = (id) => (id != null ? id.toString() : '')
@@ -414,13 +424,33 @@ export const getMessage = async(req,res) => {
       if (!conversation) return res.status(200).json({ messages: [], hasMore: false })
     }
 
-    const limit = parseInt(req.query.limit) || 12
-    const beforeId = req.query.beforeId
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || MESSAGES_PAGE_SIZE_DEFAULT, 1), 50)
+    const cursorRaw = req.query.cursor != null ? String(req.query.cursor).trim() : ''
+    const decodedCursor = decodeMessageCursor(cursorRaw)
+    const beforeId = req.query.beforeId // legacy fallback
 
     let query = { conversationId: conversation._id }
-    if (beforeId) {
-      const beforeMessage = await Message.findById(beforeId)
-      if (beforeMessage) query.createdAt = { $lt: beforeMessage.createdAt }
+    if (decodedCursor) {
+      const cursorDate = new Date(decodedCursor.createdAtMs)
+      const cursorOid = new mongoose.Types.ObjectId(decodedCursor.messageId)
+      query = {
+        ...query,
+        $or: [
+          { createdAt: { $lt: cursorDate } },
+          { createdAt: cursorDate, _id: { $lt: cursorOid } },
+        ],
+      }
+    } else if (beforeId) {
+      const beforeMessage = await Message.findById(beforeId).select('createdAt _id').lean()
+      if (beforeMessage?.createdAt && beforeMessage._id) {
+        query = {
+          ...query,
+          $or: [
+            { createdAt: { $lt: beforeMessage.createdAt } },
+            { createdAt: beforeMessage.createdAt, _id: { $lt: beforeMessage._id } },
+          ],
+        }
+      }
     }
 
     const messages = await Message.find(query)
@@ -431,14 +461,22 @@ export const getMessage = async(req,res) => {
         select: 'text sender',
         populate: { path: 'sender', select: 'username name profilePic' },
       })
-      .sort({ createdAt: -1 })
+      .sort({ createdAt: -1, _id: -1 })
       .limit(limit + 1)
 
     const hasMore = messages.length > limit
     const messagesToReturn = hasMore ? messages.slice(0, limit) : messages
     messagesToReturn.reverse()
 
-    res.status(200).json({ messages: messagesToReturn, hasMore })
+    const oldestInPage = messagesToReturn[0]
+    const nextCursor = hasMore && oldestInPage?._id && oldestInPage?.createdAt
+      ? encodeMessageCursor({
+          messageId: oldestInPage._id,
+          createdAtMs: new Date(oldestInPage.createdAt).getTime(),
+        })
+      : null
+
+    res.status(200).json({ messages: messagesToReturn, hasMore, nextCursor })
   } catch(error) {
     res.status(500).json({ error: error.message })
     console.log(error)
@@ -451,15 +489,31 @@ export const mycon = async(req,res) => {
 	try {
 		const userId = req.user._id  // Fix: Use authenticated user's _id
    
-    // Pagination parameters
-    const limit = parseInt(req.query.limit) || 20 // Default to 20 conversations
-    const beforeId = req.query.beforeId // Conversation ID to fetch conversations before (for pagination)
-    
-    // If beforeId is provided, fetch its updatedAt once (used for pagination)
-    let beforeUpdatedAt = null
-    if (beforeId) {
-      const beforeConversation = await Conversation.findById(beforeId).select('updatedAt').lean()
-      if (beforeConversation?.updatedAt) beforeUpdatedAt = beforeConversation.updatedAt
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || CONVERSATIONS_PAGE_SIZE_DEFAULT, 1), 50)
+    const cursorRaw = req.query.cursor != null ? String(req.query.cursor).trim() : ''
+    const decodedCursor = decodeConversationCursor(cursorRaw)
+    const beforeId = req.query.beforeId // legacy fallback for older clients
+
+    let paginationFilter = null
+    if (decodedCursor) {
+      const cursorDate = new Date(decodedCursor.updatedAtMs)
+      const cursorOid = new mongoose.Types.ObjectId(decodedCursor.conversationId)
+      paginationFilter = {
+        $or: [
+          { updatedAt: { $lt: cursorDate } },
+          { updatedAt: cursorDate, _id: { $lt: cursorOid } },
+        ],
+      }
+    } else if (beforeId) {
+      const beforeConversation = await Conversation.findById(beforeId).select('updatedAt _id').lean()
+      if (beforeConversation?.updatedAt && beforeConversation._id) {
+        paginationFilter = {
+          $or: [
+            { updatedAt: { $lt: beforeConversation.updatedAt } },
+            { updatedAt: beforeConversation.updatedAt, _id: { $lt: beforeConversation._id } },
+          ],
+        }
+      }
     }
 
     /**
@@ -471,12 +525,12 @@ export const mycon = async(req,res) => {
      */
     const matchStage = {
       participants: new mongoose.Types.ObjectId(userId),
-      ...(beforeUpdatedAt ? { updatedAt: { $lt: beforeUpdatedAt } } : {}),
+      ...(paginationFilter || {}),
     }
 
     const conversationsAgg = await Conversation.aggregate([
       { $match: matchStage },
-      { $sort: { updatedAt: -1 } },
+      { $sort: { updatedAt: -1, _id: -1 } },
       { $limit: limit + 1 },
       {
         $lookup: {
@@ -571,11 +625,18 @@ export const mycon = async(req,res) => {
 
     const hasMore = conversationsAgg.length > limit
     const conversationsToReturn = hasMore ? conversationsAgg.slice(0, limit) : conversationsAgg
+    const lastConversation = conversationsToReturn[conversationsToReturn.length - 1]
+    const nextCursor = hasMore && lastConversation?._id && lastConversation?.updatedAt
+      ? encodeConversationCursor({
+          conversationId: lastConversation._id,
+          updatedAtMs: new Date(lastConversation.updatedAt).getTime(),
+        })
+      : null
 
-    // NOTE: totalCount removed (expensive). Use hasMore for pagination (same as mobile/web usage).
     res.status(200).json({
       conversations: conversationsToReturn,
       hasMore,
+      nextCursor,
     });
 	} catch (error) {
 		res.status(500).json({ error: error.message });
