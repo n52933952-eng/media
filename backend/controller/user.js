@@ -967,6 +967,20 @@ export const getSuggestedUsers = async(req, res) => {
         channelAccounts.forEach(account => {
             excludeIds.push(new mongoose.Types.ObjectId(account._id))
         })
+
+        // Optional: exclude a recently shown batch so the client can rotate suggestions
+        const excludeQuery = req.query.exclude
+        if (excludeQuery && typeof excludeQuery === 'string') {
+            excludeQuery.split(',').forEach((raw) => {
+                const id = raw.trim()
+                if (!id) return
+                try {
+                    excludeIds.push(new mongoose.Types.ObjectId(id))
+                } catch (_) {
+                    // ignore invalid ids
+                }
+            })
+        }
         
         // Read-from-Follow: exclude already-followed users (cap for safety)
         const followingDocs = await Follow.find({ followerId: userId }).select('followeeId').limit(5000).lean()

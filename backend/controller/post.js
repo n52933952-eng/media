@@ -41,6 +41,21 @@ import {
 } from '../services/commentService.js'
 import { findPostsByGameRoomId } from '../services/gamePostLookup.js'
 
+/**
+ * Feed scalability: a post's `likes[]` is an array of every liker's id. For viral posts that is
+ * megabytes per post and forces the client to run `likes.includes(me)` on every card. The feed
+ * only needs "how many" and "did I like it", so we drop the array and send `likeCount` + `likedByMe`.
+ * Live pseudo-posts have no likes and pass through untouched.
+ */
+function shapeFeedPostForViewer(post, viewerIdStr) {
+    if (!post || post.isLive) return post
+    const likes = Array.isArray(post.likes) ? post.likes : []
+    const likeCount = likes.length
+    const likedByMe = !!viewerIdStr && likes.some((id) => String(id) === viewerIdStr)
+    const { likes: _likes, ...rest } = post
+    return { ...rest, likeCount, likedByMe }
+}
+
 async function emitNewPostToAuthorFollowers(io, authorId, post) {
     if (!io || !authorId) return
     const followerDocs = await Follow.find({ followeeId: authorId })
@@ -732,6 +747,7 @@ export const ReplyPost = async(req,res) => {
 export const getFeedPost = async(req,res) => {
     try{
         const userId = req.user._id 
+        const viewerIdStr = String(userId)
         const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 10, 1), 50)
         const skip = parseInt(req.query.skip, 10) || 0
         const cursorRaw = req.query.cursor != null ? String(req.query.cursor).trim() : ''
@@ -806,7 +822,9 @@ export const getFeedPost = async(req,res) => {
                 (a, b) => feedSortTime(b) - feedSortTime(a),
             )
             const normalsSorted = [...topNormalPosts].sort((a, b) => feedSortTime(b) - feedSortTime(a))
-            const combinedPosts = [...livePseudoPosts, ...pinnedSorted, ...normalsSorted]
+            const combinedPosts = [...livePseudoPosts, ...pinnedSorted, ...normalsSorted].map((p) =>
+                shapeFeedPostForViewer(p, viewerIdStr),
+            )
 
             const nextOffset = firstNormalIds.length
             const hasMore = nextOffset < totalCount
@@ -830,13 +848,14 @@ export const getFeedPost = async(req,res) => {
         const nextOffset = startIndex + paginatedNormal.length
         const hasMore = nextOffset < totalCount
         const lastPost = paginatedNormal[paginatedNormal.length - 1]
+        const shapedPaginatedNormal = paginatedNormal.map((p) => shapeFeedPostForViewer(p, viewerIdStr))
 
         console.log(
             `📄 [getFeedPost] Cursor page: ${paginatedNormal.length} posts (offset: ${startIndex}, hasMore: ${hasMore})`,
         )
 
         const payload = {
-            posts: paginatedNormal,
+            posts: shapedPaginatedNormal,
             hasMore,
             totalCount,
             nextCursor: buildNextCursor(nextOffset, lastPost),
