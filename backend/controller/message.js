@@ -95,10 +95,14 @@ function buildConversationListEnrichmentStages(userId) {
     {
       $lookup: {
         from: 'messages',
-        localField: 'lastMessage.messageId',
-        foreignField: '_id',
+        let: { convId: '$_id' },
         as: '__tickSource',
-        pipeline: [{ $project: { seen: 1, delivered: 1 } }],
+        pipeline: [
+          { $match: { $expr: { $eq: ['$conversationId', '$$convId'] } } },
+          { $sort: { createdAt: -1 } },
+          { $limit: 1 },
+          { $project: { seen: 1, delivered: 1, _id: 1 } },
+        ],
       },
     },
     {
@@ -110,6 +114,12 @@ function buildConversationListEnrichmentStages(userId) {
               text: { $ifNull: ['$lastMessage.text', ''] },
               sender: { $arrayElemAt: ['$__denormSender', 0] },
               createdAt: '$lastMessage.createdAt',
+              messageId: {
+                $ifNull: [
+                  '$lastMessage.messageId',
+                  { $arrayElemAt: ['$__tickSource._id', 0] },
+                ],
+              },
               delivered: {
                 $cond: {
                   if: { $gt: [{ $size: { $ifNull: ['$__tickSource', []] } }, 0] },

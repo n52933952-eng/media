@@ -2574,7 +2574,12 @@ export const initializeSocket = async (app) => {
                     seenFilter.sender = { $ne: currentUserId }
                 }
 
-                await Message.updateMany(seenFilter, { $set: { seen: true } })
+                const unseenToMark = await Message.find(seenFilter).select('_id').limit(100).lean()
+                const messageIds = unseenToMark.map((d) => String(d._id))
+
+                if (messageIds.length > 0) {
+                    await Message.updateMany(seenFilter, { $set: { seen: true } })
+                }
 
                 const readerId = currentUserId != null ? String(currentUserId) : ''
                 const convRow = await Conversation.findById(conversationId)
@@ -2587,7 +2592,7 @@ export const initializeSocket = async (app) => {
 
                 // lastMessage.seen on the conversation is for the *latest* message only.
                 // If I sent the last message, opening chat must NOT flip seen (blue ticks = recipient read).
-                if (lastSenderId && readerId && lastSenderId !== readerId) {
+                if (messageIds.length > 0 && lastSenderId && readerId && lastSenderId !== readerId) {
                     await Conversation.updateOne(
                         { _id: conversationId },
                         { $set: { 'lastMessage.seen': true, 'lastMessage.delivered': true } },
@@ -2605,29 +2610,32 @@ export const initializeSocket = async (app) => {
                     }
                 }
                 
-                // Emit read receipts:
-                // - 1:1: notify the explicit sender (`userId`)
-                // - Group: notify other participants currently online
-                if (userId) {
-                    const senderData = await getUserSocket(userId)
-                    const senderSocketId = senderData?.socketId
-                    if (senderSocketId) {
-                        io.to(senderSocketId).emit("messagesSeen", { conversationId })
-                    }
-                } else {
-                    const conversation = await Conversation.findById(conversationId).select('participants')
-                    const participantIds = (conversation?.participants || [])
-                        .map((p) => p?.toString?.())
-                        .filter((pid) => pid && pid !== currentUserId)
+                // Emit read receipts only when messages were actually marked seen.
+                if (messageIds.length > 0) {
+                    if (userId) {
+                        const senderData = await getUserSocket(userId)
+                        const senderSocketId = senderData?.socketId
+                        if (senderSocketId) {
+                            io.to(senderSocketId).emit('messagesSeen', { conversationId, messageIds })
+                        }
+                    } else {
+                        const conversation = await Conversation.findById(conversationId).select('participants')
+                        const participantIds = (conversation?.participants || [])
+                            .map((p) => p?.toString?.())
+                            .filter((pid) => pid && pid !== currentUserId)
 
-                    await Promise.all(
-                        participantIds.map(async (pid) => {
-                            const participantSocket = await getUserSocket(pid)
-                            if (participantSocket?.socketId) {
-                                io.to(participantSocket.socketId).emit("messagesSeen", { conversationId })
-                            }
-                        })
-                    )
+                        await Promise.all(
+                            participantIds.map(async (pid) => {
+                                const participantSocket = await getUserSocket(pid)
+                                if (participantSocket?.socketId) {
+                                    io.to(participantSocket.socketId).emit('messagesSeen', {
+                                        conversationId,
+                                        messageIds,
+                                    })
+                                }
+                            })
+                        )
+                    }
                 }
                 
                 // Notify the reader (not the sender) so they can clear local unread — do NOT use `messagesSeen`
