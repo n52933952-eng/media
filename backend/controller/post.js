@@ -818,11 +818,13 @@ export const getFeedPost = async(req,res) => {
                 updatedAt: s.startedAt,
             }))
 
-            const pinnedSorted = (await attachReplyCountsToPosts([...channelPosts])).sort(
+            const channelWithCounts = await attachReplyCountsToPosts([...channelPosts])
+            const normalsSorted = [...topNormalPosts].sort((a, b) => feedSortTime(b) - feedSortTime(a))
+            // Channels live only on page 1, but are sorted by time among the first posts (not pinned to the very top).
+            const mixedNonLive = [...channelWithCounts, ...normalsSorted].sort(
                 (a, b) => feedSortTime(b) - feedSortTime(a),
             )
-            const normalsSorted = [...topNormalPosts].sort((a, b) => feedSortTime(b) - feedSortTime(a))
-            const combinedPosts = [...livePseudoPosts, ...pinnedSorted, ...normalsSorted].map((p) =>
+            const combinedPosts = [...livePseudoPosts, ...mixedNonLive].map((p) =>
                 shapeFeedPostForViewer(p, viewerIdStr),
             )
 

@@ -16,6 +16,7 @@ export const createLiveStreamPost = async (req, res) => {
     const Post = (await import('../models/post.js')).default
     const { getIO, getUserSocketMap } = await import('../socket/socket.js')
     const { getChannelById } = await import('../config/channels.js')
+    const { invalidateUserFeedCache } = await import('../services/feedCache.js')
 
     const channelConfig = getChannelById(channelId)
 
@@ -63,6 +64,9 @@ export const createLiveStreamPost = async (req, res) => {
         await existingPost.save()
       } catch (_) {}
 
+      // Re-adding bumps updatedAt → refresh page 1 so it isn't served from stale cache.
+      await invalidateUserFeedCache(req.user._id)
+
       await existingPost.populate('postedBy', 'username profilePic name')
 
       const io = getIO()
@@ -92,6 +96,9 @@ export const createLiveStreamPost = async (req, res) => {
 
     await liveStreamPost.save()
     await liveStreamPost.populate('postedBy', 'username profilePic name')
+
+    // New channel card must appear on the next page-1 load (avoid stale cached feed).
+    await invalidateUserFeedCache(req.user._id)
 
     console.log(`✅ Created live stream post: ${liveStreamPost._id} for user: ${req.user._id}`)
 
