@@ -49,7 +49,7 @@ import { findPostsByGameRoomId } from '../services/gamePostLookup.js'
  * buildLikedPostIdSet). We still fall back to the legacy `likes[]` for any un-backfilled docs.
  * Live pseudo-posts have no likes and pass through untouched.
  */
-function shapeFeedPostForViewer(post, viewerIdStr, likedSet) {
+function shapeFeedPostForViewer(post, viewerIdStr, likedSet, previewMap) {
     if (!post || post.isLive) return post
     const postIdStr = post._id != null ? String(post._id) : ''
     const likeCount =
@@ -61,8 +61,9 @@ function shapeFeedPostForViewer(post, viewerIdStr, likedSet) {
         if (likedSet) likedByMe = likedSet.has(postIdStr)
         else if (Array.isArray(post.likes)) likedByMe = post.likes.some((id) => String(id) === viewerIdStr)
     }
+    const likePreview = previewMap ? (previewMap.get(postIdStr) || null) : null
     const { likes: _likes, ...rest } = post
-    return { ...rest, likeCount, likedByMe }
+    return { ...rest, likeCount, likedByMe, likePreview }
 }
 
 /**
@@ -85,12 +86,59 @@ async function buildLikedPostIdSet(viewerIdStr, posts) {
 }
 
 /**
+ * One aggregation → Map<postIdStr, {_id, username, name, profilePic}> of the most-recent
+ * liker per post, so the feed can render a "liked by [avatar]" preview without an extra
+ * request per card. Uses the {post:1, _id:-1} index and one batched User lookup, so it
+ * scales to a full page of posts with just two queries total.
+ */
+async function buildLikePreviewMap(posts) {
+    if (!Array.isArray(posts) || posts.length === 0) return new Map()
+    const objectIds = posts
+        .filter(
+            (p) =>
+                p && !p.isLive && p._id != null && mongoose.Types.ObjectId.isValid(String(p._id)),
+        )
+        .map((p) => new mongoose.Types.ObjectId(String(p._id)))
+    if (objectIds.length === 0) return new Map()
+
+    const rows = await Like.aggregate([
+        { $match: { post: { $in: objectIds } } },
+        { $sort: { _id: -1 } },
+        { $group: { _id: '$post', user: { $first: '$user' } } },
+    ])
+    if (!rows.length) return new Map()
+
+    const userIds = [...new Set(rows.map((r) => String(r.user)).filter(Boolean))]
+    const users = await User.find({ _id: { $in: userIds } })
+        .select('_id username name profilePic')
+        .lean()
+    const userById = new Map(users.map((u) => [String(u._id), u]))
+
+    const map = new Map()
+    for (const r of rows) {
+        const u = userById.get(String(r.user))
+        if (u) {
+            map.set(String(r._id), {
+                _id: u._id,
+                username: u.username,
+                name: u.name,
+                profilePic: u.profilePic || null,
+            })
+        }
+    }
+    return map
+}
+
+/**
  * Strip the legacy `likes[]` and attach `likeCount` + `likedByMe` to profile posts,
  * using a single batched Like lookup for the whole page.
  */
 async function shapeProfilePostsForViewer(posts, viewerIdStr) {
     if (!Array.isArray(posts) || posts.length === 0) return []
-    const likedSet = await buildLikedPostIdSet(viewerIdStr, posts)
+    const [likedSet, previewMap] = await Promise.all([
+        buildLikedPostIdSet(viewerIdStr, posts),
+        buildLikePreviewMap(posts),
+    ])
     return posts.map((p) => {
         const obj = p?.toObject ? p.toObject() : p
         const { likes: _likes, ...rest } = obj
@@ -103,6 +151,7 @@ async function shapeProfilePostsForViewer(posts, viewerIdStr) {
             ...rest,
             likeCount,
             likedByMe: viewerIdStr ? likedSet.has(postIdStr) : false,
+            likePreview: previewMap.get(postIdStr) || null,
         }
     })
 }
@@ -327,6 +376,19 @@ export const getPost = async(req,res) => {
         withReplies.likedByMe = viewerId
             ? !!(await Like.exists({ post: req.params.id, user: viewerId }))
             : false
+        // Most-recent liker preview (for the inline "liked by [avatar]" UI).
+        const previewLike = await Like.findOne({ post: req.params.id })
+            .sort({ _id: -1 })
+            .populate('user', '_id username name profilePic')
+            .lean()
+        withReplies.likePreview = previewLike?.user
+            ? {
+                  _id: previewLike.user._id,
+                  username: previewLike.user.username,
+                  name: previewLike.user.name,
+                  profilePic: previewLike.user.profilePic || null,
+              }
+            : null
         res.status(200).json(withReplies)
 
     }
@@ -991,9 +1053,12 @@ export const getFeedPost = async(req,res) => {
             const mixedNonLive = [...channelWithCounts, ...normalsSorted].sort(
                 (a, b) => feedSortTime(b) - feedSortTime(a),
             )
-            const likedSet = await buildLikedPostIdSet(viewerIdStr, mixedNonLive)
+            const [likedSet, previewMap] = await Promise.all([
+                buildLikedPostIdSet(viewerIdStr, mixedNonLive),
+                buildLikePreviewMap(mixedNonLive),
+            ])
             const combinedPosts = [...livePseudoPosts, ...mixedNonLive].map((p) =>
-                shapeFeedPostForViewer(p, viewerIdStr, likedSet),
+                shapeFeedPostForViewer(p, viewerIdStr, likedSet, previewMap),
             )
 
             const nextOffset = firstNormalIds.length
@@ -1018,9 +1083,12 @@ export const getFeedPost = async(req,res) => {
         const nextOffset = startIndex + paginatedNormal.length
         const hasMore = nextOffset < totalCount
         const lastPost = paginatedNormal[paginatedNormal.length - 1]
-        const likedSet = await buildLikedPostIdSet(viewerIdStr, paginatedNormal)
+        const [likedSet, previewMap] = await Promise.all([
+            buildLikedPostIdSet(viewerIdStr, paginatedNormal),
+            buildLikePreviewMap(paginatedNormal),
+        ])
         const shapedPaginatedNormal = paginatedNormal.map((p) =>
-            shapeFeedPostForViewer(p, viewerIdStr, likedSet),
+            shapeFeedPostForViewer(p, viewerIdStr, likedSet, previewMap),
         )
 
         console.log(
