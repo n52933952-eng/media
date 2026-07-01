@@ -1470,10 +1470,16 @@ export const getFollowingUsers = async (req, res) => {
             const window = legacyFollowing.slice(skip, skip + pageSize + 1).map(id => id?.toString?.()).filter(Boolean)
             hasMore = window.length > pageSize
             followeeIds = hasMore ? window.slice(0, pageSize) : window
+            nextCursor =
+                hasMore && followeeIds.length > 0 ? followeeIds[followeeIds.length - 1] : null
         } else {
             hasMore = followingDocs.length > pageSize
             const sliceDocs = hasMore ? followingDocs.slice(0, pageSize) : followingDocs
             followeeIds = sliceDocs.map(d => d.followeeId).filter(Boolean)
+            nextCursor =
+                hasMore && sliceDocs.length > 0
+                    ? String(sliceDocs[sliceDocs.length - 1]._id)
+                    : null
         }
         }
 
