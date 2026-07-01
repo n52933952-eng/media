@@ -62,7 +62,7 @@ function buildConversationListEnrichmentStages(userId) {
             },
           },
           { $addFields: { sender: { $arrayElemAt: ['$sender', 0] } } },
-          { $project: { text: 1, sender: 1, createdAt: 1 } },
+          { $project: { text: 1, sender: 1, createdAt: 1, delivered: 1, seen: 1 } },
         ],
       },
     },

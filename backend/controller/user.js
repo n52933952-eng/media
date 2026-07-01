@@ -1265,7 +1265,10 @@ export const getFollowingUsers = async (req, res) => {
                 return res.status(404).json({ error: 'User not found' })
             }
         }
-        const wantsPaginate = req.query.limit !== undefined || req.query.skip !== undefined
+        const wantsPaginate =
+            req.query.limit !== undefined ||
+            req.query.skip !== undefined ||
+            req.query.cursor !== undefined
 
         if (!wantsPaginate) {
             const limit = 500
@@ -1298,9 +1301,55 @@ export const getFollowingUsers = async (req, res) => {
             return res.status(200).json(followingUsers)
         }
 
-        const pageSize = Math.min(Math.max(parseInt(String(req.query.limit), 10) || 12, 1), 100)
+        const pageSize = Math.min(Math.max(parseInt(String(req.query.limit), 10) || 20, 1), 100)
         const skip = Math.max(parseInt(String(req.query.skip), 10) || 0, 0)
+        const cursorRaw = req.query.cursor != null ? String(req.query.cursor).trim() : ''
+        const useCursor = !!cursorRaw
 
+        let followeeIds = []
+        let hasMore = false
+        let nextCursor = null
+
+        if (useCursor) {
+            if (!mongoose.Types.ObjectId.isValid(cursorRaw)) {
+                return res.status(400).json({ error: 'Invalid cursor' })
+            }
+            const followFilter = {
+                followerId: subjectId,
+                _id: { $lt: new mongoose.Types.ObjectId(cursorRaw) },
+            }
+            let followingDocs = await Follow.find(followFilter)
+                .select('followeeId _id')
+                .sort({ _id: -1 })
+                .limit(pageSize + 1)
+                .lean()
+
+            let useLegacy = false
+            if (!followingDocs.length) {
+                const c = await Follow.countDocuments({ followerId: subjectId })
+                if (c === 0) useLegacy = true
+            }
+
+            if (useLegacy) {
+                const currentUser = await User.findById(subjectId).select('following').lean()
+                const legacyFollowing = Array.isArray(currentUser?.following) ? currentUser.following : []
+                const allIds = legacyFollowing.map((id) => id?.toString?.()).filter(Boolean)
+                const cursorIdx = allIds.findIndex((id) => id === cursorRaw)
+                const start = cursorIdx >= 0 ? cursorIdx + 1 : allIds.length
+                const window = allIds.slice(start, start + pageSize + 1)
+                hasMore = window.length > pageSize
+                followeeIds = hasMore ? window.slice(0, pageSize) : window
+                nextCursor = hasMore && followeeIds.length > 0 ? followeeIds[followeeIds.length - 1] : null
+            } else {
+                hasMore = followingDocs.length > pageSize
+                const sliceDocs = hasMore ? followingDocs.slice(0, pageSize) : followingDocs
+                followeeIds = sliceDocs.map((d) => d.followeeId).filter(Boolean)
+                nextCursor =
+                    hasMore && sliceDocs.length > 0
+                        ? String(sliceDocs[sliceDocs.length - 1]._id)
+                        : null
+            }
+        } else {
         let followingDocs = await Follow.find({ followerId: subjectId })
             .select('followeeId')
             .sort({ createdAt: -1 })
@@ -1314,9 +1363,6 @@ export const getFollowingUsers = async (req, res) => {
             if (c === 0) useLegacy = true
         }
 
-        let followeeIds = []
-        let hasMore = false
-
         if (useLegacy) {
             const currentUser = await User.findById(subjectId).select('following').lean()
             const legacyFollowing = Array.isArray(currentUser?.following) ? currentUser.following : []
@@ -1328,9 +1374,15 @@ export const getFollowingUsers = async (req, res) => {
             const sliceDocs = hasMore ? followingDocs.slice(0, pageSize) : followingDocs
             followeeIds = sliceDocs.map(d => d.followeeId).filter(Boolean)
         }
+        }
 
         if (followeeIds.length === 0) {
-            return res.status(200).json({ users: [], hasMore: false, nextSkip: skip })
+            return res.status(200).json({
+                users: [],
+                hasMore: false,
+                nextSkip: skip,
+                nextCursor: null,
+            })
         }
 
         const followingUsers = await User.find({
@@ -1349,6 +1401,7 @@ export const getFollowingUsers = async (req, res) => {
             users: followingUsers,
             hasMore,
             nextSkip: skip + followeeIds.length,
+            nextCursor,
         })
     } catch (error) {
         console.error('Error getting following users:', error)
