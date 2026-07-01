@@ -2,6 +2,7 @@ import cron from 'node-cron'
 import Notification from '../models/notification.js'
 import Message from '../models/message.js'
 import Conversation from '../models/conversation.js'
+import { buildConversationLastMessageFromMessage } from './conversationLastMessage.js'
 import FeedHiddenPost from '../models/feedHiddenPost.js'
 import { deleteMediaAsset, isManagedMediaUrl } from './mediaStorage.js'
 
@@ -32,18 +33,18 @@ async function refreshConversationLastMessage(conversationId) {
   const cid = String(conversationId)
   const last = await Message.findOne({ conversationId: cid })
     .sort({ createdAt: -1 })
-    .select('text sender')
+    .select('text sender seen delivered createdAt img')
     .lean()
 
   if (last) {
     await Conversation.findByIdAndUpdate(cid, {
-      lastMessage: { text: last.text, sender: last.sender },
+      lastMessage: buildConversationLastMessageFromMessage(last),
     })
     return
   }
 
   await Conversation.findByIdAndUpdate(cid, {
-    lastMessage: { text: '', sender: null },
+    lastMessage: buildConversationLastMessageFromMessage(null),
   })
 }
 

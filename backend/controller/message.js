@@ -14,6 +14,7 @@ import {
   decodeMessageCursor,
   MESSAGES_PAGE_SIZE_DEFAULT,
 } from '../services/messageCursor.js'
+import { buildConversationLastMessageFromMessage } from '../services/conversationLastMessage.js'
 
 // ── helpers ────────────────────────────────────────────────────────────────
 const idStr = (id) => (id != null ? id.toString() : '')
@@ -41,15 +42,39 @@ function buildConversationListEnrichmentStages(userId) {
             },
           },
         },
+        __denormLastMessageReady: {
+          $and: [
+            { $ne: [{ $ifNull: ['$lastMessage.sender', null] }, null] },
+            { $ne: [{ $ifNull: ['$lastMessage.createdAt', null] }, null] },
+          ],
+        },
+      },
+    },
+    {
+      $lookup: {
+        from: 'users',
+        localField: 'lastMessage.sender',
+        foreignField: '_id',
+        as: '__denormSender',
+        pipeline: [{ $project: { username: 1, name: 1, profilePic: 1 } }],
       },
     },
     {
       $lookup: {
         from: 'messages',
-        let: { convId: '$_id' },
+        let: { convId: '$_id', useLookup: '$__denormLastMessageReady' },
         as: '__lastMessageDoc',
         pipeline: [
-          { $match: { $expr: { $eq: ['$conversationId', '$$convId'] } } },
+          {
+            $match: {
+              $expr: {
+                $and: [
+                  { $eq: ['$conversationId', '$$convId'] },
+                  { $eq: ['$$useLookup', false] },
+                ],
+              },
+            },
+          },
           { $sort: { createdAt: -1 } },
           { $limit: 1 },
           {
@@ -68,7 +93,19 @@ function buildConversationListEnrichmentStages(userId) {
     },
     {
       $addFields: {
-        lastMessage: { $arrayElemAt: ['$__lastMessageDoc', 0] },
+        lastMessage: {
+          $cond: {
+            if: '$__denormLastMessageReady',
+            then: {
+              text: { $ifNull: ['$lastMessage.text', ''] },
+              sender: { $arrayElemAt: ['$__denormSender', 0] },
+              createdAt: '$lastMessage.createdAt',
+              delivered: { $ifNull: ['$lastMessage.delivered', false] },
+              seen: { $ifNull: ['$lastMessage.seen', false] },
+            },
+            else: { $arrayElemAt: ['$__lastMessageDoc', 0] },
+          },
+        },
       },
     },
     {
@@ -99,7 +136,7 @@ function buildConversationListEnrichmentStages(userId) {
         },
       },
     },
-    { $project: { __lastMessageDoc: 0, __unread: 0 } },
+    { $project: { __lastMessageDoc: 0, __unread: 0, __denormSender: 0, __denormLastMessageReady: 0 } },
   ]
 }
 
@@ -326,6 +363,10 @@ export async function ackMessageDeliveredHttp(req, res) {
       if (!partStrs.includes(ackerId)) continue
 
       await Message.updateOne({ _id: msg._id }, { $set: { delivered: true } })
+      await Conversation.updateOne(
+        { _id: convId, 'lastMessage.messageId': msg._id },
+        { $set: { 'lastMessage.delivered': true } },
+      )
 
       notifySenderMessageDelivered(senderStr, msg._id.toString(), convId)
     }
@@ -381,6 +422,7 @@ function parseLiveShareStreamerId(text) {
 /** Core send logic shared between file-upload and plain-text paths */
 async function _persistAndBroadcastMessage({ conversation, senderId, message, img, replyTo }) {
   const liveShareStreamerId = parseLiveShareStreamerId(message)
+  const previewText = (message && String(message).trim()) || (img ? '📷 Image' : '')
   const newMessage = new Message({
     conversationId: conversation._id,
     sender: senderId,
@@ -390,10 +432,14 @@ async function _persistAndBroadcastMessage({ conversation, senderId, message, im
     ...(liveShareStreamerId ? { liveShareStreamerId } : {}),
   })
 
-  conversation.lastMessage = { text: message, sender: senderId }
-  conversation.updatedAt = new Date()
+  await newMessage.save()
 
-  await Promise.all([newMessage.save(), conversation.save()])
+  conversation.lastMessage = buildConversationLastMessageFromMessage({
+    ...newMessage.toObject(),
+    text: previewText,
+  })
+  conversation.updatedAt = new Date()
+  await conversation.save()
 
   await newMessage.populate('sender', 'username profilePic name')
   if (newMessage.replyTo) {

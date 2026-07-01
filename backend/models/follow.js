@@ -21,6 +21,8 @@ FollowSchema.index({ followerId: 1, followeeId: 1 }, { unique: true })
 // Query helpers
 FollowSchema.index({ followeeId: 1, createdAt: -1 })
 FollowSchema.index({ followerId: 1, createdAt: -1 })
+// Cursor pagination: followerId + Follow._id (stable with mobile nextCursor)
+FollowSchema.index({ followerId: 1, _id: -1 })
 
 const Follow = mongoose.model('Follow', FollowSchema)
 export default Follow

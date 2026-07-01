@@ -1252,8 +1252,8 @@ export const getBusyGameUsers = async (req, res) => {
 }
 
 // Get users that current user is following (for messages, chess challenge list, etc.)
-// Without `limit`/`skip` query: returns a plain array (max 500) — backward compatible.
-// With `limit` or `skip`: returns { users, hasMore, nextSkip } for pagination.
+// Without `limit`/`skip`/`cursor`/`q`: returns a plain array (max 500) — backward compatible.
+// With `limit`, `skip`, `cursor`, or `q`: returns { users, hasMore, nextSkip, nextCursor }.
 export const getFollowingUsers = async (req, res) => {
     try {
         let subjectId = req.user._id
@@ -1265,7 +1265,11 @@ export const getFollowingUsers = async (req, res) => {
                 return res.status(404).json({ error: 'User not found' })
             }
         }
+
+        const searchQuery = req.query.q != null ? String(req.query.q).trim() : ''
+        const wantsSearch = searchQuery.length > 0
         const wantsPaginate =
+            wantsSearch ||
             req.query.limit !== undefined ||
             req.query.skip !== undefined ||
             req.query.cursor !== undefined
@@ -1276,7 +1280,7 @@ export const getFollowingUsers = async (req, res) => {
 
             const followingDocs = await Follow.find({ followerId: subjectId })
                 .select('followeeId')
-                .sort({ createdAt: -1 })
+                .sort({ _id: -1 })
                 .limit(limit)
                 .lean()
 
@@ -1305,6 +1309,103 @@ export const getFollowingUsers = async (req, res) => {
         const skip = Math.max(parseInt(String(req.query.skip), 10) || 0, 0)
         const cursorRaw = req.query.cursor != null ? String(req.query.cursor).trim() : ''
         const useCursor = !!cursorRaw
+
+        // Server-side search among people you follow (Messages "start chat" — no bulk load).
+        if (wantsSearch) {
+            if (searchQuery.length > 48) {
+                return res.status(200).json({ users: [], hasMore: false, nextSkip: 0, nextCursor: null })
+            }
+            const escaped = searchQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+            const pattern = new RegExp(escaped, 'i')
+
+            const followMatch = { followerId: subjectId }
+            if (useCursor) {
+                if (!mongoose.Types.ObjectId.isValid(cursorRaw)) {
+                    return res.status(400).json({ error: 'Invalid cursor' })
+                }
+                followMatch._id = { $lt: new mongoose.Types.ObjectId(cursorRaw) }
+            }
+
+            const searchAgg = await Follow.aggregate([
+                { $match: followMatch },
+                { $sort: { _id: -1 } },
+                {
+                    $lookup: {
+                        from: 'users',
+                        localField: 'followeeId',
+                        foreignField: '_id',
+                        as: 'user',
+                        pipeline: [
+                            {
+                                $project: {
+                                    username: 1,
+                                    name: 1,
+                                    profilePic: 1,
+                                    bio: 1,
+                                },
+                            },
+                        ],
+                    },
+                },
+                { $unwind: '$user' },
+                {
+                    $match: {
+                        $or: [
+                            { 'user.username': pattern },
+                            { 'user.name': pattern },
+                        ],
+                    },
+                },
+                { $limit: pageSize + 1 },
+                {
+                    $project: {
+                        followId: '$_id',
+                        user: 1,
+                    },
+                },
+            ])
+
+            let hasMore = searchAgg.length > pageSize
+            let slice = hasMore ? searchAgg.slice(0, pageSize) : searchAgg
+
+            // Legacy fallback when Follow collection is empty for this user.
+            if (!slice.length && !useCursor) {
+                const c = await Follow.countDocuments({ followerId: subjectId })
+                if (c === 0) {
+                    const currentUser = await User.findById(subjectId).select('following').lean()
+                    const legacyFollowing = Array.isArray(currentUser?.following) ? currentUser.following : []
+                    const legacyIds = legacyFollowing.map((id) => id?.toString?.()).filter(Boolean)
+                    if (legacyIds.length > 0) {
+                        const legacyUsers = await User.find({
+                            _id: { $in: legacyIds },
+                            $or: [{ username: pattern }, { name: pattern }],
+                        })
+                            .select('_id username name profilePic bio')
+                            .limit(pageSize + 1)
+                            .lean()
+                        hasMore = legacyUsers.length > pageSize
+                        const users = hasMore ? legacyUsers.slice(0, pageSize) : legacyUsers
+                        return res.status(200).json({
+                            users,
+                            hasMore,
+                            nextSkip: users.length,
+                            nextCursor: null,
+                        })
+                    }
+                }
+            }
+
+            const users = slice.map((row) => row.user)
+            const nextCursor =
+                hasMore && slice.length > 0 ? String(slice[slice.length - 1].followId) : null
+
+            return res.status(200).json({
+                users,
+                hasMore,
+                nextSkip: skip + users.length,
+                nextCursor,
+            })
+        }
 
         let followeeIds = []
         let hasMore = false
@@ -1351,8 +1452,8 @@ export const getFollowingUsers = async (req, res) => {
             }
         } else {
         let followingDocs = await Follow.find({ followerId: subjectId })
-            .select('followeeId')
-            .sort({ createdAt: -1 })
+            .select('followeeId _id')
+            .sort({ _id: -1 })
             .skip(skip)
             .limit(pageSize + 1)
             .lean()

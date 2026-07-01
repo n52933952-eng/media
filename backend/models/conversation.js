@@ -17,6 +17,19 @@ const ConversationSchema = new mongoose.Schema({
             type:Boolean,
             default:false
         },
+        delivered:{
+            type:Boolean,
+            default:false
+        },
+        createdAt:{
+            type:Date,
+            default:null
+        },
+        messageId:{
+            type:mongoose.Schema.Types.ObjectId,
+            ref:"Message",
+            default:null
+        },
     },
 
     // ── Group conversation fields ──────────────────────────────────────────

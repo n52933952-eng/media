@@ -2577,7 +2577,7 @@ export const initializeSocket = async (app) => {
                 // Update conversation's lastMessage.seen to true
                 await Conversation.updateOne(
                     { _id: conversationId },
-                    { $set: { "lastMessage.seen": true } }
+                    { $set: { "lastMessage.seen": true, "lastMessage.delivered": true } }
                 )
                 
                 // Emit read receipts:
@@ -2674,6 +2674,10 @@ export const initializeSocket = async (app) => {
                     if (!partStrs.includes(ackerId)) continue
 
                     await Message.updateOne({ _id: msg._id }, { $set: { delivered: true } })
+                    await Conversation.updateOne(
+                        { _id: convId, 'lastMessage.messageId': msg._id },
+                        { $set: { 'lastMessage.delivered': true } },
+                    )
 
                     emitToUserSelf(senderStr, 'messageDelivered', {
                         messageId: msg._id.toString(),
