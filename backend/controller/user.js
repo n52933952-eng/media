@@ -2,6 +2,7 @@ import crypto from 'crypto'
 import { OAuth2Client } from 'google-auth-library'
 import User from '../models/user.js'
 import Post from '../models/post.js'
+import Like from '../models/like.js'
 import Follow from '../models/follow.js'
 import Conversation from '../models/conversation.js'
 import Message from '../models/message.js'
@@ -481,12 +482,27 @@ export const DeleteMyAccount = async (req, res) => {
     await Post.updateMany({ contributors: userId }, { $pull: { contributors: userId } })
     // Also handle legacy string contributor ids (defensive)
     await Post.updateMany({ contributors: userIdStr }, { $pull: { contributors: userIdStr } })
-    // Remove likes and embedded replies by this user to avoid broken profile lookups
+    // Post likes (Like collection): remove this user's likes and fix the affected counts.
+    const likedRows = await Like.find({ user: userId }).select('post').lean()
+    if (likedRows.length) {
+      const likedPostIds = likedRows.map((r) => r.post)
+      await Like.deleteMany({ user: userId })
+      await Post.updateMany({ _id: { $in: likedPostIds } }, { $inc: { likeCount: -1 } })
+      await Post.updateMany(
+        { _id: { $in: likedPostIds }, likeCount: { $lt: 0 } },
+        { $set: { likeCount: 0 } },
+      )
+    }
+    // Legacy array + embedded replies cleanup (un-backfilled docs)
     await Post.updateMany({ likes: userId }, { $pull: { likes: userId } })
     await Post.updateMany({ 'replies.userId': userId }, { $pull: { replies: { userId } } })
 
-    // Delete authored posts
+    // Delete authored posts + their likes
+    const authoredPosts = await Post.find({ postedBy: userId }).select('_id').lean()
     await Post.deleteMany({ postedBy: userId })
+    if (authoredPosts.length) {
+      await Like.deleteMany({ post: { $in: authoredPosts.map((p) => p._id) } })
+    }
 
     // Stories: remove viewer entries on others + delete own stories
     await Story.updateMany({ 'viewers.user': userId }, { $pull: { viewers: { user: userId } } })

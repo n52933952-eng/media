@@ -83,11 +83,22 @@ const PostSchema = mongoose.Schema({
         }
     },
 
+    /**
+     * Legacy per-post likers array. No longer written to — the `Like` collection is the
+     * source of truth. Kept on old documents for migration/backfill only.
+     */
     likes:{
        type:[mongoose.Schema.Types.ObjectId],
        ref:"User",
        default:[]
 
+    },
+
+    /** Denormalized like count — source of truth is the Like collection. */
+    likeCount: {
+        type: Number,
+        default: 0,
+        min: 0,
     },
 
     /** Football feed: like counts per live match card (key matches client footballMatchId). */

@@ -45,6 +45,7 @@ export async function buildFeedNormalPostIds(userId, hiddenObjectIds) {
       ],
       ...hiddenFilter,
     })
+      .select('-likes')
       .populate('postedBy', '-password')
       .populate('contributors', 'username profilePic name')
       .sort({ updatedAt: -1, createdAt: -1 })
@@ -57,6 +58,7 @@ export async function buildFeedNormalPostIds(userId, hiddenObjectIds) {
     contributors: userId,
     ...hiddenFilter,
   })
+    .select('-likes')
     .populate('postedBy', '-password')
     .populate('contributors', 'username profilePic name')
     .sort({ updatedAt: -1, createdAt: -1 })
@@ -116,6 +118,7 @@ export async function populateFeedPostsByIds(ids) {
   const wanted = (Array.isArray(ids) ? ids : []).map(String).filter(Boolean)
   if (!wanted.length) return []
   const docs = await Post.find({ _id: { $in: wanted } })
+    .select('-likes')
     .populate('postedBy', '-password')
     .populate('contributors', 'username profilePic name')
     .lean()
@@ -126,6 +129,7 @@ export async function populateFeedPostsByIds(ids) {
 
 export async function fetchChannelPostsForUser(userId) {
   return Post.find({ channelAddedBy: userId.toString() })
+    .select('-likes')
     .populate('postedBy', '-password')
     .populate('contributors', 'username profilePic name')
     .sort({ createdAt: -1 })

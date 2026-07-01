@@ -1,6 +1,8 @@
 
+import mongoose from 'mongoose'
 import User from '../models/user.js'
 import Post, { MAX_REPLIES_PER_POST } from '../models/post.js'
+import Like from '../models/like.js'
 import Follow from '../models/follow.js'
 import LiveStream from '../models/liveStream.js'
 import { uploadMulterFile, deleteMediaAsset, respondToUploadError } from '../services/mediaStorage.js'
@@ -42,18 +44,67 @@ import {
 import { findPostsByGameRoomId } from '../services/gamePostLookup.js'
 
 /**
- * Feed scalability: a post's `likes[]` is an array of every liker's id. For viral posts that is
- * megabytes per post and forces the client to run `likes.includes(me)` on every card. The feed
- * only needs "how many" and "did I like it", so we drop the array and send `likeCount` + `likedByMe`.
+ * Feed scalability: likes live in the Like collection now. The feed only needs "how many"
+ * (`post.likeCount`) and "did I like it" (`likedByMe`, from a batched per-page lookup — see
+ * buildLikedPostIdSet). We still fall back to the legacy `likes[]` for any un-backfilled docs.
  * Live pseudo-posts have no likes and pass through untouched.
  */
-function shapeFeedPostForViewer(post, viewerIdStr) {
+function shapeFeedPostForViewer(post, viewerIdStr, likedSet) {
     if (!post || post.isLive) return post
-    const likes = Array.isArray(post.likes) ? post.likes : []
-    const likeCount = likes.length
-    const likedByMe = !!viewerIdStr && likes.some((id) => String(id) === viewerIdStr)
+    const postIdStr = post._id != null ? String(post._id) : ''
+    const likeCount =
+        typeof post.likeCount === 'number'
+            ? post.likeCount
+            : (Array.isArray(post.likes) ? post.likes.length : 0)
+    let likedByMe = false
+    if (viewerIdStr) {
+        if (likedSet) likedByMe = likedSet.has(postIdStr)
+        else if (Array.isArray(post.likes)) likedByMe = post.likes.some((id) => String(id) === viewerIdStr)
+    }
     const { likes: _likes, ...rest } = post
     return { ...rest, likeCount, likedByMe }
+}
+
+/**
+ * One indexed query → Set of postId strings (from `posts`) that `viewerIdStr` has liked.
+ * Powers `likedByMe` for an entire feed/profile page without loading any likes arrays.
+ */
+async function buildLikedPostIdSet(viewerIdStr, posts) {
+    if (!viewerIdStr || !Array.isArray(posts) || posts.length === 0) return new Set()
+    const ids = posts
+        .filter(
+            (p) =>
+                p && !p.isLive && p._id != null && mongoose.Types.ObjectId.isValid(String(p._id)),
+        )
+        .map((p) => String(p._id))
+    if (ids.length === 0) return new Set()
+    const likedRows = await Like.find({ user: viewerIdStr, post: { $in: ids } })
+        .select('post')
+        .lean()
+    return new Set(likedRows.map((r) => String(r.post)))
+}
+
+/**
+ * Strip the legacy `likes[]` and attach `likeCount` + `likedByMe` to profile posts,
+ * using a single batched Like lookup for the whole page.
+ */
+async function shapeProfilePostsForViewer(posts, viewerIdStr) {
+    if (!Array.isArray(posts) || posts.length === 0) return []
+    const likedSet = await buildLikedPostIdSet(viewerIdStr, posts)
+    return posts.map((p) => {
+        const obj = p?.toObject ? p.toObject() : p
+        const { likes: _likes, ...rest } = obj
+        const likeCount =
+            typeof rest.likeCount === 'number'
+                ? rest.likeCount
+                : (Array.isArray(obj.likes) ? obj.likes.length : 0)
+        const postIdStr = rest._id != null ? String(rest._id) : ''
+        return {
+            ...rest,
+            likeCount,
+            likedByMe: viewerIdStr ? likedSet.has(postIdStr) : false,
+        }
+    })
 }
 
 async function emitNewPostToAuthorFollowers(io, authorId, post) {
@@ -260,6 +311,7 @@ export const getPost = async(req,res) => {
     try{
 
         const post = await Post.findById(req.params.id)
+            .select('-likes')
             .populate("postedBy", "username profilePic name")
             .populate("contributors", "username profilePic name")
 
@@ -268,7 +320,14 @@ export const getPost = async(req,res) => {
         }
 
         const withReplies = await attachRepliesToPost(post)
-      res.status(200).json(withReplies)
+        delete withReplies.likes
+        withReplies.likeCount = typeof withReplies.likeCount === 'number' ? withReplies.likeCount : 0
+        // likedByMe when we know the viewer (route may be unauthenticated).
+        const viewerId = req.user?._id ? String(req.user._id) : null
+        withReplies.likedByMe = viewerId
+            ? !!(await Like.exists({ post: req.params.id, user: viewerId }))
+            : false
+        res.status(200).json(withReplies)
 
     }
     catch(error){
@@ -511,6 +570,10 @@ export const deletePost = async(req,res) => {
       
       await Post.findByIdAndDelete(req.params.id)
       await deleteCommentsForPost(req.params.id)
+      // Remove this post's likes from the Like collection.
+      Like.deleteMany({ post: req.params.id }).catch((e) =>
+        console.error('Error deleting post likes:', e),
+      )
 
       const io = getIO()
       if (io) {
@@ -540,7 +603,8 @@ export const LikePost = async(req,res) => {
              ? String(rawMid).trim().slice(0, 128)
              : null
   
-     const post = await Post.findById(id)
+     // Exclude the legacy `likes` array — likes now live in the Like collection.
+     const post = await Post.findById(id).select('-likes')
      
      if(!post){
         return res.status(400).json({message:"no post found"})
@@ -593,44 +657,142 @@ export const LikePost = async(req,res) => {
          })
      }
     
-     const isUserLikedPost = post.likes.includes(userId)
-
-     if(isUserLikedPost){
-         await Post.updateOne({_id:id},{$pull:{likes:userId}})
-         res.status(200).json({message:"post unlike scfully"})
-     }else{
-      post.likes.push(userId)
-      await post.save()
-      
-      // Create notification for post owner when someone likes their post
-      // Don't notify if user is liking their own post
-      if (post.postedBy.toString() !== userId.toString()) {
-          const { createNotification } = await import('./notification.js')
-          createNotification(post.postedBy, 'like', userId, {
-              postId: post._id
-          }).catch(err => {
-              console.error('Error creating like notification:', err)
-          })
-      }
-      
-      // Create activity for activity feed
-      const { createActivity } = await import('./activity.js')
-      createActivity(userId, 'like', {
-          postId: post._id,
-          targetUser: post.postedBy,
-          metadata: { postText: post.text?.substring(0, 50) || '' }
-      }).catch(err => {
-          console.error('Error creating activity:', err)
-      })
-      
-      res.status(200).json({message:"post liked scfully"})
+     // Normal post like toggle — backed by the Like collection + denormalized likeCount.
+     // Atomic + O(1): no per-post array is loaded or rewritten, so this scales to
+     // millions of likers without hitting the 16MB document limit.
+     const removed = await Like.findOneAndDelete({ post: id, user: userId })
+     if (removed) {
+         const updated = await Post.findByIdAndUpdate(
+             id,
+             { $inc: { likeCount: -1 } },
+             { new: true },
+         ).select('likeCount')
+         // Guard against the counter drifting below zero (e.g. legacy/backfill edge cases).
+         let count = updated?.likeCount ?? 0
+         if (count < 0) {
+             count = 0
+             await Post.updateOne({ _id: id }, { $set: { likeCount: 0 } })
+         }
+         return res.status(200).json({ message: 'post unlike scfully', liked: false, likeCount: count })
      }
 
-   
-    }
+     // Newly liked — create the Like doc; ignore the unique-index race on a double tap.
+     try {
+         await Like.create({ post: id, user: userId })
+     } catch (e) {
+         if (e?.code === 11000) {
+             const cur = await Post.findById(id).select('likeCount')
+             return res.status(200).json({
+                 message: 'post liked scfully',
+                 liked: true,
+                 likeCount: Math.max(0, cur?.likeCount ?? 0),
+             })
+         }
+         throw e
+     }
+     const updated = await Post.findByIdAndUpdate(
+         id,
+         { $inc: { likeCount: 1 } },
+         { new: true },
+     ).select('likeCount')
+
+     // Notify the owner + record activity (like only, not unlike) — unchanged behavior.
+     if (post.postedBy.toString() !== userId.toString()) {
+         const { createNotification } = await import('./notification.js')
+         createNotification(post.postedBy, 'like', userId, {
+             postId: post._id,
+         }).catch(err => {
+             console.error('Error creating like notification:', err)
+         })
+     }
+     const { createActivity } = await import('./activity.js')
+     createActivity(userId, 'like', {
+         postId: post._id,
+         targetUser: post.postedBy,
+         metadata: { postText: post.text?.substring(0, 50) || '' },
+     }).catch(err => {
+         console.error('Error creating activity:', err)
+     })
+
+     return res.status(200).json({
+         message: 'post liked scfully',
+         liked: true,
+         likeCount: Math.max(0, updated?.likeCount ?? 0),
+     })
+   }
     catch(error){
         console.log(error)
         res.status(500).json({ error: error.message })
+    }
+}
+
+/**
+ * Paginated "who liked this post" list (Instagram style), newest-first.
+ * Cursor-based over the Like collection (indexed by { post, _id }), so it stays fast
+ * regardless of how many likes a post has — nothing is loaded into memory in bulk.
+ *
+ * GET /api/post/likes-list/:id?limit=20&cursor=<base64url>
+ * → { users: [{ _id, username, name, profilePic }], total, hasMore, nextCursor }
+ */
+export const getPostLikes = async (req, res) => {
+    try {
+        const { id } = req.params
+        if (!mongoose.Types.ObjectId.isValid(id)) {
+            return res.status(400).json({ message: 'invalid post id' })
+        }
+
+        const rawLimit = parseInt(req.query.limit, 10)
+        const limit = Math.min(Math.max(Number.isFinite(rawLimit) ? rawLimit : 20, 1), 50)
+
+        // Decode cursor → last seen Like _id (paginate by _id descending = newest first).
+        let cursorId = null
+        const rawCursor = req.query.cursor
+        if (rawCursor) {
+            try {
+                const decoded = JSON.parse(
+                    Buffer.from(String(rawCursor), 'base64url').toString('utf8'),
+                )
+                if (decoded?.c && mongoose.Types.ObjectId.isValid(decoded.c)) {
+                    cursorId = new mongoose.Types.ObjectId(decoded.c)
+                }
+            } catch (_) {
+                cursorId = null
+            }
+        }
+
+        const query = { post: id }
+        if (cursorId) query._id = { $lt: cursorId }
+
+        // Fetch one extra row to know if there's another page.
+        const rows = await Like.find(query)
+            .sort({ _id: -1 })
+            .limit(limit + 1)
+            .populate('user', '_id username name profilePic')
+            .lean()
+
+        const hasMore = rows.length > limit
+        const pageRows = hasMore ? rows.slice(0, limit) : rows
+
+        // Drop likes whose user was deleted; keep newest-first order from the query.
+        const users = pageRows.map((r) => r.user).filter(Boolean)
+
+        const lastRow = pageRows[pageRows.length - 1]
+        const nextCursor =
+            hasMore && lastRow
+                ? Buffer.from(JSON.stringify({ c: String(lastRow._id) })).toString('base64url')
+                : null
+
+        // Total from the denormalized counter (fast); fall back to a count if it's missing.
+        const postDoc = await Post.findById(id).select('likeCount').lean()
+        let total = Number(postDoc?.likeCount)
+        if (!Number.isFinite(total) || total < 0) {
+            total = await Like.countDocuments({ post: id })
+        }
+
+        return res.status(200).json({ users, total, hasMore, nextCursor })
+    } catch (error) {
+        console.log(error)
+        return res.status(500).json({ error: error.message })
     }
 }
 
@@ -824,8 +986,9 @@ export const getFeedPost = async(req,res) => {
             const mixedNonLive = [...channelWithCounts, ...normalsSorted].sort(
                 (a, b) => feedSortTime(b) - feedSortTime(a),
             )
+            const likedSet = await buildLikedPostIdSet(viewerIdStr, mixedNonLive)
             const combinedPosts = [...livePseudoPosts, ...mixedNonLive].map((p) =>
-                shapeFeedPostForViewer(p, viewerIdStr),
+                shapeFeedPostForViewer(p, viewerIdStr, likedSet),
             )
 
             const nextOffset = firstNormalIds.length
@@ -850,7 +1013,10 @@ export const getFeedPost = async(req,res) => {
         const nextOffset = startIndex + paginatedNormal.length
         const hasMore = nextOffset < totalCount
         const lastPost = paginatedNormal[paginatedNormal.length - 1]
-        const shapedPaginatedNormal = paginatedNormal.map((p) => shapeFeedPostForViewer(p, viewerIdStr))
+        const likedSet = await buildLikedPostIdSet(viewerIdStr, paginatedNormal)
+        const shapedPaginatedNormal = paginatedNormal.map((p) =>
+            shapeFeedPostForViewer(p, viewerIdStr, likedSet),
+        )
 
         console.log(
             `📄 [getFeedPost] Cursor page: ${paginatedNormal.length} posts (offset: ${startIndex}, hasMore: ${hasMore})`,
@@ -893,16 +1059,21 @@ export const getUserPostsById = async(req,res)=>{
         const skip = parseInt(req.query.skip) || 0
         
         const posts = await Post.find(profilePostsQuery(userId))
+            .select('-likes')
             .populate("postedBy","-password")
             .populate("contributors", "username profilePic name")
             .sort({createdAt:-1})
             .limit(limit)
             .skip(skip)
-            
+            .lean()
+
+        const viewerId = req.user?._id ? String(req.user._id) : null
+        const shaped = await shapeProfilePostsForViewer(posts, viewerId)
+
         res.status(200).json({ 
-            posts: posts || [],
+            posts: shaped,
             hasMore: false, // Not needed for feed integration
-            totalCount: posts.length
+            totalCount: shaped.length
         })
     }
     catch(error){
@@ -929,6 +1100,7 @@ export const getUserPosts = async(req,res)=>{
          const profileFilter = profilePostsQuery(user._id)
 
          const postsRaw = await Post.find(profileFilter)
+            .select('-likes')
             .populate("postedBy","-password")
             .populate("contributors", "username profilePic name")
             .sort({createdAt:-1})
@@ -936,8 +1108,10 @@ export const getUserPosts = async(req,res)=>{
             .skip(skip)
             .lean()
 
-         const posts = await attachReplyCountsToPosts(postsRaw)
-            
+         const withCounts = await attachReplyCountsToPosts(postsRaw)
+         const viewerId = req.user?._id ? String(req.user._id) : null
+         const posts = await shapeProfilePostsForViewer(withCounts, viewerId)
+
          // Check if there are more posts
          const totalCount = await Post.countDocuments(profileFilter)
          const hasMore = (skip + limit) < totalCount
