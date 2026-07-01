@@ -5,6 +5,7 @@ import mongoose from 'mongoose'
 import Message from '../models/message.js'
 import Conversation from '../models/conversation.js'
 import User from '../models/user.js'
+import { buildConversationLastMessageFromMessage } from '../services/conversationLastMessage.js'
 import { createChessGamePost, deleteChessGamePost, createCardGamePost, deleteCardGamePost } from '../controller/post.js'
 import LiveStream from '../models/liveStream.js'
 import * as redisService from '../services/redis.js'
@@ -2574,11 +2575,35 @@ export const initializeSocket = async (app) => {
                 }
 
                 await Message.updateMany(seenFilter, { $set: { seen: true } })
-                // Update conversation's lastMessage.seen to true
-                await Conversation.updateOne(
-                    { _id: conversationId },
-                    { $set: { "lastMessage.seen": true, "lastMessage.delivered": true } }
-                )
+
+                const readerId = currentUserId != null ? String(currentUserId) : ''
+                const convRow = await Conversation.findById(conversationId)
+                    .select('lastMessage.sender')
+                    .lean()
+                const lastSenderId =
+                    convRow?.lastMessage?.sender != null
+                        ? String(convRow.lastMessage.sender)
+                        : ''
+
+                // lastMessage.seen on the conversation is for the *latest* message only.
+                // If I sent the last message, opening chat must NOT flip seen (blue ticks = recipient read).
+                if (lastSenderId && readerId && lastSenderId !== readerId) {
+                    await Conversation.updateOne(
+                        { _id: conversationId },
+                        { $set: { 'lastMessage.seen': true, 'lastMessage.delivered': true } },
+                    )
+                } else if (lastSenderId && readerId && lastSenderId === readerId) {
+                    const lastMsg = await Message.findOne({ conversationId })
+                        .sort({ createdAt: -1 })
+                        .select('text sender seen delivered createdAt img')
+                        .lean()
+                    if (lastMsg) {
+                        await Conversation.updateOne(
+                            { _id: conversationId },
+                            { $set: { lastMessage: buildConversationLastMessageFromMessage(lastMsg) } },
+                        )
+                    }
+                }
                 
                 // Emit read receipts:
                 // - 1:1: notify the explicit sender (`userId`)

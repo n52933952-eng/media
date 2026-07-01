@@ -92,6 +92,15 @@ function buildConversationListEnrichmentStages(userId) {
       },
     },
     {
+      $lookup: {
+        from: 'messages',
+        localField: 'lastMessage.messageId',
+        foreignField: '_id',
+        as: '__tickSource',
+        pipeline: [{ $project: { seen: 1, delivered: 1 } }],
+      },
+    },
+    {
       $addFields: {
         lastMessage: {
           $cond: {
@@ -100,8 +109,18 @@ function buildConversationListEnrichmentStages(userId) {
               text: { $ifNull: ['$lastMessage.text', ''] },
               sender: { $arrayElemAt: ['$__denormSender', 0] },
               createdAt: '$lastMessage.createdAt',
-              delivered: { $ifNull: ['$lastMessage.delivered', false] },
-              seen: { $ifNull: ['$lastMessage.seen', false] },
+              delivered: {
+                $ifNull: [
+                  { $arrayElemAt: ['$__tickSource.delivered', 0] },
+                  { $ifNull: ['$lastMessage.delivered', false] },
+                ],
+              },
+              seen: {
+                $ifNull: [
+                  { $arrayElemAt: ['$__tickSource.seen', 0] },
+                  { $ifNull: ['$lastMessage.seen', false] },
+                ],
+              },
             },
             else: { $arrayElemAt: ['$__lastMessageDoc', 0] },
           },
@@ -136,7 +155,7 @@ function buildConversationListEnrichmentStages(userId) {
         },
       },
     },
-    { $project: { __lastMessageDoc: 0, __unread: 0, __denormSender: 0, __denormLastMessageReady: 0 } },
+    { $project: { __lastMessageDoc: 0, __unread: 0, __denormSender: 0, __denormLastMessageReady: 0, __tickSource: 0 } },
   ]
 }
 
