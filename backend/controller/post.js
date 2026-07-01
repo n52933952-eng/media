@@ -672,24 +672,27 @@ export const LikePost = async(req,res) => {
          if (count < 0) {
              count = 0
              await Post.updateOne({ _id: id }, { $set: { likeCount: 0 } })
-         }
-         return res.status(200).json({ message: 'post unlike scfully', liked: false, likeCount: count })
-     }
+        }
+        // Refresh the liker's own feed cache so a reload doesn't show the stale liked state.
+        await invalidateUserFeedCache(userId)
+        return res.status(200).json({ message: 'post unlike scfully', liked: false, likeCount: count })
+    }
 
-     // Newly liked — create the Like doc; ignore the unique-index race on a double tap.
-     try {
-         await Like.create({ post: id, user: userId })
-     } catch (e) {
-         if (e?.code === 11000) {
-             const cur = await Post.findById(id).select('likeCount')
-             return res.status(200).json({
-                 message: 'post liked scfully',
-                 liked: true,
-                 likeCount: Math.max(0, cur?.likeCount ?? 0),
-             })
-         }
-         throw e
-     }
+    // Newly liked — create the Like doc; ignore the unique-index race on a double tap.
+    try {
+        await Like.create({ post: id, user: userId })
+    } catch (e) {
+        if (e?.code === 11000) {
+            const cur = await Post.findById(id).select('likeCount')
+            await invalidateUserFeedCache(userId)
+            return res.status(200).json({
+                message: 'post liked scfully',
+                liked: true,
+                likeCount: Math.max(0, cur?.likeCount ?? 0),
+            })
+        }
+        throw e
+    }
      const updated = await Post.findByIdAndUpdate(
          id,
          { $inc: { likeCount: 1 } },
@@ -706,20 +709,22 @@ export const LikePost = async(req,res) => {
          })
      }
      const { createActivity } = await import('./activity.js')
-     createActivity(userId, 'like', {
-         postId: post._id,
-         targetUser: post.postedBy,
-         metadata: { postText: post.text?.substring(0, 50) || '' },
-     }).catch(err => {
-         console.error('Error creating activity:', err)
-     })
+    createActivity(userId, 'like', {
+        postId: post._id,
+        targetUser: post.postedBy,
+        metadata: { postText: post.text?.substring(0, 50) || '' },
+    }).catch(err => {
+        console.error('Error creating activity:', err)
+    })
 
-     return res.status(200).json({
-         message: 'post liked scfully',
-         liked: true,
-         likeCount: Math.max(0, updated?.likeCount ?? 0),
-     })
-   }
+    // Refresh the liker's own feed cache so a reload reflects the new liked state.
+    await invalidateUserFeedCache(userId)
+    return res.status(200).json({
+        message: 'post liked scfully',
+        liked: true,
+        likeCount: Math.max(0, updated?.likeCount ?? 0),
+    })
+  }
     catch(error){
         console.log(error)
         res.status(500).json({ error: error.message })

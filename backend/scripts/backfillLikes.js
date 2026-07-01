@@ -8,12 +8,18 @@
  * Run from the backend directory:
  *   node scripts/backfillLikes.js
  */
+import path from 'path'
+import { fileURLToPath } from 'url'
 import dotenv from 'dotenv'
 import mongoose from 'mongoose'
 import Post from '../models/post.js'
 import Like from '../models/like.js'
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
+// Load .env from the current dir if present, then fall back to the project root .env
+// (this repo keeps it at D:/thredtrain/.env, one level above /backend).
 dotenv.config()
+dotenv.config({ path: path.resolve(__dirname, '../../.env') })
 
 const BATCH = 500
 
@@ -32,50 +38,38 @@ async function run() {
 
     let posts = 0
     let likesInserted = 0
-    let ops = []
+    let docs = []
 
     const flush = async () => {
-        if (!ops.length) return
+        if (!docs.length) return
         try {
-            const r = await Like.bulkWrite(ops, { ordered: false })
-            likesInserted += r.upsertedCount || 0
+            // Insert order is preserved, so _id stays monotonic = like order (newest last).
+            const res = await Like.insertMany(docs, { ordered: false })
+            likesInserted += res.length
         } catch (e) {
-            // ordered:false → duplicate-key errors on re-run are expected and safe.
-            likesInserted += e?.result?.upsertedCount || 0
-            const nonDup = (e?.writeErrors || []).filter((w) => w?.err?.code !== 11000)
-            if (nonDup.length) console.error('bulkWrite errors:', nonDup.length)
+            // ordered:false → duplicate-key (11000) errors are expected on re-run; keep the rest.
+            likesInserted += Array.isArray(e?.insertedDocs) ? e.insertedDocs.length : 0
+            const writeErrors = e?.writeErrors || []
+            const nonDup = writeErrors.filter((w) => (w?.err?.code ?? w?.code) !== 11000)
+            if (nonDup.length) {
+                console.error('insertMany non-dup errors:', nonDup.length, nonDup[0]?.errmsg || '')
+            }
         }
-        ops = []
+        docs = []
     }
 
     for await (const post of cursor) {
         const likes = Array.isArray(post.likes) ? post.likes : []
-        const baseTime = post.createdAt ? new Date(post.createdAt).getTime() : Date.now()
 
-        likes.forEach((uid, idx) => {
-            if (!uid) return
-            const ts = new Date(baseTime + idx * 1000)
-            ops.push({
-                updateOne: {
-                    filter: { post: post._id, user: uid },
-                    update: {
-                        $setOnInsert: {
-                            _id: new mongoose.Types.ObjectId(),
-                            post: post._id,
-                            user: uid,
-                            createdAt: ts,
-                            updatedAt: ts,
-                        },
-                    },
-                    upsert: true,
-                },
-            })
-        })
+        for (const uid of likes) {
+            if (!uid) continue
+            docs.push({ post: post._id, user: uid })
+        }
 
         await Post.updateOne({ _id: post._id }, { $set: { likeCount: likes.length } })
         posts++
 
-        if (ops.length >= BATCH) await flush()
+        if (docs.length >= BATCH) await flush()
         if (posts % 500 === 0) {
             console.log(`  …processed ${posts} posts, ~${likesInserted} likes inserted`)
         }
