@@ -1316,7 +1316,6 @@ export const getFollowingUsers = async (req, res) => {
                 return res.status(200).json({ users: [], hasMore: false, nextSkip: 0, nextCursor: null })
             }
             const escaped = searchQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-            const pattern = new RegExp(escaped, 'i')
 
             const followMatch = { followerId: subjectId }
             if (useCursor) {
@@ -1338,6 +1337,7 @@ export const getFollowingUsers = async (req, res) => {
                         pipeline: [
                             {
                                 $project: {
+                                    _id: 1,
                                     username: 1,
                                     name: 1,
                                     profilePic: 1,
@@ -1351,8 +1351,8 @@ export const getFollowingUsers = async (req, res) => {
                 {
                     $match: {
                         $or: [
-                            { 'user.username': pattern },
-                            { 'user.name': pattern },
+                            { 'user.username': { $regex: escaped, $options: 'i' } },
+                            { 'user.name': { $regex: escaped, $options: 'i' } },
                         ],
                     },
                 },
@@ -1378,7 +1378,10 @@ export const getFollowingUsers = async (req, res) => {
                     if (legacyIds.length > 0) {
                         const legacyUsers = await User.find({
                             _id: { $in: legacyIds },
-                            $or: [{ username: pattern }, { name: pattern }],
+                            $or: [
+                                { username: { $regex: escaped, $options: 'i' } },
+                                { name: { $regex: escaped, $options: 'i' } },
+                            ],
                         })
                             .select('_id username name profilePic bio')
                             .limit(pageSize + 1)
