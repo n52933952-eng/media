@@ -46,6 +46,7 @@ function buildConversationListEnrichmentStages(userId) {
           $and: [
             { $ne: [{ $ifNull: ['$lastMessage.sender', null] }, null] },
             { $ne: [{ $ifNull: ['$lastMessage.createdAt', null] }, null] },
+            { $ne: [{ $ifNull: ['$lastMessage.messageId', null] }, null] },
           ],
         },
       },
@@ -110,16 +111,18 @@ function buildConversationListEnrichmentStages(userId) {
               sender: { $arrayElemAt: ['$__denormSender', 0] },
               createdAt: '$lastMessage.createdAt',
               delivered: {
-                $ifNull: [
-                  { $arrayElemAt: ['$__tickSource.delivered', 0] },
-                  { $ifNull: ['$lastMessage.delivered', false] },
-                ],
+                $cond: {
+                  if: { $gt: [{ $size: { $ifNull: ['$__tickSource', []] } }, 0] },
+                  then: { $eq: [{ $arrayElemAt: ['$__tickSource.delivered', 0] }, true] },
+                  else: false,
+                },
               },
               seen: {
-                $ifNull: [
-                  { $arrayElemAt: ['$__tickSource.seen', 0] },
-                  { $ifNull: ['$lastMessage.seen', false] },
-                ],
+                $cond: {
+                  if: { $gt: [{ $size: { $ifNull: ['$__tickSource', []] } }, 0] },
+                  then: { $eq: [{ $arrayElemAt: ['$__tickSource.seen', 0] }, true] },
+                  else: false,
+                },
               },
             },
             else: { $arrayElemAt: ['$__lastMessageDoc', 0] },
