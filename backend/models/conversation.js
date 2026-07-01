@@ -50,6 +50,8 @@ const ConversationSchema = new mongoose.Schema({
 ConversationSchema.index({ participants: 1 })
 // Index on updatedAt for sorting conversations by most recent
 ConversationSchema.index({ updatedAt: -1 })
+// Compound: list "my conversations" sorted by recent (Messages inbox query)
+ConversationSchema.index({ participants: 1, updatedAt: -1 })
 // Index for group admin queries (e.g. "find groups I admin")
 ConversationSchema.index({ isGroup: 1, admin: 1 }, { sparse: true })
 
