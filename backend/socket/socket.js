@@ -2155,15 +2155,23 @@ export const initializeSocket = async (app) => {
 
                 // FCM: truly offline OR mobile background (presence offline) — same idea as WebRTC callUser
                 const needsFcm = !deliverSocketId || (clientMarkedOffline && receiverClientType !== 'web')
+                let fcmSent = false
                 if (needsFcm) {
                     try {
                         const { sendCallNotification } = await import('../services/pushNotifications.js')
-                        await sendCallNotification(receiverId, callerName, callerId, callType || 'video')
-                        console.log(`📬 [LiveKit] FCM call notification → ${receiverId} (needsFcm=${needsFcm})`)
+                        const fcmResult = await sendCallNotification(receiverId, callerName, callerId, callType || 'video')
+                        fcmSent = !!fcmResult?.success
+                        console.log(`📬 [LiveKit] FCM call notification → ${receiverId} (needsFcm=${needsFcm}, sent=${fcmSent})`)
                     } catch (fcmErr) {
                         console.error('❌ [LiveKit] FCM push failed:', fcmErr.message)
                     }
                 }
+
+                // Tell the caller whether the callee is actually reachable (live in-app socket OR FCM delivered).
+                // Lets the caller ring full-length for a backgrounded-but-reachable phone, and only hang up
+                // fast when the callee is truly offline (no socket AND no push token / phone off).
+                const calleeReachable = !!deliverSocketId || fcmSent
+                socket.emit('livekit:callTarget', { roomName, receiverId, reachable: calleeReachable })
 
                 const directTimerKey = directCallTimerKey({ roomName, callerId, receiverId })
                 if (directTimerKey && LIVEKIT_MAX_SESSION_MS > 0) {
