@@ -23,6 +23,7 @@ import{useState,useContext,useMemo,useEffect} from 'react'
 import{UserContext} from '../context/UserContext'
 import{PostContext} from '../context/PostContext'
 import useShowToast from '../hooks/useShowToast.js'
+import PostLikesModal from './PostLikesModal.jsx'
 
 
 
@@ -43,7 +44,17 @@ const Actions = ({ post, showFeedExtras = true }) => {
 	
 
 
-	const[liked,setLiked] = useState(post?.likes?.includes(user?._id))
+	const[liked,setLiked] = useState(
+		post?.likedByMe ?? post?.likes?.includes(user?._id) ?? false,
+	)
+	const [likeCount, setLikeCount] = useState(
+		post?.likeCount ?? post?.likes?.length ?? 0,
+	)
+
+	useEffect(() => {
+		setLiked(post?.likedByMe ?? post?.likes?.includes(user?._id) ?? false)
+		setLikeCount(post?.likeCount ?? post?.likes?.length ?? 0)
+	}, [post?._id, post?.likedByMe, post?.likeCount, post?.likes, user?._id])
     
 	const{followPost,setFollowPost}=useContext(PostContext)
    
@@ -60,6 +71,11 @@ const Actions = ({ post, showFeedExtras = true }) => {
 		isOpen: isCapsuleOpen,
 		onOpen: onCapsuleOpen,
 		onClose: onCapsuleClose,
+	} = useDisclosure()
+	const {
+		isOpen: isLikesOpen,
+		onOpen: onLikesOpen,
+		onClose: onLikesClose,
 	} = useDisclosure()
 	const [capsuleLoading, setCapsuleLoading] = useState(false)
 	const [capsuleLoadingDuration, setCapsuleLoadingDuration] = useState(null)
@@ -110,27 +126,23 @@ const Actions = ({ post, showFeedExtras = true }) => {
 	})
     const data = await res.json()
 
-	
-     if(!liked){
+	const newLiked = typeof data?.liked === 'boolean' ? data.liked : !liked
+	const newCount =
+		typeof data?.likeCount === 'number'
+			? data.likeCount
+			: newLiked
+				? likeCount + 1
+				: Math.max(0, likeCount - 1)
 
-	const updatePost = followPost.map((p) => {
-		if(p._id === post._id){
-			return {...p,likes:[...p.likes,user._id]}
-		}
-		return p
-	})    
-	setFollowPost(updatePost)
-  }else{
-	const updaredpost = followPost.map((p) => {
-		if(p._id === post._id){
-			return { ...p, likes: p.likes.filter((id) => id !== user._id)}
-		}
-		return p
-	})
-	setFollowPost(updaredpost)
-  }
- 
-  setLiked(!liked)
+	setFollowPost(
+		followPost.map((p) =>
+			p._id === post._id
+				? { ...p, likedByMe: newLiked, likeCount: newCount }
+				: p,
+		),
+	)
+	setLiked(newLiked)
+	setLikeCount(newCount)
 	 }catch(error){
 		console.log(error)
 	 }
@@ -448,8 +460,14 @@ return (
 				{getReplyCount(post)} Comment
 				</Text>
 				<Box w={0.5} h={0.5} borderRadius={"full"} bg={"gray.light"}></Box>
-				<Text color={"gray.light"} fontSize='sm'>
-				{post?.likes?.length} likes
+				<Text
+					color={"gray.light"}
+					fontSize='sm'
+					cursor={likeCount > 0 ? 'pointer' : 'default'}
+					onClick={likeCount > 0 ? onLikesOpen : undefined}
+					_hover={likeCount > 0 ? { textDecoration: 'underline' } : undefined}
+				>
+				{likeCount} {likeCount === 1 ? 'like' : 'likes'}
 				</Text>
 			</Flex>
 
@@ -594,6 +612,13 @@ return (
 			</ModalContent>
 		</Modal>
 		)}
+
+			<PostLikesModal
+				isOpen={isLikesOpen}
+				onClose={onLikesClose}
+				postId={post?._id}
+				initialCount={likeCount}
+			/>
 
 		</Flex>
 	);
