@@ -149,11 +149,13 @@ const ShareStageLayout = ({
 // ── Incoming call overlay ─────────────────────────────────────────────────────
 const IncomingCallOverlay = () => {
   const { incomingCall, answerCall, declineCall } = useLiveKit();
-  const { isLive, endLiveForCall } = useLiveBroadcast();
+  const { isLive, isMinimized, isSharing, endNormalLiveBeforeInterrupt } = useLiveBroadcast();
   if (!incomingCall) return null;
 
+  const liveWouldEnd = isLive && !(isMinimized && isSharing);
+
   const handleAnswer = async () => {
-    if (isLive) await endLiveForCall();
+    await endNormalLiveBeforeInterrupt();
     await answerCall();
   };
 
@@ -173,7 +175,7 @@ const IncomingCallOverlay = () => {
           <Badge colorScheme={incomingCall.callType === 'audio' ? 'green' : 'purple'}>
             Incoming {incomingCall.callType === 'audio' ? 'Voice' : 'Video'} Call
           </Badge>
-          {isLive ? (
+          {liveWouldEnd ? (
             <Text color="orange.300" fontSize="sm" textAlign="center" mt={1}>
               Answer ends your live stream
             </Text>

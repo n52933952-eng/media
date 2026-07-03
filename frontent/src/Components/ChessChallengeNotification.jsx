@@ -16,7 +16,7 @@ import { useLiveBroadcast } from '../context/LiveBroadcastContext'
 
 const ChessChallengeNotification = () => {
   const { chessChallenge, acceptChessChallenge, declineChessChallenge } = useContext(SocketContext)
-  const { isLive, isMinimized, isSharing, endLiveForCall } = useLiveBroadcast()
+  const { endNormalLiveBeforeInterrupt } = useLiveBroadcast()
   const navigate = useNavigate()
 
   const bgColor = useColorModeValue('white', '#1a1a1a')
@@ -28,9 +28,7 @@ const ChessChallengeNotification = () => {
   }
 
   const handleAccept = async () => {
-    if (isLive && !isMinimized && !isSharing) {
-      await endLiveForCall();
-    }
+    await endNormalLiveBeforeInterrupt()
     navigate(`/chess/${chessChallenge.from}`)
     setTimeout(() => {
       acceptChessChallenge()

@@ -15,7 +15,7 @@ import { useLiveBroadcast } from '../context/LiveBroadcastContext'
 
 const CardChallengeNotification = () => {
     const { cardChallenge, acceptCardChallenge, declineCardChallenge } = useContext(SocketContext)
-    const { isLive, isMinimized, isSharing, endLiveForCall } = useLiveBroadcast()
+    const { endNormalLiveBeforeInterrupt } = useLiveBroadcast()
     const navigate = useNavigate()
 
     const bgColor = useColorModeValue('white', '#1a1a1a')
@@ -25,9 +25,7 @@ const CardChallengeNotification = () => {
 
     const handleAccept = async () => {
         const fromId = cardChallenge.from
-        if (isLive && !isMinimized && !isSharing) {
-            await endLiveForCall()
-        }
+        await endNormalLiveBeforeInterrupt()
         acceptCardChallenge()
         navigate(`/card/${fromId}`)
     }

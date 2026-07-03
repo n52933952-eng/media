@@ -283,6 +283,13 @@ export const LiveBroadcastProvider = ({ children }) => {
     await endLive();
   }, [endLive]);
 
+  /** Normal camera live (not share+minimize) — end stream before call / game. */
+  const endNormalLiveBeforeInterrupt = useCallback(async () => {
+    if (isLive && !isMinimized && !isSharing) {
+      await endLiveForCall();
+    }
+  }, [isLive, isMinimized, isSharing, endLiveForCall]);
+
   endLiveRef.current = endLive;
 
   useEffect(() => {
@@ -482,6 +489,7 @@ export const LiveBroadcastProvider = ({ children }) => {
     goLive,
     endLive,
     endLiveForCall,
+    endNormalLiveBeforeInterrupt,
     toggleShare,
     shareAndGoAppHome,
     shareWindow,

@@ -45,12 +45,14 @@ import AdSenseLoader from './Components/AdSenseLoader'
 import LiveStreamMiniBar from './Components/LiveStreamMiniBar'
 import LiveCameraPip from './Components/LiveCameraPip'
 import { liveBroadcastNav } from './services/liveBroadcastNav'
+import { useLiveBroadcast } from './context/LiveBroadcastContext'
 
 const AppContent = () => {
   const location = useLocation()
   const navigate = useNavigate()
   const{user}=useContext(UserContext)
   const { socket } = useContext(SocketContext) || {}
+  const { endNormalLiveBeforeInterrupt } = useLiveBroadcast()
   const { colorMode } = useColorMode()
 
   const [isScrolled, setIsScrolled] = useState(false)
@@ -59,11 +61,12 @@ const AppContent = () => {
   // Persistent listener: when the person WE challenged accepts, navigate to the race
   useEffect(() => {
     if (!socket || !user) return
-    const handleRaceAccepted = (data) => {
+    const handleRaceAccepted = async (data) => {
       if (!data?.roomId || !data?.opponentId) return
       const pendingTo = localStorage.getItem('racePendingTo')
       const opId = data.opponentId?.toString()
       if (pendingTo && pendingTo === opId) {
+        await endNormalLiveBeforeInterrupt()
         localStorage.removeItem('racePendingTo')
         localStorage.setItem('raceRoomId', data.roomId)
         // Mark this user as the host (challenger) so RacingGamePage knows
@@ -73,7 +76,7 @@ const AppContent = () => {
     }
     socket.on('acceptRaceChallenge', handleRaceAccepted)
     return () => socket.off('acceptRaceChallenge', handleRaceAccepted)
-  }, [socket, user, navigate])
+  }, [socket, user, navigate, endNormalLiveBeforeInterrupt])
 
   useEffect(() => {
     liveBroadcastNav.minimize = () => navigate('/home');

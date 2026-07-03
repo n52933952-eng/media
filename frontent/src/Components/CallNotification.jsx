@@ -11,9 +11,11 @@ import {
 } from '@chakra-ui/react'
 import { FaPhone, FaVideo, FaPhoneSlash } from 'react-icons/fa'
 import { SocketContext } from '../context/SocketContext'
+import { useLiveBroadcast } from '../context/LiveBroadcastContext'
 
 const CallNotification = () => {
   const { call, answerCall, leaveCall, callType } = useContext(SocketContext)
+  const { endNormalLiveBeforeInterrupt } = useLiveBroadcast()
 
   const bgColor = useColorModeValue('white', '#1a1a1a')
   const borderColor = useColorModeValue('gray.200', 'gray.700')
@@ -78,7 +80,7 @@ const CallNotification = () => {
             colorScheme="green"
             size="md"
             flex={1}
-            onClick={answerCall}
+            onClick={() => { void endNormalLiveBeforeInterrupt().then(() => answerCall()) }}
           >
             Answer
           </Button>

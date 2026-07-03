@@ -2,9 +2,11 @@ import React, { useContext } from 'react'
 import { Box, Flex, Avatar, Text, Button, VStack, HStack, useColorModeValue } from '@chakra-ui/react'
 import { useNavigate } from 'react-router-dom'
 import { SocketContext } from '../context/SocketContext'
+import { useLiveBroadcast } from '../context/LiveBroadcastContext'
 
 const RacingChallengeNotification = () => {
     const { raceChallenge, acceptRaceChallenge, declineRaceChallenge } = useContext(SocketContext)
+    const { endNormalLiveBeforeInterrupt } = useLiveBroadcast()
     const navigate = useNavigate()
 
     const bgColor     = useColorModeValue('white', '#0f172a')
@@ -12,10 +14,9 @@ const RacingChallengeNotification = () => {
 
     if (!raceChallenge?.isReceivingChallenge) return null
 
-    const handleAccept = () => {
-        // acceptRaceChallenge sets raceRoomId in localStorage
+    const handleAccept = async () => {
+        await endNormalLiveBeforeInterrupt()
         acceptRaceChallenge()
-        // Acceptor is the guest (not host)
         localStorage.setItem('raceIsHost', 'false')
         navigate(`/race/${raceChallenge.from}`)
     }
