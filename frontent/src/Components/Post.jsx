@@ -1,5 +1,4 @@
 ﻿import React,{useEffect,useState,useContext, useCallback, useMemo, memo, useRef} from 'react'
-import{Link} from 'react-router-dom'
 import{Flex,Avatar,Box,Text,Image,Button, VStack, HStack, Grid, GridItem, SimpleGrid, Spinner, useColorModeValue, useDisclosure, Menu, MenuButton, MenuList, MenuItem, IconButton, Tooltip} from '@chakra-ui/react'
 import { HiOutlineDotsHorizontal } from "react-icons/hi";
 import { MdOutlineDeleteOutline, MdPersonRemove } from "react-icons/md";
@@ -84,6 +83,54 @@ const Post = ({post: initialPost, postedBy, onDelete, visibleVideoOnly = false, 
   }, [isVideoInView, isVideoMedia, autoPlayMedia])
 
   const navigate = useNavigate()
+  /** Blocks post-card navigation after menu close (portal click-through). */
+  const menuNavBlockRef = useRef(false)
+  const menuOpenRef = useRef(false)
+
+  const blockPostNavBriefly = useCallback(() => {
+    menuNavBlockRef.current = true
+    window.setTimeout(() => {
+      menuNavBlockRef.current = false
+    }, 450)
+  }, [])
+
+  const shouldNavigateToPostDetail = useCallback(
+    (e) => {
+      const target = e?.target
+      if (!target || !post?._id || !postedBy?.username) return false
+      if (menuNavBlockRef.current || menuOpenRef.current) return false
+      if (
+        target.closest('button') ||
+        target.closest('a') ||
+        target.closest('input') ||
+        target.closest('textarea') ||
+        target.closest('[data-no-navigate="true"]') ||
+        target.closest('[data-feed-actions="true"]') ||
+        target.closest('.chakra-menu__menu-button') ||
+        target.closest('.chakra-menu__menu-list') ||
+        target.closest('.chakra-menu__menuitem') ||
+        target.closest('[role="menu"]') ||
+        target.closest('svg[aria-label="Like"]') ||
+        target.closest('svg[aria-label="Comment"]') ||
+        target.closest('svg[aria-label="Share"]') ||
+        target.closest('[data-chess-card]') ||
+        target.closest('[data-card-game-card]')
+      ) {
+        return false
+      }
+      return true
+    },
+    [post?._id, postedBy?.username],
+  )
+
+  const goToPostDetail = useCallback(
+    (e) => {
+      if (!shouldNavigateToPostDetail(e)) return
+      e?.preventDefault?.()
+      navigate(`/${postedBy?.username}/post/${post._id}`)
+    },
+    [shouldNavigateToPostDetail, navigate, postedBy?.username, post._id],
+  )
 
 const showToast = useShowToast()
 
@@ -1136,7 +1183,17 @@ const showToast = useShowToast()
             onClick={(e) => e.stopPropagation()}
             onMouseDown={(e) => e.stopPropagation()}
           >
-          <Menu placement="bottom-end" isLazy>
+          <Menu
+            placement="bottom-end"
+            isLazy
+            onOpen={() => {
+              menuOpenRef.current = true
+            }}
+            onClose={() => {
+              menuOpenRef.current = false
+              blockPostNavBriefly()
+            }}
+          >
             <MenuButton
               as={IconButton}
               aria-label="Post options"
@@ -1144,14 +1201,27 @@ const showToast = useShowToast()
               size="sm"
               variant="ghost"
               type="button"
-              onClick={(e) => e.stopPropagation()}
-              onMouseDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation()
+                blockPostNavBriefly()
+              }}
+              onMouseDown={(e) => {
+                e.stopPropagation()
+                blockPostNavBriefly()
+              }}
             />
             <MenuList zIndex={2000}>
               <MenuItem
-                onClick={(e) => {
+                onMouseDown={(e) => {
+                  e.preventDefault()
                   e.stopPropagation()
-                  handleFeedPostMenuPress()
+                  blockPostNavBriefly()
+                }}
+                onClick={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  blockPostNavBriefly()
+                  window.setTimeout(() => handleFeedPostMenuPress(), 0)
                 }}
               >
                 {isWeatherPost || isMyChannelFeedCard ? 'Remove from feed' : 'Not interested'}
@@ -1956,30 +2026,19 @@ const showToast = useShowToast()
   }
 
   return (
-    <Link
+    <Box
       data-post-id={post._id}
-      to={`/${postedBy?.username}/post/${post._id}`}
-      onClick={(e) => {
-        const target = e.target
-        if (
-          target.closest('button') ||
-          target.closest('[data-no-navigate="true"]') ||
-          target.closest('[data-feed-actions="true"]') ||
-          target.closest('.chakra-menu__menu-button') ||
-          target.closest('.chakra-menu__menu-list') ||
-          target.closest('.chakra-menu__menuitem') ||
-          target.closest('[role="menu"]') ||
-          target.closest('svg[aria-label="Like"]') ||
-          target.closest('svg[aria-label="Comment"]') ||
-          target.closest('svg[aria-label="Share"]')
-        ) {
+      onClick={goToPostDetail}
+      onMouseDown={(e) => {
+        if (menuOpenRef.current || menuNavBlockRef.current) {
           e.preventDefault()
           e.stopPropagation()
         }
       }}
+      cursor="pointer"
     >
       {postContent}
-    </Link>
+    </Box>
   )
 }
 

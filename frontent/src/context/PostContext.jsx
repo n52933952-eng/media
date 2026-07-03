@@ -8,6 +8,9 @@ import {
   saveHiddenFeedPostIds,
   saveHiddenFeedSources,
 } from '../utils/feedHiddenStorage'
+import { trimFeedPostsToMax, FEED_IN_MEMORY_MAX_POSTS } from '../utils/feedMemoryCap'
+
+export { FEED_IN_MEMORY_MAX_POSTS }
 
 const apiBase = () => (import.meta.env.PROD ? window.location.origin : 'http://localhost:5000')
 
@@ -16,11 +19,18 @@ export const PostContext = createContext({})
 
 export function PostContextProvider({ children }) {
   const { user } = useContext(UserContext) || {}
-  const [followPost, setFollowPost] = useState([])
+  const [followPost, setFollowPostState] = useState([])
   const [hiddenFeedPostIds, setHiddenFeedPostIds] = useState(() => new Set())
   const [hiddenFeedSources, setHiddenFeedSources] = useState(() => new Set())
   const hiddenPostIdsRef = useRef(new Set())
   const hiddenSourcesRef = useRef(new Set())
+
+  const setFollowPost = useCallback((next) => {
+    setFollowPostState((prev) => {
+      const computed = typeof next === 'function' ? next(prev) : next
+      return trimFeedPostsToMax(computed)
+    })
+  }, [])
 
   useEffect(() => {
     const uid = user?._id ? String(user._id) : ''
@@ -29,7 +39,7 @@ export function PostContextProvider({ children }) {
       setHiddenFeedSources(new Set())
       hiddenPostIdsRef.current = new Set()
       hiddenSourcesRef.current = new Set()
-      setFollowPost([])
+      setFollowPostState([])
       return
     }
     const posts = loadHiddenFeedPostIds(uid)
@@ -54,7 +64,9 @@ export function PostContextProvider({ children }) {
   }, [user?._id])
 
   useEffect(() => {
-    setFollowPost((prev) => filterPostsForFeed(prev, hiddenPostIdsRef.current, hiddenSourcesRef.current))
+    setFollowPostState((prev) =>
+      trimFeedPostsToMax(filterPostsForFeed(prev, hiddenPostIdsRef.current, hiddenSourcesRef.current)),
+    )
   }, [hiddenFeedPostIds, hiddenFeedSources])
 
   const hideFeedPostFromFeed = useCallback(async (postId) => {
@@ -73,7 +85,7 @@ export function PostContextProvider({ children }) {
       if (user?._id) saveHiddenFeedPostIds(String(user._id), next)
       return next
     })
-    setFollowPost((prev) => prev.filter((p) => String(p._id) !== id))
+    setFollowPostState((prev) => prev.filter((p) => String(p._id) !== id))
   }, [user?._id])
 
   const hideFeedSourceFromFeed = useCallback((username) => {
@@ -86,7 +98,7 @@ export function PostContextProvider({ children }) {
       if (user?._id) saveHiddenFeedSources(String(user._id), next)
       return next
     })
-    setFollowPost((prev) => prev.filter((p) => String(p?.postedBy?.username || '') !== uname))
+    setFollowPostState((prev) => prev.filter((p) => String(p?.postedBy?.username || '') !== uname))
   }, [user?._id])
 
   const filterFeedPosts = useCallback((list) => {

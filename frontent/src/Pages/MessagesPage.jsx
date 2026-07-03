@@ -266,7 +266,9 @@ const MessagesPage = () => {
   const shouldScrollToBottomRef = useRef(false) // Track if we should scroll to bottom (only on initial load)
   const fetchedConversationsForUserRef = useRef(null) // Prevent duplicate initial fetches for same user
   const isLoadingOlderMessagesRef = useRef(false) // Prevent duplicate top-scroll pagination triggers
-  const lastOlderBeforeIdRef = useRef(null) // Prevent requesting the same older-page cursor repeatedly
+  const convCursorRef = useRef(null) // Conversation list cursor (next page)
+  const messageCursorRef = useRef(null) // Older messages cursor for active chat
+  const lastOlderCursorRequestRef = useRef(null) // Prevent duplicate older-page fetches
   const lastScrollAtRef = useRef(0) // Avoid opening reactions while user is actively scrolling
   const touchStartPointRef = useRef({ x: 0, y: 0, t: 0 })
   const touchMovedRef = useRef(false)
@@ -319,19 +321,21 @@ const MessagesPage = () => {
   const hoverBg = useColorModeValue('gray.50', '#1a1a1a')  // Light hover in light mode
   const emojiPickerTheme = useColorModeValue('light', 'dark')
 
-  // Function to fetch conversations with pagination
-  const fetchConversations = async (loadMore = false, beforeId = null) => {
+  // Function to fetch conversations with cursor pagination (matches mobile MessagesScreen)
+  const fetchConversations = async (loadMore = false) => {
+    if (loadMore && !convCursorRef.current) return
+
     if (loadMore) {
       setLoadingMoreConversations(true)
     } else {
+      convCursorRef.current = null
       setLoading(true)
     }
 
     try {
-      // Build URL with pagination parameters
-      let url = `${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/message/conversations?limit=20`
-      if (beforeId) {
-        url += `&beforeId=${beforeId}`
+      let url = `${import.meta.env.PROD ? window.location.origin : 'http://localhost:5000'}/api/message/conversations?limit=20`
+      if (loadMore && convCursorRef.current) {
+        url += `&cursor=${encodeURIComponent(convCursorRef.current)}`
       }
 
       const res = await fetch(url, {
@@ -340,21 +344,27 @@ const MessagesPage = () => {
       const data = await res.json()
       if (res.ok) {
         const fetchedConversations = data.conversations || data || []
-        
-        if (!loadMore) {
-          // Initial load - log what database returned
-          fetchedConversations.slice(0, 3).forEach((c, i) => {
-          })
-        }
-        
-        if (loadMore && beforeId && data.conversations) {
-          // Loading more conversations - append to existing
-          setConversations(prev => [...prev, ...data.conversations])
+        const hasMore = data.hasMore === true
+
+        if (data.nextCursor != null && String(data.nextCursor).trim() !== '') {
+          convCursorRef.current = String(data.nextCursor)
         } else {
-          // Initial load - replace all conversations
+          convCursorRef.current = null
+        }
+        setHasMoreConversations(hasMore)
+
+        if (loadMore) {
+          setConversations((prev) => {
+            const seen = new Set(prev.map((c) => c._id?.toString?.() ?? String(c._id ?? '')))
+            const appended = fetchedConversations.filter((c) => {
+              const id = c._id?.toString?.() ?? String(c._id ?? '')
+              return id && !seen.has(id)
+            })
+            return appended.length ? [...prev, ...appended] : prev
+          })
+        } else {
           setConversations(fetchedConversations)
         }
-        setHasMoreConversations(data.hasMore || false)
       }
     } catch (error) {
       if (!loadMore) {
@@ -371,12 +381,8 @@ const MessagesPage = () => {
 
   // Load more conversations when scrolling to bottom
   const loadMoreConversations = async () => {
-    if (!hasMoreConversations || loadingMoreConversations || conversations.length === 0) return
-
-    const oldestConversation = conversations[conversations.length - 1]
-    if (!oldestConversation?._id) return
-
-    await fetchConversations(true, oldestConversation._id)
+    if (!hasMoreConversations || loadingMoreConversations || !convCursorRef.current) return
+    await fetchConversations(true)
   }
 
 
@@ -554,28 +560,37 @@ const MessagesPage = () => {
       if (ids.length) socket.emit('ackMessageDelivered', { messageIds: ids.slice(0, 50) })
     }
 
-    const fetchMessages = async (loadMore = false, beforeId = null) => {
+    const fetchMessages = async (loadMore = false) => {
       if (!selectedConversation) return
 
       const isGroupConv = !!selectedConversation.isGroup
       const otherUser = isGroupConv ? null : selectedConversation.participants.find(p => idStr(p._id) !== idStr(user?._id)) || selectedConversation.participants[0]
-      if (!isGroupConv && !otherUser?._id) return
-      if (isGroupConv && !selectedConversation._id) return
+      const conversationId = selectedConversation._id?.toString?.() ?? (selectedConversation._id != null ? String(selectedConversation._id) : '')
+
+      if (!isGroupConv && !otherUser?._id && !conversationId) return
+      if (isGroupConv && !conversationId) return
+      if (loadMore && !messageCursorRef.current) return
 
       // Store current conversation ID to detect if it changes during fetch
       const currentConversationId = selectedConversation._id
 
       if (loadMore) {
         setLoadingMoreMessages(true)
+      } else {
+        messageCursorRef.current = null
+        lastOlderCursorRequestRef.current = null
       }
 
       try {
-        // Build URL with pagination parameters
-        let url = isGroupConv
-          ? `${MSG_API_BASE}/api/message/${selectedConversation._id}?limit=12&conversationId=${selectedConversation._id}`
-          : `${MSG_API_BASE}/api/message/${otherUser._id}?limit=12`
-        if (beforeId) {
-          url += `&beforeId=${beforeId}`
+        const limit = 12
+        let url = ''
+        if (conversationId) {
+          url = `${MSG_API_BASE}/api/message/${conversationId}?limit=${limit}&conversationId=${encodeURIComponent(conversationId)}`
+        } else {
+          url = `${MSG_API_BASE}/api/message/${otherUser._id}?limit=${limit}`
+        }
+        if (loadMore && messageCursorRef.current) {
+          url += `&cursor=${encodeURIComponent(messageCursorRef.current)}`
         }
 
         const res = await fetch(url, {
@@ -587,26 +602,28 @@ const MessagesPage = () => {
         if (selectedConversation?._id !== currentConversationId) {
           return
         }
+
+        if (data.nextCursor != null && String(data.nextCursor).trim() !== '') {
+          messageCursorRef.current = String(data.nextCursor)
+        } else {
+          messageCursorRef.current = null
+        }
         
         if (res.ok) {
-          if (loadMore && beforeId) {
-            // Loading older messages - prepend to existing messages
-            // Update firstMessageIdRef before prepending to detect this is pagination
+          if (loadMore) {
             if (data.messages && data.messages.length > 0) {
               firstMessageIdRef.current = data.messages[0]._id
             }
             setMessages((prev) => {
-              const combined = [...data.messages, ...prev]
-              // Limit to 200 messages max to prevent memory issues
-              // Keep most recent 200 messages (trim from oldest side if needed)
+              const combined = [...(data.messages || []), ...prev]
               if (combined.length > 200) {
                 return combined.slice(0, 200)
               }
               return combined
             })
             emitDeliveryAcksForList(data.messages || [])
-            // Don't update lastMessageCountRef here - pagination shouldn't trigger unread count
-            return // Exit early, don't trigger unread detection
+            setHasMoreMessages(data.hasMore === true)
+            return
           } else {
             // Initial load - replace all messages
             const messagesToSet = data.messages || []
@@ -644,8 +661,7 @@ const MessagesPage = () => {
             }
           }
           
-          // Update pagination state
-          setHasMoreMessages(data.hasMore || false)
+          setHasMoreMessages(data.hasMore === true)
         }
       } catch (error) {
         showToast('Error', 'Failed to load messages', 'error')
@@ -659,7 +675,7 @@ const MessagesPage = () => {
     // Only fetch messages if conversation has _id (existing conversation)
     // New conversations (no _id) start with empty messages
     if (selectedConversation && selectedConversation._id) {
-      fetchMessages(false, null) // Initial load
+      fetchMessages(false) // Initial load
     } else if (!selectedConversation) {
       // Clear refs when conversation is cleared
       currentConversationIdRef.current = null
@@ -739,10 +755,10 @@ const MessagesPage = () => {
   // Function to load older messages (called when scrolling to top)
   const loadOlderMessages = async () => {
     if (!hasMoreMessages || loadingMoreMessages || isLoadingOlderMessagesRef.current || !messages.length) return
+    if (!messageCursorRef.current) return
 
-    const oldestMessage = messages[0]
-    if (!oldestMessage?._id) return
-    if (lastOlderBeforeIdRef.current === oldestMessage._id) return
+    const cursorToLoad = messageCursorRef.current
+    if (lastOlderCursorRequestRef.current === cursorToLoad) return
 
     // Store current scroll position
     const container = messagesContainerRef.current
@@ -752,30 +768,44 @@ const MessagesPage = () => {
     const previousScrollTop = container.scrollTop
 
     try {
-      const isGroupConv = !!selectedConversation?.isGroup
-      const otherUser = isGroupConv ? null : selectedConversation?.participants.find(p => idStr(p._id) !== idStr(user?._id)) || selectedConversation?.participants[0]
-      if (!isGroupConv && !otherUser?._id) return
-      if (isGroupConv && !selectedConversation?._id) return
-
       isLoadingOlderMessagesRef.current = true
-      lastOlderBeforeIdRef.current = oldestMessage._id
+      lastOlderCursorRequestRef.current = cursorToLoad
       setLoadingMoreMessages(true)
 
-      const base = import.meta.env.PROD ? window.location.origin : 'http://localhost:5000'
-      const url = isGroupConv
-        ? `${base}/api/message/${selectedConversation._id}?limit=12&conversationId=${selectedConversation._id}&beforeId=${oldestMessage._id}`
-        : `${base}/api/message/${otherUser._id}?limit=12&beforeId=${oldestMessage._id}`
+      const isGroupConv = !!selectedConversation?.isGroup
+      const otherUser = isGroupConv ? null : selectedConversation?.participants.find(p => idStr(p._id) !== idStr(user?._id)) || selectedConversation?.participants[0]
+      const conversationId = selectedConversation?._id?.toString?.() ?? (selectedConversation?._id != null ? String(selectedConversation._id) : '')
+
+      if (!conversationId && !isGroupConv && !otherUser?._id) return
+      if (isGroupConv && !conversationId) return
+
+      const base = MSG_API_BASE
+      const limit = 12
+      let url = conversationId
+        ? `${base}/api/message/${conversationId}?limit=${limit}&conversationId=${encodeURIComponent(conversationId)}&cursor=${encodeURIComponent(cursorToLoad)}`
+        : `${base}/api/message/${otherUser._id}?limit=${limit}&cursor=${encodeURIComponent(cursorToLoad)}`
+
       const res = await fetch(url, {
         credentials: 'include',
       })
       const data = await res.json()
 
-      if (res.ok && data.messages && data.messages.length > 0) {
-        // Prepend older messages
-        setMessages((prev) => [...data.messages, ...prev])
-        setHasMoreMessages(data.hasMore || false)
+      if (data.nextCursor != null && String(data.nextCursor).trim() !== '') {
+        messageCursorRef.current = String(data.nextCursor)
+      } else {
+        messageCursorRef.current = null
+      }
 
-        // Maintain scroll position after loading
+      if (res.ok && data.messages && data.messages.length > 0) {
+        setMessages((prev) => {
+          const combined = [...data.messages, ...prev]
+          if (combined.length > 200) {
+            return combined.slice(0, 200)
+          }
+          return combined
+        })
+        setHasMoreMessages(data.hasMore === true)
+
         setTimeout(() => {
           if (container) {
             const newScrollHeight = container.scrollHeight
@@ -785,6 +815,7 @@ const MessagesPage = () => {
         }, 50)
       } else {
         setHasMoreMessages(false)
+        messageCursorRef.current = null
       }
     } catch (error) {
       console.error('Error loading older messages:', error)
