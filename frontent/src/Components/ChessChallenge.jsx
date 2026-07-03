@@ -22,11 +22,13 @@ import { useNavigate } from 'react-router-dom'
 import { UserContext } from '../context/UserContext'
 import { SocketContext } from '../context/SocketContext'
 import useShowToast from '../hooks/useShowToast'
+import { useLiveBroadcast } from '../context/LiveBroadcastContext'
 import API_BASE_URL from '../config/api'
 
 const ChessChallenge = ({ compact = false }) => {
     const { user, setOrientation } = useContext(UserContext)
     const { socket, onlineUsers } = useContext(SocketContext)
+    const { endNormalLiveBeforeInterrupt } = useLiveBroadcast()
     const { isOpen, onOpen, onClose } = useDisclosure()
     const [availableUsers, setAvailableUsers] = useState([])
     const [loading, setLoading] = useState(false)
@@ -214,7 +216,7 @@ const ChessChallenge = ({ compact = false }) => {
         // CRITICAL: Only process if we're the challenger
         // The backend sends acceptChessChallenge to BOTH users, but only challenger should set "white"
         // We know we're the challenger if the socket event's yourColor is "white"
-        socket.on('acceptChessChallenge', (data) => {
+        socket.on('acceptChessChallenge', async (data) => {
             // Only process if socket says we're white (meaning we're the challenger)
             if (data.yourColor === 'white') {
                 if (import.meta.env.DEV) {
@@ -230,6 +232,7 @@ const ChessChallenge = ({ compact = false }) => {
                 setOrientation("white")
                 
                 showToast('Challenge Accepted! ♟️', 'Starting game...', 'success')
+                await endNormalLiveBeforeInterrupt()
                 navigate(`/chess/${data.opponentId}`)
             } else {
                 if (import.meta.env.DEV) {
@@ -247,7 +250,7 @@ const ChessChallenge = ({ compact = false }) => {
             socket.off('userAvailableRace', syncBusy)
             socket.off('acceptChessChallenge')
         }
-    }, [socket, navigate, showToast, setOrientation, fetchBusyGameUserIds])
+    }, [socket, navigate, showToast, setOrientation, fetchBusyGameUserIds, endNormalLiveBeforeInterrupt])
 
     const handleOpenModal = () => {
         fetchAvailableUsers()

@@ -21,11 +21,13 @@ import { useNavigate } from 'react-router-dom'
 import { UserContext } from '../context/UserContext'
 import { SocketContext } from '../context/SocketContext'
 import useShowToast from '../hooks/useShowToast'
+import { useLiveBroadcast } from '../context/LiveBroadcastContext'
 import API_BASE_URL from '../config/api'
 
 const CardChallenge = ({ compact = false }) => {
     const { user } = useContext(UserContext)
     const { socket, onlineUsers } = useContext(SocketContext)
+    const { endNormalLiveBeforeInterrupt } = useLiveBroadcast()
     const { isOpen, onOpen, onClose } = useDisclosure()
     const [availableUsers, setAvailableUsers] = useState([])
     const [loading, setLoading] = useState(false)
@@ -148,7 +150,7 @@ const CardChallenge = ({ compact = false }) => {
         // Challenger receives acceptCardChallenge → navigate to game
         // We only handle this here if we are the one who SENT the challenge.
         // The accepter navigates via CardChallengeNotification + SocketContext.acceptCardChallenge().
-        socket.on('acceptCardChallenge', (data) => {
+        socket.on('acceptCardChallenge', async (data) => {
             if (!data?.roomId) return
             const weAreChallenger = sentChallengeToRef.current &&
                 data.opponentId?.toString() === sentChallengeToRef.current.toString()
@@ -156,6 +158,7 @@ const CardChallenge = ({ compact = false }) => {
                 sentChallengeToRef.current = null
                 localStorage.setItem('cardRoomId', data.roomId)
                 showToast('Challenge Accepted! 🃏', 'Starting Go Fish game...', 'success')
+                await endNormalLiveBeforeInterrupt()
                 navigate(`/card/${data.opponentId}`)
             }
         })
@@ -169,7 +172,7 @@ const CardChallenge = ({ compact = false }) => {
             socket.off('userAvailableRace', syncBusy)
             socket.off('acceptCardChallenge')
         }
-    }, [socket, navigate, showToast, user, fetchBusyGameUserIds])
+    }, [socket, navigate, showToast, user, fetchBusyGameUserIds, endNormalLiveBeforeInterrupt])
 
     const handleOpenModal = () => {
         fetchAvailableUsers()

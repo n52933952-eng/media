@@ -47,6 +47,7 @@ import { SocketContext } from '../context/SocketContext'
 import useShowToast from '../hooks/useShowToast'
 import { LiveKitContext } from '../context/LiveKitContext'
 import { GroupCallContext } from '../context/GroupCallContext'
+import { useLiveBroadcast } from '../context/LiveBroadcastContext'
 import { formatDistanceToNow } from 'date-fns'
 import { FaPhone, FaPhoneSlash, FaVideo } from 'react-icons/fa'
 import { BsCheck2All, BsReply, BsFillImageFill, BsTrash } from 'react-icons/bs'
@@ -210,6 +211,7 @@ const MessagesPage = () => {
   const { startCall, busyUsers, isCalling, callAccepted } = useContext(LiveKitContext) || {}
   // Group calling
   const { startGroupCall, groupCallActive } = useContext(GroupCallContext) || {}
+  const { endNormalLiveBeforeInterrupt } = useLiveBroadcast()
   const showToast = useShowToast()
 
   // State
@@ -294,7 +296,7 @@ const MessagesPage = () => {
   }, [messages, selectedConversation])
 
   // Pre-flight check for group calls: warn about busy members BEFORE connecting to LiveKit
-  const handleGroupCallStart = useCallback((type) => {
+  const handleGroupCallStart = useCallback(async (type) => {
     const participants = selectedConversation?.participants || []
     const myId = idStr(user?._id)
     const others = participants.filter(p => idStr(p?._id) !== myId)
@@ -311,8 +313,9 @@ const MessagesPage = () => {
         'warning'
       )
     }
+    await endNormalLiveBeforeInterrupt()
     startGroupCall?.(selectedConversation._id, type)
-  }, [selectedConversation, user?._id, busyUsers, startGroupCall, showToast])
+  }, [selectedConversation, user?._id, busyUsers, startGroupCall, showToast, endNormalLiveBeforeInterrupt])
 
   // Theme colors - white for light mode, dark for dark mode
   const bgColor = useColorModeValue('white', '#101010')  // White in light mode, dark in dark mode
@@ -3934,7 +3937,10 @@ const MessagesPage = () => {
                         showToast('Busy', 'User is busy right now. Please try again later.', 'warning')
                         return
                       }
-                      startCall(recipient, 'video')
+                      void (async () => {
+                        await endNormalLiveBeforeInterrupt()
+                        startCall(recipient, 'video')
+                      })()
                     }}
                     bg={bgColor}
                     color={useColorModeValue('black', 'white')}
@@ -3969,7 +3975,10 @@ const MessagesPage = () => {
                         showToast('Busy', 'User is busy right now. Please try again later.', 'warning')
                         return
                       }
-                      startCall(recipient, 'audio')
+                      void (async () => {
+                        await endNormalLiveBeforeInterrupt()
+                        startCall(recipient, 'audio')
+                      })()
                     }}
                     bg={bgColor}
                     color={useColorModeValue('black', 'white')}

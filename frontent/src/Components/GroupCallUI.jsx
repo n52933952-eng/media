@@ -15,6 +15,7 @@ import {
 import { PhoneIcon } from '@chakra-ui/icons';
 import { RoomEvent, Track } from 'livekit-client';
 import { GroupCallContext } from '../context/GroupCallContext';
+import { useLiveBroadcast } from '../context/LiveBroadcastContext';
 import ScreenShareViewer from './ScreenShareViewer';
 
 const HangupIcon = () => <span style={{ fontSize: 20 }}>📵</span>;
@@ -110,7 +111,15 @@ const ParticipantTile = ({ participant }) => {
 // ── Incoming group call overlay ───────────────────────────────────────────────
 const IncomingGroupCallOverlay = () => {
   const { incomingGroupCall, joinGroupCall, declineGroupCall } = useContext(GroupCallContext);
+  const { isLive, isMinimized, isSharing, endNormalLiveBeforeInterrupt } = useLiveBroadcast();
   if (!incomingGroupCall) return null;
+
+  const liveWouldEnd = isLive && !(isMinimized && isSharing);
+
+  const handleJoin = async () => {
+    await endNormalLiveBeforeInterrupt();
+    await joinGroupCall();
+  };
 
   return (
     <Box
@@ -129,6 +138,11 @@ const IncomingGroupCallOverlay = () => {
         <VStack spacing={0}>
           <Text color="white" fontWeight="bold" fontSize="xl">{incomingGroupCall.callerName}</Text>
           <Text color="gray.400" fontSize="sm">is calling the group…</Text>
+          {liveWouldEnd ? (
+            <Text color="orange.300" fontSize="sm" textAlign="center" mt={1}>
+              Join ends your live stream
+            </Text>
+          ) : null}
         </VStack>
         <HStack spacing={8}>
           <VStack spacing={1}>
@@ -136,7 +150,7 @@ const IncomingGroupCallOverlay = () => {
             <Text color="gray.400" fontSize="sm">Decline</Text>
           </VStack>
           <VStack spacing={1}>
-            <IconButton icon={<PhoneIcon />} colorScheme="green" borderRadius="full" size="lg" onClick={joinGroupCall} aria-label="Join" />
+            <IconButton icon={<PhoneIcon />} colorScheme="green" borderRadius="full" size="lg" onClick={() => { void handleJoin(); }} aria-label="Join" />
             <Text color="gray.400" fontSize="sm">Join</Text>
           </VStack>
         </HStack>
