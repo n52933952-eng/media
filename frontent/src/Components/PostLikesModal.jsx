@@ -15,6 +15,8 @@ import {
 import { useNavigate } from 'react-router-dom'
 
 const PAGE_SIZE = 20
+/** Fixed modal list height — scroll inside; loads more pages on scroll (cursor API). */
+const LIST_HEIGHT = '420px'
 const apiBase = () => (import.meta.env.PROD ? window.location.origin : 'http://localhost:5000')
 
 /**
@@ -30,77 +32,102 @@ export default function PostLikesModal({ isOpen, onClose, postId, initialCount =
 	const cursorRef = useRef(null)
 	const hasMoreRef = useRef(true)
 	const seenRef = useRef(new Set())
+	const loadingMoreRef = useRef(false)
+	const listRef = useRef(null)
+	const sentinelRef = useRef(null)
 
-	const fetchPage = useCallback(
-		async (isFirst) => {
-			if (!postId) return
+	const fetchPage = useCallback(async (isFirst) => {
+		if (!postId) return
+		if (isFirst) {
+			setLoading(true)
+			setError(null)
+		} else {
+			if (!hasMoreRef.current || loadingMoreRef.current) return
+			loadingMoreRef.current = true
+			setLoadingMore(true)
+		}
+		try {
+			const parts = [`limit=${PAGE_SIZE}`]
+			if (!isFirst && cursorRef.current) {
+				parts.push(`cursor=${encodeURIComponent(cursorRef.current)}`)
+			}
+			const res = await fetch(
+				`${apiBase()}/api/post/likes-list/${postId}?${parts.join('&')}`,
+				{ credentials: 'include' },
+			)
+			const data = await res.json()
+			if (!res.ok) throw new Error(data?.error || data?.message || 'Failed to load likes')
+
+			const page = Array.isArray(data?.users) ? data.users : []
+			cursorRef.current = data?.nextCursor ?? null
+			hasMoreRef.current = !!data?.hasMore && !!data?.nextCursor
+			if (typeof data?.total === 'number') setTotal(data.total)
+
 			if (isFirst) {
-				setLoading(true)
-				setError(null)
+				seenRef.current = new Set(page.map((u) => String(u._id)))
+				setUsers(page)
 			} else {
-				if (!hasMoreRef.current || loadingMore) return
-				setLoadingMore(true)
-			}
-			try {
-				const parts = [`limit=${PAGE_SIZE}`]
-				if (!isFirst && cursorRef.current) {
-					parts.push(`cursor=${encodeURIComponent(cursorRef.current)}`)
-				}
-				const res = await fetch(
-					`${apiBase()}/api/post/likes-list/${postId}?${parts.join('&')}`,
-					{ credentials: 'include' },
-				)
-				const data = await res.json()
-				if (!res.ok) throw new Error(data?.error || data?.message || 'Failed to load likes')
-
-				const page = Array.isArray(data?.users) ? data.users : []
-				cursorRef.current = data?.nextCursor ?? null
-				hasMoreRef.current = !!data?.hasMore && !!data?.nextCursor
-				if (typeof data?.total === 'number') setTotal(data.total)
-
-				if (isFirst) {
-					seenRef.current = new Set(page.map((u) => String(u._id)))
-					setUsers(page)
-				} else {
-					setUsers((prev) => {
-						const merged = [...prev]
-						for (const u of page) {
-							const id = String(u._id)
-							if (id && !seenRef.current.has(id)) {
-								seenRef.current.add(id)
-								merged.push(u)
-							}
+				setUsers((prev) => {
+					const merged = [...prev]
+					for (const u of page) {
+						const id = String(u._id)
+						if (id && !seenRef.current.has(id)) {
+							seenRef.current.add(id)
+							merged.push(u)
 						}
-						return merged
-					})
-				}
-			} catch (e) {
-				if (isFirst) setError(e?.message || 'Failed to load likes')
-			} finally {
-				if (isFirst) setLoading(false)
-				else setLoadingMore(false)
+					}
+					return merged
+				})
 			}
-		},
-		[postId, loadingMore],
-	)
+		} catch (e) {
+			if (isFirst) setError(e?.message || 'Failed to load likes')
+		} finally {
+			if (isFirst) setLoading(false)
+			else {
+				loadingMoreRef.current = false
+				setLoadingMore(false)
+			}
+		}
+	}, [postId])
 
 	useEffect(() => {
 		if (!isOpen || !postId) return
 		cursorRef.current = null
 		hasMoreRef.current = true
 		seenRef.current = new Set()
+		loadingMoreRef.current = false
 		setUsers([])
 		setTotal(initialCount ?? 0)
+		setError(null)
 		fetchPage(true)
-		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [isOpen, postId])
+	}, [isOpen, postId, initialCount, fetchPage])
 
-	const handleScroll = (e) => {
-		const el = e.target
-		if (el.scrollHeight - el.scrollTop - el.clientHeight < 80) {
-			if (!loading && !loadingMore && hasMoreRef.current) fetchPage(false)
+	const handleScroll = useCallback(() => {
+		const el = listRef.current
+		if (!el || loading || loadingMoreRef.current || !hasMoreRef.current) return
+		if (el.scrollHeight - el.scrollTop - el.clientHeight < 100) {
+			fetchPage(false)
 		}
-	}
+	}, [fetchPage, loading])
+
+	// IntersectionObserver fallback for load-more at list bottom
+	useEffect(() => {
+		if (!isOpen || loading || users.length === 0) return
+		const root = listRef.current
+		const sentinel = sentinelRef.current
+		if (!root || !sentinel) return
+
+		const observer = new IntersectionObserver(
+			(entries) => {
+				if (entries[0]?.isIntersecting && hasMoreRef.current && !loadingMoreRef.current) {
+					fetchPage(false)
+				}
+			},
+			{ root, rootMargin: '80px', threshold: 0 },
+		)
+		observer.observe(sentinel)
+		return () => observer.disconnect()
+	}, [isOpen, loading, users.length, fetchPage])
 
 	const handleUserClick = (username) => {
 		if (!username) return
@@ -114,28 +141,46 @@ export default function PostLikesModal({ isOpen, onClose, postId, initialCount =
 			: 'Likes'
 
 	return (
-		<Modal isOpen={isOpen} onClose={onClose} isCentered size="sm" scrollBehavior="inside">
+		<Modal isOpen={isOpen} onClose={onClose} isCentered size="sm" blockScrollOnMount>
 			<ModalOverlay />
-			<ModalContent maxH="70vh">
-				<ModalHeader fontSize="md" pb={2}>
+			<ModalContent maxW="400px" w="full" overflow="hidden">
+				<ModalHeader fontSize="md" pb={2} flexShrink={0}>
 					{title}
 				</ModalHeader>
 				<ModalCloseButton />
-				<ModalBody pb={4} px={0}>
+				<ModalBody pb={4} px={0} pt={0}>
 					{loading ? (
-						<Flex justify="center" py={10}>
+						<Flex justify="center" align="center" h={LIST_HEIGHT}>
 							<Spinner size="lg" />
 						</Flex>
 					) : error ? (
-						<Text textAlign="center" color="gray.500" py={8} px={4}>
-							{error}
-						</Text>
+						<Flex justify="center" align="center" h={LIST_HEIGHT} px={4}>
+							<Text textAlign="center" color="gray.500">
+								{error}
+							</Text>
+						</Flex>
 					) : users.length === 0 ? (
-						<Text textAlign="center" color="gray.500" py={8}>
-							No likes yet
-						</Text>
+						<Flex justify="center" align="center" h={LIST_HEIGHT}>
+							<Text textAlign="center" color="gray.500">
+								No likes yet
+							</Text>
+						</Flex>
 					) : (
-						<Box maxH="52vh" overflowY="auto" onScroll={handleScroll} px={2}>
+						<Box
+							ref={listRef}
+							h={LIST_HEIGHT}
+							overflowY="auto"
+							overflowX="hidden"
+							onScroll={handleScroll}
+							px={2}
+							css={{
+								'&::-webkit-scrollbar': { width: '6px' },
+								'&::-webkit-scrollbar-thumb': {
+									background: 'rgba(128,128,128,0.4)',
+									borderRadius: '3px',
+								},
+							}}
+						>
 							{users.map((u) => (
 								<Flex
 									key={u._id}
@@ -163,6 +208,7 @@ export default function PostLikesModal({ isOpen, onClose, postId, initialCount =
 									</Box>
 								</Flex>
 							))}
+							<Box ref={sentinelRef} h="1px" w="full" aria-hidden />
 							{loadingMore ? (
 								<Flex justify="center" py={4}>
 									<Spinner size="sm" />

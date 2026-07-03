@@ -1130,22 +1130,26 @@ const showToast = useShowToast()
           </Tooltip>
         ) : null}
         {showFeedPostMenu ? (
-          <Menu>
+          <Box
+            as="span"
+            display="inline-flex"
+            onClick={(e) => e.stopPropagation()}
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+          <Menu placement="bottom-end" isLazy>
             <MenuButton
               as={IconButton}
               aria-label="Post options"
               icon={<HiOutlineDotsHorizontal />}
               size="sm"
               variant="ghost"
-              onClick={(e) => {
-                e.preventDefault()
-                e.stopPropagation()
-              }}
+              type="button"
+              onClick={(e) => e.stopPropagation()}
+              onMouseDown={(e) => e.stopPropagation()}
             />
-            <MenuList onClick={(e) => e.stopPropagation()}>
+            <MenuList zIndex={2000}>
               <MenuItem
                 onClick={(e) => {
-                  e.preventDefault()
                   e.stopPropagation()
                   handleFeedPostMenuPress()
                 }}
@@ -1154,6 +1158,7 @@ const showToast = useShowToast()
               </MenuItem>
             </MenuList>
           </Menu>
+          </Box>
         ) : null}
 
          {/* Show delete button if user is post author OR user added this channel post */}
@@ -1962,6 +1967,8 @@ const showToast = useShowToast()
           target.closest('[data-feed-actions="true"]') ||
           target.closest('.chakra-menu__menu-button') ||
           target.closest('.chakra-menu__menu-list') ||
+          target.closest('.chakra-menu__menuitem') ||
+          target.closest('[role="menu"]') ||
           target.closest('svg[aria-label="Like"]') ||
           target.closest('svg[aria-label="Comment"]') ||
           target.closest('svg[aria-label="Share"]')
