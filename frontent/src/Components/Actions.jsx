@@ -113,7 +113,9 @@ const Actions = ({ post, showFeedExtras = true }) => {
 	
 	   
 	
-	const handlelikeandunlike = async() => {
+	const handlelikeandunlike = async(e) => {
+     e?.preventDefault?.()
+     e?.stopPropagation?.()
      if(!user) return 
 
 	 try{
@@ -395,8 +397,16 @@ const Actions = ({ post, showFeedExtras = true }) => {
 
 
 return (
-		<Flex flexDirection='column'>
-			<Flex gap={3} my={2} onClick={(e) => e.preventDefault()}>
+		<Flex
+			flexDirection='column'
+			data-no-navigate="true"
+			data-feed-actions="true"
+			onClick={(e) => {
+				e.preventDefault()
+				e.stopPropagation()
+			}}
+		>
+			<Flex gap={3} my={2}>
 				<svg
 					aria-label='Like'
 					color={liked ? "rgb(237, 73, 86)" : ""}
@@ -405,6 +415,7 @@ return (
 					role='img'
 					viewBox='0 0 24 22'
 					width='20'
+					style={{ cursor: 'pointer' }}
                     onClick={handlelikeandunlike}
 				
 				>
@@ -423,7 +434,12 @@ return (
 					role='img'
 					viewBox='0 0 24 24'
 					width='20'
-				  onClick={onOpen}
+					style={{ cursor: 'pointer' }}
+				  onClick={(e) => {
+						e.preventDefault()
+						e.stopPropagation()
+						onOpen()
+					}}
 				>
 					<title>Comment</title>
 					<path
@@ -464,7 +480,11 @@ return (
 					color={"gray.light"}
 					fontSize='sm'
 					cursor={likeCount > 0 ? 'pointer' : 'default'}
-					onClick={likeCount > 0 ? onLikesOpen : undefined}
+					onClick={(e) => {
+						e.preventDefault()
+						e.stopPropagation()
+						if (likeCount > 0) onLikesOpen()
+					}}
 					_hover={likeCount > 0 ? { textDecoration: 'underline' } : undefined}
 				>
 				{likeCount} {likeCount === 1 ? 'like' : 'likes'}
@@ -663,7 +683,15 @@ const ShareSVG = ({ onClick, disabled = false }) => {
 			role='img'
 			viewBox='0 0 24 24'
 			width='20'
-			onClick={disabled ? undefined : onClick}
+			onClick={
+				disabled
+					? undefined
+					: (e) => {
+							e.preventDefault()
+							e.stopPropagation()
+							onClick?.(e)
+						}
+			}
 			style={{ cursor: disabled ? 'not-allowed' : 'pointer', opacity: disabled ? 0.45 : 1 }}
 		>
 			<title>Share</title>

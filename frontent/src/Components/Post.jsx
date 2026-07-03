@@ -1086,7 +1086,37 @@ const showToast = useShowToast()
     
     
     
-     <Flex alignItems="center" gap={2}>
+     <Flex alignItems="center" gap={2} data-no-navigate="true" onClick={(e) => e.stopPropagation()}>
+        {/* Timestamp first (swapped with action icons) */}
+        {(() => {
+          const createdAt = post?.createdAt ? new Date(post.createdAt) : null
+          const updatedAt = post?.updatedAt ? new Date(post.updatedAt) : null
+          const fallbackAt = post?.date ? new Date(post.date) : null
+          const createdOk = createdAt && !Number.isNaN(createdAt.getTime())
+          const updatedOk = updatedAt && !Number.isNaN(updatedAt.getTime())
+          const fallbackOk = fallbackAt && !Number.isNaN(fallbackAt.getTime())
+          const displayDate = createdOk ? createdAt : (updatedOk ? updatedAt : (fallbackOk ? fallbackAt : null))
+          const isEdited =
+            createdOk &&
+            updatedOk &&
+            Math.abs(updatedAt.getTime() - createdAt.getTime()) > 60 * 1000
+
+          if (!displayDate) return null
+
+          return (
+            <Flex direction="column" alignItems="flex-end" gap={0} mr={1}>
+              <Text fontSize="sm" color="gray.light" textAlign="right" whiteSpace="nowrap">
+                {formatDistanceToNow(displayDate, { addSuffix: true })}
+              </Text>
+              {isEdited && (
+                <Text fontSize="xs" color="gray.light" textAlign="right" whiteSpace="nowrap">
+                  · Edited {format(updatedAt, 'PP p')}
+                </Text>
+              )}
+            </Flex>
+          )
+        })()}
+
         {canMessagePostOwner ? (
           <Tooltip label="Message" hasArrow>
             <IconButton
@@ -1107,49 +1137,33 @@ const showToast = useShowToast()
               icon={<HiOutlineDotsHorizontal />}
               size="sm"
               variant="ghost"
-              onClick={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.preventDefault()
+                e.stopPropagation()
+              }}
             />
             <MenuList onClick={(e) => e.stopPropagation()}>
-              <MenuItem onClick={handleFeedPostMenuPress}>
+              <MenuItem
+                onClick={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  handleFeedPostMenuPress()
+                }}
+              >
                 {isWeatherPost || isMyChannelFeedCard ? 'Remove from feed' : 'Not interested'}
               </MenuItem>
             </MenuList>
           </Menu>
         ) : null}
-        {/* Timestamp: relative on top, Edited on second line if needed */}
-        {(() => {
-          const createdAt = post?.createdAt ? new Date(post.createdAt) : null
-          const updatedAt = post?.updatedAt ? new Date(post.updatedAt) : null
-          const fallbackAt = post?.date ? new Date(post.date) : null
-          const createdOk = createdAt && !Number.isNaN(createdAt.getTime())
-          const updatedOk = updatedAt && !Number.isNaN(updatedAt.getTime())
-          const fallbackOk = fallbackAt && !Number.isNaN(fallbackAt.getTime())
-          const displayDate = createdOk ? createdAt : (updatedOk ? updatedAt : (fallbackOk ? fallbackAt : null))
-          const isEdited =
-            createdOk &&
-            updatedOk &&
-            Math.abs(updatedAt.getTime() - createdAt.getTime()) > 60 * 1000
-
-          if (!displayDate) return null
-
-          return (
-            <Flex direction="column" alignItems="flex-end" gap={0}>
-              <Text fontSize="sm" color="gray.light" textAlign="right" whiteSpace="nowrap">
-                {formatDistanceToNow(displayDate, { addSuffix: true })}
-              </Text>
-              {isEdited && (
-                <Text fontSize="xs" color="gray.light" textAlign="right" whiteSpace="nowrap">
-                  · Edited {format(updatedAt, 'PP p')}
-                </Text>
-              )}
-            </Flex>
-          )
-        })()}
 
          {/* Show delete button if user is post author OR user added this channel post */}
          {(user?._id === postedBy?._id || (post?.channelAddedBy && post.channelAddedBy === user?._id?.toString())) && (
            <MdOutlineDeleteOutline 
-             onClick={handleDeletepost}
+             onClick={(e) => {
+               e.preventDefault()
+               e.stopPropagation()
+               handleDeletepost(e)
+             }}
              cursor="pointer"
              color={useColorModeValue('gray.600', 'gray.400')}
              _hover={{ color: 'red.500' }}
@@ -1615,7 +1629,7 @@ const showToast = useShowToast()
   )}
   
   
-  <Flex gap={2} my={1} align="center" flexWrap="wrap">
+  <Flex gap={2} my={1} align="center" flexWrap="wrap" data-no-navigate="true" onClick={(e) => e.stopPropagation()}>
     {!isChessPost && !isCardPost && (
       <Actions post={post} showFeedExtras={showFeedExtras} />
     )}
@@ -1941,18 +1955,19 @@ const showToast = useShowToast()
       data-post-id={post._id}
       to={`/${postedBy?.username}/post/${post._id}`}
       onClick={(e) => {
-        // Check if clicked element should prevent navigation
         const target = e.target
-        
-        // Check if the click is on a button, input, or has data-no-navigate
         if (
           target.closest('button') ||
           target.closest('[data-no-navigate="true"]') ||
+          target.closest('[data-feed-actions="true"]') ||
           target.closest('.chakra-menu__menu-button') ||
-          target.closest('.chakra-menu__menu-list')
+          target.closest('.chakra-menu__menu-list') ||
+          target.closest('svg[aria-label="Like"]') ||
+          target.closest('svg[aria-label="Comment"]') ||
+          target.closest('svg[aria-label="Share"]')
         ) {
-          console.log('🔵 [Post] Preventing navigation - clicked on interactive element')
           e.preventDefault()
+          e.stopPropagation()
         }
       }}
     >
