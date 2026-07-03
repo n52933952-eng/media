@@ -190,6 +190,45 @@ const clearInCall = async (userId) => {
     catch (e) { console.error(`❌ [call] clearInCall ${userId}:`, e.message) }
 }
 
+// ─── HTTP ringing-ack (reliable "callee is online now" signal) ──────────────
+
+/**
+ * POST /api/call/ack-ringing
+ * Called by the callee's NATIVE FCM handler the instant an incoming-call push arrives.
+ * Crucially, this request only reaches us if the callee's phone actually has internet
+ * right now — unlike FCM "sent", which only means Google queued the message. So it's a
+ * trustworthy "callee is reachable / ringing" signal that we relay to the caller so their
+ * ring screen keeps ringing (instead of the fast offline hang-up).
+ *
+ * Body: { callerId, recipientUserId, callId? }
+ */
+export const ackCallRinging = async (req, res) => {
+    try {
+        const { callerId, recipientUserId, callId } = req.body || {}
+        if (!callerId || !recipientUserId) {
+            return res.status(400).json({ success: false, error: 'Missing callerId or recipientUserId' })
+        }
+
+        const io = getIO()
+        const callerSocketId = await getRecipientSockedId(String(callerId))
+        if (io && callerSocketId) {
+            io.to(callerSocketId).emit('livekit:calleeRinging', {
+                receiverId: String(recipientUserId),
+                callId: callId || null,
+                via: 'fcm',
+            })
+            console.log(`🔔 [ack-ringing] callee ${recipientUserId} online → notified caller ${callerId}`)
+        } else {
+            console.log(`🔔 [ack-ringing] callee ${recipientUserId} online but caller ${callerId} has no live socket`)
+        }
+
+        return res.status(200).json({ success: true })
+    } catch (error) {
+        console.error('❌ [ack-ringing]', error.message)
+        return res.status(500).json({ success: false, error: error.message })
+    }
+}
+
 // ─── HTTP cancel (kept — FCM offline cancel still uses this) ────────────────
 
 /**

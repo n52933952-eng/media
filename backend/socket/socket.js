@@ -2167,9 +2167,18 @@ export const initializeSocket = async (app) => {
                     }
                 }
 
-                // Tell the caller whether the callee is actually reachable (live in-app socket OR FCM delivered).
-                // Lets the caller ring full-length for a backgrounded-but-reachable phone, and only hang up
-                // fast when the callee is truly offline (no socket AND no push token / phone off).
+                // Reachability signalling for the caller's ring UI:
+                //   • livekit:calleeRinging  → RELIABLE "callee device is online right now".
+                //     Emitted when the callee has a live in-app socket. For the FCM/background path
+                //     it is emitted later by POST /api/call/ack-ringing, which the callee's phone
+                //     only hits if it actually has internet (see native MyFirebaseMessagingService).
+                //   • livekit:callTarget { reachable } → weak hint. reachable:false means we truly
+                //     cannot reach the callee (no socket AND no push token/phone off) → caller may
+                //     hang up fast. reachable:true only means a push was QUEUED (fcmSent), NOT that
+                //     the phone is online — so the caller keeps probing until calleeRinging or timeout.
+                if (deliverSocketId) {
+                    socket.emit('livekit:calleeRinging', { roomName, receiverId, via: 'socket' })
+                }
                 const calleeReachable = !!deliverSocketId || fcmSent
                 socket.emit('livekit:callTarget', { roomName, receiverId, reachable: calleeReachable })
 
