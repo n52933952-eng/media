@@ -1089,22 +1089,22 @@ const showToast = useShowToast()
       
        {post?.replies?.[0] && (
           <Avatar 
-        src={post?.replies[0]?.userProfilePic}
-        size="sm" name={post?.replies[0]?.username} position="absolute" top="0px" left="15px" padding="2px"/>
+        src={post?.replies?.[0]?.userProfilePic}
+        size="sm" name={post?.replies?.[0]?.username} position="absolute" top="0px" left="15px" padding="2px"/>
        )}
       
          
          {post?.replies?.[1] && (
           <Avatar 
-        src={post?.replies[1]?.userProfilePic}
-        size="sm" name={post?.replies[1]?.username} position="absolute" bottom="0px" right="-5px" padding="2px"/>
+        src={post?.replies?.[1]?.userProfilePic}
+        size="sm" name={post?.replies?.[1]?.username} position="absolute" bottom="0px" right="-5px" padding="2px"/>
          )}
        
        
-        {post?.replies[2] &&(
+        {post?.replies?.[2] && (
         <Avatar 
-        src={post?.replies[2]?.userProfilePic}
-        size="sm" name={post?.replies[2]?.username} bottom="0px" left="4px" padding="2px"/>
+        src={post?.replies?.[2]?.userProfilePic}
+        size="sm" name={post?.replies?.[2]?.username} bottom="0px" left="4px" padding="2px"/>
         )}
        
         
