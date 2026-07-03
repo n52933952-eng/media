@@ -1,7 +1,7 @@
 import Notification from '../models/notification.js'
 import User from '../models/user.js'
 import Post from '../models/post.js'
-import { getIO, getRecipientSockedId } from '../socket/socket.js'
+import { getIO, getRecipientSockedId, getUserSocket, isUserEffectivelyOnline } from '../socket/socket.js'
 import {
     decodeNotificationCursor,
     encodeNotificationCursor,
@@ -111,14 +111,27 @@ export const createNotification = async (userId, type, fromUserId, options = {})
         
         const notificationObj = buildNotificationSocketPayload(notification, options)
         const io = getIO()
-        // In-app: only when there is a live, valid socket (same helper as messages)
+        // In-app only when the app is genuinely in the foreground — same rule as messages/calls.
+        // A backgrounded mobile app can keep its WebSocket open while presence is `offline`; treating
+        // that as "delivered in-app" is why follow/like pushes were inconsistent (socket open → no push,
+        // but the banner never showed because the app was in the background). Web has no FCM channel,
+        // so we always deliver to a live web socket regardless of presence.
         let deliveredInApp = false
         try {
             const socketId = await getRecipientSockedId(userId)
             if (io && socketId) {
-                io.to(socketId).emit('newNotification', notificationObj)
-                deliveredInApp = true
-                console.log(`📬 [createNotification] In-app notification → user ${userId}, type: ${type}, socket: ${socketId}`)
+                const receiverData = await getUserSocket(userId).catch(() => null)
+                const clientType = String(receiverData?.clientType || '').toLowerCase()
+                const deliverInApp = clientType === 'web'
+                    ? true
+                    : await isUserEffectivelyOnline(userId)
+                if (deliverInApp) {
+                    io.to(socketId).emit('newNotification', notificationObj)
+                    deliveredInApp = true
+                    console.log(`📬 [createNotification] In-app notification → user ${userId}, type: ${type}, socket: ${socketId}`)
+                } else {
+                    console.log(`⚠️ [createNotification] Socket open but backgrounded for user ${userId} (type: ${type}) — will send push`)
+                }
             } else {
                 console.log(`⚠️ [createNotification] No live socket for user ${userId} (type: ${type}) — will send push if applicable`)
             }
