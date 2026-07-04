@@ -31,7 +31,7 @@ import PostLikesModal from './PostLikesModal.jsx'
 import { isChessFeedPost, isGoFishFeedPost } from '../utils/gameFeedPostUtils.js'
 import { getReplyCount, withReplyCountDelta } from '../utils/postUtils.js'
 
-const Actions = ({ post, showFeedExtras = true }) => {
+const Actions = ({ post, showFeedExtras = true, onReplyAdded }) => {
 	const isEphemeralGamePost = isChessFeedPost(post) || isGoFishFeedPost(post)
 	if (isEphemeralGamePost) {
 		return null
@@ -339,18 +339,24 @@ const Actions = ({ post, showFeedExtras = true }) => {
      const data = await res.json()
 
 	 if(res.ok){
-		const updatedReply = followPost.map((p) => {
-			if(p._id === post._id){
-				const replyWithLikes = {
-					...data,
-					likes: data.likes || []
+		const replyWithLikes = {
+			...data,
+			likes: data.likes || []
+		}
+
+		if (onReplyAdded) {
+			onReplyAdded(replyWithLikes)
+		} else {
+			const updatedReply = followPost.map((p) => {
+				if(p._id === post._id){
+					const replies = Array.isArray(p.replies) ? [...p.replies, replyWithLikes] : [replyWithLikes]
+					return { ...withReplyCountDelta(p, 1), replies }
 				}
-				const replies = Array.isArray(p.replies) ? [...p.replies, replyWithLikes] : [replyWithLikes]
-				return { ...withReplyCountDelta(p, 1), replies }
-			}
-			return p 
-		})
-		setFollowPost(updatedReply)
+				return p 
+			})
+			setFollowPost(updatedReply)
+		}
+
 		setReply("")
 		onClose()
 		

@@ -1,4 +1,4 @@
-import React,{useEffect,useState,useContext,useCallback,useMemo} from 'react'
+import React,{useEffect,useState,useContext,useCallback,useMemo,useRef} from 'react'
 import{Avatar,Flex,Text,Image,Box,Divider,Button,Spinner,VStack,HStack,Grid,GridItem,SimpleGrid,useColorModeValue,useDisclosure} from '@chakra-ui/react'
 import { HiDotsHorizontal } from "react-icons/hi";
 import Actions from '../Components/Actions'
@@ -19,6 +19,12 @@ import {
   isFootballMatchLive,
   footballMatchKey,
 } from '../utils/footballFeed'
+import {
+  COMMENTS_PAGE_SIZE,
+  mergeRepliesById,
+  postCommentsApiUrl,
+  postDetailApiUrl,
+} from '../utils/postUtils.js'
 
 const apiBaseUrl = () => (import.meta.env.PROD ? window.location.origin : 'http://localhost:5000')
 
@@ -38,6 +44,118 @@ const PostPage = () => {
    const {socket} = useContext(SocketContext) || {}
 
     const post = followPost[0]
+
+    const [postReplies, setPostReplies] = useState([])
+    const [commentsLoading, setCommentsLoading] = useState(false)
+    const [commentsLoadingMore, setCommentsLoadingMore] = useState(false)
+    const [commentsHasMore, setCommentsHasMore] = useState(false)
+    const commentsSkipRef = useRef(0)
+    const loadMoreRef = useRef(null)
+    const commentsFetchGenRef = useRef(0)
+
+    /** From feed: `?fixture=<id>` scopes comments to that match thread */
+    const footballMatchId = fixtureIdParam || null
+
+    const scopedReplies = useMemo(() => {
+      const all = Array.isArray(postReplies) ? postReplies : []
+      if (!footballMatchId) return all
+      const fid = String(footballMatchId)
+      const roots = all.filter(
+        (r) => !r?.parentReplyId && String(r?.footballMatchId || '') === fid,
+      )
+      const rootIds = new Set(roots.map((r) => String(r._id)))
+      const inThread = new Set(rootIds)
+      let added = true
+      while (added) {
+        added = false
+        for (const r of all) {
+          const rid = String(r._id)
+          if (inThread.has(rid)) continue
+          const p = r.parentReplyId ? String(r.parentReplyId) : ''
+          if (p && inThread.has(p)) {
+            inThread.add(rid)
+            added = true
+          }
+        }
+      }
+      return all.filter((r) => inThread.has(String(r._id)))
+    }, [postReplies, footballMatchId])
+
+    const topLevelReplies = useMemo(
+      () => scopedReplies.filter((r) => !r?.parentReplyId),
+      [scopedReplies],
+    )
+
+    const bumpReplyCount = useCallback(
+      (delta) => {
+        if (!delta) return
+        setFollowPost((prev) =>
+          prev.map((p) => {
+            if (String(p._id) !== String(id)) return p
+            const next = Math.max(0, (typeof p.replyCount === 'number' ? p.replyCount : 0) + delta)
+            return { ...p, replyCount: next, replies: [] }
+          }),
+        )
+      },
+      [id, setFollowPost],
+    )
+
+    const fetchCommentsPage = useCallback(
+      async (loadMore) => {
+        if (!id) return
+        if (loadMore) {
+          if (!commentsHasMore || commentsLoadingMore || commentsLoading) return
+          setCommentsLoadingMore(true)
+        } else {
+          if (commentsLoading) return
+          setCommentsLoading(true)
+          commentsSkipRef.current = 0
+        }
+
+        const gen = ++commentsFetchGenRef.current
+        const skip = loadMore ? commentsSkipRef.current : 0
+
+        try {
+          const res = await fetch(
+            postCommentsApiUrl(id, {
+              limit: COMMENTS_PAGE_SIZE,
+              skip,
+              footballMatchId,
+            }),
+            { credentials: 'include' },
+          )
+          const data = await res.json()
+          if (gen !== commentsFetchGenRef.current) return
+          if (!res.ok) throw new Error(data?.error || 'Failed to load comments')
+
+          const batch = Array.isArray(data?.replies) ? data.replies : []
+          setPostReplies((prev) => (loadMore ? mergeRepliesById(prev, batch) : batch))
+          setCommentsHasMore(!!data?.hasMore)
+          commentsSkipRef.current = skip + COMMENTS_PAGE_SIZE
+        } catch (error) {
+          console.error('[PostPage] comments fetch:', error)
+          if (!loadMore) setPostReplies([])
+        } finally {
+          if (gen === commentsFetchGenRef.current) {
+            if (loadMore) setCommentsLoadingMore(false)
+            else setCommentsLoading(false)
+          }
+        }
+      },
+      [id, footballMatchId, commentsHasMore, commentsLoadingMore, commentsLoading],
+    )
+
+    const fetchCommentsPageRef = useRef(fetchCommentsPage)
+    fetchCommentsPageRef.current = fetchCommentsPage
+
+    const handleReplyAdded = useCallback(
+      (reply) => {
+        if (!reply?._id) return
+        setPostReplies((prev) => mergeRepliesById(prev, [reply]))
+        bumpReplyCount(1)
+      },
+      [bumpReplyCount],
+    )
     
     const showToast = useShowToast()
     
@@ -375,12 +493,11 @@ const PostPage = () => {
         
         if (postIdStr === updatedPostIdStr) {
           console.log('✏️ Post updated via socket on PostPage:', postId)
-          // Update post in context
           setFollowPost(prev => 
             prev.map(p => {
               const pIdStr = p._id?.toString()
               if (pIdStr === updatedPostIdStr) {
-                return updatedPost
+                return { ...updatedPost, replies: [], replyCount: updatedPost.replyCount ?? p.replyCount }
               }
               return p
             })
@@ -399,14 +516,19 @@ const PostPage = () => {
    
     const getpost = async() => {
     
-      const res = await fetch(`${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/post/${id}`,{
+      const res = await fetch(postDetailApiUrl(id, { includeReplies: false }),{
         credentials: "include",
       })
 
       const data = await res.json()
 
       if(res.ok){
-        setFollowPost([data])
+        setFollowPost([{ ...data, replies: [] }])
+        setPostReplies([])
+        setCommentsHasMore(false)
+        commentsSkipRef.current = 0
+        commentsFetchGenRef.current += 1
+        fetchCommentsPageRef.current(false)
       }
       }
 
@@ -423,7 +545,23 @@ const PostPage = () => {
    return () => {
      document.removeEventListener('visibilitychange', handleVisibilityChange)
    }
-  },[id])
+  },[id, setFollowPost])
+
+  useEffect(() => {
+    const el = loadMoreRef.current
+    if (!el || !commentsHasMore) return
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting) {
+          fetchCommentsPageRef.current(true)
+        }
+      },
+      { rootMargin: '240px' },
+    )
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [commentsHasMore, topLevelReplies.length])
 
 
 
@@ -723,7 +861,11 @@ if(!post) {
        
      
      <Flex my={3} gap={3}>
-        <Actions post={post} showFeedExtras={false} />
+        <Actions
+          post={post}
+          showFeedExtras={false}
+          onReplyAdded={handleReplyAdded}
+        />
       </Flex>
       
 
@@ -749,21 +891,38 @@ if(!post) {
   
       <Divider my={4}/>
 
-    {/* Comments section - for auto-scrolling after adding comment */}
+    {/* Comments section - paginated from /api/post/:id/comments */}
     <Box data-comments-section pb={8}>
-      {/* Show only top-level comments (parentReplyId is null or undefined) */}
-      {post.replies
-      .filter((reply) => !reply.parentReplyId)
-      .map((reply) => (
-        <Box key={reply._id} data-comment-id={reply._id}>  {/* Add data attribute for scrolling */}
-          <Comment 
-            reply={reply} 
-            postId={post._id}
-            allReplies={post.replies}  // Pass all replies so Comment can find nested ones
-            postedBy={post.postedBy}  // Pass post owner so Comment can check delete permissions
-          />
-        </Box>
-      ))}
+      {commentsLoading && topLevelReplies.length === 0 ? (
+        <Flex justify="center" py={8}>
+          <Spinner size="md" />
+        </Flex>
+      ) : topLevelReplies.length === 0 ? (
+        <Text color={secondaryTextColor} textAlign="center" py={8}>
+          No comments yet. Start the conversation.
+        </Text>
+      ) : (
+        topLevelReplies.map((reply) => (
+          <Box key={reply._id} data-comment-id={reply._id}>
+            <Comment
+              reply={reply}
+              postId={post._id}
+              allReplies={scopedReplies}
+              postedBy={post.postedBy}
+              onRepliesChange={setPostReplies}
+              onReplyCountDelta={bumpReplyCount}
+            />
+          </Box>
+        ))
+      )}
+
+      {commentsLoadingMore && (
+        <Flex justify="center" py={4}>
+          <Spinner size="sm" />
+        </Flex>
+      )}
+
+      {commentsHasMore && <Box ref={loadMoreRef} h="1px" aria-hidden />}
     </Box>
    
       {/* Edit Post Modal */}

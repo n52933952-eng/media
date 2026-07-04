@@ -7,13 +7,13 @@ import { formatDistanceToNow } from 'date-fns'
 import { UserContext } from '../context/UserContext'
 import { PostContext } from '../context/PostContext'
 import useShowToast from '../hooks/useShowToast'
-import { getReplyCount, withReplyCountDelta } from '../utils/postUtils.js'
+import { getReplyCount, withReplyCountDelta, mergeRepliesById, removeReplyAndDescendants } from '../utils/postUtils.js'
 
 
 
 
 
-const Comment = ({ reply, postId, allReplies, postedBy }) => {
+const Comment = ({ reply, postId, allReplies, postedBy, onRepliesChange, onReplyCountDelta }) => {
   
 
   const { user } = useContext(UserContext)
@@ -90,7 +90,12 @@ const Comment = ({ reply, postId, allReplies, postedBy }) => {
   // Use fresh profile picture if available, otherwise use stored one
   const displayProfilePic = freshProfilePic || reply?.userProfilePic
 
-  const nestedReplies = (allReplies || []).filter((r) => {
+  const repliesList =
+    allReplies ??
+    followPost.find((p) => String(p._id) === String(postId))?.replies ??
+    []
+
+  const nestedReplies = (repliesList || []).filter((r) => {
    
     if (!r.parentReplyId || !reply._id) return false
     return r.parentReplyId.toString() === reply._id.toString()
@@ -363,19 +368,25 @@ const Comment = ({ reply, postId, allReplies, postedBy }) => {
 
       if (res.ok) {
       
-        const updatedFollowPost = followPost.map((p) => {
-          if (p._id === postId) {
-            const replyWithLikes = {
-              ...data,
-              likes: data.likes || []
-            }
-            const replies = Array.isArray(p.replies) ? [...p.replies, replyWithLikes] : [replyWithLikes]
-            return { ...withReplyCountDelta(p, 1), replies }
-          }
-          return p
-        })
+        const replyWithLikes = {
+          ...data,
+          likes: data.likes || []
+        }
 
-       setFollowPost(updatedFollowPost)
+        if (onRepliesChange) {
+          onRepliesChange((prev) => mergeRepliesById(prev, [replyWithLikes]))
+          onReplyCountDelta?.(1)
+        } else {
+          const updatedFollowPost = followPost.map((p) => {
+            if (p._id === postId) {
+              const replies = Array.isArray(p.replies) ? [...p.replies, replyWithLikes] : [replyWithLikes]
+              return { ...withReplyCountDelta(p, 1), replies }
+            }
+            return p
+          })
+          setFollowPost(updatedFollowPost)
+        }
+
          setReplyText("")
         setIsReplying(false)
         
@@ -420,29 +431,45 @@ const Comment = ({ reply, postId, allReplies, postedBy }) => {
 
     if (res.ok) {
     
-      const updatedFollowPost = followPost.map((p) => {
-        if (p._id === postId) {  
-          const existingReplies = Array.isArray(p.replies) ? p.replies : []
-          const updatedReplies = existingReplies.map((r) => {
-            if (r._id.toString() === reply._id.toString()) { 
+      if (onRepliesChange) {
+        onRepliesChange((prev) =>
+          (prev || []).map((r) => {
+            if (r._id.toString() === reply._id.toString()) {
               return {
                 ...r,
                 likes: data.isLiked
                   ? [...(r.likes || []), user._id]
-                  : (r.likes || []).filter((id) => id.toString() !== user._id.toString())
+                  : (r.likes || []).filter((id) => id.toString() !== user._id.toString()),
               }
             }
             return r
-          })
-          return {
-            ...p,
-            replies: updatedReplies
+          }),
+        )
+      } else {
+        const updatedFollowPost = followPost.map((p) => {
+          if (p._id === postId) {  
+            const existingReplies = Array.isArray(p.replies) ? p.replies : []
+            const updatedReplies = existingReplies.map((r) => {
+              if (r._id.toString() === reply._id.toString()) { 
+                return {
+                  ...r,
+                  likes: data.isLiked
+                    ? [...(r.likes || []), user._id]
+                    : (r.likes || []).filter((id) => id.toString() !== user._id.toString())
+                }
+              }
+              return r
+            })
+            return {
+              ...p,
+              replies: updatedReplies
+            }
           }
-        }
-        return p
-      })
-      
-      setFollowPost(updatedFollowPost)
+          return p
+        })
+        
+        setFollowPost(updatedFollowPost)
+      }
       
    
       setLiked(data.isLiked)
@@ -487,33 +514,39 @@ const Comment = ({ reply, postId, allReplies, postedBy }) => {
       const data = await res.json()
 
       if (res.ok) {
-        // Remove comment from the post's replies array
-        const updatedFollowPost = followPost.map((p) => {
-          if (p._id === postId) {
-            const existingReplies = Array.isArray(p.replies) ? p.replies : []
-            const filterReplies = (replies, deletedId) => {
-              return replies.filter((r) => {
-                if (r._id.toString() === deletedId.toString()) {
-                  return false
-                }
-                if (r.parentReplyId && r.parentReplyId.toString() === deletedId.toString()) {
-                  return false
-                }
-                return true
-              })
-            }
-            const filtered = filterReplies(existingReplies, reply._id)
-            const removed = existingReplies.length - filtered.length
+        if (onRepliesChange) {
+          const filtered = removeReplyAndDescendants(repliesList, reply._id)
+          const removed = repliesList.length - filtered.length
+          onRepliesChange(filtered)
+          if (removed > 0) onReplyCountDelta?.(-removed)
+        } else {
+          const updatedFollowPost = followPost.map((p) => {
+            if (p._id === postId) {
+              const existingReplies = Array.isArray(p.replies) ? p.replies : []
+              const filterReplies = (replies, deletedId) => {
+                return replies.filter((r) => {
+                  if (r._id.toString() === deletedId.toString()) {
+                    return false
+                  }
+                  if (r.parentReplyId && r.parentReplyId.toString() === deletedId.toString()) {
+                    return false
+                  }
+                  return true
+                })
+              }
+              const filtered = filterReplies(existingReplies, reply._id)
+              const removed = existingReplies.length - filtered.length
 
-            return {
-              ...withReplyCountDelta(p, -Math.max(1, removed)),
-              replies: filtered,
+              return {
+                ...withReplyCountDelta(p, -Math.max(1, removed)),
+                replies: filtered,
+              }
             }
-          }
-          return p
-        })
+            return p
+          })
 
-        setFollowPost(updatedFollowPost)
+          setFollowPost(updatedFollowPost)
+        }
         showToast("Success", "Comment deleted successfully", "success")
       } else {
         showToast("Error", data.error || "Failed to delete comment", "error")
@@ -694,6 +727,8 @@ const Comment = ({ reply, postId, allReplies, postedBy }) => {
             postId={postId}
             allReplies={allReplies}
             postedBy={postedBy}
+            onRepliesChange={onRepliesChange}
+            onReplyCountDelta={onReplyCountDelta}
           />
         ))}
       </Box>
