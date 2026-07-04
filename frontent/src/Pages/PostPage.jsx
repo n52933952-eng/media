@@ -750,7 +750,7 @@ if(!post) {
       <Divider my={4}/>
 
     {/* Comments section - for auto-scrolling after adding comment */}
-    <Box data-comments-section>
+    <Box data-comments-section pb={8}>
       {/* Show only top-level comments (parentReplyId is null or undefined) */}
       {post.replies
       .filter((reply) => !reply.parentReplyId)

@@ -109,6 +109,7 @@ const Comment = ({ reply, postId, allReplies, postedBy }) => {
   const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState(0)
   const inputRef = useRef(null)  // Ref for the input field
   const replyInputRef = useRef(null)  // Ref for the reply input section (for scrolling)
+  const suggestionsRef = useRef(null)  // Ref for mention dropdown (scroll into view)
   
   // NEW: Function to handle Reply button click - prefills @username and scrolls to input
   const handleReplyClick = () => {
@@ -280,6 +281,15 @@ const Comment = ({ reply, postId, allReplies, postedBy }) => {
       return () => document.removeEventListener('click', handleClickOutside)
     }
   }, [showSuggestions])
+
+  // When mention suggestions appear, scroll them into view (page scroll — no inner dropdown scrollbar)
+  useEffect(() => {
+    if (!showSuggestions || mentionSuggestions.length === 0) return
+    const t = setTimeout(() => {
+      suggestionsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+    }, 80)
+    return () => clearTimeout(t)
+  }, [showSuggestions, mentionSuggestions.length])
   
   // NEW: Function to format text and style @mentions (like Facebook's blue @mentions)
   const formatTextWithMentions = (text) => {
@@ -584,68 +594,22 @@ const Comment = ({ reply, postId, allReplies, postedBy }) => {
       
         {isReplying && (
           <Flex 
-            ref={replyInputRef}  // Ref for auto-scrolling
-            gap={2} 
-            mt={2} 
-            mb={2}
-            direction="column" 
-            position="relative"
+            ref={replyInputRef}
+            gap={3}
+            mt={3}
+            mb={4}
+            py={2}
+            direction="column"
           >
-          
             <Input
               ref={inputRef}
-              size="sm"
+              size="md"
               placeholder={`Reply to @${reply.username}...`}
               value={replyText}
               onChange={handleInputChange}
               onKeyDown={handleKeyDown}
             />
-            
-            {/* Mention suggestions dropdown */}
-            {showSuggestions && mentionSuggestions.length > 0 && (
-              <Box
-                position="absolute"
-                top="100%"
-                left={0}
-                right={0}
-                mt={1}
-                bg="white"
-                border="1px solid"
-                borderColor="gray.200"
-                borderRadius="md"
-                boxShadow="lg"
-                zIndex={1000}
-                maxH="200px"
-                overflowY="auto"
-              >
-                <VStack align="stretch" spacing={0}>
-                  {mentionSuggestions.map((user, index) => (
-                    <Flex
-                      key={user._id || user.username}
-                      align="center"
-                      gap={2}
-                      p={2}
-                      cursor="pointer"
-                      bg={index === selectedSuggestionIndex ? "gray.100" : "transparent"}
-                      _hover={{ bg: "gray.100" }}
-                      onClick={() => selectMentionUser(user)}
-                    >
-                      <Avatar src={user.profilePic} size="sm" />
-                      <Flex direction="column">
-                        <Text fontSize="sm" fontWeight="bold">
-                          {user.username}
-                        </Text>
-                        <Text fontSize="xs" color="gray.500">
-                          {user.name}
-                        </Text>
-                      </Flex>
-                    </Flex>
-                  ))}
-                </VStack>
-              </Box>
-            )}
-            
-           
+
             <Flex gap={2}>
               <Button
                 size="sm"
@@ -662,11 +626,57 @@ const Comment = ({ reply, postId, allReplies, postedBy }) => {
                 onClick={() => {
                   setIsReplying(false)
                   setReplyText("")
+                  setShowSuggestions(false)
+                  setMentionSuggestions([])
                 }}
               >
                 Cancel
               </Button>
             </Flex>
+
+            {/* Mention suggestions — in document flow (no inner scrollbar; page scrolls instead) */}
+            {showSuggestions && mentionSuggestions.length > 0 && (
+              <Box
+                ref={suggestionsRef}
+                mt={1}
+                mb={2}
+                bg="white"
+                border="1px solid"
+                borderColor="gray.200"
+                borderRadius="md"
+                boxShadow="md"
+                overflow="hidden"
+              >
+                <VStack align="stretch" spacing={0}>
+                  {mentionSuggestions.slice(0, 6).map((user, index) => (
+                    <Flex
+                      key={user._id || user.username}
+                      align="center"
+                      gap={3}
+                      px={3}
+                      py={2.5}
+                      cursor="pointer"
+                      bg={index === selectedSuggestionIndex ? "gray.100" : "transparent"}
+                      _hover={{ bg: "gray.100" }}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        selectMentionUser(user)
+                      }}
+                    >
+                      <Avatar src={user.profilePic} size="sm" />
+                      <Flex direction="column" minW={0}>
+                        <Text fontSize="sm" fontWeight="bold" noOfLines={1}>
+                          {user.username}
+                        </Text>
+                        <Text fontSize="xs" color="gray.500" noOfLines={1}>
+                          {user.name}
+                        </Text>
+                      </Flex>
+                    </Flex>
+                  ))}
+                </VStack>
+              </Box>
+            )}
           </Flex>
         )}
 
