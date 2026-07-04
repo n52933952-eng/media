@@ -43,6 +43,7 @@ const CommentSchema = new mongoose.Schema(
 )
 
 CommentSchema.index({ postId: 1, date: 1 })
+CommentSchema.index({ postId: 1, parentReplyId: 1, date: 1 })
 CommentSchema.index({ userId: 1, date: -1 })
 
 const Comment = mongoose.model('Comment', CommentSchema)

@@ -2,12 +2,13 @@ import express from 'express'
 
 const router = express.Router()
 
-import{LikeComent,ReplyToComment,createPost,getPost,deletePost,updatePost,LikePost,getPostLikes,ReplyPost,getFeedPost,getUserPosts,getUserPostsById,addContributorToPost,removeContributorFromPost,hidePostFromFeed,getHiddenFeedPostIds,getUserComments,deleteComment} from '../controller/post.js'
+import{LikeComent,ReplyToComment,createPost,getPost,getPostComments,deletePost,updatePost,LikePost,getPostLikes,ReplyPost,getFeedPost,getUserPosts,getUserPostsById,addContributorToPost,removeContributorFromPost,hidePostFromFeed,getHiddenFeedPostIds,getUserComments,deleteComment} from '../controller/post.js'
 import protectRoute from '../middlware/protectRoute.js'
 import optionalAuth from '../middlware/optionalAuth.js'
 import upload from '../middlware/upload.js'
 
 router.post("/create",protectRoute,upload.single('file'),createPost)
+router.get("/:id/comments",optionalAuth,getPostComments)
 router.get("/:id",optionalAuth,getPost)
 router.get("/user/:username",optionalAuth,getUserPosts)
 router.get("/user/id/:userId",protectRoute,getUserPostsById)

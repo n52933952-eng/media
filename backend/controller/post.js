@@ -38,6 +38,8 @@ import {
     toggleCommentLike,
     attachRepliesToPost,
     attachReplyCountsToPosts,
+    getCommentCountForPost,
+    getPostCommentsPaginated,
     getUserCommentsPaginated,
     deleteCommentsForPost,
 } from '../services/commentService.js'
@@ -368,7 +370,21 @@ export const getPost = async(req,res) => {
             return res.status(500).json({message:"no post"})
         }
 
-        const withReplies = await attachRepliesToPost(post)
+        const includeReplies =
+            req.query.includeReplies !== 'false' && req.query.includeReplies !== '0'
+
+        let withReplies
+        if (includeReplies) {
+            withReplies = await attachRepliesToPost(post)
+        } else {
+            withReplies = post.toObject()
+            const storedCount = withReplies.replyCount
+            withReplies.replyCount =
+                typeof storedCount === 'number' && storedCount >= 0
+                    ? storedCount
+                    : await getCommentCountForPost(post._id)
+            withReplies.replies = []
+        }
         delete withReplies.likes
         withReplies.likeCount = typeof withReplies.likeCount === 'number' ? withReplies.likeCount : 0
         // likedByMe when we know the viewer (route may be unauthenticated).
@@ -399,9 +415,27 @@ export const getPost = async(req,res) => {
 
 }
 
+export const getPostComments = async (req, res) => {
+    try {
+        const post = await Post.findById(req.params.id).select('_id replyCount').lean()
+        if (!post) {
+            return res.status(404).json({ message: 'no post' })
+        }
 
-
-
+        const { limit = 12, skip = 0, footballMatchId = null } = req.query
+        const result = await getPostCommentsPaginated(req.params.id, {
+            limit,
+            skip,
+            footballMatchId,
+        })
+        if (result.total == null && typeof post.replyCount === 'number') {
+            result.total = post.replyCount
+        }
+        res.status(200).json(result)
+    } catch (error) {
+        res.status(500).json({ error: error.message })
+    }
+}
 
 // Update post (allows owner or contributors for collaborative posts)
 export const updatePost = async(req,res) => {

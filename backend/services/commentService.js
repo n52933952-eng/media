@@ -2,6 +2,27 @@ import mongoose from 'mongoose'
 import Comment from '../models/comment.js'
 import Post, { MAX_REPLIES_PER_POST } from '../models/post.js'
 
+/** Only fields needed for comment list UI — keeps Mongo payload small. */
+const COMMENT_LIST_SELECT =
+  '_id userId text username userProfilePic date parentReplyId likes mentionedUser footballMatchId'
+
+function toObjectId(value) {
+  const s = String(value)
+  return mongoose.Types.ObjectId.isValid(s) ? new mongoose.Types.ObjectId(s) : null
+}
+
+function buildRootCommentQuery(postId, footballMatchId = null) {
+  const oid = toObjectId(postId)
+  const query = {
+    postId: oid || String(postId),
+    $or: [{ parentReplyId: null }, { parentReplyId: { $exists: false } }],
+  }
+  if (footballMatchId) {
+    query.footballMatchId = String(footballMatchId)
+  }
+  return query
+}
+
 export function formatCommentForApi(doc) {
   if (!doc) return null
   const d = doc.toObject ? doc.toObject() : doc
@@ -79,6 +100,137 @@ export async function getCommentsForPost(postId) {
   const post = await Post.findById(pid).select('replies').lean()
   if (!Array.isArray(post?.replies) || !post.replies.length) return []
   return post.replies.map((r) => formatCommentForApi(r))
+}
+
+async function getDescendantCommentsForRoots(postId, rootIds) {
+  if (!rootIds?.length) return []
+  const pid = toObjectId(postId)
+  if (!pid) return []
+
+  const rootOids = rootIds.map(toObjectId).filter(Boolean)
+  if (!rootOids.length) return []
+
+  const rows = await Comment.aggregate([
+    { $match: { _id: { $in: rootOids }, postId: pid } },
+    {
+      $graphLookup: {
+        from: 'comments',
+        startWith: '$_id',
+        connectFromField: '_id',
+        connectToField: 'parentReplyId',
+        as: 'descendants',
+        maxDepth: 24,
+        restrictSearchWithMatch: { postId: pid },
+      },
+    },
+    { $project: { descendants: 1 } },
+  ])
+
+  const out = []
+  const seen = new Set()
+  for (const row of rows) {
+    for (const d of row.descendants || []) {
+      const id = String(d._id)
+      if (seen.has(id)) continue
+      seen.add(id)
+      out.push(d)
+    }
+  }
+  return out
+}
+
+function collectEmbeddedThreadReplies(embedded, roots) {
+  const rootIds = new Set(roots.map((r) => String(r._id)))
+  const inThread = new Set(rootIds)
+  let added = true
+  while (added) {
+    added = false
+    for (const r of embedded) {
+      const id = String(r._id)
+      if (inThread.has(id)) continue
+      const p = r.parentReplyId ? String(r.parentReplyId) : ''
+      if (p && inThread.has(p)) {
+        inThread.add(id)
+        added = true
+      }
+    }
+  }
+  return embedded.filter((r) => inThread.has(String(r._id)))
+}
+
+/** Paginate top-level comments; each page includes nested replies for those roots. */
+export async function getPostCommentsPaginated(
+  postId,
+  { limit = 12, skip = 0, footballMatchId = null } = {},
+) {
+  const pid = String(postId)
+  const limitNum = Math.min(Math.max(parseInt(limit, 10) || 12, 1), 50)
+  const skipNum = Math.max(parseInt(skip, 10) || 0, 0)
+  const rootQuery = buildRootCommentQuery(postId, footballMatchId)
+
+  // Fetch limit+1 to detect hasMore — avoids an expensive countDocuments scan.
+  const rootsPlus = await Comment.find(rootQuery)
+    .select(COMMENT_LIST_SELECT)
+    .sort({ date: 1 })
+    .skip(skipNum)
+    .limit(limitNum + 1)
+    .lean()
+
+  if (!rootsPlus.length && skipNum === 0) {
+    const post = await Post.findById(pid).select('replies replyCount').lean()
+    const embedded = Array.isArray(post?.replies) ? post.replies : []
+    if (!embedded.length) {
+      return { replies: [], total: post?.replyCount ?? 0, hasMore: false }
+    }
+
+    let topLevel = embedded.filter((r) => !r?.parentReplyId)
+    if (footballMatchId) {
+      topLevel = topLevel.filter(
+        (r) => String(r?.footballMatchId || '') === String(footballMatchId),
+      )
+    }
+    const legacyRoots = topLevel.slice(skipNum, skipNum + limitNum + 1)
+    const hasMore = legacyRoots.length > limitNum
+    const pageRoots = hasMore ? legacyRoots.slice(0, limitNum) : legacyRoots
+    if (!pageRoots.length) {
+      return {
+        replies: [],
+        total: post?.replyCount ?? topLevel.length,
+        hasMore: skipNum < topLevel.length,
+      }
+    }
+    const thread = collectEmbeddedThreadReplies(embedded, pageRoots)
+    return {
+      replies: thread.map(formatCommentForApi),
+      total: post?.replyCount ?? topLevel.length,
+      hasMore: skipNum + pageRoots.length < topLevel.length,
+    }
+  }
+
+  const hasMore = rootsPlus.length > limitNum
+  const roots = hasMore ? rootsPlus.slice(0, limitNum) : rootsPlus
+
+  if (!roots.length) {
+    return { replies: [], total: 0, hasMore: false }
+  }
+
+  const rootIds = roots.map((r) => String(r._id))
+  const descendants = await getDescendantCommentsForRoots(pid, rootIds)
+  const seen = new Set()
+  const merged = []
+  for (const doc of [...roots, ...descendants]) {
+    const id = String(doc._id)
+    if (seen.has(id)) continue
+    seen.add(id)
+    merged.push(formatCommentForApi(doc))
+  }
+  merged.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
+
+  return {
+    replies: merged,
+    total: null,
+    hasMore,
+  }
 }
 
 export async function attachRepliesToPost(post) {
