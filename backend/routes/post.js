@@ -2,7 +2,7 @@ import express from 'express'
 
 const router = express.Router()
 
-import{LikeComent,ReplyToComment,createPost,getPost,getPostComments,deletePost,updatePost,LikePost,getPostLikes,ReplyPost,getFeedPost,getUserPosts,getUserPostsById,addContributorToPost,removeContributorFromPost,setContributorImage,setCollaborativePostAudio,removeCollaborativePostAudio,hidePostFromFeed,getHiddenFeedPostIds,getUserComments,deleteComment} from '../controller/post.js'
+import{LikeComent,ReplyToComment,createPost,getPost,getPostComments,deletePost,updatePost,updateCarouselPostImages,LikePost,getPostLikes,ReplyPost,getFeedPost,getUserPosts,getUserPostsById,addContributorToPost,removeContributorFromPost,setContributorImage,setCollaborativePostAudio,removeCollaborativePostAudio,hidePostFromFeed,getHiddenFeedPostIds,getUserComments,deleteComment} from '../controller/post.js'
 import protectRoute from '../middlware/protectRoute.js'
 import optionalAuth from '../middlware/optionalAuth.js'
 import upload, { postCreateUpload } from '../middlware/upload.js'
@@ -31,6 +31,7 @@ router.put("/reply-comment/:id", protectRoute, ReplyToComment)
 router.put("/likecoment/:postId/:replyId", protectRoute, LikeComent)
 router.delete("/comment/:postId/:replyId", protectRoute, deleteComment)
 
+router.put("/carousel/:postId/images", protectRoute, upload.fields([{ name: 'images', maxCount: 4 }]), updateCarouselPostImages)
 router.put("/collaborative/:postId/contributor", protectRoute, addContributorToPost)
 router.put("/collaborative/:postId/contributor-image", protectRoute, upload.single('file'), setContributorImage)
 router.put("/collaborative/:postId/audio", protectRoute, upload.single('audio'), setCollaborativePostAudio)

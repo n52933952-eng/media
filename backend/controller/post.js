@@ -336,7 +336,7 @@ export const createPost = async(req,res) => {
 
            if (singleVideo) {
              const result = await uploadMulterFile(imageFiles[0], 'posts')
-             img = result.secure_url
+           img = result.secure_url
              const postData = { postedBy, text: textTrim, img }
              if (wantCollaborative) {
                postData.isCollaborative = true
@@ -382,7 +382,7 @@ export const createPost = async(req,res) => {
                contributorsParsed && Array.isArray(contributorsParsed) ? contributorsParsed : [postedBy]
              if (imageUrls.length) {
                postData.collaboratorImages = [{ userId: postedBy, img: imageUrls[0] }]
-             }
+           }
            }
 
            const newPost = new Post(postData)
@@ -465,7 +465,7 @@ export const getPost = async(req,res) => {
         if(!post){
             return res.status(500).json({message:"no post"})
         }
-
+  
         const includeReplies =
             req.query.includeReplies !== 'false' && req.query.includeReplies !== '0'
 
@@ -748,6 +748,108 @@ export const updatePost = async(req,res) => {
     }
 }
 
+/** Owner only: replace carousel photos (keep / upload mix) and optional caption. */
+export const updateCarouselPostImages = async (req, res) => {
+    try {
+        const { postId } = req.params
+        const { text, imageSlots } = req.body
+        const userId = req.user._id
+
+        const post = await Post.findById(postId)
+        if (!post) {
+            return res.status(404).json({ error: 'Post not found' })
+        }
+        if (post.isCollaborative) {
+            return res.status(400).json({ error: 'Use collaborative edit for this post' })
+        }
+        const existingImages = Array.isArray(post.images)
+            ? post.images.map(String).filter(Boolean)
+            : []
+        if (existingImages.length === 0) {
+            return res.status(400).json({ error: 'This post is not a carousel post' })
+        }
+
+        const postOwnerId = post.postedBy.toString()
+        if (postOwnerId !== userId.toString()) {
+            return res.status(403).json({ error: 'Only the post owner can edit carousel photos' })
+        }
+
+        let slots
+        try {
+            slots = typeof imageSlots === 'string' ? JSON.parse(imageSlots) : imageSlots
+        } catch {
+            return res.status(400).json({ error: 'Invalid imageSlots payload' })
+        }
+
+        if (!Array.isArray(slots) || slots.length === 0 || slots.length > MAX_POST_CAROUSEL_IMAGES) {
+            return res.status(400).json({ error: `Carousel must have 1–${MAX_POST_CAROUSEL_IMAGES} photos` })
+        }
+
+        const MaxLength = 500
+        if (text != null && String(text).length > MaxLength) {
+            return res.status(400).json({ error: 'Post text must be 500 characters or less' })
+        }
+
+        const oldUrlSet = new Set(existingImages)
+        const newFiles = req.files?.images || []
+        let newFileIdx = 0
+        const finalUrls = []
+
+        for (const slot of slots) {
+            if (slot?.kind === 'keep' && slot.url) {
+                const url = String(slot.url)
+                if (!oldUrlSet.has(url)) {
+                    return res.status(400).json({ error: 'Invalid existing image URL' })
+                }
+                finalUrls.push(url)
+            } else if (slot?.kind === 'new') {
+                const f = newFiles[newFileIdx++]
+                if (!f) {
+                    return res.status(400).json({ error: 'Missing uploaded image file' })
+                }
+                if (String(f.mimetype || '').startsWith('video/')) {
+                    return res.status(400).json({ error: 'Carousel posts support photos only' })
+                }
+                const result = await uploadMulterFile(f, 'posts')
+                finalUrls.push(result.secure_url)
+            } else {
+                return res.status(400).json({ error: 'Invalid image slot' })
+            }
+        }
+
+        if (newFileIdx !== newFiles.length) {
+            return res.status(400).json({ error: 'Too many uploaded images' })
+        }
+
+        for (const url of existingImages) {
+            if (!finalUrls.includes(url)) {
+                await deleteMediaAsset(url).catch(() => {})
+            }
+        }
+
+        post.images = finalUrls
+        post.img = finalUrls[0] || post.img
+        if (text !== undefined && text !== null) {
+            post.text = String(text)
+        }
+        post.editedAt = new Date()
+        await post.save()
+
+        await post.populate('postedBy', 'username profilePic name')
+        await post.populate('contributors', 'username profilePic name')
+
+        const io = getIO()
+        if (io) {
+            await emitPostUpdatedToRecipients(io, post, postOwnerId)
+        }
+
+        res.status(200).json({ message: 'Carousel updated', post })
+    } catch (error) {
+        console.error('[updateCarouselPostImages]', error)
+        return respondToUploadError(res, error)
+    }
+}
+
 export const deletePost = async(req,res) => {
     try{
       const post = await Post.findById(req.params.id)
@@ -905,23 +1007,23 @@ export const LikePost = async(req,res) => {
      ).select('likeCount')
 
      // Notify the owner + record activity (like only, not unlike) — unchanged behavior.
-     if (post.postedBy.toString() !== userId.toString()) {
-         const { createNotification } = await import('./notification.js')
-         createNotification(post.postedBy, 'like', userId, {
+      if (post.postedBy.toString() !== userId.toString()) {
+          const { createNotification } = await import('./notification.js')
+          createNotification(post.postedBy, 'like', userId, {
              postId: post._id,
-         }).catch(err => {
-             console.error('Error creating like notification:', err)
-         })
-     }
-     const { createActivity } = await import('./activity.js')
-    createActivity(userId, 'like', {
-        postId: post._id,
-        targetUser: post.postedBy,
+          }).catch(err => {
+              console.error('Error creating like notification:', err)
+          })
+      }
+      const { createActivity } = await import('./activity.js')
+      createActivity(userId, 'like', {
+          postId: post._id,
+          targetUser: post.postedBy,
         metadata: { postText: post.text?.substring(0, 50) || '' },
-    }).catch(err => {
-        console.error('Error creating activity:', err)
-    })
-
+      }).catch(err => {
+          console.error('Error creating activity:', err)
+      })
+      
     // Refresh the liker's own feed cache so a reload reflects the new liked state.
     await invalidateUserFeedCache(userId)
     return res.status(200).json({
@@ -1035,14 +1137,14 @@ export const ReplyPost = async(req,res) => {
         if (footballMatchIdRaw != null && String(footballMatchIdRaw).trim() !== '') {
             footballMatchId = String(footballMatchIdRaw).trim().slice(0, 128)
         }
-
+     
         let savedReply
         try {
             savedReply = await createComment({
                 postId: id,
-                userId,
+            userId,
                 username,
-                userProfilePic,
+            userProfilePic,
                 text: trimmedText,
                 footballMatchId,
             })
@@ -1176,9 +1278,9 @@ export const getFeedPost = async(req,res) => {
                 streamer: { $in: liveFollowIds },
                 active: true,
             })
-                .populate('streamer', 'name username profilePic')
-                .sort({ startedAt: -1 })
-                .lean()
+            .populate('streamer', 'name username profilePic')
+            .sort({ startedAt: -1 })
+            .lean()
 
             const livePseudoPosts = activeStreams.map((s) => ({
                 _id: `live_${s._id}`,
@@ -1207,8 +1309,8 @@ export const getFeedPost = async(req,res) => {
             const nextOffset = firstNormalIds.length
             const hasMore = nextOffset < totalCount
             const lastNormal = normalsSorted[normalsSorted.length - 1]
-
-            const payload = {
+            
+            const payload = { 
                 posts: combinedPosts,
                 hasMore,
                 totalCount,
@@ -1219,7 +1321,7 @@ export const getFeedPost = async(req,res) => {
             await setCachedFeed(userId, pageKey, limit, payload)
             return res.status(200).json(payload)
         }
-
+        
         const startIndex = resolveOffset()
         const pageIds = normalIds.slice(startIndex, startIndex + limit)
         const paginatedNormal = await populateFeedPostsByIds(pageIds)
@@ -1237,8 +1339,8 @@ export const getFeedPost = async(req,res) => {
         console.log(
             `📄 [getFeedPost] Cursor page: ${paginatedNormal.length} posts (offset: ${startIndex}, hasMore: ${hasMore})`,
         )
-
-        const payload = {
+        
+        const payload = { 
             posts: shapedPaginatedNormal,
             hasMore,
             totalCount,
@@ -1285,7 +1387,7 @@ export const getUserPostsById = async(req,res)=>{
 
         const viewerId = req.user?._id ? String(req.user._id) : null
         const shaped = await shapeProfilePostsForViewer(posts, viewerId)
-
+            
         res.status(200).json({ 
             posts: shaped,
             hasMore: false, // Not needed for feed integration
@@ -1327,7 +1429,7 @@ export const getUserPosts = async(req,res)=>{
          const withCounts = await attachReplyCountsToPosts(postsRaw)
          const viewerId = req.user?._id ? String(req.user._id) : null
          const posts = await shapeProfilePostsForViewer(withCounts, viewerId)
-
+            
          // Check if there are more posts
          const totalCount = await Post.countDocuments(profileFilter)
          const hasMore = (skip + limit) < totalCount
@@ -1394,9 +1496,9 @@ export const ReplyToComment = async(req, res) => {
         try {
             newReply = await createComment({
                 postId: id,
-                userId,
+            userId,
                 username,
-                userProfilePic,
+            userProfilePic,
                 text: trimmedText,
                 parentReplyId: parentReplyId || null,
                 mentionedUser,
@@ -2030,7 +2132,10 @@ export const setCollaborativePostAudio = async (req, res) => {
             return res.status(404).json({ message: 'Post not found' })
         }
         if (!post.isCollaborative) {
-            return res.status(400).json({ message: 'This post is not collaborative' })
+            const hasCarouselImages = Array.isArray(post.images) && post.images.length > 0
+            if (!hasCarouselImages) {
+                return res.status(400).json({ message: 'This post is not collaborative' })
+            }
         }
 
         const postOwnerId = post.postedBy.toString()
@@ -2072,7 +2177,10 @@ export const removeCollaborativePostAudio = async (req, res) => {
             return res.status(404).json({ message: 'Post not found' })
         }
         if (!post.isCollaborative) {
-            return res.status(400).json({ message: 'This post is not collaborative' })
+            const hasCarouselImages = Array.isArray(post.images) && post.images.length > 0
+            if (!hasCarouselImages) {
+                return res.status(400).json({ message: 'This post is not collaborative' })
+            }
         }
 
         const postOwnerId = post.postedBy.toString()
@@ -2125,7 +2233,10 @@ export const setContributorImage = async (req, res) => {
             return res.status(404).json({ message: 'Post not found' })
         }
         if (!post.isCollaborative) {
-            return res.status(400).json({ message: 'This post is not collaborative' })
+            const hasCarouselImages = Array.isArray(post.images) && post.images.length > 0
+            if (!hasCarouselImages) {
+                return res.status(400).json({ message: 'This post is not collaborative' })
+            }
         }
 
         const postOwnerId = post.postedBy.toString()
