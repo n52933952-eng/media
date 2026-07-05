@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { Box, Image, HStack, IconButton, Text } from '@chakra-ui/react'
-import { mediaDisplayUrl } from './mediaUrl.js'
+import { mediaDisplayUrl } from '../utils/mediaUrl.js'
 
 const PostMediaCarousel = ({ slides = [], audioUrl = null, maxH = '480px' }) => {
   const [index, setIndex] = useState(0)
