@@ -2012,6 +2012,96 @@ export const removeContributorFromPost = async(req, res) => {
 }
 
 /** Upload or replace the current user's photo on a collaborative post (one image per contributor). */
+/** Owner only: add or replace background MP3 on a collaborative post. */
+export const setCollaborativePostAudio = async (req, res) => {
+    try {
+        const { postId } = req.params
+        const userId = req.user._id
+
+        if (!req.file) {
+            return res.status(400).json({ error: 'Audio file is required' })
+        }
+        if (!String(req.file.mimetype || '').startsWith('audio/')) {
+            return res.status(400).json({ error: 'Audio must be an MP3 or other audio file' })
+        }
+
+        const post = await Post.findById(postId)
+        if (!post) {
+            return res.status(404).json({ message: 'Post not found' })
+        }
+        if (!post.isCollaborative) {
+            return res.status(400).json({ message: 'This post is not collaborative' })
+        }
+
+        const postOwnerId = post.postedBy.toString()
+        if (postOwnerId !== userId.toString()) {
+            return res.status(403).json({ message: 'Only the post owner can add music' })
+        }
+
+        const result = await uploadMulterFile(req.file, 'posts')
+        if (post.audio && post.audio !== result.secure_url) {
+            await deleteMediaAsset(post.audio).catch(() => {})
+        }
+        post.audio = result.secure_url
+        post.editedAt = new Date()
+        await post.save()
+
+        await post.populate('postedBy', 'username profilePic name')
+        await post.populate('contributors', 'username profilePic name')
+
+        const io = getIO()
+        if (io) {
+            await emitPostUpdatedToRecipients(io, post, postOwnerId)
+        }
+
+        res.status(200).json({ message: 'Music updated', post })
+    } catch (error) {
+        console.error('[setCollaborativePostAudio]', error)
+        return respondToUploadError(res, error)
+    }
+}
+
+/** Owner only: remove background MP3 from a collaborative post. */
+export const removeCollaborativePostAudio = async (req, res) => {
+    try {
+        const { postId } = req.params
+        const userId = req.user._id
+
+        const post = await Post.findById(postId)
+        if (!post) {
+            return res.status(404).json({ message: 'Post not found' })
+        }
+        if (!post.isCollaborative) {
+            return res.status(400).json({ message: 'This post is not collaborative' })
+        }
+
+        const postOwnerId = post.postedBy.toString()
+        if (postOwnerId !== userId.toString()) {
+            return res.status(403).json({ message: 'Only the post owner can remove music' })
+        }
+
+        if (post.audio) {
+            await deleteMediaAsset(post.audio).catch(() => {})
+            post.audio = null
+            post.editedAt = new Date()
+            await post.save()
+        }
+
+        await post.populate('postedBy', 'username profilePic name')
+        await post.populate('contributors', 'username profilePic name')
+
+        const io = getIO()
+        if (io) {
+            await emitPostUpdatedToRecipients(io, post, postOwnerId)
+        }
+
+        res.status(200).json({ message: 'Music removed', post })
+    } catch (error) {
+        console.error('[removeCollaborativePostAudio]', error)
+        res.status(500).json({ error: error.message })
+    }
+}
+
 export const setContributorImage = async (req, res) => {
     try {
         const { postId } = req.params

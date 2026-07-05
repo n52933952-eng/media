@@ -2,7 +2,7 @@ import express from 'express'
 
 const router = express.Router()
 
-import{LikeComent,ReplyToComment,createPost,getPost,getPostComments,deletePost,updatePost,LikePost,getPostLikes,ReplyPost,getFeedPost,getUserPosts,getUserPostsById,addContributorToPost,removeContributorFromPost,setContributorImage,hidePostFromFeed,getHiddenFeedPostIds,getUserComments,deleteComment} from '../controller/post.js'
+import{LikeComent,ReplyToComment,createPost,getPost,getPostComments,deletePost,updatePost,LikePost,getPostLikes,ReplyPost,getFeedPost,getUserPosts,getUserPostsById,addContributorToPost,removeContributorFromPost,setContributorImage,setCollaborativePostAudio,removeCollaborativePostAudio,hidePostFromFeed,getHiddenFeedPostIds,getUserComments,deleteComment} from '../controller/post.js'
 import protectRoute from '../middlware/protectRoute.js'
 import optionalAuth from '../middlware/optionalAuth.js'
 import upload, { postCreateUpload } from '../middlware/upload.js'
@@ -33,6 +33,8 @@ router.delete("/comment/:postId/:replyId", protectRoute, deleteComment)
 
 router.put("/collaborative/:postId/contributor", protectRoute, addContributorToPost)
 router.put("/collaborative/:postId/contributor-image", protectRoute, upload.single('file'), setContributorImage)
+router.put("/collaborative/:postId/audio", protectRoute, upload.single('audio'), setCollaborativePostAudio)
+router.delete("/collaborative/:postId/audio", protectRoute, removeCollaborativePostAudio)
 router.delete("/collaborative/:postId/contributor/:contributorId", protectRoute, removeContributorFromPost)
 
 export default router

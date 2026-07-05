@@ -95,6 +95,12 @@ const CreatePost = () => {
       return
     }
 
+    if (isCollaborative && file.type.startsWith('video/')) {
+      showToast('Error', 'Collaborative posts only support photos, not videos.', 'error')
+      if (imageInput.current) imageInput.current.value = ''
+      return
+    }
+
     // Check file size (100MB upload limit)
     const maxSize = 100 * 1024 * 1024 // 100MB
     const fileSizeMB = file.size / (1024 * 1024)
@@ -203,7 +209,31 @@ const CreatePost = () => {
 
 
 
+  const clearSingleImageMedia = () => {
+    if (imagePreview && imagePreview.startsWith('blob:')) URL.revokeObjectURL(imagePreview)
+    setImage(null)
+    setImagePreview('')
+    if (imageInput.current) imageInput.current.value = ''
+  }
+
+  const enableCollaborativeMode = () => {
+    const hadCarousel = carouselFiles.length > 0 || !!audioFile
+    const hadVideo = image?.type?.startsWith('video/')
+    clearCarouselMedia()
+    if (hadVideo) {
+      clearSingleImageMedia()
+      showToast('Collaborative posts', 'Videos removed — one photo per person only.', 'info')
+    } else if (hadCarousel) {
+      showToast('Collaborative posts', 'Carousel and music removed — one photo per person only.', 'info')
+    }
+  }
+
   const handleCarouselChange = (event) => {
+    if (isCollaborative) {
+      showToast('Not available', 'Collaborative posts use one photo per person — no carousel.', 'info')
+      if (carouselInput.current) carouselInput.current.value = ''
+      return
+    }
     const files = Array.from(event.target.files || []).slice(0, 4)
     if (!files.length) return
     if (files.some((f) => !f.type.startsWith('image/'))) {
@@ -220,6 +250,11 @@ const CreatePost = () => {
   }
 
   const handleAudioChange = async (event) => {
+    if (isCollaborative) {
+      showToast('Not available', 'Collaborative posts cannot include music.', 'info')
+      if (audioInput.current) audioInput.current.value = ''
+      return
+    }
     const file = event.target.files?.[0]
     if (!file) return
     if (!file.type.startsWith('audio/')) {
@@ -268,6 +303,17 @@ const CreatePost = () => {
        console.log('⚠️ Compression in progress, but proceeding with upload using available file')
        setIsUploading(false)
        setUploadProgress(0)
+     }
+
+     if (isCollaborative) {
+       if (carouselFiles.length > 0 || audioFile) {
+         showToast('Error', 'Collaborative posts cannot include multiple photos or music.', 'error')
+         return
+       }
+       if (image?.type?.startsWith('video/')) {
+         showToast('Error', 'Collaborative posts only support photos, not videos.', 'error')
+         return
+       }
      }
 
      setLoading(true)
@@ -591,12 +637,19 @@ const CreatePost = () => {
               isChecked={isCollaborative}
               onChange={(e) => {
                 const next = e.target.checked
+                if (next) enableCollaborativeMode()
                 setIsCollaborative(next)
                 if (!next) setSelectedCollaborators([])
               }}
             >
               <Text fontSize="sm">🤝 Make this a collaborative post (others can contribute)</Text>
             </Checkbox>
+
+            {isCollaborative && (
+              <Text fontSize="xs" color="gray.500" mt={2}>
+                One photo per person — add yours now; contributors add theirs later. No carousel or music.
+              </Text>
+            )}
 
             {isCollaborative && user && (
               <Box mt={3}>
@@ -656,7 +709,13 @@ const CreatePost = () => {
             <Input type="file" accept="audio/mpeg,audio/mp3,audio/*" hidden ref={audioInput} onChange={handleAudioChange} />
 
             <Flex mt={3} gap={3} flexWrap="wrap" align="center">
-              <BsFileImageFill onClick={() => imageInput.current.click()} style={{ cursor: 'pointer' }} title="Photo or video" />
+              <BsFileImageFill
+                onClick={() => imageInput.current.click()}
+                style={{ cursor: 'pointer' }}
+                title={isCollaborative ? 'Photo only' : 'Photo or video'}
+              />
+              {!isCollaborative && (
+              <>
               <Button size="xs" variant="outline" onClick={() => carouselInput.current?.click()}>
                 Carousel (up to 4 photos)
               </Button>
@@ -665,9 +724,11 @@ const CreatePost = () => {
                   {audioFile ? '🎵 Change music' : 'Add music (MP3)'}
                 </Button>
               )}
+              </>
+              )}
             </Flex>
 
-            {carouselPreviews.length > 0 && (
+            {!isCollaborative && carouselPreviews.length > 0 && (
               <Flex mt={4} gap={2} flexWrap="wrap" position="relative">
                 {carouselPreviews.map((src, idx) => (
                   <Image key={src} src={src} alt="" boxSize="120px" objectFit="cover" borderRadius="md" />
@@ -685,9 +746,15 @@ const CreatePost = () => {
               </Flex>
             )}
 
-            <Input  type="file" accept="image/*,video/*" hidden ref={imageInput} onChange={handleImageChange} />
+            <Input
+              type="file"
+              accept={isCollaborative ? 'image/*' : 'image/*,video/*'}
+              hidden
+              ref={imageInput}
+              onChange={handleImageChange}
+            />
 
-            {!carouselPreviews.length && (
+            {!isCollaborative && !carouselPreviews.length && (
             <BsFileImageFill onClick={() => imageInput.current.click()} />
             )}
                

@@ -29,6 +29,7 @@ const MAX_CHAR = 500
 const EditPost = ({post, isOpen, onClose, onUpdate}) => {
   const{user}=useContext(UserContext)
   const{setFollowPost}=useContext(PostContext)
+  const isCollaborative = !!post?.isCollaborative
   
   const[postText,setPostText]=useState(post?.text || '')
   const[image,setImage]=useState(null) // File object for new image
@@ -181,6 +182,11 @@ const EditPost = ({post, isOpen, onClose, onUpdate}) => {
       return
     }
 
+    if (isCollaborative && image && image instanceof File) {
+      showToast("Info", "Use “Change your photo” on the post to update your image.", "info")
+      return
+    }
+
     setLoading(true)
     setUploadProgress(0)
     
@@ -188,8 +194,8 @@ const EditPost = ({post, isOpen, onClose, onUpdate}) => {
       const formData = new FormData()
       formData.append('text', postText)
       
-      // Only include file if user selected a new one
-      if (image && image instanceof File) {
+      // Only include file if user selected a new one (not for collaborative — photos via contributor flow)
+      if (image && image instanceof File && !isCollaborative) {
         formData.append('file', image)
         
         const xhr = new XMLHttpRequest()
@@ -339,7 +345,13 @@ const EditPost = ({post, isOpen, onClose, onUpdate}) => {
             <Text fontSize="sm" fontWeight="bold" textAlign="right" color="gray.500" mt={1}>
               {remaingChar}/{MAX_CHAR}
             </Text>
-         
+
+            {isCollaborative ? (
+              <Text fontSize="sm" color="gray.500" mt={3}>
+                To change your photo, use “Change your photo” on the post.
+              </Text>
+            ) : (
+              <>
             <Input 
               type="file" 
               accept="image/*,video/*" 
@@ -377,8 +389,10 @@ const EditPost = ({post, isOpen, onClose, onUpdate}) => {
                 />
               </Flex>
             }
+              </>
+            )}
             
-            {uploadProgress > 0 && uploadProgress < 100 && (
+            {!isCollaborative && uploadProgress > 0 && uploadProgress < 100 && (
               <Box mt={2}>
                 <Text fontSize="xs" color={textColor} mb={1}>
                   Upload Progress: {Math.round(uploadProgress)}%
