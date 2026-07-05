@@ -18,10 +18,15 @@ const storage = multer.diskStorage({
 })
 
 const fileFilter = (req, file, cb) => {
-  if (file.mimetype.startsWith('image/') || file.mimetype.startsWith('video/')) {
+  const mt = String(file.mimetype || '').toLowerCase()
+  if (
+    mt.startsWith('image/') ||
+    mt.startsWith('video/') ||
+    mt.startsWith('audio/')
+  ) {
     cb(null, true)
   } else {
-    cb(new Error('Only images and videos are allowed'), false)
+    cb(new Error('Only images, videos, and audio are allowed'), false)
   }
 }
 
@@ -32,5 +37,18 @@ const upload = multer({
     fileSize: MAX_UPLOAD_BYTES,
   },
 })
+
+/** Create post: legacy single `file`, up to 4 `images`, optional `audio`. */
+export const postCreateUpload = multer({
+  storage,
+  fileFilter,
+  limits: {
+    fileSize: MAX_UPLOAD_BYTES,
+  },
+}).fields([
+  { name: 'file', maxCount: 1 },
+  { name: 'images', maxCount: 4 },
+  { name: 'audio', maxCount: 1 },
+])
 
 export default upload

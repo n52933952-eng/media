@@ -1,6 +1,58 @@
 /** Comment count: feed uses replyCount; post detail may use replies[]. */
 export const COMMENTS_PAGE_SIZE = 12
 
+export const CHANNEL_USERNAMES = [
+  'Football',
+  'AlJazeera',
+  'NBCNews',
+  'BeinSportsNews',
+  'SkyNews',
+  'Cartoonito',
+  'NatGeoKids',
+  'SciShowKids',
+  'JJAnimalTime',
+  'KidsArabic',
+  'NatGeoAnimals',
+  'MBCDrama',
+  'Fox11',
+]
+
+export function getYouTubeVideoId(url) {
+  if (!url) return ''
+  const normalized = String(url).trim()
+  const patterns = [
+    /youtube\.com\/embed\/([^?&/]+)/i,
+    /youtube\.com\/watch\?v=([^?&/]+)/i,
+    /youtu\.be\/([^?&/]+)/i,
+    /youtube\.com\/shorts\/([^?&/]+)/i,
+    /youtube\.com\/live\/([^?&/]+)/i,
+    /(?:ytimg\.com|img\.youtube\.com)\/vi\/([^?&/]+)/i,
+  ]
+  for (const pattern of patterns) {
+    const match = normalized.match(pattern)
+    if (match?.[1]) return match[1]
+  }
+  return ''
+}
+
+export function isYouTubePost(post) {
+  return !!getYouTubeVideoId(post?.img || '')
+}
+
+export function isChannelPost(post) {
+  if (!post) return false
+  if (isYouTubePost(post)) return true
+  if (post.channelAddedBy) return true
+  const username = post.postedBy?.username
+  return !!username && CHANNEL_USERNAMES.includes(username)
+}
+
+/** News / YouTube channels: likes only at post level. Football keeps per-match comments. */
+export function hideChannelPostComments(post) {
+  if (!isChannelPost(post)) return false
+  return post?.postedBy?.username !== 'Football'
+}
+
 export function getReplyCount(post) {
   if (!post) return 0
   if (typeof post.replyCount === 'number') return post.replyCount

@@ -27,6 +27,18 @@ const PostSchema = mongoose.Schema({
         type:String
     },
 
+    /** Up to 4 carousel images (Instagram-style). `img` mirrors images[0] for legacy clients. */
+    images: {
+        type: [String],
+        default: undefined,
+    },
+
+    /** Optional background audio (MP3) for carousel posts. */
+    audio: {
+        type: String,
+        default: null,
+    },
+
     footballData:{
         type:String // JSON string of match data for Football posts
     },
@@ -65,7 +77,22 @@ const PostSchema = mongoose.Schema({
         ref: "User"
     }],
 
-    // Match reaction posts - auto-created when goals are scored
+    /** Collaborative album: one image per contributor (including owner). */
+    collaboratorImages: [
+        {
+            userId: {
+                type: mongoose.Schema.Types.ObjectId,
+                ref: "User",
+                required: true,
+            },
+            img: {
+                type: String,
+                required: true,
+            },
+        },
+    ],
+
+    // Collaborative posts - multiple users can contribute
     isMatchReaction: {
         type: Boolean,
         default: false

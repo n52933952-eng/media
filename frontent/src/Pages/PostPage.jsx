@@ -24,6 +24,7 @@ import {
   mergeRepliesById,
   postCommentsApiUrl,
   postDetailApiUrl,
+  hideChannelPostComments,
 } from '../utils/postUtils.js'
 
 const apiBaseUrl = () => (import.meta.env.PROD ? window.location.origin : 'http://localhost:5000')
@@ -85,6 +86,9 @@ const PostPage = () => {
       () => scopedReplies.filter((r) => !r?.parentReplyId),
       [scopedReplies],
     )
+
+    const hideChannelComments = hideChannelPostComments(post)
+    const showCommentsSection = !hideChannelComments || !!footballMatchId
 
     const bumpReplyCount = useCallback(
       (delta) => {
@@ -528,7 +532,9 @@ const PostPage = () => {
         setCommentsHasMore(false)
         commentsSkipRef.current = 0
         commentsFetchGenRef.current += 1
-        fetchCommentsPageRef.current(false)
+        if (!hideChannelPostComments(data) || footballMatchId) {
+          fetchCommentsPageRef.current(false)
+        }
       }
       }
 
@@ -892,6 +898,7 @@ if(!post) {
       <Divider my={4}/>
 
     {/* Comments section - paginated from /api/post/:id/comments */}
+    {showCommentsSection && (
     <Box data-comments-section pb={8}>
       {commentsLoading && topLevelReplies.length === 0 ? (
         <Flex justify="center" py={8}>
@@ -924,6 +931,7 @@ if(!post) {
 
       {commentsHasMore && <Box ref={loadMoreRef} h="1px" aria-hidden />}
     </Box>
+    )}
    
       {/* Edit Post Modal */}
       <EditPost

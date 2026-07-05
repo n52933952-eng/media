@@ -27,6 +27,8 @@ import {
 } from '../utils/gameFeedPostUtils.js'
 import { isVideoUrl, mediaDisplayUrl } from '../utils/mediaUrl.js'
 import { parsePostFromApiResponse, postDetailApiUrl } from '../utils/postUtils.js'
+import PostMediaCarousel from './PostMediaCarousel'
+import { getPostCarouselSlides, getPostCarouselAudio, shouldShowPostCarousel } from '../utils/postCarousel.js'
 
 const apiBaseUrl = () => (import.meta.env.PROD ? window.location.origin : 'http://localhost:5000')
 
@@ -42,6 +44,9 @@ const Post = ({post: initialPost, postedBy, onDelete, visibleVideoOnly = false, 
   const rawMediaUrl = String(post?.img || '')
   const mediaUrl = mediaDisplayUrl(rawMediaUrl)
   const isVideoMedia = isVideoUrl(rawMediaUrl)
+  const carouselSlides = useMemo(() => getPostCarouselSlides(post), [post])
+  const carouselAudio = useMemo(() => getPostCarouselAudio(post), [post?.audio])
+  const showCarousel = shouldShowPostCarousel(post)
   
   // Update local post when initialPost changes (e.g., from parent re-fetch)
   useEffect(() => {
@@ -1642,8 +1647,12 @@ const showToast = useShowToast()
     </Box>
   )}
   
-  {post?.img && !isFootballPost && !isWeatherPost && !isChessPost && (
+  {(post?.img || (Array.isArray(post?.images) && post.images.length)) && !isFootballPost && !isWeatherPost && !isChessPost && (
     <Box borderRadius={4} overflow="hidden" border="0.5px solid" borderColor="gray.light" my={2}>
+      {showCarousel && !rawMediaUrl.includes('youtube.com/embed') && !rawMediaUrl.includes('youtu.be') && !isVideoMedia ? (
+        <PostMediaCarousel slides={carouselSlides} audioUrl={carouselAudio} />
+      ) : (
+      <>
       {/* YouTube Embed (Al Jazeera Live or any YouTube video) */}
       {(() => {
         const isYouTube = post.img.includes('youtube.com/embed') || post.img.includes('youtu.be')
@@ -1699,6 +1708,8 @@ const showToast = useShowToast()
           loading="lazy"
           alt="Post image"
         />
+      )}
+      </>
       )}
     </Box>
   )}

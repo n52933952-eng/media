@@ -29,13 +29,15 @@ import PostLikesModal from './PostLikesModal.jsx'
 
 
 import { isChessFeedPost, isGoFishFeedPost } from '../utils/gameFeedPostUtils.js'
-import { getReplyCount, withReplyCountDelta } from '../utils/postUtils.js'
+import { getReplyCount, withReplyCountDelta, hideChannelPostComments } from '../utils/postUtils.js'
 
 const Actions = ({ post, showFeedExtras = true, onReplyAdded }) => {
 	const isEphemeralGamePost = isChessFeedPost(post) || isGoFishFeedPost(post)
 	if (isEphemeralGamePost) {
 		return null
 	}
+
+	const hideComments = hideChannelPostComments(post)
 
 	const{user}=useContext(UserContext)
 	const ENABLE_POST_SHARE_TO_CHAT = (import.meta.env.VITE_ENABLE_POST_SHARE_TO_CHAT || 'true') !== 'false'
@@ -432,6 +434,7 @@ return (
 					></path>
 				</svg>
 
+				{!hideComments && (
 				<svg
 					aria-label='Comment'
 					color=''
@@ -456,6 +459,7 @@ return (
 						strokeWidth='2'
 					></path>
 				</svg>
+				)}
 
 			{showFeedExtras && isCapsuleEligiblePost && (
 				<Tooltip label={capsuleSealed ? `Set: ${capsuleSelectedLabel || formatCapsuleCountdown(capsuleOpenAt)}` : 'Remind me later'} placement="top" hasArrow>
@@ -478,10 +482,14 @@ return (
 			</Flex>
 
 			<Flex gap={2} alignItems={"center"}>
+				{!hideComments && (
+				<>
 				<Text color={"gray.light"} fontSize='sm'>
 				{getReplyCount(post)} Comment
 				</Text>
 				<Box w={0.5} h={0.5} borderRadius={"full"} bg={"gray.light"}></Box>
+				</>
+				)}
 				<Text
 					color={"gray.light"}
 					fontSize='sm'
@@ -497,6 +505,7 @@ return (
 				</Text>
 			</Flex>
 
+			{!hideComments && (
 			<Modal isOpen={isOpen} onClose={onClose}>
 				
 				<ModalOverlay />
@@ -519,6 +528,7 @@ return (
 					</ModalFooter>
 				</ModalContent>
 			</Modal>
+			)}
 
 			<Modal isOpen={isShareOpen} onClose={onShareClose}>
 				<ModalOverlay />

@@ -44,6 +44,24 @@ import {
     deleteCommentsForPost,
 } from '../services/commentService.js'
 import { findPostsByGameRoomId } from '../services/gamePostLookup.js'
+import {
+    upsertCollaboratorImage,
+    removeCollaboratorImageForUser,
+} from '../utils/collaboratorImages.js'
+import { MAX_POST_CAROUSEL_IMAGES } from '../utils/postCarousel.js'
+
+function collectCreatePostMediaFiles(req) {
+    const imageFiles = []
+    if (req.files?.images?.length) {
+        imageFiles.push(...req.files.images)
+    } else if (req.files?.file?.length) {
+        imageFiles.push(req.files.file[0])
+    } else if (req.file) {
+        imageFiles.push(req.file)
+    }
+    const audioFile = req.files?.audio?.[0] || null
+    return { imageFiles, audioFile }
+}
 
 /**
  * Feed scalability: likes live in the Like collection now. The feed only needs "how many"
@@ -266,7 +284,7 @@ export const createPost = async(req,res) => {
             return res.status(400).json({error:"postedBy is required"})
         }
 
-        if(!textTrim && !req.file){
+        if(!textTrim && !req.file && !(req.files?.images?.length) && !(req.files?.file?.length)){
             return res.status(400).json({error:"text or media is required"})
         }
 
@@ -286,17 +304,87 @@ export const createPost = async(req,res) => {
         return res.status(500).json({error:"post text must be 500 or less"})
        }
 
-       if (req.file) {
-         try {
-           const result = await uploadMulterFile(req.file, 'posts')
-           img = result.secure_url
+       const { imageFiles, audioFile } = collectCreatePostMediaFiles(req)
 
+       if (imageFiles.length > MAX_POST_CAROUSEL_IMAGES) {
+         return res.status(400).json({ error: `Maximum ${MAX_POST_CAROUSEL_IMAGES} images allowed` })
+       }
+
+       const isCarouselUpload =
+         imageFiles.length > 1 || !!(req.files?.images?.length) || !!audioFile
+
+       if (isCarouselUpload) {
+         if (imageFiles.some((f) => String(f.mimetype || '').startsWith('video/'))) {
+           return res.status(400).json({
+             error: 'Carousel posts support up to 4 photos with optional audio, not video',
+           })
+         }
+         if (audioFile && !String(audioFile.mimetype || '').startsWith('audio/')) {
+           return res.status(400).json({ error: 'Audio must be an MP3 or other audio file' })
+         }
+         if (imageFiles.length === 0) {
+           return res.status(400).json({ error: 'Add at least one photo for a carousel post' })
+         }
+       }
+
+       if (imageFiles.length > 0 || audioFile) {
+         try {
+           const singleVideo =
+             imageFiles.length === 1 &&
+             String(imageFiles[0].mimetype || '').startsWith('video/') &&
+             !isCarouselUpload
+
+           if (singleVideo) {
+             const result = await uploadMulterFile(imageFiles[0], 'posts')
+             img = result.secure_url
+             const postData = { postedBy, text: textTrim, img }
+             if (wantCollaborative) {
+               postData.isCollaborative = true
+               postData.contributors =
+                 contributorsParsed && Array.isArray(contributorsParsed)
+                   ? contributorsParsed
+                   : [postedBy]
+             }
+             const newPost = new Post(postData)
+             await newPost.save()
+             await newPost.populate('postedBy', 'username profilePic name')
+             await notifyContributorsOnCollaborativeCreate(newPost, postedBy)
+             const io = getIO()
+             if (io) await emitNewPostToAuthorFollowers(io, postedBy, newPost)
+             const { createActivity } = await import('./activity.js')
+             createActivity(postedBy, 'post', {
+               postId: newPost._id,
+               metadata: { text: (textTrim || '').substring(0, 50), hasImage: !!img },
+             }).catch((err) => console.error('Error creating activity:', err))
+             return res.status(200).json({ message: 'post created sufully', post: newPost })
+           }
+
+           const imageUrls = []
+           for (const f of imageFiles.slice(0, MAX_POST_CAROUSEL_IMAGES)) {
+             const result = await uploadMulterFile(f, 'posts')
+             imageUrls.push(result.secure_url)
+           }
+
+           let audioUrl = null
+           if (audioFile) {
+             const audioResult = await uploadMulterFile(audioFile, 'posts')
+             audioUrl = audioResult.secure_url
+           }
+
+           img = imageUrls[0] || ''
            const postData = { postedBy, text: textTrim, img }
+           if (imageUrls.length) postData.images = imageUrls
+           if (audioUrl) postData.audio = audioUrl
+
            if (wantCollaborative) {
              postData.isCollaborative = true
              postData.contributors =
                contributorsParsed && Array.isArray(contributorsParsed) ? contributorsParsed : [postedBy]
+             if (imageUrls.length) {
+               postData.collaboratorImages = [{ userId: postedBy, img: imageUrls[0] }]
+             }
            }
+
            const newPost = new Post(postData)
            await newPost.save()
 
@@ -311,7 +399,12 @@ export const createPost = async(req,res) => {
            const { createActivity } = await import('./activity.js')
            createActivity(postedBy, 'post', {
              postId: newPost._id,
-             metadata: { text: (textTrim || '').substring(0, 50), hasImage: !!img },
+             metadata: {
+               text: (textTrim || '').substring(0, 50),
+               hasImage: imageUrls.length > 0,
+               imageCount: imageUrls.length,
+               hasAudio: !!audioUrl,
+             },
            }).catch((err) => {
              console.error('Error creating activity:', err)
            })
@@ -328,6 +421,9 @@ export const createPost = async(req,res) => {
        if (wantCollaborative) {
          postData.isCollaborative = true
          postData.contributors = contributorsParsed && Array.isArray(contributorsParsed) ? contributorsParsed : [postedBy]
+         if (img) {
+           postData.collaboratorImages = [{ userId: postedBy, img }]
+         }
        }
        const newPost = new Post(postData)
        await newPost.save()
@@ -505,17 +601,30 @@ export const updatePost = async(req,res) => {
         let img = post.img // Keep existing image by default
         
         if(req.file) {
-            if (post.img) {
-                await deleteMediaAsset(post.img)
-            }
-
             try {
                 const result = await uploadMulterFile(req.file, 'posts')
                 img = result.secure_url
 
+                if (post.isCollaborative) {
+                    const isVideo =
+                        (req.file.mimetype && req.file.mimetype.startsWith('video/')) ||
+                        /\.(mp4|webm|ogg|mov)$/i.test(img) ||
+                        img.includes('/video/upload/')
+                    if (isVideo) {
+                        return res.status(400).json({
+                            error: 'Collaborative posts only support one photo per contributor',
+                        })
+                    }
+                    await upsertCollaboratorImage(post, userId, img)
+                } else {
+                    if (post.img) {
+                        await deleteMediaAsset(post.img)
+                    }
+                    post.img = img
+                }
+
                         // Update post
                         post.text = text !== undefined && text !== null ? text : post.text
-                        post.img = img
                         post.editedAt = new Date()
                         await post.save()
                         
@@ -1865,6 +1974,7 @@ export const removeContributorFromPost = async(req, res) => {
 
         // Remove contributor
         post.contributors.splice(contributorIndex, 1)
+        await removeCollaboratorImageForUser(post, contributorId)
         // Bump updatedAt so followers see recency (and web "Edited" label reflects membership change)
         post.updatedAt = new Date()
         await post.save()
@@ -1897,6 +2007,74 @@ export const removeContributorFromPost = async(req, res) => {
         })
     } catch (error) {
         console.log(error)
+        res.status(500).json({ error: error.message })
+    }
+}
+
+/** Upload or replace the current user's photo on a collaborative post (one image per contributor). */
+export const setContributorImage = async (req, res) => {
+    try {
+        const { postId } = req.params
+        const userId = req.user._id
+
+        if (!req.file) {
+            return res.status(400).json({ error: 'Image file is required' })
+        }
+
+        const isVideo =
+            (req.file.mimetype && req.file.mimetype.startsWith('video/')) ||
+            (req.file.originalname && /\.(mp4|webm|ogg|mov)$/i.test(req.file.originalname))
+        if (isVideo) {
+            return res.status(400).json({
+                error: 'Collaborative posts only support one photo per contributor',
+            })
+        }
+
+        const post = await Post.findById(postId)
+        if (!post) {
+            return res.status(404).json({ message: 'Post not found' })
+        }
+        if (!post.isCollaborative) {
+            return res.status(400).json({ message: 'This post is not collaborative' })
+        }
+
+        const postOwnerId = post.postedBy.toString()
+        const isOwner = postOwnerId === userId.toString()
+        const isContributor =
+            Array.isArray(post.contributors) &&
+            post.contributors.some((c) => c.toString() === userId.toString())
+
+        if (!isOwner && !isContributor) {
+            return res.status(403).json({
+                message: 'You must be the owner or a contributor to add a photo',
+            })
+        }
+
+        const result = await uploadMulterFile(req.file, 'posts')
+        await upsertCollaboratorImage(post, userId, result.secure_url)
+        post.editedAt = new Date()
+        await post.save()
+
+        await post.populate('postedBy', 'username profilePic name')
+        await post.populate('contributors', 'username profilePic name')
+
+        const io = getIO()
+        if (io) {
+            const sent = await emitPostUpdatedToRecipients(io, post, postOwnerId)
+            if (sent > 0) {
+                console.log(`📤 [setContributorImage] Emitted postUpdated to ${sent} recipient socket(s)`)
+            }
+        }
+
+        res.status(200).json({
+            message: 'Contributor photo updated',
+            post,
+        })
+    } catch (error) {
+        console.error('[setContributorImage]', error)
+        if (error?.message?.includes?.('upload')) {
+            return respondToUploadError(res, error)
+        }
         res.status(500).json({ error: error.message })
     }
 }

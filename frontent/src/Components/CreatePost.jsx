@@ -53,10 +53,13 @@ const CreatePost = () => {
     const[isUploading,setIsUploading]=useState(false)
     const[isCollaborative,setIsCollaborative]=useState(false)
     const [selectedCollaborators, setSelectedCollaborators] = useState([])
-
-
+    const [carouselFiles, setCarouselFiles] = useState([])
+    const [carouselPreviews, setCarouselPreviews] = useState([])
+    const [audioFile, setAudioFile] = useState(null)
 
     const imageInput = useRef()
+    const carouselInput = useRef()
+    const audioInput = useRef()
 
    
      const showToast = useShowToast()
@@ -105,6 +108,10 @@ const CreatePost = () => {
     }
 
     // Store file for preview
+    setCarouselFiles([])
+    carouselPreviews.forEach((u) => { if (u?.startsWith('blob:')) URL.revokeObjectURL(u) })
+    setCarouselPreviews([])
+    setAudioFile(null)
     setImage(file)
     const previewURL = URL.createObjectURL(file)
     setImagePreview(previewURL)
@@ -196,6 +203,40 @@ const CreatePost = () => {
 
 
 
+  const handleCarouselChange = (event) => {
+    const files = Array.from(event.target.files || []).slice(0, 4)
+    if (!files.length) return
+    if (files.some((f) => !f.type.startsWith('image/'))) {
+      showToast('Invalid file type', 'Carousel posts support photos only (up to 4)', 'error')
+      return
+    }
+    carouselPreviews.forEach((u) => { if (u?.startsWith('blob:')) URL.revokeObjectURL(u) })
+    if (imagePreview && imagePreview.startsWith('blob:')) URL.revokeObjectURL(imagePreview)
+    setImage(null)
+    setImagePreview('')
+    setCarouselFiles(files)
+    setCarouselPreviews(files.map((f) => URL.createObjectURL(f)))
+    if (carouselInput.current) carouselInput.current.value = ''
+  }
+
+  const handleAudioChange = (event) => {
+    const file = event.target.files?.[0]
+    if (!file) return
+    if (!file.type.startsWith('audio/')) {
+      showToast('Invalid file type', 'Please select an MP3 or audio file', 'error')
+      return
+    }
+    setAudioFile(file)
+    if (audioInput.current) audioInput.current.value = ''
+  }
+
+  const clearCarouselMedia = () => {
+    carouselPreviews.forEach((u) => { if (u?.startsWith('blob:')) URL.revokeObjectURL(u) })
+    setCarouselFiles([])
+    setCarouselPreviews([])
+    setAudioFile(null)
+  }
+
    const handleCreatePost = async() => {
      // Allow posting even if compression is in progress (will use original file)
      // Only block if no file is selected at all
@@ -227,6 +268,69 @@ const CreatePost = () => {
       )
     }
     
+    if (carouselFiles.length > 0) {
+      carouselFiles.forEach((f) => formData.append('images', f))
+      if (audioFile) formData.append('audio', audioFile)
+
+      const xhr = new XMLHttpRequest()
+      xhr.upload.addEventListener('progress', (e) => {
+        if (e.lengthComputable) setUploadProgress((e.loaded / e.total) * 100)
+      })
+      xhr.open('POST', `${API_BASE_URL}/api/post/create`)
+      xhr.withCredentials = true
+      xhr.timeout = 1200000
+      xhr.onload = () => {
+        if (xhr.status === 200) {
+          try {
+            const data = JSON.parse(xhr.responseText)
+            if (data.error) {
+              showToast('Error', data.error, 'error')
+              setLoading(false)
+              return
+            }
+            if (data.post && setFollowPost) {
+              const newPost = {
+                ...data.post,
+                postedBy: data.post.postedBy || {
+                  _id: user._id,
+                  username: user.username,
+                  name: user.name,
+                  profilePic: user.profilePic,
+                },
+              }
+              setFollowPost((prev) => {
+                const exists = prev.some((p) => p._id?.toString() === newPost._id?.toString())
+                return exists ? prev : [newPost, ...prev]
+              })
+            }
+            showToast('Success', 'Post created successfully', 'success')
+            onClose()
+            setPostText('')
+            clearCarouselMedia()
+            if (imagePreview && imagePreview.startsWith('blob:')) URL.revokeObjectURL(imagePreview)
+            setImage(null)
+            setImagePreview('')
+            setUploadProgress(0)
+            setIsCollaborative(false)
+            setSelectedCollaborators([])
+            setLoading(false)
+          } catch {
+            showToast('Error', 'Failed to parse server response', 'error')
+            setLoading(false)
+          }
+        } else {
+          showToast('Error', 'Failed to create post', 'error')
+          setLoading(false)
+        }
+      }
+      xhr.onerror = () => {
+        showToast('Error', 'Network error while creating post', 'error')
+        setLoading(false)
+      }
+      xhr.send(formData)
+      return
+    }
+
     if (image) {
       // Check if image is a File object (needs upload) or URL string
       if (image instanceof File) {
@@ -530,11 +634,46 @@ const CreatePost = () => {
               </Box>
             )}
          
+            <Input type="file" accept="image/*" multiple hidden ref={carouselInput} onChange={handleCarouselChange} />
+            <Input type="file" accept="audio/mpeg,audio/mp3,audio/*" hidden ref={audioInput} onChange={handleAudioChange} />
+
+            <Flex mt={3} gap={3} flexWrap="wrap" align="center">
+              <BsFileImageFill onClick={() => imageInput.current.click()} style={{ cursor: 'pointer' }} title="Photo or video" />
+              <Button size="xs" variant="outline" onClick={() => carouselInput.current?.click()}>
+                Carousel (up to 4 photos)
+              </Button>
+              {carouselFiles.length > 0 && (
+                <Button size="xs" variant="outline" onClick={() => audioInput.current?.click()}>
+                  {audioFile ? '🎵 Change music' : 'Add music (MP3)'}
+                </Button>
+              )}
+            </Flex>
+
+            {carouselPreviews.length > 0 && (
+              <Flex mt={4} gap={2} flexWrap="wrap" position="relative">
+                {carouselPreviews.map((src, idx) => (
+                  <Image key={src} src={src} alt="" boxSize="120px" objectFit="cover" borderRadius="md" />
+                ))}
+                {audioFile && (
+                  <Text fontSize="sm" alignSelf="center">🎵 {audioFile.name}</Text>
+                )}
+                <CloseButton
+                  onClick={clearCarouselMedia}
+                  position="absolute"
+                  top={0}
+                  right={0}
+                  bg="gray.500"
+                />
+              </Flex>
+            )}
+
             <Input  type="file" accept="image/*,video/*" hidden ref={imageInput} onChange={handleImageChange} />
 
+            {!carouselPreviews.length && (
             <BsFileImageFill onClick={() => imageInput.current.click()} />
+            )}
                
-               {imagePreview && 
+               {imagePreview && !carouselPreviews.length &&
                  <Flex mt={5} position="relative" w="full">
                      {image?.type?.startsWith('image/') ? (
                        <Image src={imagePreview} alt="Preview" maxH="400px" borderRadius="md" />
