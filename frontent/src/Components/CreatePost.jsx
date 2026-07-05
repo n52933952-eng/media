@@ -219,15 +219,33 @@ const CreatePost = () => {
     if (carouselInput.current) carouselInput.current.value = ''
   }
 
-  const handleAudioChange = (event) => {
+  const handleAudioChange = async (event) => {
     const file = event.target.files?.[0]
     if (!file) return
     if (!file.type.startsWith('audio/')) {
       showToast('Invalid file type', 'Please select an MP3 or audio file', 'error')
       return
     }
-    setAudioFile(file)
-    if (audioInput.current) audioInput.current.value = ''
+    const url = URL.createObjectURL(file)
+    try {
+      const durationSec = await new Promise((resolve, reject) => {
+        const audio = new Audio()
+        audio.preload = 'metadata'
+        audio.onloadedmetadata = () => resolve(audio.duration)
+        audio.onerror = () => reject(new Error('Could not read audio'))
+        audio.src = url
+      })
+      if (typeof durationSec === 'number' && durationSec > 4 * 60 + 0.5) {
+        showToast('Music too long', 'Music must be 4 minutes or less', 'error')
+        return
+      }
+      setAudioFile(file)
+    } catch {
+      showToast('Error', 'Could not read audio file', 'error')
+    } finally {
+      URL.revokeObjectURL(url)
+      if (audioInput.current) audioInput.current.value = ''
+    }
   }
 
   const clearCarouselMedia = () => {

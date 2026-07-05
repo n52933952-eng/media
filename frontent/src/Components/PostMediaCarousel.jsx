@@ -43,15 +43,33 @@ const PostMediaCarousel = ({ slides = [], audioUrl = null, maxH = '480px' }) => 
         <Text
           position="absolute"
           left={3}
-          bottom={3}
+          top={3}
           fontSize="sm"
           color="white"
-          bg="blackAlpha.600"
+          bg="blackAlpha.700"
+          px={2}
+          py={1}
+          borderRadius="md"
+          maxW="55%"
+          noOfLines={1}
+        >
+          {slide.name || slide.username}
+        </Text>
+      ) : null}
+      {slides.length > 1 ? (
+        <Text
+          position="absolute"
+          top={3}
+          right={audioUrl ? '52px' : 3}
+          fontSize="sm"
+          fontWeight="bold"
+          color="white"
+          bg="blackAlpha.700"
           px={2}
           py={1}
           borderRadius="md"
         >
-          {slide.name || slide.username}
+          {index + 1}/{slides.length}
         </Text>
       ) : null}
       {audioUrl ? (

@@ -25,6 +25,17 @@ export async function upsertCollaboratorImage(post, userId, imgUrl) {
             await deleteMediaAsset(post.img).catch(() => {})
         }
         post.img = imgUrl
+        // Feed carousel reads post.images[] first — keep owner slot in sync.
+        if (Array.isArray(post.images) && post.images.length > 0) {
+            const oldFirst = post.images[0]
+            if (oldFirst && oldFirst !== imgUrl) {
+                await deleteMediaAsset(oldFirst).catch(() => {})
+            }
+            post.images[0] = imgUrl
+        } else {
+            post.images = [imgUrl]
+        }
+        post.markModified('images')
     }
     post.markModified('collaboratorImages')
 }
