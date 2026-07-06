@@ -104,3 +104,31 @@ export function isManagedMediaUrl(url) {
   if (!url) return false
   return r2.isR2Url(url)
 }
+
+/** All unique R2 URLs attached to a post (carousel, collab, audio, legacy img). */
+export function collectPostMediaUrls(post) {
+  const urls = new Set()
+  if (!post) return []
+
+  const add = (u) => {
+    const s = u != null ? String(u).trim() : ''
+    if (s) urls.add(s)
+  }
+
+  add(post.img)
+  add(post.audio)
+  for (const u of post.images || []) add(u)
+  for (const row of post.collaboratorImages || []) add(row?.img)
+  add(post.thumbnail)
+  add(post.videoThumbnail)
+  add(post.thumb)
+  add(post.thumbnailUrl)
+
+  return [...urls]
+}
+
+/** Delete every managed media file for a post (used on post delete). */
+export async function deleteAllPostMedia(post) {
+  const urls = collectPostMediaUrls(post).filter(isManagedMediaUrl)
+  await Promise.allSettled(urls.map((url) => deleteMediaAsset(url)))
+}

@@ -5,7 +5,7 @@ import Post, { MAX_REPLIES_PER_POST } from '../models/post.js'
 import Like from '../models/like.js'
 import Follow from '../models/follow.js'
 import LiveStream from '../models/liveStream.js'
-import { uploadMulterFile, deleteMediaAsset, respondToUploadError } from '../services/mediaStorage.js'
+import { uploadMulterFile, deleteMediaAsset, deleteAllPostMedia, respondToUploadError } from '../services/mediaStorage.js'
 import { getIO, getUserSocket } from '../socket/socket.js'
 import { emitToUserIds, collectSocketIdsForUserIds } from '../services/postSocketEmit.js'
 import { dedupeGamePostsForFeed } from '../utils/dedupeGameFeedPosts.js'
@@ -868,9 +868,7 @@ export const deletePost = async(req,res) => {
         return res.status(400).json({message:"you cant delete other users post"})
       }
 
-      if (post.img) {
-        await deleteMediaAsset(post.img)
-      }
+      await deleteAllPostMedia(post)
 
       // OPTIMIZED: Get followers before deleting post
       const postAuthorId = post.postedBy.toString()
