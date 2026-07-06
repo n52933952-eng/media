@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react'
-import { Box, Image, HStack, IconButton, Text } from '@chakra-ui/react'
+import { Box, Image, HStack, IconButton, Text, Avatar } from '@chakra-ui/react'
 import { mediaDisplayUrl } from '../utils/mediaUrl.js'
 
 const PostMediaCarousel = ({ slides = [], audioUrl = null, maxH = '480px' }) => {
@@ -39,22 +39,27 @@ const PostMediaCarousel = ({ slides = [], audioUrl = null, maxH = '480px' }) => 
   return (
     <Box position="relative" w="full" mb={3}>
       <Image src={src} alt="" w="full" maxH={maxH} objectFit="contain" bg="black" borderRadius="md" />
-      {slide.name || slide.username ? (
-        <Text
+      {slide.name || slide.username || slide.profilePic ? (
+        <HStack
           position="absolute"
           left={3}
           top={3}
-          fontSize="sm"
-          color="white"
+          spacing={2}
           bg="blackAlpha.700"
           px={2}
           py={1}
           borderRadius="md"
-          maxW="55%"
-          noOfLines={1}
+          maxW="60%"
         >
-          {slide.name || slide.username}
-        </Text>
+          {slide.profilePic ? (
+            <Avatar src={slide.profilePic} name={slide.name || slide.username} size="xs" />
+          ) : null}
+          {(slide.name || slide.username) ? (
+            <Text fontSize="sm" color="white" noOfLines={1}>
+              {slide.name || slide.username}
+            </Text>
+          ) : null}
+        </HStack>
       ) : null}
       {slides.length > 1 ? (
         <Text

@@ -26,6 +26,8 @@ import {
   postDetailApiUrl,
   hideChannelPostComments,
 } from '../utils/postUtils.js'
+import PostMediaCarousel from '../Components/PostMediaCarousel'
+import { getPostCarouselSlides, getPostCarouselAudio, shouldShowPostCarousel } from '../utils/postCarousel.js'
 
 const apiBaseUrl = () => (import.meta.env.PROD ? window.location.origin : 'http://localhost:5000')
 
@@ -45,6 +47,10 @@ const PostPage = () => {
    const {socket} = useContext(SocketContext) || {}
 
     const post = followPost[0]
+
+    const carouselSlides = useMemo(() => (post ? getPostCarouselSlides(post) : []), [post])
+    const carouselAudio = useMemo(() => (post ? getPostCarouselAudio(post) : null), [post?.audio])
+    const showCarousel = post ? shouldShowPostCarousel(post) : false
 
     const [postReplies, setPostReplies] = useState([])
     const [commentsLoading, setCommentsLoading] = useState(false)
@@ -766,7 +772,10 @@ if(!post) {
     )}
 
     <Box borderRadius={16} overflow={"hidden"} border={"1px solid"} borderColor={"gray.light"} my={3}>
-      {post?.img && (() => {
+      {(showCarousel || post?.img || (Array.isArray(post?.images) && post.images.length)) && (
+        showCarousel ? (
+          <PostMediaCarousel slides={carouselSlides} audioUrl={carouselAudio} maxH="500px" />
+        ) : post?.img && (() => {
         // Check if it's a YouTube embed URL (channel posts use this format)
         const isYouTubeEmbed = post.img.includes('youtube.com/embed')
         
@@ -860,7 +869,8 @@ if(!post) {
         
         // Default to image
         return <Image src={post?.img} w={"full"} objectFit="contain" maxH="500px" />
-      })()}
+      })())
+      }
     </Box>
 
 

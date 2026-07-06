@@ -78,3 +78,26 @@ export function shouldShowPostCarousel(post) {
   if (post?.isCollaborative && slides.length > 0) return true
   return false
 }
+
+/** Non-collaborative multi-photo carousel (owner manages photos). */
+export function isCarouselPost(post) {
+  if (post?.isCollaborative) return false
+  const images = Array.isArray(post?.images)
+    ? post.images.map(String).filter(Boolean)
+    : []
+  return images.length > 0
+}
+
+export function getMyCollaboratorImage(post, userId) {
+  if (!userId) return null
+  const uid = String(userId)
+  for (const row of post?.collaboratorImages || []) {
+    if (String(row.userId) === uid && row?.img) return String(row.img)
+  }
+  const ownerId = contributorIdStr(post?.postedBy)
+  if (uid === ownerId) {
+    const ownerUrls = getOwnerImageUrls(post)
+    if (ownerUrls.length) return ownerUrls[0]
+  }
+  return null
+}

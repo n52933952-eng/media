@@ -28,6 +28,7 @@ const UserPage = () => {
    const showToast = useShowToast()
    
    const[posts,setPosts]=useState([])
+   const[totalPostsCount,setTotalPostsCount]=useState(null)
    const[activeTab,setActiveTab]=useState('posts')
    const[comments,setComments]=useState([])
    const[loadingComments,setLoadingComments]=useState(false)
@@ -226,6 +227,7 @@ const UserPage = () => {
      setLoadingpost(true)
      setSkip(0)
      setPosts([])
+     setTotalPostsCount(null)
    }
   
   try{
@@ -238,6 +240,10 @@ const UserPage = () => {
 
    if(res.ok){
      const newPosts = data.posts || data || []
+     
+     if (typeof data.totalCount === 'number') {
+       setTotalPostsCount(data.totalCount)
+     }
      
      if (isLoadMore) {
        // Append new posts to existing ones
@@ -322,6 +328,7 @@ const UserPage = () => {
    fetchUserPost()
    setSkip(0)
    setHasMore(true)
+   setTotalPostsCount(null)
    setActiveTab('posts') // Reset to posts tab when username changes
   },[username])
 
@@ -345,6 +352,7 @@ const UserPage = () => {
         if (exists) return prev
         return [newPost, ...prev]
       })
+      setTotalPostsCount((n) => (typeof n === 'number' ? n + 1 : null))
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [followPost, username, currentUser])
@@ -377,7 +385,7 @@ if(!user && loading){
         activeTab={activeTab}
         setActiveTab={setActiveTab}
         onUserFollowed={fetchFollowedUserPosts}
-        postsCount={posts?.length ?? 0}
+        postsCount={totalPostsCount ?? posts?.length ?? 0}
         onProfileRefresh={fetchUser}
       />
       
@@ -398,9 +406,10 @@ if(!user && loading){
                       postedBy={post.postedBy}
                       visibleVideoOnly
                       showFeedExtras={false}
+                      isOwnProfile={currentUser?.username === username}
                       onDelete={(postId) => {
-                        // Remove post from local state immediately
                         setPosts(prev => prev.filter(p => p._id !== postId))
+                        setTotalPostsCount((n) => (typeof n === 'number' ? Math.max(0, n - 1) : null))
                       }}
                     />
                   ))}

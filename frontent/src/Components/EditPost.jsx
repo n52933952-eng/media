@@ -1,4 +1,4 @@
-import React,{useState,useRef,useContext,useEffect} from 'react'
+import React,{useState,useRef,useContext,useEffect,useCallback} from 'react'
 import {
   Modal,
   ModalOverlay,
@@ -16,6 +16,7 @@ import {
   Flex,
   Box,
   Button,
+  SimpleGrid,
   useColorModeValue
 } from "@chakra-ui/react";
 import { BsFileImageFill } from "react-icons/bs";
@@ -23,34 +24,54 @@ import useShowToast from '../hooks/useShowToast.js'
 import { compressVideo, needsCompression } from '../utils/videoCompress'
 import{UserContext} from '../context/UserContext'
 import{PostContext} from '../context/PostContext'
+import { isCarouselPost, MAX_POST_CAROUSEL_IMAGES } from '../utils/postCarousel.js'
 
 const MAX_CHAR = 500
+const apiBase = () => (import.meta.env.PROD ? window.location.origin : 'http://localhost:5000')
 
 const EditPost = ({post, isOpen, onClose, onUpdate}) => {
   const{user}=useContext(UserContext)
   const{setFollowPost}=useContext(PostContext)
   const isCollaborative = !!post?.isCollaborative
+  const isCarousel = isCarouselPost(post)
+  const captionOnlyEdit = isCollaborative
   
   const[postText,setPostText]=useState(post?.text || '')
-  const[image,setImage]=useState(null) // File object for new image
-  const[imagePreview,setImagePreview]=useState(post?.img || '') // Preview URL (existing or new)
+  const[image,setImage]=useState(null)
+  const[imagePreview,setImagePreview]=useState(post?.img || '')
   const[loading,setLoading]=useState(false)
   const[uploadProgress,setUploadProgress]=useState(0)
   const[isUploading,setIsUploading]=useState(false)
+  const[carouselSlots,setCarouselSlots]=useState([])
 
   const imageInput = useRef()
+  const carouselInputRef = useRef()
+  const carouselReplaceIndexRef = useRef(-1)
   const showToast = useShowToast()
   const[remaingChar,setRemaingChar]=useState(MAX_CHAR - (post?.text?.length || 0))
 
-  // Update state when post changes
+  const resetCarouselSlots = useCallback(() => {
+    if (!isCarouselPost(post)) {
+      setCarouselSlots([])
+      return
+    }
+    const urls = Array.isArray(post?.images) ? post.images.map(String).filter(Boolean) : []
+    setCarouselSlots(urls.map((url, index) => ({
+      key: `existing-${index}-${url}`,
+      kind: 'existing',
+      url,
+    })))
+  }, [post])
+
   useEffect(() => {
     if (post) {
       setPostText(post.text || '')
       setImagePreview(post.img || '')
       setRemaingChar(MAX_CHAR - (post.text?.length || 0))
-      setImage(null) // Reset new image
+      setImage(null)
+      resetCarouselSlots()
     }
-  }, [post])
+  }, [post, resetCarouselSlots])
 
   const handleTextChange = (e) => {
     const inputText = e.target.value
@@ -64,6 +85,49 @@ const EditPost = ({post, isOpen, onClose, onUpdate}) => {
     }
   }
 
+  const handleCarouselFile = (event) => {
+    const picked = event.target.files?.[0]
+    const replaceAt = carouselReplaceIndexRef.current
+    carouselReplaceIndexRef.current = -1
+    if (carouselInputRef.current) carouselInputRef.current.value = ''
+
+    if (!picked) return
+    if (!picked.type.startsWith('image/')) {
+      showToast('Invalid file', 'Carousel posts only support photos', 'error')
+      return
+    }
+
+    const newSlot = {
+      key: `new-${Date.now()}-${Math.random()}`,
+      kind: 'new',
+      file: picked,
+      preview: URL.createObjectURL(picked),
+    }
+
+    if (replaceAt >= 0) {
+      setCarouselSlots((prev) => prev.map((slot, i) => (i === replaceAt ? newSlot : slot)))
+    } else if (carouselSlots.length < MAX_POST_CAROUSEL_IMAGES) {
+      setCarouselSlots((prev) => [...prev, newSlot])
+    } else {
+      showToast('Limit reached', `Maximum ${MAX_POST_CAROUSEL_IMAGES} photos`, 'error')
+    }
+  }
+
+  const pickCarouselPhoto = (replaceIndex = -1) => {
+    carouselReplaceIndexRef.current = replaceIndex
+    carouselInputRef.current?.click()
+  }
+
+  const removeCarouselSlot = (index) => {
+    setCarouselSlots((prev) => {
+      const slot = prev[index]
+      if (slot?.kind === 'new' && slot.preview?.startsWith('blob:')) {
+        URL.revokeObjectURL(slot.preview)
+      }
+      return prev.filter((_, i) => i !== index)
+    })
+  }
+
   const handleImageChange = async (event) => {
     const file = event.target.files[0]
     
@@ -74,14 +138,12 @@ const EditPost = ({post, isOpen, onClose, onUpdate}) => {
       return
     }
 
-    const maxSize = 100 * 1024 * 1024 // 100MB
+    const maxSize = 100 * 1024 * 1024
     const fileSizeMB = file.size / (1024 * 1024)
     
     if (file.size > maxSize) {
-      showToast("File too large", `File (${fileSizeMB.toFixed(1)}MB) exceeds the 100MB limit. Please compress the file or use a smaller one.`, "error")
-      if (imageInput.current) {
-        imageInput.current.value = ''
-      }
+      showToast("File too large", `File (${fileSizeMB.toFixed(1)}MB) exceeds the 100MB limit.`, "error")
+      if (imageInput.current) imageInput.current.value = ''
       return
     }
 
@@ -94,64 +156,43 @@ const EditPost = ({post, isOpen, onClose, onUpdate}) => {
     if (needsCompression(file)) {
       setIsUploading(true)
       setUploadProgress(10)
-      
       const compressionTimeout = setTimeout(() => {
-        console.warn('⚠️ Compression timeout - using original file')
         setIsUploading(false)
         setUploadProgress(0)
-        showToast("Compression taking too long", "You can use the original video. Compression will be skipped.", "warning", 5000)
+        showToast("Compression taking too long", "Using original file.", "warning", 5000)
       }, 120000)
       
       try {
-        showToast("Compressing video", "Please wait while we compress your video...", "info", 5000)
-        
+        showToast("Compressing video", "Please wait...", "info", 5000)
         const compressedFile = await compressVideo(file, {
           maxSizeMB: 95,
           quality: fileSizeMB > 50 ? 'low' : 'medium',
           timeout: 110000,
-          progressCallback: (progress) => {
-            setUploadProgress(10 + (progress * 0.8))
-          }
+          progressCallback: (progress) => setUploadProgress(10 + (progress * 0.8)),
         })
-        
         clearTimeout(compressionTimeout)
-        const compressedSizeMB = compressedFile.size / (1024 * 1024)
-        console.log(`✅ Video compressed: ${fileSizeMB.toFixed(2)}MB → ${compressedSizeMB.toFixed(2)}MB`)
-        
         setImage(compressedFile)
-        if (previewURL && previewURL.startsWith('blob:')) {
-          URL.revokeObjectURL(previewURL)
-        }
-        const newPreviewURL = URL.createObjectURL(compressedFile)
-        setImagePreview(newPreviewURL)
-        
+        if (previewURL.startsWith('blob:')) URL.revokeObjectURL(previewURL)
+        setImagePreview(URL.createObjectURL(compressedFile))
         setUploadProgress(100)
         setIsUploading(false)
-        showToast("Compression complete", `Video compressed to ${compressedSizeMB.toFixed(2)}MB`, "success")
+        showToast("Compression complete", "Video ready to upload", "success")
       } catch (error) {
         clearTimeout(compressionTimeout)
-        console.error('❌ Video compression error:', error)
         setUploadProgress(0)
         setIsUploading(false)
-        
         if (file.size > 100 * 1024 * 1024) {
           setImage(null)
-          setImagePreview(post?.img || '') // Restore original
+          setImagePreview(post?.img || '')
           showToast("File too large", "File exceeds 100MB limit.", "error")
-          if (imageInput.current) {
-            imageInput.current.value = ''
-          }
+          if (imageInput.current) imageInput.current.value = ''
         } else {
           showToast("Compression failed", "You can still use the original video.", "warning", 5000)
         }
       }
-    } else if (file.type.startsWith('video/')) {
-      console.log(`✅ Video ${fileSizeMB.toFixed(2)}MB is under 50MB - ready to upload without compression`)
     }
     
-    if (imageInput.current) {
-      imageInput.current.value = ''
-    }
+    if (imageInput.current) imageInput.current.value = ''
   }
 
   const handleRemoveImage = () => {
@@ -160,24 +201,36 @@ const EditPost = ({post, isOpen, onClose, onUpdate}) => {
     }
     setImage(null)
     setImagePreview('')
-    if (imageInput.current) {
-      imageInput.current.value = ''
+    if (imageInput.current) imageInput.current.value = ''
+  }
+
+  const finishUpdate = (updatedPost) => {
+    if (updatedPost && setFollowPost) {
+      setFollowPost(prev => prev.map(p => p._id === post._id ? updatedPost : p))
     }
+    showToast("Success", "Post updated successfully", "success")
+    onClose()
+    onUpdate?.(updatedPost)
+    setImage(null)
+    setUploadProgress(0)
+    setLoading(false)
   }
 
   const handleUpdatePost = async() => {
     if (isUploading && !image) {
-      showToast("Please wait", "File is still processing. Please wait for it to complete.", "warning")
+      showToast("Please wait", "File is still processing.", "warning")
       return
     }
-    
-    if (isUploading && image) {
-      console.log('⚠️ Compression in progress, but proceeding with update using available file')
-      setIsUploading(false)
-      setUploadProgress(0)
-    }
 
-    if (!postText.trim() && !imagePreview) {
+    const trimmed = postText.trim()
+    const hasRemoteMedia = isCarousel ? carouselSlots.length > 0 : !!imagePreview
+    const willUploadNew = !captionOnlyEdit && !isCarousel && !!(image && image instanceof File)
+
+    if (!trimmed && !hasRemoteMedia && !willUploadNew) {
+      showToast("Error", "Post cannot be empty", "error")
+      return
+    }
+    if (isCarousel && carouselSlots.length === 0 && !trimmed) {
       showToast("Error", "Post cannot be empty", "error")
       return
     }
@@ -191,118 +244,92 @@ const EditPost = ({post, isOpen, onClose, onUpdate}) => {
     setUploadProgress(0)
     
     try {
+      if (isCarousel) {
+        const formData = new FormData()
+        formData.append('text', trimmed)
+        const imageSlots = carouselSlots.map((slot) =>
+          slot.kind === 'existing' ? { kind: 'keep', url: slot.url } : { kind: 'new' }
+        )
+        formData.append('imageSlots', JSON.stringify(imageSlots))
+        for (const slot of carouselSlots) {
+          if (slot.kind === 'new' && slot.file) {
+            formData.append('images', slot.file)
+          }
+        }
+
+        const res = await fetch(`${apiBase()}/api/post/carousel/${post._id}/images`, {
+          method: 'PUT',
+          credentials: 'include',
+          body: formData,
+        })
+        const data = await res.json()
+        if (res.ok && (data.post || data._id)) {
+          finishUpdate(data.post ?? data)
+        } else {
+          showToast("Error", data.error || "Failed to update post", "error")
+          setLoading(false)
+        }
+        return
+      }
+
       const formData = new FormData()
       formData.append('text', postText)
       
-      // Only include file if user selected a new one (not for collaborative — photos via contributor flow)
       if (image && image instanceof File && !isCollaborative) {
         formData.append('file', image)
         
         const xhr = new XMLHttpRequest()
-        
         xhr.upload.addEventListener('progress', (e) => {
-          if (e.lengthComputable) {
-            setUploadProgress((e.loaded / e.total) * 100)
-          }
+          if (e.lengthComputable) setUploadProgress((e.loaded / e.total) * 100)
         })
-        
-        xhr.addEventListener('load', () => {
-          if (xhr.status === 200) {
-            setUploadProgress(100)
-          }
-        })
-        
-        xhr.open('PUT', `${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/post/${post._id}`)
+        xhr.open('PUT', `${apiBase()}/api/post/${post._id}`)
         xhr.withCredentials = true
-        xhr.timeout = 1200000 // 20 minutes
+        xhr.timeout = 1200000
         
         xhr.ontimeout = () => {
-          showToast("Upload timeout", "Video upload is taking longer than expected. Please try again or use a smaller video.", "error")
+          showToast("Upload timeout", "Please try again.", "error")
           setLoading(false)
           setUploadProgress(0)
         }
-        
         xhr.onerror = () => {
-          showToast("Upload error", "Network error during upload. Please check your connection and try again.", "error")
+          showToast("Upload error", "Network error during upload.", "error")
           setLoading(false)
           setUploadProgress(0)
         }
-        
         xhr.onload = () => {
           if (xhr.status === 200) {
             try {
               const data = JSON.parse(xhr.responseText)
-              
-              if(data.error){
+              if (data.error) {
                 showToast("Error", data.error, "error")
                 setLoading(false)
-                setUploadProgress(0)
                 return
               }
-
-              // Update post in feed
-              if (data.post && setFollowPost) {
-                setFollowPost(prev => prev.map(p => p._id === post._id ? data.post : p))
-              }
-
-              showToast("Success", "Post updated successfully", "success")
-              onClose()
-              
-              if (onUpdate) {
-                onUpdate(data.post)
-              }
-              
-              // Reset state
-              setImage(null)
-              setUploadProgress(0)
-              setLoading(false)
-            } catch (error) {
+              finishUpdate(data.post)
+            } catch {
               showToast("Error", "Failed to parse server response", "error")
               setLoading(false)
-              setUploadProgress(0)
             }
           } else {
-            try {
-              const errorData = JSON.parse(xhr.responseText)
-              showToast("Error", errorData.error || "Failed to update post", "error")
-            } catch (error) {
-              showToast("Error", "Failed to update post", "error")
-            }
+            showToast("Error", "Failed to update post", "error")
             setLoading(false)
-            setUploadProgress(0)
           }
         }
-        
         xhr.send(formData)
       } else {
-        // No file upload - just update text
-        const res = await fetch(`${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/post/${post._id}`, {
+        const res = await fetch(`${apiBase()}/api/post/${post._id}`, {
           method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json'
-          },
+          headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
-          body: JSON.stringify({ text: postText })
+          body: JSON.stringify({ text: postText }),
         })
-
         const data = await res.json()
-
-        if(res.ok && data.post){
-          // Update post in feed
-          if (setFollowPost) {
-            setFollowPost(prev => prev.map(p => p._id === post._id ? data.post : p))
-          }
-
-          showToast("Success", "Post updated successfully", "success")
-          onClose()
-          
-          if (onUpdate) {
-            onUpdate(data.post)
-          }
+        if (res.ok && data.post) {
+          finishUpdate(data.post)
         } else {
           showToast("Error", data.error || "Failed to update post", "error")
+          setLoading(false)
         }
-        setLoading(false)
       }
     } catch(error){
       showToast("Error", error.message || error, "error")
@@ -312,16 +339,20 @@ const EditPost = ({post, isOpen, onClose, onUpdate}) => {
   }
 
   const handleClose = () => {
-    // Clean up preview URL if it's a blob
     if (imagePreview && imagePreview.startsWith('blob:') && image) {
       URL.revokeObjectURL(imagePreview)
     }
-    // Reset to original values
+    for (const slot of carouselSlots) {
+      if (slot.kind === 'new' && slot.preview?.startsWith('blob:')) {
+        URL.revokeObjectURL(slot.preview)
+      }
+    }
     setPostText(post?.text || '')
     setImagePreview(post?.img || '')
     setImage(null)
     setUploadProgress(0)
     setIsUploading(false)
+    resetCarouselSlots()
     onClose()
   }
 
@@ -346,7 +377,49 @@ const EditPost = ({post, isOpen, onClose, onUpdate}) => {
               {remaingChar}/{MAX_CHAR}
             </Text>
 
-            {isCollaborative ? (
+            {isCarousel ? (
+              <>
+                <Text fontSize="sm" color="gray.500" mt={3} mb={2}>
+                  Edit photos (up to {MAX_POST_CAROUSEL_IMAGES}). Photos only.
+                </Text>
+                <Input
+                  type="file"
+                  accept="image/*"
+                  hidden
+                  ref={carouselInputRef}
+                  onChange={handleCarouselFile}
+                />
+                <SimpleGrid columns={{ base: 2, md: 3 }} spacing={3}>
+                  {carouselSlots.map((slot, index) => (
+                    <Box key={slot.key} position="relative" borderRadius="md" overflow="hidden" bg="black">
+                      <Image
+                        src={slot.kind === 'existing' ? slot.url : slot.preview}
+                        alt=""
+                        w="full"
+                        h="120px"
+                        objectFit="cover"
+                        cursor="pointer"
+                        onClick={() => pickCarouselPhoto(index)}
+                      />
+                      <CloseButton
+                        size="sm"
+                        position="absolute"
+                        top={1}
+                        right={1}
+                        bg="blackAlpha.600"
+                        color="white"
+                        onClick={() => removeCarouselSlot(index)}
+                      />
+                    </Box>
+                  ))}
+                </SimpleGrid>
+                {carouselSlots.length < MAX_POST_CAROUSEL_IMAGES ? (
+                  <Button size="sm" mt={3} leftIcon={<BsFileImageFill />} onClick={() => pickCarouselPhoto(-1)}>
+                    Add photo
+                  </Button>
+                ) : null}
+              </>
+            ) : isCollaborative ? (
               <Text fontSize="sm" color="gray.500" mt={3}>
                 To change your photo, use “Change your photo” on the post.
               </Text>
@@ -392,7 +465,7 @@ const EditPost = ({post, isOpen, onClose, onUpdate}) => {
               </>
             )}
             
-            {!isCollaborative && uploadProgress > 0 && uploadProgress < 100 && (
+            {!isCollaborative && !isCarousel && uploadProgress > 0 && uploadProgress < 100 && (
               <Box mt={2}>
                 <Text fontSize="xs" color={textColor} mb={1}>
                   Upload Progress: {Math.round(uploadProgress)}%
@@ -410,7 +483,7 @@ const EditPost = ({post, isOpen, onClose, onUpdate}) => {
             colorScheme='blue' 
             onClick={handleUpdatePost} 
             isLoading={loading}
-            isDisabled={!postText.trim() && !imagePreview}
+            isDisabled={!postText.trim() && !(isCarousel ? carouselSlots.length > 0 : imagePreview)}
           >
             Update Post
           </Button>

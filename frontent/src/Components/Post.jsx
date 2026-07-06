@@ -15,6 +15,8 @@ import { followIdToString } from '../utils/postUtils.js'
 import { isUserInOnlineList } from '../utils/presenceUtils.js'
 import AddContributorModal from './AddContributorModal'
 import ManageContributorsModal from './ManageContributorsModal'
+import AddCollaboratorPhotoModal from './AddCollaboratorPhotoModal'
+import CollaborativePostAudioModal from './CollaborativePostAudioModal'
 import EditPost from './EditPost'
 import FootballIcon from './FootballIcon'
 import FootballMatchCards from './FootballMatchCards'
@@ -28,11 +30,11 @@ import {
 import { isVideoUrl, mediaDisplayUrl } from '../utils/mediaUrl.js'
 import { parsePostFromApiResponse, postDetailApiUrl } from '../utils/postUtils.js'
 import PostMediaCarousel from './PostMediaCarousel'
-import { getPostCarouselSlides, getPostCarouselAudio, shouldShowPostCarousel } from '../utils/postCarousel.js'
+import { getPostCarouselSlides, getPostCarouselAudio, shouldShowPostCarousel, isCarouselPost, getMyCollaboratorImage } from '../utils/postCarousel.js'
 
 const apiBaseUrl = () => (import.meta.env.PROD ? window.location.origin : 'http://localhost:5000')
 
-const Post = ({post: initialPost, postedBy, onDelete, visibleVideoOnly = false, autoPlayMedia, showFeedExtras = true}) => {
+const Post = ({post: initialPost, postedBy, onDelete, visibleVideoOnly = false, autoPlayMedia, showFeedExtras = true, isOwnProfile = true}) => {
     
   // Local state for this specific post (used when not in feed context)
   const [localPost, setLocalPost] = useState(initialPost)
@@ -184,6 +186,8 @@ const showToast = useShowToast()
   const { isOpen: isAddContributorOpen, onOpen: onAddContributorOpen, onClose: onAddContributorClose } = useDisclosure()
   const { isOpen: isManageContributorsOpen, onOpen: onManageContributorsOpen, onClose: onManageContributorsClose } = useDisclosure()
   const { isOpen: isEditPostOpen, onOpen: onEditPostOpen, onClose: onEditPostClose } = useDisclosure()
+  const { isOpen: isCollabPhotoOpen, onOpen: onCollabPhotoOpen, onClose: onCollabPhotoClose } = useDisclosure()
+  const { isOpen: isCollabAudioOpen, onOpen: onCollabAudioOpen, onClose: onCollabAudioClose } = useDisclosure()
   
   // Color modes
   const cardBg = useColorModeValue('white', '#252b3b')
@@ -907,6 +911,38 @@ const showToast = useShowToast()
     const cId = (typeof c === 'string' ? c : c?._id)?.toString?.() ?? String(typeof c === 'string' ? c : c?._id ?? '')
     return !!cId && !!currentUserId && cId === currentUserId
   })
+
+  const isSomeoneElsesProfile = !showFeedExtras && isOwnProfile === false
+  const canActAsContributor = !!isContributor && !isSomeoneElsesProfile
+  const isCarouselOwnerPost = isCarouselPost(post) && isOwner
+  const canAddCollaborator = !!post.isCollaborative && (isOwner || canActAsContributor)
+  const canManageCollabAudio = !!post.isCollaborative && isOwner
+  const canManageCarouselAudio = isCarouselOwnerPost
+  const myCollaboratorPhoto = getMyCollaboratorImage(post, currentUserId)
+  const hasCollabAudio = !!carouselAudio
+
+  const canEditPostText =
+    !!user &&
+    !isChannelPost &&
+    !isWeatherPost &&
+    !isFootballPost &&
+    !isChessPost &&
+    !isCardPost &&
+    !post?.channelAddedBy &&
+    (isOwner || (!!post.isCollaborative && canActAsContributor))
+
+  const canShowPenMenu =
+    canEditPostText ||
+    (canAddCollaborator && !!post.isCollaborative) ||
+    isCarouselOwnerPost
+
+  const applyPostUpdate = useCallback((updatedPost) => {
+    if (!updatedPost) return
+    setLocalPost({ ...updatedPost })
+    if (setFollowPost) {
+      setFollowPost((prev) => prev.map((p) => (p._id === post._id ? updatedPost : p)))
+    }
+  }, [post._id, setFollowPost])
 
   const isMyChannelFeedCard =
     !!post?.channelAddedBy && String(post.channelAddedBy) === String(user?._id)
@@ -1720,134 +1756,75 @@ const showToast = useShowToast()
       <Actions post={post} showFeedExtras={showFeedExtras} />
     )}
     
-    {/* Edit Post Button - Show for:
-        1. Post owner (for both regular and collaborative posts)
-        2. Contributors (for collaborative posts only)
-    */}
-    {(() => {
-      const isOwner = user?._id?.toString() === postedBy?._id?.toString()
-      const isContributor = post?.isCollaborative && post?.contributors && Array.isArray(post.contributors) && 
-        post.contributors.some(c => (c._id || c).toString() === user?._id?.toString())
-      const canEdit = isOwner || isContributor
-      
-      console.log('🔵 [Post] Edit button check:', {
-        postId: post?._id?.substring(0, 8),
-        isOwner: isOwner,
-        isContributor: isContributor,
-        canEdit: canEdit,
-        userId: user?._id?.toString()?.substring(0, 8),
-        postedById: postedBy?._id?.toString()?.substring(0, 8),
-        contributorsArray: post?.contributors?.map(c => ({
-          id: (c._id || c)?.toString()?.substring(0, 8),
-          name: c?.name
-        }))
-      })
-      
-      if (!canEdit) return null
-      
-      return (
-        <Flex align="center" gap={2} flexWrap="wrap">
-        <Button
+    {canShowPenMenu && (
+      <Menu>
+        <MenuButton
+          as={Button}
           size="xs"
           variant="outline"
           colorScheme="blue"
           onClick={(e) => {
             e.preventDefault()
             e.stopPropagation()
-            onEditPostOpen()
+            blockPostNavBriefly()
           }}
         >
-          ✏️ Edit Post
-        </Button>
-        
-        {/* Collaborative Post Actions - Only show for collaborative posts */}
-        {(() => {
-          const isOwner = user?._id?.toString() === postedBy?._id?.toString()
-          const isContributor = post?.isCollaborative && post?.contributors && Array.isArray(post.contributors) &&
-            post.contributors.some(c => (c._id || c).toString() === user?._id?.toString())
-          const isCollab = post?.isCollaborative
-          const hasContributors = post?.contributors && Array.isArray(post.contributors) && post.contributors.length > 0
-          
-          console.log('🔵 [Post] Collaborative actions check:', {
-            postId: post?._id?.substring(0, 8),
-            isCollaborative: isCollab,
-            isOwner: isOwner,
-            hasContributors: hasContributors,
-            contributorsCount: post?.contributors?.length,
-            userId: user?._id?.toString(),
-            postedById: postedBy?._id?.toString(),
-            userIdMatch: user?._id?.toString() === postedBy?._id?.toString()
-          })
-          
-          if (!isCollab) {
-            console.log('⚠️ [Post] Not a collaborative post, hiding actions')
-            return null
-          }
-          
-          return (
+          ✏️
+        </MenuButton>
+        <MenuList zIndex={1500}>
+          {canEditPostText && (
+            <MenuItem
+              onClick={(e) => {
+                e.stopPropagation()
+                onEditPostOpen()
+              }}
+            >
+              {isCarouselOwnerPost ? 'Edit caption & photos' : 'Edit caption'}
+            </MenuItem>
+          )}
+          {post.isCollaborative && canAddCollaborator && (
             <>
-              <Button
-                size="xs"
-                variant="outline"
-                colorScheme="blue"
+              <MenuItem
                 onClick={(e) => {
-                  e.preventDefault()
+                  e.stopPropagation()
+                  onCollabPhotoOpen()
+                }}
+              >
+                {myCollaboratorPhoto ? 'Change your photo' : 'Add your photo'}
+              </MenuItem>
+              <MenuItem
+                onClick={(e) => {
                   e.stopPropagation()
                   onAddContributorOpen()
                 }}
               >
-                + Add Contributor
-              </Button>
-              
-              {/* Manage Contributors Menu (only for owner of collaborative post) */}
-              {(() => {
-                console.log('🔵 [Post] Three-dot menu check:', {
-                  isOwner: isOwner,
-                  isContributor: isContributor,
-                  hasContributors: hasContributors,
-                  willShow: (isOwner || isContributor) && hasContributors
-                })
-                
-                if (!isOwner && !isContributor) {
-                  console.log('⚠️ [Post] User is not owner/contributor, hiding three dots')
-                  return null
-                }
-                
-                if (!hasContributors) {
-                  console.log('⚠️ [Post] No contributors yet, hiding three dots')
-                  return null
-                }
-                
-                console.log('✅ [Post] Showing three-dot menu!')
-                return (
-                <Menu>
-                  <MenuButton
-                    as={IconButton}
-                    icon={<BsThreeDotsVertical />}
-                    size="xs"
-                    variant="ghost"
-                    aria-label="Manage contributors"
-                  />
-                  <MenuList zIndex={1500}>
-                    <MenuItem
-                      icon={<MdPersonRemove />}
-                      onClick={() => {
-                        console.log('🔵 [Post] Manage Contributors clicked!')
-                        onManageContributorsOpen()
-                      }}
-                    >
-                      Manage Contributors
-                    </MenuItem>
-                  </MenuList>
-                </Menu>
-                )
-              })()}
+                Add contributor
+              </MenuItem>
+              {(isOwner || canActAsContributor) && post.contributors?.length > 0 && (
+                <MenuItem
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    onManageContributorsOpen()
+                  }}
+                >
+                  Manage contributors
+                </MenuItem>
+              )}
             </>
-          )
-        })()}
-      </Flex>
-      )
-    })()}
+          )}
+          {(canManageCollabAudio || canManageCarouselAudio) && (
+            <MenuItem
+              onClick={(e) => {
+                e.stopPropagation()
+                onCollabAudioOpen()
+              }}
+            >
+              {hasCollabAudio ? 'Change music' : 'Add music'}
+            </MenuItem>
+          )}
+        </MenuList>
+      </Menu>
+    )}
     
     {/* Add Contributor Modal */}
     <AddContributorModal
@@ -1942,22 +1919,25 @@ const showToast = useShowToast()
       }}
     />
     
-    {/* Edit Post Modal */}
     <EditPost
       post={post}
       isOpen={isEditPostOpen}
       onClose={onEditPostClose}
-      onUpdate={(updatedPost) => {
-        // Update post in feed
-        if (setFollowPost && updatedPost) {
-          setFollowPost(prev => prev.map(p => p._id === updatedPost._id ? updatedPost : p))
-        }
-        // Update local state too (profile pages may not use feed state)
-        if (updatedPost) {
-          setLocalPost({ ...updatedPost })
-        }
-        console.log('✅ Post updated:', updatedPost._id)
-      }}
+      onUpdate={applyPostUpdate}
+    />
+
+    <AddCollaboratorPhotoModal
+      isOpen={isCollabPhotoOpen}
+      onClose={onCollabPhotoClose}
+      post={post}
+      onSaved={applyPostUpdate}
+    />
+
+    <CollaborativePostAudioModal
+      isOpen={isCollabAudioOpen}
+      onClose={onCollabAudioClose}
+      post={post}
+      onSaved={applyPostUpdate}
     />
     
     {/* Manage Contributors Modal */}
