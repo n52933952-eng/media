@@ -73,8 +73,8 @@ export function getPostCarouselAudio(post) {
 export function shouldShowPostCarousel(post) {
   const slides = getPostCarouselSlides(post)
   if (slides.length > 1) return true
-  if (slides.length === 1 && Array.isArray(post?.images) && post.images.length > 0) return true
   if (slides.length === 1 && getPostCarouselAudio(post)) return true
+  if (slides.length === 1 && Array.isArray(post?.images) && post.images.length > 1) return true
   if (post?.isCollaborative && slides.length > 0) return true
   return false
 }
@@ -85,7 +85,9 @@ export function isCarouselPost(post) {
   const images = Array.isArray(post?.images)
     ? post.images.map(String).filter(Boolean)
     : []
-  return images.length > 0
+  if (images.length > 1) return true
+  if (images.length === 1 && getPostCarouselAudio(post)) return true
+  return false
 }
 
 export function getMyCollaboratorImage(post, userId) {

@@ -41,14 +41,32 @@ export async function upsertCollaboratorImage(post, userId, imgUrl) {
 }
 
 export async function removeCollaboratorImageForUser(post, userId) {
-    if (!Array.isArray(post.collaboratorImages)) return
     const uid = String(userId)
+    const ownerId = contributorIdStr(post.postedBy)
+    if (!Array.isArray(post.collaboratorImages)) post.collaboratorImages = []
+
+    let removedUrl = null
     const idx = post.collaboratorImages.findIndex((e) => String(e.userId) === uid)
-    if (idx < 0) return
-    const old = post.collaboratorImages[idx].img
-    if (old) await deleteMediaAsset(old).catch(() => {})
-    post.collaboratorImages.splice(idx, 1)
-    post.markModified('collaboratorImages')
+    if (idx >= 0) {
+        removedUrl = post.collaboratorImages[idx].img
+        post.collaboratorImages.splice(idx, 1)
+        post.markModified('collaboratorImages')
+    }
+
+    if (uid === ownerId) {
+        if (!removedUrl && post.img) removedUrl = String(post.img)
+        post.img = undefined
+        if (Array.isArray(post.images)) {
+            if (removedUrl) {
+                post.images = post.images.filter((u) => String(u) !== String(removedUrl))
+            } else {
+                post.images = []
+            }
+            post.markModified('images')
+        }
+    }
+
+    if (removedUrl) await deleteMediaAsset(removedUrl).catch(() => {})
 }
 
 /** Ordered carousel URLs: owner first, then contributors (matches client). */

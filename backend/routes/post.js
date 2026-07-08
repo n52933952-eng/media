@@ -2,7 +2,7 @@ import express from 'express'
 
 const router = express.Router()
 
-import{LikeComent,ReplyToComment,createPost,getPost,getPostComments,deletePost,updatePost,updateCarouselPostImages,LikePost,getPostLikes,ReplyPost,getFeedPost,getUserPosts,getUserPostsById,addContributorToPost,removeContributorFromPost,setContributorImage,setCollaborativePostAudio,removeCollaborativePostAudio,hidePostFromFeed,getHiddenFeedPostIds,getUserComments,deleteComment} from '../controller/post.js'
+import{LikeComent,ReplyToComment,createPost,getPost,getPostComments,deletePost,updatePost,updateCarouselPostImages,LikePost,getPostLikes,ReplyPost,getFeedPost,getUserPosts,getUserPostsById,addContributorToPost,removeContributorFromPost,setContributorImage,removeContributorImage,setCollaborativePostAudio,removeCollaborativePostAudio,hidePostFromFeed,getHiddenFeedPostIds,getUserComments,deleteComment} from '../controller/post.js'
 import protectRoute from '../middlware/protectRoute.js'
 import optionalAuth from '../middlware/optionalAuth.js'
 
@@ -33,6 +33,7 @@ router.delete("/comment/:postId/:replyId", protectRoute, deleteComment)
 router.put("/carousel/:postId/images", protectRoute, updateCarouselPostImages)
 router.put("/collaborative/:postId/contributor", protectRoute, addContributorToPost)
 router.put("/collaborative/:postId/contributor-image", protectRoute, setContributorImage)
+router.delete("/collaborative/:postId/contributor-image", protectRoute, removeContributorImage)
 router.put("/collaborative/:postId/audio", protectRoute, setCollaborativePostAudio)
 router.delete("/collaborative/:postId/audio", protectRoute, removeCollaborativePostAudio)
 router.delete("/collaborative/:postId/contributor/:contributorId", protectRoute, removeContributorFromPost)

@@ -2220,6 +2220,66 @@ export const setContributorImage = async (req, res) => {
     }
 }
 
+export const removeContributorImage = async (req, res) => {
+    try {
+        const { postId } = req.params
+        const userId = req.user._id
+
+        const post = await Post.findById(postId)
+        if (!post) {
+            return res.status(404).json({ message: 'Post not found' })
+        }
+        if (!post.isCollaborative) {
+            const hasCarouselImages = Array.isArray(post.images) && post.images.length > 0
+            if (!hasCarouselImages) {
+                return res.status(400).json({ message: 'This post is not collaborative' })
+            }
+        }
+
+        const postOwnerId = post.postedBy.toString()
+        const isOwner = postOwnerId === userId.toString()
+        const isContributor =
+            Array.isArray(post.contributors) &&
+            post.contributors.some((c) => c.toString() === userId.toString())
+
+        if (!isOwner && !isContributor) {
+            return res.status(403).json({
+                message: 'You must be the owner or a contributor to remove your photo',
+            })
+        }
+
+        const uid = userId.toString()
+        const inCollabList = (post.collaboratorImages || []).some((e) => String(e.userId) === uid)
+        const ownerHasLegacyImg = isOwner && !!post.img
+        if (!inCollabList && !ownerHasLegacyImg) {
+            return res.status(400).json({ message: 'No photo to remove' })
+        }
+
+        await removeCollaboratorImageForUser(post, userId)
+        post.editedAt = new Date()
+        await post.save()
+
+        await post.populate('postedBy', 'username profilePic name')
+        await post.populate('contributors', 'username profilePic name')
+
+        const io = getIO()
+        if (io) {
+            const sent = await emitPostUpdatedToRecipients(io, post, postOwnerId)
+            if (sent > 0) {
+                console.log(`📤 [removeContributorImage] Emitted postUpdated to ${sent} recipient socket(s)`)
+            }
+        }
+
+        res.status(200).json({
+            message: 'Contributor photo removed',
+            post,
+        })
+    } catch (error) {
+        console.error('[removeContributorImage]', error)
+        res.status(500).json({ error: error.message })
+    }
+}
+
 /** Viewer-only: hide a post from this user's feed without affecting the post for others. */
 export const hidePostFromFeed = async (req, res) => {
     try {

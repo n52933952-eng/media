@@ -27,12 +27,14 @@ const AddCollaboratorPhotoModal = ({ isOpen, onClose, post, onSaved }) => {
   const { user } = useContext(UserContext)
   const showToast = useShowToast()
   const [saving, setSaving] = useState(false)
+  const [removing, setRemoving] = useState(false)
   const [preview, setPreview] = useState('')
   const [file, setFile] = useState(null)
   const inputRef = useRef()
 
   const currentUserId = user?._id != null ? String(user._id) : ''
-  const hasExistingPhoto = !!getMyCollaboratorImage(post, currentUserId)
+  const existingPhotoUrl = getMyCollaboratorImage(post, currentUserId)
+  const hasExistingPhoto = !!existingPhotoUrl
 
   useEffect(() => {
     if (isOpen) {
@@ -84,6 +86,31 @@ const AddCollaboratorPhotoModal = ({ isOpen, onClose, post, onSaved }) => {
     }
   }
 
+  const handleRemove = async () => {
+    if (!post?._id || !hasExistingPhoto) return
+    if (!window.confirm('Remove your photo from this collaborative post?')) return
+    setRemoving(true)
+    try {
+      const res = await fetch(`${apiBase()}/api/post/collaborative/${post._id}/contributor-image`, {
+        method: 'DELETE',
+        credentials: 'include',
+      })
+      const data = await res.json()
+      const updated = data?.post ?? data
+      if (res.ok && updated?._id) {
+        showToast('Success', 'Photo removed', 'success')
+        onSaved?.(updated)
+        onClose()
+      } else {
+        showToast('Error', data.error || data.message || 'Failed to remove photo', 'error')
+      }
+    } catch (err) {
+      showToast('Error', err.message || 'Failed to remove photo', 'error')
+    } finally {
+      setRemoving(false)
+    }
+  }
+
   const handleClose = () => {
     if (preview.startsWith('blob:')) URL.revokeObjectURL(preview)
     setFile(null)
@@ -110,11 +137,27 @@ const AddCollaboratorPhotoModal = ({ isOpen, onClose, post, onSaved }) => {
             <Box borderRadius="md" overflow="hidden" bg="black">
               <Image src={preview} alt="" maxH="320px" w="full" objectFit="contain" />
             </Box>
+          ) : hasExistingPhoto ? (
+            <Box borderRadius="md" overflow="hidden" bg="black">
+              <Image src={existingPhotoUrl} alt="" maxH="320px" w="full" objectFit="contain" />
+            </Box>
           ) : null}
         </ModalBody>
         <ModalFooter>
           <Button mr={3} onClick={handleClose}>Cancel</Button>
-          <Button colorScheme="blue" onClick={handleSave} isLoading={saving} isDisabled={!file}>
+          {hasExistingPhoto ? (
+            <Button
+              mr={3}
+              colorScheme="red"
+              variant="outline"
+              onClick={handleRemove}
+              isLoading={removing}
+              isDisabled={saving}
+            >
+              Remove photo
+            </Button>
+          ) : null}
+          <Button colorScheme="blue" onClick={handleSave} isLoading={saving} isDisabled={!file || removing}>
             Save
           </Button>
         </ModalFooter>
