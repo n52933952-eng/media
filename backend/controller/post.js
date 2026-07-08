@@ -290,7 +290,7 @@ export const createPost = async(req,res) => {
     try{
   
         const{postedBy,text,isCollaborative,contributors}= req.body
-        // Multipart/form-data sends contributors as a JSON string (same as web); JSON body sends an array.
+        // Clients may send contributors as a JSON string or array.
         let contributorsParsed = contributors
         if (typeof contributors === 'string') {
             try {
@@ -300,7 +300,7 @@ export const createPost = async(req,res) => {
                 contributorsParsed = undefined
             }
         }
-        // Multipart sends strings; only treat explicit true / "true" as collaborative (string "false" is truthy in JS)
+        // Only treat explicit true / "true" as collaborative (string "false" is truthy in JS)
         const wantCollaborative = isCollaborative === true || isCollaborative === 'true'
          
       let img = ''

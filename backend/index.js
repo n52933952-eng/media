@@ -1,5 +1,4 @@
 import express from 'express'
-import multer from 'multer'
 import mongoose from 'mongoose'
 import dotenv from 'dotenv'; 
 import cookieParser from 'cookie-parser'
@@ -39,16 +38,8 @@ dotenv.config()
 
 const app = express()
 
-app.use(express.json({ limit: "500mb" })); // Increased for other endpoints
-app.use(express.urlencoded({ limit: "500mb", extended: true })); // Increased for other endpoints
-// Note: File uploads via Multer use disk storage with a 100MB limit (see middlware/upload.js)
-
-// Increase server timeout for large file uploads (20 minutes)
-app.use((req, res, next) => {
-  req.setTimeout(1200000); // 20 minutes
-  res.setTimeout(1200000); // 20 minutes
-  next();
-});
+app.use(express.json({ limit: "10mb" }));
+app.use(express.urlencoded({ limit: "10mb", extended: true }));
 
 app.use(cookieParser())
 
@@ -172,23 +163,6 @@ app.use("/api/call",CallRoute)
 app.use("/api/story",StoryRoute)
 app.use("/api/media",MediaRoute)
 app.use("/api/capsule",CapsuleRoute)
-
-// Multer upload errors (file too large, wrong type, etc.)
-app.use((err, req, res, next) => {
-  if (err instanceof multer.MulterError) {
-    if (err.code === 'LIMIT_FILE_SIZE') {
-      return res.status(400).json({
-        error: 'File is too large. Maximum upload size is 100MB.',
-        code: 'FILE_TOO_LARGE',
-      })
-    }
-    return res.status(400).json({ error: err.message, code: err.code })
-  }
-  if (err?.message === 'Only images and videos are allowed') {
-    return res.status(400).json({ error: err.message })
-  }
-  next(err)
-})
 
 // 404 handler for API routes (before static files and catch-all)
 app.use('/api/*', (req, res) => {

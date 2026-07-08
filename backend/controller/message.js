@@ -452,7 +452,7 @@ function parseLiveShareStreamerId(text) {
   }
 }
 
-/** Core send logic shared between file-upload and plain-text paths */
+/** Core send logic for new messages (JSON body with optional image URL). */
 async function _persistAndBroadcastMessage({ conversation, senderId, message, img, replyTo }) {
   const liveShareStreamerId = parseLiveShareStreamerId(message)
   const previewText = (message && String(message).trim()) || (img ? '📷 Image' : '')
