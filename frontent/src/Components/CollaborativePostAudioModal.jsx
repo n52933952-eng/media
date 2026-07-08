@@ -15,6 +15,7 @@ import {
 } from '@chakra-ui/react'
 import useShowToast from '../hooks/useShowToast.js'
 import { getPostCarouselAudio, isCarouselPost } from '../utils/postCarousel.js'
+import { uploadMediaToR2 } from '../utils/directR2Upload'
 
 const apiBase = () => (import.meta.env.PROD ? window.location.origin : 'http://localhost:5000')
 
@@ -50,12 +51,12 @@ const CollaborativePostAudioModal = ({ isOpen, onClose, post, onSaved }) => {
     }
     setSaving(true)
     try {
-      const formData = new FormData()
-      formData.append('audio', file)
+      const audio = await uploadMediaToR2(file, 'posts', { skipCompress: true })
       const res = await fetch(`${apiBase()}/api/post/collaborative/${post._id}/audio`, {
         method: 'PUT',
         credentials: 'include',
-        body: formData,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ audio }),
       })
       const data = await res.json()
       const updated = data?.post ?? data

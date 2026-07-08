@@ -1,4 +1,5 @@
-import { uploadMulterFile, deleteMediaAsset, respondToUploadError } from '../services/mediaStorage.js'
+import { deleteMediaAsset } from '../services/mediaStorage.js'
+import { assertManagedMediaUrls } from '../services/r2Presign.js'
 import Story from '../models/story.js'
 import Follow from '../models/follow.js'
 import { getFollowGraphIdsForUser } from '../services/followGraph.js'
@@ -46,23 +47,16 @@ const STORY_TTL_MS = 24 * 60 * 60 * 1000
 /** Max slides in one active story (across multiple “Share” sessions until 24h expiry) */
 const STORY_MAX_TOTAL_SLIDES = 50
 
-/** POST — multipart field `files` (array) */
+/** POST — client already uploaded to R2; body.slides or body.urls + types */
 export const createStory = async (req, res) => {
   try {
-    const files = req.files
-    if (!files?.length) {
-      return res.status(400).json({ error: 'At least one image or video is required' })
-    }
-
     const userId = req.user._id.toString()
+    const body = req.body || {}
 
-    // Optional overlay text. Supports either:
-    // - text: single string applied to all uploaded slides
-    // - texts: JSON array (same length as files) for per-slide captions
-    const textAll = (req.body?.text || '').toString().slice(0, 300)
+    const textAll = (body.text || '').toString().slice(0, 300)
     let texts = null
     try {
-      const raw = req.body?.texts
+      const raw = body.texts
       if (raw) {
         const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw
         if (Array.isArray(parsed)) {
@@ -73,49 +67,164 @@ export const createStory = async (req, res) => {
       texts = null
     }
 
+    let rawSlides = null
+    if (Array.isArray(body.slides)) {
+      rawSlides = body.slides
+    } else if (typeof body.slides === 'string') {
+      try {
+        const parsed = JSON.parse(body.slides)
+        if (Array.isArray(parsed)) rawSlides = parsed
+      } catch (_) {
+        rawSlides = null
+      }
+    }
+
+    const slides = []
+
+    if (rawSlides?.length) {
+      for (let i = 0; i < rawSlides.length; i++) {
+        const s = rawSlides[i] || {}
+        const url = s.url != null ? String(s.url).trim() : ''
+        if (!url) {
+          return res.status(400).json({ error: 'Each slide requires a url' })
+        }
+        const typeRaw = (s.type != null ? String(s.type) : '').toLowerCase()
+        const isVideo =
+          typeRaw === 'video' ||
+          /\.(mp4|webm|ogg|mov)(\?|$)/i.test(url) ||
+          url.includes('/video/')
+        const slideText =
+          (s.text != null ? String(s.text).slice(0, 300) : null) ??
+          ((texts && typeof texts[i] === 'string' ? texts[i] : textAll) || '')
+
+        if (isVideo) {
+          let durationSec = STORY_MAX_VIDEO_SEC
+          if (s.durationSec != null && s.durationSec !== '') {
+            const dur = Number(s.durationSec)
+            if (!Number.isFinite(dur) || dur <= 0) {
+              return res.status(400).json({ error: 'Invalid video durationSec' })
+            }
+            if (dur > STORY_MAX_VIDEO_SEC + 0.5) {
+              return res.status(400).json({
+                error: `Each video must be ${STORY_MAX_VIDEO_SEC} seconds or less`,
+              })
+            }
+            durationSec = Math.min(dur, STORY_MAX_VIDEO_SEC)
+          }
+          slides.push({
+            type: 'video',
+            url,
+            publicId: '',
+            text: slideText,
+            durationSec,
+          })
+        } else {
+          slides.push({
+            type: 'image',
+            url,
+            publicId: '',
+            text: slideText,
+            durationSec: 5,
+          })
+        }
+      }
+    } else {
+      let urls = body.urls
+      if (typeof urls === 'string') {
+        try {
+          urls = JSON.parse(urls)
+        } catch (_) {
+          urls = [urls]
+        }
+      }
+      if (!Array.isArray(urls) || !urls.length) {
+        return res.status(400).json({ error: 'At least one image or video is required' })
+      }
+
+      let types = body.types
+      if (typeof types === 'string') {
+        try {
+          types = JSON.parse(types)
+        } catch (_) {
+          types = null
+        }
+      }
+
+      let durations = body.durations ?? body.durationSecs
+      if (typeof durations === 'string') {
+        try {
+          durations = JSON.parse(durations)
+        } catch (_) {
+          durations = null
+        }
+      }
+
+      for (let i = 0; i < urls.length; i++) {
+        const url = urls[i] != null ? String(urls[i]).trim() : ''
+        if (!url) {
+          return res.status(400).json({ error: 'Each slide requires a url' })
+        }
+        const typeRaw =
+          Array.isArray(types) && types[i] != null ? String(types[i]).toLowerCase() : ''
+        const isVideo =
+          typeRaw === 'video' ||
+          /\.(mp4|webm|ogg|mov)(\?|$)/i.test(url) ||
+          url.includes('/video/')
+        const slideText = (texts && typeof texts[i] === 'string' ? texts[i] : textAll) || ''
+
+        if (isVideo) {
+          let durationSec = STORY_MAX_VIDEO_SEC
+          const rawDur = Array.isArray(durations) ? durations[i] : null
+          if (rawDur != null && rawDur !== '') {
+            const dur = Number(rawDur)
+            if (!Number.isFinite(dur) || dur <= 0) {
+              return res.status(400).json({ error: 'Invalid video durationSec' })
+            }
+            if (dur > STORY_MAX_VIDEO_SEC + 0.5) {
+              return res.status(400).json({
+                error: `Each video must be ${STORY_MAX_VIDEO_SEC} seconds or less`,
+              })
+            }
+            durationSec = Math.min(dur, STORY_MAX_VIDEO_SEC)
+          }
+          slides.push({
+            type: 'video',
+            url,
+            publicId: '',
+            text: slideText,
+            durationSec,
+          })
+        } else {
+          slides.push({
+            type: 'image',
+            url,
+            publicId: '',
+            text: slideText,
+            durationSec: 5,
+          })
+        }
+      }
+    }
+
+    if (!slides.length) {
+      return res.status(400).json({ error: 'At least one image or video is required' })
+    }
+
+    try {
+      assertManagedMediaUrls(slides.map((s) => s.url))
+    } catch (e) {
+      return res.status(400).json({ error: e.message, code: e.code })
+    }
+
     const existing = await Story.findOne({
       user: userId,
       expiresAt: { $gt: new Date() },
     })
     const currentLen = existing?.slides?.length ?? 0
-    if (currentLen + files.length > STORY_MAX_TOTAL_SLIDES) {
+    if (currentLen + slides.length > STORY_MAX_TOTAL_SLIDES) {
       return res.status(400).json({
         error: `Your story can have at most ${STORY_MAX_TOTAL_SLIDES} items before it expires (24h).`,
       })
-    }
-
-    const slides = []
-
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i]
-      const isVideo = file.mimetype.startsWith('video/')
-      const result = await uploadMulterFile(file, 'stories')
-      const slideText = (texts && typeof texts[i] === 'string' ? texts[i] : textAll) || ''
-
-      if (isVideo) {
-        const dur = typeof result.duration === 'number' ? result.duration : parseFloat(result.duration) || 0
-        if (dur > STORY_MAX_VIDEO_SEC + 0.5) {
-          try {
-            await deleteMediaAsset(result.secure_url, result.public_id)
-          } catch (_) {}
-          return res.status(400).json({ error: `Each video must be ${STORY_MAX_VIDEO_SEC} seconds or less` })
-        }
-        slides.push({
-          type: 'video',
-          url: result.secure_url,
-          publicId: result.public_id || '',
-          text: slideText,
-          durationSec: Math.min(dur || STORY_MAX_VIDEO_SEC, STORY_MAX_VIDEO_SEC),
-        })
-      } else {
-        slides.push({
-          type: 'image',
-          url: result.secure_url,
-          publicId: result.public_id || '',
-          text: slideText,
-          durationSec: 5,
-        })
-      }
     }
 
     if (existing) {
@@ -147,9 +256,6 @@ export const createStory = async (req, res) => {
     return res.status(201).json({ story, appended: false })
   } catch (e) {
     console.error('❌ [createStory]', e)
-    if (e?.code === 'VIDEO_TOO_LONG') {
-      return respondToUploadError(res, e, 'Failed to create story')
-    }
     return res.status(500).json({ error: e.message || 'Failed to create story' })
   }
 }

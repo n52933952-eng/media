@@ -25,6 +25,7 @@ import { compressVideo, needsCompression } from '../utils/videoCompress'
 import{UserContext} from '../context/UserContext'
 import{PostContext} from '../context/PostContext'
 import { isCarouselPost, MAX_POST_CAROUSEL_IMAGES } from '../utils/postCarousel.js'
+import { uploadMediaToR2, uploadManyMediaToR2 } from '../utils/directR2Upload'
 
 const MAX_CHAR = 500
 const apiBase = () => (import.meta.env.PROD ? window.location.origin : 'http://localhost:5000')
@@ -245,22 +246,24 @@ const EditPost = ({post, isOpen, onClose, onUpdate}) => {
     
     try {
       if (isCarousel) {
-        const formData = new FormData()
-        formData.append('text', trimmed)
-        const imageSlots = carouselSlots.map((slot) =>
-          slot.kind === 'existing' ? { kind: 'keep', url: slot.url } : { kind: 'new' }
-        )
-        formData.append('imageSlots', JSON.stringify(imageSlots))
-        for (const slot of carouselSlots) {
-          if (slot.kind === 'new' && slot.file) {
-            formData.append('images', slot.file)
+        const newSlots = carouselSlots.filter((s) => s.kind === 'new' && s.file)
+        const uploadedUrls =
+          newSlots.length > 0
+            ? await uploadManyMediaToR2(newSlots.map((s) => s.file), 'posts')
+            : []
+        let newIdx = 0
+        const imageSlots = carouselSlots.map((slot) => {
+          if (slot.kind === 'existing') {
+            return { kind: 'keep', url: slot.url }
           }
-        }
+          return { kind: 'url', url: uploadedUrls[newIdx++] }
+        })
 
         const res = await fetch(`${apiBase()}/api/post/carousel/${post._id}/images`, {
           method: 'PUT',
           credentials: 'include',
-          body: formData,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: trimmed, imageSlots }),
         })
         const data = await res.json()
         if (res.ok && (data.post || data._id)) {
@@ -272,50 +275,25 @@ const EditPost = ({post, isOpen, onClose, onUpdate}) => {
         return
       }
 
-      const formData = new FormData()
-      formData.append('text', postText)
-      
       if (image && image instanceof File && !isCollaborative) {
-        formData.append('file', image)
-        
-        const xhr = new XMLHttpRequest()
-        xhr.upload.addEventListener('progress', (e) => {
-          if (e.lengthComputable) setUploadProgress((e.loaded / e.total) * 100)
+        setUploadProgress(20)
+        const isVideo = image.type?.startsWith('video/')
+        const img = await uploadMediaToR2(image, 'posts', { skipCompress: !!isVideo })
+        setUploadProgress(80)
+        const res = await fetch(`${apiBase()}/api/post/${post._id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ text: postText, img }),
         })
-        xhr.open('PUT', `${apiBase()}/api/post/${post._id}`)
-        xhr.withCredentials = true
-        xhr.timeout = 1200000
-        
-        xhr.ontimeout = () => {
-          showToast("Upload timeout", "Please try again.", "error")
+        const data = await res.json()
+        setUploadProgress(100)
+        if (res.ok && data.post) {
+          finishUpdate(data.post)
+        } else {
+          showToast("Error", data.error || "Failed to update post", "error")
           setLoading(false)
-          setUploadProgress(0)
         }
-        xhr.onerror = () => {
-          showToast("Upload error", "Network error during upload.", "error")
-          setLoading(false)
-          setUploadProgress(0)
-        }
-        xhr.onload = () => {
-          if (xhr.status === 200) {
-            try {
-              const data = JSON.parse(xhr.responseText)
-              if (data.error) {
-                showToast("Error", data.error, "error")
-                setLoading(false)
-                return
-              }
-              finishUpdate(data.post)
-            } catch {
-              showToast("Error", "Failed to parse server response", "error")
-              setLoading(false)
-            }
-          } else {
-            showToast("Error", "Failed to update post", "error")
-            setLoading(false)
-          }
-        }
-        xhr.send(formData)
       } else {
         const res = await fetch(`${apiBase()}/api/post/${post._id}`, {
           method: 'PUT',

@@ -21,12 +21,11 @@ import {
 } from '../controller/message.js'
 
 import protectRoute from '../middlware/protectRoute.js'
-import upload from '../middlware/upload.js'
 
 const router = express.Router()
 
 // ── Message send / ack ─────────────────────────────────────────────────────
-router.post('/', protectRoute, upload.single('file'), sendMessaeg)
+router.post('/', protectRoute, sendMessaeg)
 router.post('/ack-delivered', ackMessageDeliveredHttp)
 router.get('/undelivered-ids', protectRoute, getUndeliveredIncomingMessageIds)
 

@@ -20,6 +20,7 @@ import {
 import useShowToast from '../hooks/useShowToast.js'
 import API_BASE_URL from '../config/api'
 import { compressVideo, needsCompression } from '../utils/videoCompress'
+import { uploadManyMediaToR2 } from '../utils/directR2Upload'
 
 const MAX_FILES = 20
 const MAX_CAPTION = 300
@@ -114,61 +115,57 @@ export default function AddStoryModal({ isOpen, onClose, onPosted }) {
     setPreviews(nextPreviews)
   }
 
-  const submit = () => {
+  const submit = async () => {
     if (!files.length) {
       showToast('Add media', 'Choose at least one photo or video.', 'error')
       return
     }
 
-    const fd = new FormData()
-    files.forEach((f) => fd.append('files', f))
     const t = caption.trim().slice(0, MAX_CAPTION)
-    if (t) fd.append('text', t)
-
     setLoading(true)
-    setProgress(0)
+    setProgress(10)
 
-    const xhr = new XMLHttpRequest()
-    xhr.open('POST', `${API_BASE_URL}/api/story/create`)
-    xhr.withCredentials = true
-    xhr.timeout = 1_200_000
-
-    xhr.upload.addEventListener('progress', (ev) => {
-      if (ev.lengthComputable) setProgress((ev.loaded / ev.total) * 100)
-    })
-
-    xhr.onload = () => {
-      setLoading(false)
-      setProgress(0)
-      try {
-        const data = JSON.parse(xhr.responseText || '{}')
-        if (xhr.status >= 200 && xhr.status < 300 && !data.error) {
-          showToast('Story', 'Your story was shared.', 'success')
-          window.dispatchEvent(new CustomEvent('storyStripChanged'))
-          onPosted?.()
-          reset()
-          onClose()
-        } else {
-          showToast('Error', data.error || 'Could not create story', 'error')
+    try {
+      const urls = await uploadManyMediaToR2(files, 'stories')
+      setProgress(80)
+      const slides = urls.map((url, i) => {
+        const f = files[i]
+        const isVid =
+          f?.type?.startsWith('video/') ||
+          /\.(mp4|webm|ogg|mov)(\?|$)/i.test(url)
+        return {
+          type: isVid ? 'video' : 'image',
+          url,
+          ...(t ? { text: t } : {}),
         }
-      } catch {
-        showToast('Error', 'Could not create story', 'error')
+      })
+
+      const res = await fetch(`${API_BASE_URL}/api/story/create`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          slides,
+          ...(t ? { text: t } : {}),
+        }),
+      })
+      const data = await res.json().catch(() => ({}))
+      setProgress(100)
+      if (res.ok && !data.error) {
+        showToast('Story', 'Your story was shared.', 'success')
+        window.dispatchEvent(new CustomEvent('storyStripChanged'))
+        onPosted?.()
+        reset()
+        onClose()
+      } else {
+        showToast('Error', data.error || 'Could not create story', 'error')
       }
-    }
-
-    xhr.onerror = () => {
+    } catch (e) {
+      showToast('Error', e?.message || 'Network error while uploading.', 'error')
+    } finally {
       setLoading(false)
       setProgress(0)
-      showToast('Error', 'Network error while uploading.', 'error')
     }
-
-    xhr.ontimeout = () => {
-      setLoading(false)
-      setProgress(0)
-      showToast('Timeout', 'Upload took too long. Try fewer or smaller files.', 'error')
-    }
-
-    xhr.send(fd)
   }
 
   return (

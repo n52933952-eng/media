@@ -1,5 +1,8 @@
 export const MAX_POST_CAROUSEL_IMAGES = 4
 
+/** Soft cap for collaborative posts — keeps feed docs and fanout bounded. */
+export const MAX_COLLABORATORS = 20
+
 export function contributorIdStr(c) {
     if (c == null) return ''
     if (typeof c === 'object' && c._id != null) return String(c._id)

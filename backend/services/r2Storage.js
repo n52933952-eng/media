@@ -20,7 +20,7 @@ function publicBaseUrl() {
   return String(process.env.R2_PUBLIC_URL || '').replace(/\/$/, '')
 }
 
-function bucketName() {
+export function bucketName() {
   return process.env.R2_BUCKET_NAME || 'playsocial-media'
 }
 
@@ -32,7 +32,7 @@ function s3Endpoint() {
 
 let client = null
 
-function getClient() {
+export function getClient() {
   if (client) return client
   const accessKeyId = process.env.R2_ACCESS_KEY_ID
   const secretAccessKey = process.env.R2_SECRET_ACCESS_KEY
@@ -47,7 +47,7 @@ function getClient() {
   return client
 }
 
-function extFromMimetype(mimetype) {
+export function extFromMimetype(mimetype) {
   const mt = String(mimetype || '').toLowerCase()
   if (MIME_EXT[mt]) return MIME_EXT[mt]
   const sub = mt.split('/')[1]

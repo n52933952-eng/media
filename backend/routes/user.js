@@ -3,7 +3,6 @@ import express from 'express'
 const router = express.Router()
 import{SignUp,LoginUser,GoogleLogin,LogOut,FollowAndUnfollow,getMe,getUserProfile,UpdateUser,searchUsers,getSuggestedUsers,getBusyChessUsers,getBusyCardUsers,getBusyGameUsers,getFollowingUsers,getFollowersUsers,removeFollower,DeleteMyAccount} from '../controller/user.js'
 import protectRoute  from '../middlware/protectRoute.js'
-import upload from '../middlware/upload.js'
 import User from '../models/user.js'
 
 router.post("/signup", SignUp)
@@ -19,7 +18,7 @@ router.get("/me", protectRoute, getMe)
 // Put getUserPro before other routes that might conflict
 router.get("/getUserPro/:query",protectRoute,getUserProfile)
 
-router.put("/update/:id",protectRoute,upload.single('file'),UpdateUser)
+router.put("/update/:id",protectRoute,UpdateUser)
 router.get("/search",protectRoute,searchUsers)  // GET /api/user/search?search=john
 router.get("/suggested",protectRoute,getSuggestedUsers)  // GET /api/user/suggested
 router.get("/following",protectRoute,getFollowingUsers)  // GET /api/user/following

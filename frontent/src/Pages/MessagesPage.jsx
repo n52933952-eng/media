@@ -55,6 +55,7 @@ import { MdDelete } from 'react-icons/md'
 import EmojiPicker from 'emoji-picker-react'
 import { compressVideo, needsCompression } from '../utils/videoCompress'
 import { isVideoUrl } from '../utils/mediaUrl'
+import { uploadMediaToR2 } from '../utils/directR2Upload'
 import LiveShareChatCard from '../Components/LiveShareChatCard'
 import { parseLiveShareMessage, liveSharePreviewText, resolveLiveShareFromMessage } from '../utils/liveShareMessage'
 
@@ -2222,114 +2223,59 @@ const MessagesPage = () => {
     setUploadProgress(0) // Reset progress
     
     try {
-      // If no file, send as JSON (no FormData needed)
-      if (!image || !(image instanceof File)) {
-        const url = `${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/message`
-        
-        const response = await fetch(url, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            recipientId: isGroup ? undefined : recipientId,
-            conversationId: isGroup ? selectedConversation._id : undefined,
-            message: newMessage || '',
-            replyTo: replyingTo?._id || null
-          }),
-          credentials: 'include',
-          redirect: 'manual' // CRITICAL: Prevent any redirects that could cause reload
-        })
-        
-        // Check for redirect status codes
-        if (response.type === 'opaqueredirect' || response.status === 301 || response.status === 302) {
-          console.error('Unexpected redirect detected')
-          throw new Error('Server returned a redirect - this should not happen')
-        }
-        
-        if (!response.ok) {
-          const contentType = response.headers.get('content-type')
-          if (contentType && contentType.includes('application/json')) {
-            const errorData = await response.json().catch(() => ({}))
-            throw new Error(errorData.error || errorData.message || 'Failed to send message')
-          } else {
-            throw new Error(`Server error: ${response.status} ${response.statusText}`)
-          }
-        }
-        
-        // Verify response is JSON
-        const contentType = response.headers.get('content-type')
-        if (!contentType || !contentType.includes('application/json')) {
-          console.error('Server returned non-JSON response:', contentType)
-          throw new Error('Server returned invalid response format')
-        }
-        
-        const data = await response.json()
-        handleMessageSent(data)
-        return false
+      let imgUrl
+      if (image instanceof File) {
+        setUploadProgress(20)
+        const isVid = image.type?.startsWith('video/')
+        imgUrl = await uploadMediaToR2(image, 'messages', { skipCompress: !!isVid })
+        setUploadProgress(80)
       }
+
+      const url = `${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/message`
       
-      // Upload file via backend (R2 storage)
-      const formData = new FormData()
-      if (isGroup) {
-        formData.append('conversationId', selectedConversation._id)
-      } else {
-        formData.append('recipientId', recipientId)
-      }
-      formData.append('message', newMessage || '')
-      formData.append('file', image)
-      
-      // Add replyTo to formData if exists
-      if (replyingTo?._id) {
-        formData.append('replyTo', replyingTo._id)
-      }
-      
-      // Track upload progress using Promise wrapper around XHR
-      await new Promise((resolve, reject) => {
-        const xhr = new XMLHttpRequest()
-        
-        // Upload progress tracking
-        xhr.upload.addEventListener('progress', (e) => {
-          if (e.lengthComputable) {
-            const progress = 80 + ((e.loaded / e.total) * 20)
-            setUploadProgress(Math.min(progress, 100))
-          }
-        })
-        
-        xhr.addEventListener('load', () => {
-          if (xhr.status === 201) {
-            setUploadProgress(100)
-            try {
-              const data = JSON.parse(xhr.responseText)
-              handleMessageSent(data)
-              resolve(data)
-            } catch (error) {
-              console.error('Error parsing response:', error)
-              reject(new Error('Failed to parse server response'))
-            }
-          } else {
-            try {
-              const errorData = JSON.parse(xhr.responseText)
-              reject(new Error(errorData.error || errorData.message || 'Failed to send message'))
-            } catch (error) {
-              reject(new Error(`Failed to send message: ${xhr.statusText}`))
-            }
-          }
-        })
-        
-        xhr.onerror = () => {
-          reject(new Error('Network error while sending message'))
-        }
-        
-        xhr.ontimeout = () => {
-          reject(new Error('Upload timeout. Please try again.'))
-        }
-        
-        xhr.open('POST', `${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/message`, true)
-        xhr.withCredentials = true
-        xhr.timeout = 1200000 // 20 minutes timeout for large uploads
-        xhr.send(formData)
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          recipientId: isGroup ? undefined : recipientId,
+          conversationId: isGroup ? selectedConversation._id : undefined,
+          message: newMessage || '',
+          replyTo: replyingTo?._id || null,
+          ...(imgUrl ? { img: imgUrl } : {}),
+        }),
+        credentials: 'include',
+        redirect: 'manual' // CRITICAL: Prevent any redirects that could cause reload
       })
+      
+      // Check for redirect status codes
+      if (response.type === 'opaqueredirect' || response.status === 301 || response.status === 302) {
+        console.error('Unexpected redirect detected')
+        throw new Error('Server returned a redirect - this should not happen')
+      }
+      
+      if (!response.ok) {
+        const contentType = response.headers.get('content-type')
+        if (contentType && contentType.includes('application/json')) {
+          const errorData = await response.json().catch(() => ({}))
+          throw new Error(errorData.error || errorData.message || 'Failed to send message')
+        } else {
+          throw new Error(`Server error: ${response.status} ${response.statusText}`)
+        }
+      }
+      
+      // Verify response is JSON
+      const contentType = response.headers.get('content-type')
+      if (!contentType || !contentType.includes('application/json')) {
+        console.error('Server returned non-JSON response:', contentType)
+        throw new Error('Server returned invalid response format')
+      }
+      
+      const data = await response.json()
+      setUploadProgress(100)
+      handleMessageSent(data)
+      return false
       
     } catch (error) {
       console.error('Error sending message:', error)

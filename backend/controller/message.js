@@ -1,7 +1,8 @@
 import Conversation from '../models/conversation.js'
 import Message from '../models/message.js'
 import { getRecipientSockedId, getIO, getUserSocket, isUserEffectivelyOnline, getUserSelfRoomId } from '../socket/socket.js'
-import { uploadMulterFile, deleteMediaAsset, isManagedMediaUrl, respondToUploadError } from '../services/mediaStorage.js'
+import { deleteMediaAsset, isManagedMediaUrl } from '../services/mediaStorage.js'
+import { assertManagedMediaUrls } from '../services/r2Presign.js'
 import { incrementUnread, clearConversationUnreadForUsers, emitUnreadCountUpdate, getTotalUnread } from '../services/unreadCounter.js'
 import mongoose from 'mongoose'
 import {
@@ -521,6 +522,16 @@ export const sendMessaeg = async(req,res) => {
     const senderId = req.user._id
     let img = ''
 
+    const imgRaw = req.body.img != null ? String(req.body.img).trim() : ''
+    if (imgRaw) {
+      try {
+        assertManagedMediaUrls([imgRaw])
+        img = imgRaw
+      } catch (e) {
+        return res.status(400).json({ error: e.message, code: e.code })
+      }
+    }
+
     // ── Resolve conversation ───────────────────────────────────────────────
     let conversation
     if (groupConvId) {
@@ -538,25 +549,6 @@ export const sendMessaeg = async(req,res) => {
       }
     }
 
-    if (req.file) {
-      try {
-        const result = await uploadMulterFile(req.file, 'messages')
-        img = result.secure_url
-        const { responseData } = await _persistAndBroadcastMessage({
-          conversation,
-          senderId,
-          message,
-          img,
-          replyTo,
-        })
-        return res.status(201).json(responseData)
-      } catch (error) {
-        console.error('Media upload error:', error)
-        return respondToUploadError(res, error)
-      }
-    }
-
-    // ── Plain text/media path ──────────────────────────────────────────────
     const { responseData } = await _persistAndBroadcastMessage({ conversation, senderId, message, img, replyTo })
     res.status(201).json(responseData)
 

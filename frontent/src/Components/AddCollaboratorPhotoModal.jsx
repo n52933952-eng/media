@@ -19,6 +19,7 @@ import useShowToast from '../hooks/useShowToast.js'
 import { UserContext } from '../context/UserContext'
 import { useContext } from 'react'
 import { getMyCollaboratorImage } from '../utils/postCarousel.js'
+import { uploadMediaToR2 } from '../utils/directR2Upload'
 
 const apiBase = () => (import.meta.env.PROD ? window.location.origin : 'http://localhost:5000')
 
@@ -60,12 +61,12 @@ const AddCollaboratorPhotoModal = ({ isOpen, onClose, post, onSaved }) => {
     }
     setSaving(true)
     try {
-      const formData = new FormData()
-      formData.append('file', file)
+      const img = await uploadMediaToR2(file, 'posts')
       const res = await fetch(`${apiBase()}/api/post/collaborative/${post._id}/contributor-image`, {
         method: 'PUT',
         credentials: 'include',
-        body: formData,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ img }),
       })
       const data = await res.json()
       const updated = data?.post ?? data

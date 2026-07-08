@@ -14,6 +14,7 @@ import NotificationRoute from './routes/notification.js'
 import ActivityRoute from './routes/activity.js'
 import CallRoute from './routes/call.js'
 import StoryRoute from './routes/story.js'
+import MediaRoute from './routes/media.js'
 import CapsuleRoute from './routes/capsule.js'
 import { processDueCapsules } from './controller/capsule.js'
 import { initializeSocket } from './socket/socket.js'
@@ -169,6 +170,7 @@ app.use("/api/notification",NotificationRoute)
 app.use("/api/activity",ActivityRoute)
 app.use("/api/call",CallRoute)
 app.use("/api/story",StoryRoute)
+app.use("/api/media",MediaRoute)
 app.use("/api/capsule",CapsuleRoute)
 
 // Multer upload errors (file too large, wrong type, etc.)

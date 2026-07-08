@@ -13,7 +13,8 @@ import ChessBusy from '../models/chessBusy.js'
 import bcryptjs from 'bcryptjs' 
 import GenerateToken from '../utils/GenerateToken.js'
 import mongoose from 'mongoose'
-import { uploadMulterFile, deleteMediaAsset, respondToUploadError } from '../services/mediaStorage.js'
+import { deleteMediaAsset } from '../services/mediaStorage.js'
+import { assertManagedMediaUrls, isR2Url } from '../services/r2Presign.js'
 import { LIVE_CHANNELS } from '../config/channels.js'
 import * as redisService from '../services/redis.js'
 import { getIO, getUserSelfRoomId } from '../socket/socket.js'
@@ -627,7 +628,7 @@ export const UpdateUser = async(req,res) => {
 
         let user = await User.findById(userId)
         
-        let profilePic = req.body.profilePic
+        let profilePic = req.body.profilePic != null ? String(req.body.profilePic).trim() : ''
          
 
         if(!user){
@@ -642,65 +643,23 @@ export const UpdateUser = async(req,res) => {
         const hashPassword = await bcryptjs.hashSync(password,10)
         user.password = hashPassword
       }
-       
-      if (req.file) {
+
+      const previousProfilePic = user.profilePic || ''
+      const previousUsername = user.username || ''
+      if (profilePic && isR2Url(profilePic)) {
         try {
-          if (user.profilePic) {
-            await deleteMediaAsset(String(user.profilePic))
-          }
-          const result = await uploadMulterFile(req.file, 'profile-pics')
-          profilePic = result.secure_url
-
-          user.name = name || user.name
-          user.username = username || user.username
-          user.email = email || user.email
-          user.profilePic = profilePic || user.profilePic
-          user.bio = bio || user.bio
-          user.country = country !== undefined ? country : user.country
-          user.instagram = instagram !== undefined ? instagram : user.instagram
-
-          user = await user.save()
-
-          try {
-            await updateCommentDenormForUser(userId, {
-              username: user.username,
-              profilePic: user.profilePic,
-            })
-            await Post.updateMany(
-              { 'replies.userId': userId },
-              {
-                $set: {
-                  'replies.$[reply].username': user.username,
-                  'replies.$[reply].userProfilePic': user.profilePic,
-                },
-              },
-              { arrayFilters: [{ 'reply.userId': userId }], timestamps: false }
-            )
-          } catch (updateError) {
-            console.error('Error updating comments with new profile picture:', updateError)
-          }
-
-          const { following, followers } = await getFollowGraphIdsForUser(user._id)
-          await invalidateUserAuthCache(userId)
-          return res.status(200).json({
-            _id: user._id,
-            name: user.name,
-            username: user.username,
-            email: user.email,
-            bio: user.bio,
-            profilePic: user.profilePic,
-            country: user.country,
-            instagram: user.instagram,
-            followers,
-            following,
-          })
-        } catch (error) {
-          console.error('Profile picture upload error:', error)
-          return respondToUploadError(res, error, 'Failed to upload profile picture')
+          assertManagedMediaUrls([profilePic])
+        } catch (e) {
+          return res.status(400).json({ error: e.message, code: e.code })
         }
+        if (previousProfilePic && previousProfilePic !== profilePic) {
+          await deleteMediaAsset(String(previousProfilePic)).catch(() => {})
+        }
+      } else if (profilePic && !isR2Url(profilePic)) {
+        // Ignore non-R2 values (e.g. stale client echoes); keep existing pic.
+        profilePic = ''
       }
 
-      // No file upload - update user immediately
       user.name = name || user.name
       user.username = username || user.username 
       user.email = email || user.email 
@@ -709,14 +668,11 @@ export const UpdateUser = async(req,res) => {
       user.country = country !== undefined ? country : user.country
       user.instagram = instagram !== undefined ? instagram : user.instagram
 
+      const profilePicChanged = !!(profilePic && profilePic !== previousProfilePic)
+      const usernameChanged = !!(username && username !== previousUsername)
+
       user = await user.save()
 
-      // Update all existing comments with new profile picture and username
-      // This ensures all comments show the updated profile picture immediately
-      // Only update if profile picture or username actually changed
-      const profilePicChanged = profilePic && profilePic !== user.profilePic
-      const usernameChanged = username && username !== user.username
-      
       if (profilePicChanged || usernameChanged) {
         try {
           await updateCommentDenormForUser(userId, {
@@ -735,13 +691,10 @@ export const UpdateUser = async(req,res) => {
           )
           console.log(`✅ Updated all comments for user ${user.username} with new profile picture/username`)
         } catch (updateError) {
-          // Log error but don't fail the profile update
           console.error('Error updating comments with new profile picture:', updateError)
         }
       }
 
-      // Return safe fields only (exclude password)
-      // Include followers and following to preserve them in frontend
       const { following, followers } = await getFollowGraphIdsForUser(user._id)
       await invalidateUserAuthCache(userId)
       res.status(200).json({

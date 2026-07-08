@@ -25,6 +25,8 @@ import{UserContext} from '../context/UserContext'
 import{PostContext} from '../context/PostContext'
 import { SocketContext } from '../context/SocketContext'
 import useShowToast from '../hooks/useShowToast.js'
+import API_BASE_URL from '../config/api'
+import { uploadMediaToR2 } from '../utils/directR2Upload'
 
 
 
@@ -117,158 +119,72 @@ const handleImageChange = async (event) => {
     setUploadProgress(0)
  
   try{
-    const formData = new FormData()
-    formData.append('name', inputs.name)
-    formData.append('username', inputs.username)
-    formData.append('email', inputs.email)
-    formData.append('bio', inputs.bio || '')
+    const payload = {
+      name: inputs.name,
+      username: inputs.username,
+      email: inputs.email,
+      bio: inputs.bio || '',
+      country: inputs.country || '',
+      profilePic: user.profilePic,
+    }
     if (inputs.password) {
-      formData.append('password', inputs.password)
+      payload.password = inputs.password
     }
-    
-    // Upload profile picture if a new file was selected
-    if (imageFile instanceof File) {
-      formData.append('file', imageFile)
-      
-      const xhr = new XMLHttpRequest()
-      
-      xhr.upload.addEventListener('progress', (e) => {
-        if (e.lengthComputable) {
-          setUploadProgress((e.loaded / e.total) * 100)
-        }
-      })
-      
-      xhr.open('PUT', `${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/user/update/${user._id}`)
-      xhr.withCredentials = true
-      xhr.timeout = 600000 // 10 minutes
-      
-      xhr.onload = () => {
-        if (xhr.status === 200) {
-          try {
-            const data = JSON.parse(xhr.responseText)
-            
-            if(data.error){
-              showToast("Error", data.error, "error")
-              setUpdating(false)
-              setUploadProgress(0)
-              return
-            }
-            
-            showToast("Success", "Profile updated successfully", "success")
-            setUser(data)
-            localStorage.setItem("userInfo", JSON.stringify(data))
-            
-            // Update all comments in posts with new profile picture and username
-            // This ensures comments update immediately in the UI
-            if (data.profilePic || data.username) {
-              setFollowPost(prev => prev.map(post => {
-                if (post.replies && post.replies.length > 0) {
-                  const updatedReplies = post.replies.map(reply => {
-                    // Check if this comment is from the current user
-                    if (reply.userId && reply.userId.toString() === user._id.toString()) {
-                      return {
-                        ...reply,
-                        userProfilePic: data.profilePic || reply.userProfilePic,
-                        username: data.username || reply.username
-                      }
-                    }
-                    return reply
-                  })
-                  return {
-                    ...post,
-                    replies: updatedReplies
-                  }
-                }
-                return post
-              }))
-            }
-            
-            // Clear image preview and file
-            if (imagePreview && imagePreview.startsWith('blob:')) {
-              URL.revokeObjectURL(imagePreview)
-            }
-            setImageFile(null)
-            setImagePreview(null)
-            setUploadProgress(0)
-            setUpdating(false)
-          } catch (error) {
-            showToast("Error", "Failed to parse server response", "error")
-            setUpdating(false)
-            setUploadProgress(0)
-          }
-        } else {
-          try {
-            const errorData = JSON.parse(xhr.responseText)
-            showToast("Error", errorData.error || "Failed to update profile", "error")
-          } catch (error) {
-            showToast("Error", "Failed to update profile", "error")
-          }
-          setUpdating(false)
-          setUploadProgress(0)
-        }
-      }
-      
-      xhr.onerror = () => {
-        showToast("Error", "Network error while updating profile", "error")
-        setUpdating(false)
-        setUploadProgress(0)
-      }
-      
-      xhr.ontimeout = () => {
-        showToast("Error", "Upload timeout. Please try again.", "error")
-        setUpdating(false)
-        setUploadProgress(0)
-      }
-      
-      xhr.send(formData)
-      return // Exit early, response handled in xhr callbacks
-    }
-    
-    // No file upload - just send profile data
-    const res = await fetch(`${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/user/update/${user._id}`,{
-      method:"PUT",
-      headers: { "Content-Type": "application/json" },
-      credentials: "include",
-      body: JSON.stringify({ ...inputs, profilePic: user.profilePic }) // Keep existing profile pic if no new one
-    })
-   
-    const data = await res.json()
 
-    if(data.error){
-      showToast("Error", data.error, "error")
+    if (imageFile instanceof File) {
+      setUploadProgress(20)
+      payload.profilePic = await uploadMediaToR2(imageFile, 'profile-pics')
+      setUploadProgress(80)
+    }
+
+    const res = await fetch(`${API_BASE_URL}/api/user/update/${user._id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify(payload),
+    })
+
+    const data = await res.json()
+    setUploadProgress(100)
+
+    if (data.error) {
+      showToast('Error', data.error, 'error')
       setUpdating(false)
+      setUploadProgress(0)
       return
     }
-    
-    showToast("Success", "Profile updated successfully", "success")
+
+    showToast('Success', 'Profile updated successfully', 'success')
     setUser(data)
-    localStorage.setItem("userInfo", JSON.stringify(data))
-    
-    // Update all comments in posts with new profile picture and username
-    // This ensures comments update immediately in the UI
+    localStorage.setItem('userInfo', JSON.stringify(data))
+
     if (data.profilePic || data.username) {
-      setFollowPost(prev => prev.map(post => {
-        if (post.replies && post.replies.length > 0) {
-          const updatedReplies = post.replies.map(reply => {
-            // Check if this comment is from the current user
-            if (reply.userId && reply.userId.toString() === user._id.toString()) {
-              return {
-                ...reply,
-                userProfilePic: data.profilePic || reply.userProfilePic,
-                username: data.username || reply.username
+      setFollowPost((prev) =>
+        prev.map((post) => {
+          if (post.replies && post.replies.length > 0) {
+            const updatedReplies = post.replies.map((reply) => {
+              if (reply.userId && reply.userId.toString() === user._id.toString()) {
+                return {
+                  ...reply,
+                  userProfilePic: data.profilePic || reply.userProfilePic,
+                  username: data.username || reply.username,
+                }
               }
-            }
-            return reply
-          })
-          return {
-            ...post,
-            replies: updatedReplies
+              return reply
+            })
+            return { ...post, replies: updatedReplies }
           }
-        }
-        return post
-      }))
+          return post
+        }),
+      )
     }
-    
+
+    if (imagePreview && imagePreview.startsWith('blob:')) {
+      URL.revokeObjectURL(imagePreview)
+    }
+    setImageFile(null)
+    setImagePreview(null)
+    setUploadProgress(0)
     setUpdating(false)
   }
   catch(error){

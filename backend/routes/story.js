@@ -1,6 +1,5 @@
 import express from 'express'
 import protectRoute from '../middlware/protectRoute.js'
-import upload from '../middlware/upload.js'
 import {
   createStory,
   deleteMyStory,
@@ -13,7 +12,7 @@ import {
 
 const router = express.Router()
 
-router.post('/create', protectRoute, upload.array('files', 20), createStory)
+router.post('/create', protectRoute, createStory)
 router.delete('/mine', protectRoute, deleteMyStory)
 router.delete('/mine/slide', protectRoute, deleteMyStorySlide)
 router.get('/feed-strip', protectRoute, getFeedStrip)

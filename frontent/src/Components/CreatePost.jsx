@@ -29,6 +29,7 @@ import useShowToast from '../hooks/useShowToast.js'
 import { compressVideo, needsCompression } from '../utils/videoCompress'
 import API_BASE_URL from '../config/api'
 import { buildInitialContributorIds } from '../utils/collaborators'
+import { uploadMediaToR2, uploadManyMediaToR2 } from '../utils/directR2Upload'
 import CollaboratorPicker from './CollaboratorPicker'
 
 import{UserContext} from '../context/UserContext'
@@ -320,241 +321,67 @@ const CreatePost = () => {
      setUploadProgress(0)
      
   try{
-    // Upload file via backend (R2 storage)
-    const formData = new FormData()
-    formData.append('postedBy', user._id)
-    formData.append('text', postText)
+    const payload = {
+      postedBy: user._id,
+      text: postText,
+    }
     if (isCollaborative) {
-      formData.append('isCollaborative', 'true')
-      formData.append(
-        'contributors',
-        JSON.stringify(buildInitialContributorIds(user?._id, selectedCollaborators))
-      )
+      payload.isCollaborative = true
+      payload.contributors = buildInitialContributorIds(user?._id, selectedCollaborators)
     }
-    
+
+    setUploadProgress(10)
+
     if (carouselFiles.length > 0) {
-      carouselFiles.forEach((f) => formData.append('images', f))
-      if (audioFile) formData.append('audio', audioFile)
-
-      const xhr = new XMLHttpRequest()
-      xhr.upload.addEventListener('progress', (e) => {
-        if (e.lengthComputable) setUploadProgress((e.loaded / e.total) * 100)
-      })
-      xhr.open('POST', `${API_BASE_URL}/api/post/create`)
-      xhr.withCredentials = true
-      xhr.timeout = 1200000
-      xhr.onload = () => {
-        if (xhr.status === 200) {
-          try {
-            const data = JSON.parse(xhr.responseText)
-            if (data.error) {
-              showToast('Error', data.error, 'error')
-              setLoading(false)
-              return
-            }
-            if (data.post && setFollowPost) {
-              const newPost = {
-                ...data.post,
-                postedBy: data.post.postedBy || {
-                  _id: user._id,
-                  username: user.username,
-                  name: user.name,
-                  profilePic: user.profilePic,
-                },
-              }
-              setFollowPost((prev) => {
-                const exists = prev.some((p) => p._id?.toString() === newPost._id?.toString())
-                return exists ? prev : [newPost, ...prev]
-              })
-            }
-            showToast('Success', 'Post created successfully', 'success')
-            onClose()
-            setPostText('')
-            clearCarouselMedia()
-            if (imagePreview && imagePreview.startsWith('blob:')) URL.revokeObjectURL(imagePreview)
-            setImage(null)
-            setImagePreview('')
-            setUploadProgress(0)
-            setIsCollaborative(false)
-            setSelectedCollaborators([])
-            setLoading(false)
-          } catch {
-            showToast('Error', 'Failed to parse server response', 'error')
-            setLoading(false)
-          }
-        } else {
-          showToast('Error', 'Failed to create post', 'error')
-          setLoading(false)
-        }
+      payload.images = await uploadManyMediaToR2(carouselFiles, 'posts')
+      setUploadProgress(70)
+      if (audioFile) {
+        payload.audio = await uploadMediaToR2(audioFile, 'posts', { skipCompress: true })
       }
-      xhr.onerror = () => {
-        showToast('Error', 'Network error while creating post', 'error')
-        setLoading(false)
+      setUploadProgress(90)
+    } else if (image instanceof File) {
+      const isVideo = image.type?.startsWith('video/')
+      payload.img = await uploadMediaToR2(image, 'posts', { skipCompress: !!isVideo })
+      if (!isVideo) payload.images = [payload.img]
+      setUploadProgress(80)
+      if (audioFile) {
+        payload.audio = await uploadMediaToR2(audioFile, 'posts', { skipCompress: true })
       }
-      xhr.send(formData)
-      return
+      setUploadProgress(90)
+    } else if (typeof image === 'string' && image) {
+      payload.img = image
     }
 
-    if (image) {
-      // Check if image is a File object (needs upload) or URL string
-      if (image instanceof File) {
-        formData.append('file', image)
-        
-        // Track upload progress
-        const xhr = new XMLHttpRequest()
-        
-        xhr.upload.addEventListener('progress', (e) => {
-          if (e.lengthComputable) {
-            setUploadProgress((e.loaded / e.total) * 100)
-          }
-        })
-        
-        xhr.addEventListener('load', () => {
-          if (xhr.status === 200) {
-            setUploadProgress(100)
-          }
-        })
-        
-        xhr.open('POST', `${API_BASE_URL}/api/post/create`)
-        xhr.withCredentials = true
-        xhr.timeout = 1200000 // 20 minutes for large video uploads
-        
-        // Handle timeout
-        xhr.ontimeout = () => {
-          showToast("Upload timeout", "Video upload is taking longer than expected. Please try again or use a smaller video.", "error")
-          setLoading(false)
-          setUploadProgress(0)
-        }
-        
-        // Handle network errors
-        xhr.onerror = () => {
-          showToast("Upload error", "Network error during upload. Please check your connection and try again.", "error")
-          setLoading(false)
-          setUploadProgress(0)
-        }
-        
-        xhr.onload = () => {
-          if (xhr.status === 200) {
-            try {
-              const data = JSON.parse(xhr.responseText)
-              
-              if(data.error){
-                showToast("Error", data.error, "error")
-                setLoading(false)
-                setUploadProgress(0)
-                return
-              }
-
-              // Immediately add the new post to the top of the feed (simple state update)
-              if (data.post && setFollowPost) {
-                // Populate the post with user data if not already populated
-                const newPost = {
-                  ...data.post,
-                  postedBy: data.post.postedBy || {
-                    _id: user._id,
-                    username: user.username,
-                    name: user.name,
-                    profilePic: user.profilePic
-                  }
-                }
-                
-                // Simple: just add to the top
-                setFollowPost(prev => {
-                  // Check if post already exists (prevent duplicates)
-                  const exists = prev.some(p => p._id?.toString() === newPost._id?.toString())
-                  if (exists) {
-                    return prev
-                  }
-                  // Add new post at the top
-                  return [newPost, ...prev]
-                })
-              }
-
-              showToast("Success", "Post created successfully", "success")
-              onClose()
-              setPostText("")
-              if (imagePreview && imagePreview.startsWith('blob:')) {
-                URL.revokeObjectURL(imagePreview)
-              }
-              setImage(null)
-              setImagePreview("")
-              setUploadProgress(0)
-              setIsCollaborative(false)
-              setSelectedCollaborators([])
-              setLoading(false)
-            } catch (error) {
-              showToast("Error", "Failed to parse server response", "error")
-              setLoading(false)
-              setUploadProgress(0)
-            }
-          } else {
-            try {
-              const errorData = JSON.parse(xhr.responseText)
-              showToast("Error", errorData.error || "Failed to create post", "error")
-            } catch (error) {
-              showToast("Error", "Failed to create post", "error")
-            }
-            setLoading(false)
-            setUploadProgress(0)
-          }
-        }
-        
-        xhr.onerror = () => {
-          showToast("Error", "Network error while creating post", "error")
-          setLoading(false)
-          setUploadProgress(0)
-        }
-        
-        xhr.ontimeout = () => {
-          showToast("Error", "Upload timeout. Please try again.", "error")
-          setLoading(false)
-          setUploadProgress(0)
-        }
-        
-        xhr.send(formData)
-        return // Exit early, response handled in xhr callbacks
-      } else {
-        // Image is already a URL (shouldn't happen, but handle it)
-        formData.append('fileUrl', image)
-      }
-    }
-
-    // No file - just send post data
-    const res = await fetch(`${API_BASE_URL}/api/post/create`,{
-      credentials: "include",
-      method:"POST",
-      body: formData
+    const res = await fetch(`${API_BASE_URL}/api/post/create`, {
+      credentials: 'include',
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
     })
 
     const data = await res.json()
+    setUploadProgress(100)
 
-    if(data.error){
-      showToast("Error", data.error, "error")
+    if (data.error) {
+      showToast('Error', data.error, 'error')
       setLoading(false)
+      setUploadProgress(0)
       return
     }
 
-    // Immediately add the new post to the top of the feed (simple state update)
     if (data.post && setFollowPost) {
-      // Populate the post with user data if not already populated
       const newPost = {
         ...data.post,
         postedBy: data.post.postedBy || {
           _id: user._id,
           username: user.username,
           name: user.name,
-          profilePic: user.profilePic
-        }
+          profilePic: user.profilePic,
+        },
       }
-      
-      // Simple: just add to the top
-      setFollowPost(prev => {
-        // Check if post already exists (prevent duplicates)
-        const exists = prev.some(p => p._id?.toString() === newPost._id?.toString())
-        if (exists) {
-          return prev
-        }
-        // Add new post at the top
+      setFollowPost((prev) => {
+        const exists = prev.some((p) => p._id?.toString() === newPost._id?.toString())
+        if (exists) return prev
         return [newPost, ...prev]
       })
     }
@@ -562,6 +389,7 @@ const CreatePost = () => {
     showToast("Success", "Post created successfully", "success")
     onClose()
     setPostText("")
+    clearCarouselMedia()
     if (imagePreview && imagePreview.startsWith('blob:')) {
       URL.revokeObjectURL(imagePreview)
     }
