@@ -23,7 +23,12 @@ import {
 import { isChessFeedPost, isGoFishFeedPost } from '../utils/gameFeedPostUtils.js'
 import { parsePostFromApiResponse, postDetailApiUrl } from '../utils/postUtils.js'
 
-const stopMenuEvent = (e, blockNav) => {
+const stopBubble = (e, blockNav) => {
+  e.stopPropagation()
+  blockNav?.()
+}
+
+const stopMenuItem = (e, blockNav) => {
   e.preventDefault()
   e.stopPropagation()
   blockNav?.()
@@ -119,7 +124,7 @@ const PostEditorMenu = ({
   }, [post?._id, applyPostUpdate])
 
   const runMenuAction = (action) => (e) => {
-    stopMenuEvent(e, onMenuInteraction)
+    stopMenuItem(e, onMenuInteraction)
     action()
   }
 
@@ -139,6 +144,7 @@ const PostEditorMenu = ({
           placement="bottom-end"
           isLazy
           strategy="fixed"
+          closeOnSelect
           onOpen={() => {
             onMenuStateChange?.(true)
             onMenuInteraction?.()
@@ -155,13 +161,13 @@ const PostEditorMenu = ({
             colorScheme="blue"
             type="button"
             aria-label="Edit post"
-            onClick={(e) => stopMenuEvent(e, onMenuInteraction)}
-            onMouseDown={(e) => stopMenuEvent(e, onMenuInteraction)}
+            onClick={(e) => stopBubble(e, onMenuInteraction)}
+            onMouseDown={(e) => stopBubble(e, onMenuInteraction)}
             {...menuButtonProps}
           >
             {iconOnly ? '✏️' : '✏️ Edit'}
           </MenuButton>
-          <MenuList zIndex={2000}>
+          <MenuList zIndex={2000} onClick={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()}>
             {canEditPostText && (
               <MenuItem onClick={runMenuAction(onEditPostOpen)}>
                 {isCarouselOwnerPost ? 'Edit caption & photos' : 'Edit caption'}
