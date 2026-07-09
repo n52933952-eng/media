@@ -26,7 +26,7 @@ import {
   postDetailApiUrl,
   hideChannelPostComments,
 } from '../utils/postUtils.js'
-import PostMediaCarousel from '../Components/PostMediaCarousel'
+import PostMediaCarousel, { POST_DETAIL_CAROUSEL_FRAME_H } from '../Components/PostMediaCarousel'
 import { getPostCarouselSlides, getPostCarouselAudio, shouldShowPostCarousel } from '../utils/postCarousel.js'
 
 const apiBaseUrl = () => (import.meta.env.PROD ? window.location.origin : 'http://localhost:5000')
@@ -765,7 +765,7 @@ if(!post) {
     <Box borderRadius={16} overflow={"hidden"} border={"1px solid"} borderColor={"gray.light"} my={3}>
       {(showCarousel || post?.img || (Array.isArray(post?.images) && post.images.length)) && (
         showCarousel ? (
-          <PostMediaCarousel slides={carouselSlides} audioUrl={carouselAudio} maxH="500px" />
+          <PostMediaCarousel slides={carouselSlides} audioUrl={carouselAudio} frameHeight={POST_DETAIL_CAROUSEL_FRAME_H} />
         ) : post?.img && (() => {
         // Check if it's a YouTube embed URL (channel posts use this format)
         const isYouTubeEmbed = post.img.includes('youtube.com/embed')
@@ -859,7 +859,19 @@ if(!post) {
         }
         
         // Default to image
-        return <Image src={post?.img} w={"full"} objectFit="contain" maxH="500px" />
+        return (
+          <Box
+            h={POST_DETAIL_CAROUSEL_FRAME_H}
+            w="full"
+            bg="black"
+            display="flex"
+            alignItems="center"
+            justifyContent="center"
+            overflow="hidden"
+          >
+            <Image src={post?.img} maxH="100%" maxW="100%" w="auto" h="auto" objectFit="contain" />
+          </Box>
+        )
       })())
       }
     </Box>

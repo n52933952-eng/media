@@ -24,7 +24,7 @@ import {
   getChessGameDataForPost,
 } from '../utils/gameFeedPostUtils.js'
 import { isVideoUrl, mediaDisplayUrl } from '../utils/mediaUrl.js'
-import PostMediaCarousel from './PostMediaCarousel'
+import PostMediaCarousel, { FEED_CAROUSEL_FRAME_H } from './PostMediaCarousel'
 import { getPostCarouselSlides, getPostCarouselAudio, shouldShowPostCarousel } from '../utils/postCarousel.js'
 
 const apiBaseUrl = () => (import.meta.env.PROD ? window.location.origin : 'http://localhost:5000')
@@ -1651,7 +1651,7 @@ const showToast = useShowToast()
   {(post?.img || (Array.isArray(post?.images) && post.images.length)) && !isFootballPost && !isWeatherPost && !isChessPost && (
     <Box borderRadius={4} overflow="hidden" border="0.5px solid" borderColor="gray.light" my={2}>
       {showCarousel && !rawMediaUrl.includes('youtube.com/embed') && !rawMediaUrl.includes('youtu.be') && !isVideoMedia ? (
-        <PostMediaCarousel slides={carouselSlides} audioUrl={carouselAudio} />
+        <PostMediaCarousel slides={carouselSlides} audioUrl={carouselAudio} frameHeight={FEED_CAROUSEL_FRAME_H} />
       ) : (
       <>
       {/* YouTube Embed (Al Jazeera Live or any YouTube video) */}
@@ -1701,14 +1701,26 @@ const showToast = useShowToast()
           }}
         />
       ) : (
+        <Box
+          h={FEED_CAROUSEL_FRAME_H}
+          w="full"
+          bg="black"
+          display="flex"
+          alignItems="center"
+          justifyContent="center"
+          overflow="hidden"
+        >
         <Image 
           src={mediaUrl} 
-          w="full" 
+          maxH="100%"
+          maxW="100%"
+          w="auto"
+          h="auto"
           objectFit="contain" 
-          maxH="400px"
           loading="lazy"
           alt="Post image"
         />
+        </Box>
       )}
       </>
       )}

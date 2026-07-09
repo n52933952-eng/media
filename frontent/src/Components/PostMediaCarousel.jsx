@@ -5,7 +5,15 @@ import { mediaDisplayUrl } from '../utils/mediaUrl.js'
 
 const SWIPE_THRESHOLD_PX = 48
 
-const PostMediaCarousel = ({ slides = [], audioUrl = null, maxH = '480px' }) => {
+/** Fixed frame — same box size for every slide (portrait, landscape, square). */
+export const FEED_CAROUSEL_FRAME_H = '260px'
+export const POST_DETAIL_CAROUSEL_FRAME_H = '320px'
+
+const PostMediaCarousel = ({
+  slides = [],
+  audioUrl = null,
+  frameHeight = FEED_CAROUSEL_FRAME_H,
+}) => {
   const [index, setIndex] = useState(0)
   const [playing, setPlaying] = useState(false)
   const audioRef = useRef(null)
@@ -87,9 +95,17 @@ const PostMediaCarousel = ({ slides = [], audioUrl = null, maxH = '480px' }) => 
   }
 
   return (
-    <Box position="relative" w="full" mb={3} ref={containerRef} tabIndex={0} outline="none">
+    <Box position="relative" w="full" mb={2} ref={containerRef} tabIndex={0} outline="none">
       <Box
         position="relative"
+        h={frameHeight}
+        w="full"
+        bg="black"
+        borderRadius="md"
+        overflow="hidden"
+        display="flex"
+        alignItems="center"
+        justifyContent="center"
         onPointerDown={onPointerDown}
         onPointerUp={onPointerUp}
         onPointerCancel={() => { dragStartX.current = null }}
@@ -99,11 +115,11 @@ const PostMediaCarousel = ({ slides = [], audioUrl = null, maxH = '480px' }) => 
         <Image
           src={src}
           alt={slide.name || slide.username || 'Post slide'}
-          w="full"
-          maxH={maxH}
+          maxH="100%"
+          maxW="100%"
+          w="auto"
+          h="auto"
           objectFit="contain"
-          bg="black"
-          borderRadius="md"
           onClick={onImageTap}
           draggable={false}
         />
@@ -211,7 +227,7 @@ const PostMediaCarousel = ({ slides = [], audioUrl = null, maxH = '480px' }) => 
       </Box>
 
       {multi ? (
-        <HStack justify="center" mt={3} spacing={2} flexWrap="wrap">
+        <HStack justify="center" mt={2} spacing={2} flexWrap="wrap">
           {slides.map((s, i) => (
             <Box
               key={s.key}
