@@ -6,8 +6,8 @@ import { mediaDisplayUrl } from '../utils/mediaUrl.js'
 const SWIPE_THRESHOLD_PX = 48
 
 /** Fixed frame — same box size for every slide (portrait, landscape, square). */
-export const FEED_CAROUSEL_FRAME_H = '260px'
-export const POST_DETAIL_CAROUSEL_FRAME_H = '320px'
+export const FEED_CAROUSEL_FRAME_H = '320px'
+export const POST_DETAIL_CAROUSEL_FRAME_H = '400px'
 
 const PostMediaCarousel = ({
   slides = [],

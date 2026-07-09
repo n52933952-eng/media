@@ -9,9 +9,20 @@ export function usePostEngagementSubscription(socket, postId) {
     const pid = String(postId)
     if (!OBJECT_ID_RE.test(pid)) return undefined
 
-    socket.emit('postSubscribeAdd', { postId: pid })
+    const subscribe = () => {
+      if (socket.connected) socket.emit('postSubscribeAdd', { postId: pid })
+    }
+    const unsubscribe = () => {
+      if (socket.connected) socket.emit('postSubscribeRemove', { postId: pid })
+    }
+
+    subscribe()
+    const onConnect = () => subscribe()
+    socket.on('connect', onConnect)
+
     return () => {
-      socket.emit('postSubscribeRemove', { postId: pid })
+      socket.off('connect', onConnect)
+      unsubscribe()
     }
   }, [socket, postId])
 }
