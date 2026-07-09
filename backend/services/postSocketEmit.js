@@ -1,5 +1,17 @@
 import { getUserSocket } from '../socket/socket.js'
 
+export const POST_ROOM_PREFIX = 'post:'
+
+/** Emit engagement updates only to clients subscribed to this post room (lightweight). */
+export function emitPostEngagement(io, postId, payload) {
+  if (!io || !postId) return
+  const room = `${POST_ROOM_PREFIX}${String(postId)}`
+  io.to(room).emit('postEngagement', {
+    postId: String(postId),
+    ...payload,
+  })
+}
+
 /** Per-user Redis lookup — scales with follower count, not total online users. */
 export async function collectSocketIdsForUserIds(userIds) {
   const unique = [...new Set(

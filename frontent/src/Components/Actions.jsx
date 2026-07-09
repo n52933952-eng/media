@@ -52,11 +52,13 @@ const Actions = ({ post, showFeedExtras = true, onReplyAdded }) => {
 	const [likeCount, setLikeCount] = useState(
 		post?.likeCount ?? post?.likes?.length ?? 0,
 	)
+	const [likePreview, setLikePreview] = useState(post?.likePreview || null)
 
 	useEffect(() => {
 		setLiked(post?.likedByMe ?? post?.likes?.includes(user?._id) ?? false)
 		setLikeCount(post?.likeCount ?? post?.likes?.length ?? 0)
-	}, [post?._id, post?.likedByMe, post?.likeCount, post?.likes, user?._id])
+		setLikePreview(post?.likePreview || null)
+	}, [post?._id, post?.likedByMe, post?.likeCount, post?.likes, post?.likePreview, user?._id])
     
 	const{followPost,setFollowPost}=useContext(PostContext)
    
@@ -137,16 +139,30 @@ const Actions = ({ post, showFeedExtras = true, onReplyAdded }) => {
 			: newLiked
 				? likeCount + 1
 				: Math.max(0, likeCount - 1)
+	const newPreview = newLiked && user
+		? {
+			_id: user._id,
+			username: user.username,
+			name: user.name,
+			profilePic: user.profilePic || null,
+		}
+		: likePreview
 
 	setFollowPost(
 		followPost.map((p) =>
 			p._id === post._id
-				? { ...p, likedByMe: newLiked, likeCount: newCount }
+				? {
+					...p,
+					likedByMe: newLiked,
+					likeCount: newCount,
+					...(newLiked && user ? { likePreview: newPreview } : {}),
+				}
 				: p,
 		),
 	)
 	setLiked(newLiked)
 	setLikeCount(newCount)
+	if (newLiked && user) setLikePreview(newPreview)
 	 }catch(error){
 		console.log(error)
 	 }
@@ -490,6 +506,18 @@ return (
 				<Box w={0.5} h={0.5} borderRadius={"full"} bg={"gray.light"}></Box>
 				</>
 				)}
+				{likeCount > 0 && likePreview?.profilePic ? (
+					<Box
+						as="img"
+						src={likePreview.profilePic}
+						alt=""
+						w="18px"
+						h="18px"
+						borderRadius="full"
+						objectFit="cover"
+						flexShrink={0}
+					/>
+				) : null}
 				<Text
 					color={"gray.light"}
 					fontSize='sm'

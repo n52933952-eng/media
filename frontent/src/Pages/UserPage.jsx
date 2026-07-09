@@ -10,6 +10,7 @@ import{UserContext} from '../context/UserContext'
 import{PostContext} from '../context/PostContext'
 import{SocketContext} from '../context/SocketContext'
 import { mergePostUpdate, postBelongsToProfile, upsertProfilePost } from '../utils/postUtils.js'
+import { applyPostEngagement } from '../hooks/usePostEngagementSubscription.js'
 
 const UserPage = () => {
  
@@ -380,13 +381,23 @@ const UserPage = () => {
       setTotalPostsCount((n) => (typeof n === 'number' ? Math.max(0, n - 1) : null))
     }
 
+    const handlePostEngagement = (data) => {
+      const postId = data?.postId?.toString?.()
+      if (!postId) return
+      setPosts((prev) =>
+        prev.map((p) => (p._id?.toString?.() === postId ? applyPostEngagement(p, data) : p)),
+      )
+    }
+
     socket.on('postUpdated', handlePostUpdated)
     socket.on('newPost', handleNewPost)
     socket.on('postDeleted', handlePostDeleted)
+    socket.on('postEngagement', handlePostEngagement)
     return () => {
       socket.off('postUpdated', handlePostUpdated)
       socket.off('newPost', handleNewPost)
       socket.off('postDeleted', handlePostDeleted)
+      socket.off('postEngagement', handlePostEngagement)
     }
   }, [socket, user])
 

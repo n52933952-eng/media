@@ -21,6 +21,7 @@ import {
   isChessFeedPost,
 } from '../utils/gameFeedPostUtils.js'
 import { isFollowingUserId, mergePostUpdate } from '../utils/postUtils.js'
+import { applyPostEngagement } from '../hooks/usePostEngagementSubscription.js'
 
 
 
@@ -507,9 +508,18 @@ const HomePage = () => {
       setFollowPost(prev => prev.filter(p => String(p._id) !== liveId))
     }
 
+    const handlePostEngagement = (data) => {
+      const postId = data?.postId?.toString?.()
+      if (!postId) return
+      setFollowPost((prev) =>
+        prev.map((p) => (p._id?.toString?.() === postId ? applyPostEngagement(p, data) : p)),
+      )
+    }
+
     socket.on('newPost', handleNewPost)
     socket.on('postDeleted', handlePostDeleted)
     socket.on('postUpdated', handlePostUpdated)
+    socket.on('postEngagement', handlePostEngagement)
     socket.on('footballPageUpdate', handleFootballFeedSync)
     socket.on('footballMatchUpdate', handleFootballFeedSync)
     socket.on('weatherUpdate', handleWeatherFeedSync)
@@ -520,6 +530,7 @@ const HomePage = () => {
       socket.off('newPost', handleNewPost)
       socket.off('postDeleted', handlePostDeleted)
       socket.off('postUpdated', handlePostUpdated)
+      socket.off('postEngagement', handlePostEngagement)
       socket.off('footballPageUpdate', handleFootballFeedSync)
       socket.off('footballMatchUpdate', handleFootballFeedSync)
       socket.off('weatherUpdate', handleWeatherFeedSync)

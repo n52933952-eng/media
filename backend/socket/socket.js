@@ -38,6 +38,8 @@ let server = null
 // ============================================================
 const PRESENCE_ROOM_PREFIX = 'presence:'
 const PRESENCE_KEY_PREFIX = 'userPresence:'
+const POST_ROOM_PREFIX = 'post:'
+const MAX_POST_SUBSCRIPTIONS_PER_SOCKET = 50
 /** Queued WebRTC answer SDP when caller socket drops before callee answers (Wi‑Fi / reconnect race). */
 const PENDING_ANSWER_PREFIX = 'pendingAnswer:'
 /** 0 = no server auto-end (broadcaster stops manually). Set LIVEKIT_MAX_SESSION_MS in env to override. */
@@ -1429,6 +1431,36 @@ export const initializeSocket = async (app) => {
                 socket.emit('presenceSnapshot', { onlineUsers: snapshot, subscribedUserIds: requested })
             } catch (e) {
                 console.error('❌ [socket] presenceSubscribe error:', e.message)
+            }
+        })
+
+        // Subscribe to live like/comment count updates for posts currently on screen.
+        socket.on('postSubscribeAdd', (payload = {}) => {
+            try {
+                const raw = payload?.postId != null ? String(payload.postId).trim() : ''
+                if (!raw || !mongoose.Types.ObjectId.isValid(raw)) return
+                if (!socket.data.postSubscriptions) socket.data.postSubscriptions = new Set()
+                if (
+                    socket.data.postSubscriptions.size >= MAX_POST_SUBSCRIPTIONS_PER_SOCKET &&
+                    !socket.data.postSubscriptions.has(raw)
+                ) {
+                    return
+                }
+                socket.join(`${POST_ROOM_PREFIX}${raw}`)
+                socket.data.postSubscriptions.add(raw)
+            } catch (e) {
+                console.error('❌ [socket] postSubscribeAdd error:', e.message)
+            }
+        })
+
+        socket.on('postSubscribeRemove', (payload = {}) => {
+            try {
+                const raw = payload?.postId != null ? String(payload.postId).trim() : ''
+                if (!raw) return
+                socket.leave(`${POST_ROOM_PREFIX}${raw}`)
+                socket.data.postSubscriptions?.delete(raw)
+            } catch (e) {
+                console.error('❌ [socket] postSubscribeRemove error:', e.message)
             }
         })
 

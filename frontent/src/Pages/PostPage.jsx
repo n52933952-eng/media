@@ -29,6 +29,7 @@ import {
 } from '../utils/postUtils.js'
 import PostMediaCarousel, { POST_DETAIL_CAROUSEL_FRAME_H } from '../Components/PostMediaCarousel'
 import { getPostCarouselSlides, getPostCarouselAudio, shouldShowPostCarousel, postHasDisplayableMedia } from '../utils/postCarousel.js'
+import { usePostEngagementSubscription, applyPostEngagement } from '../hooks/usePostEngagementSubscription.js'
 
 const apiBaseUrl = () => (import.meta.env.PROD ? window.location.origin : 'http://localhost:5000')
 
@@ -52,6 +53,7 @@ const PostPage = () => {
     const carouselSlides = useMemo(() => (post ? getPostCarouselSlides(post) : []), [post])
     const carouselAudio = useMemo(() => (post ? getPostCarouselAudio(post) : null), [post?.audio])
     const showCarousel = post ? shouldShowPostCarousel(post) : false
+    usePostEngagementSubscription(socket, post?._id)
 
     const [postReplies, setPostReplies] = useState([])
     const [commentsLoading, setCommentsLoading] = useState(false)
@@ -525,10 +527,21 @@ const PostPage = () => {
         }
       }
       
+      const handlePostEngagement = (data) => {
+        const postIdStr = post._id?.toString()
+        const incomingId = data?.postId?.toString?.()
+        if (!postIdStr || postIdStr !== incomingId) return
+        setFollowPost((prev) =>
+          prev.map((p) => (p._id?.toString() === postIdStr ? applyPostEngagement(p, data) : p)),
+        )
+      }
+      
       socket.on('postUpdated', handlePostUpdated)
+      socket.on('postEngagement', handlePostEngagement)
       
       return () => {
         socket.off('postUpdated', handlePostUpdated)
+        socket.off('postEngagement', handlePostEngagement)
       }
     }, [socket, post?._id, setFollowPost])
 

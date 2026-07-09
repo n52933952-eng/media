@@ -26,6 +26,7 @@ import {
 import { isVideoUrl, mediaDisplayUrl } from '../utils/mediaUrl.js'
 import PostMediaCarousel, { FEED_CAROUSEL_FRAME_H } from './PostMediaCarousel'
 import { getPostCarouselSlides, getPostCarouselAudio, shouldShowPostCarousel, postHasDisplayableMedia } from '../utils/postCarousel.js'
+import { usePostEngagementSubscription } from '../hooks/usePostEngagementSubscription.js'
 
 const apiBaseUrl = () => (import.meta.env.PROD ? window.location.origin : 'http://localhost:5000')
 
@@ -178,6 +179,7 @@ const showToast = useShowToast()
   const{user}=useContext(UserContext)
   const{followPost,setFollowPost,hideFeedPostFromFeed,hideFeedSourceFromFeed}=useContext(PostContext)
   const { socket, onlineUser } = useContext(SocketContext) || {}
+  usePostEngagementSubscription(socket, post?._id)
   
   // Color modes
   const cardBg = useColorModeValue('white', '#252b3b')

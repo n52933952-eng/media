@@ -8,7 +8,7 @@ import LiveStream from '../models/liveStream.js'
 import { deleteMediaAsset, deleteAllPostMedia } from '../services/mediaStorage.js'
 import { assertManagedMediaUrls } from '../services/r2Presign.js'
 import { getIO, getUserSocket } from '../socket/socket.js'
-import { emitToUserIds, collectSocketIdsForUserIds } from '../services/postSocketEmit.js'
+import { emitToUserIds, collectSocketIdsForUserIds, emitPostEngagement } from '../services/postSocketEmit.js'
 import { dedupeGamePostsForFeed } from '../utils/dedupeGameFeedPosts.js'
 import { enrichGoFishPostsForFeed } from '../utils/enrichGoFishFeedPosts.js'
 import { normalizeGamePlayers } from '../utils/gameFeedPostUtils.js'
@@ -264,6 +264,26 @@ async function emitPostUpdatedToRecipients(io, post, postOwnerId) {
         postId: post._id.toString(),
         post: postObj,
     })
+}
+
+/** Most recent liker for feed/profile avatar preview. */
+async function getLatestLikePreview(postId) {
+    const row = await Like.findOne({ post: postId }).sort({ _id: -1 }).select('user').lean()
+    if (!row?.user) return null
+    const u = await User.findById(row.user).select('_id username name profilePic').lean()
+    if (!u) return null
+    return {
+        _id: u._id,
+        username: u.username,
+        name: u.name,
+        profilePic: u.profilePic || null,
+    }
+}
+
+function emitPostEngagementUpdate(postId, payload) {
+    const io = getIO()
+    if (!io || !postId) return
+    emitPostEngagement(io, postId, payload)
 }
 
 /** Profile posts query for a user's authored + collaborative posts. */
@@ -932,6 +952,8 @@ export const LikePost = async(req,res) => {
         }
         // Refresh the liker's own feed cache so a reload doesn't show the stale liked state.
         await invalidateUserFeedCache(userId)
+        const likePreview = count > 0 ? await getLatestLikePreview(id) : null
+        emitPostEngagementUpdate(id, { likeCount: count, likePreview })
         return res.status(200).json({ message: 'post unlike scfully', liked: false, likeCount: count })
     }
 
@@ -942,10 +964,13 @@ export const LikePost = async(req,res) => {
         if (e?.code === 11000) {
             const cur = await Post.findById(id).select('likeCount')
             await invalidateUserFeedCache(userId)
+            const curCount = Math.max(0, cur?.likeCount ?? 0)
+            const likePreview = curCount > 0 ? await getLatestLikePreview(id) : null
+            emitPostEngagementUpdate(id, { likeCount: curCount, likePreview })
             return res.status(200).json({
                 message: 'post liked scfully',
                 liked: true,
-                likeCount: Math.max(0, cur?.likeCount ?? 0),
+                likeCount: curCount,
             })
         }
         throw e
@@ -976,10 +1001,18 @@ export const LikePost = async(req,res) => {
       
     // Refresh the liker's own feed cache so a reload reflects the new liked state.
     await invalidateUserFeedCache(userId)
+    const likeCount = Math.max(0, updated?.likeCount ?? 0)
+    const likePreview = {
+        _id: req.user._id,
+        username: req.user.username,
+        name: req.user.name,
+        profilePic: req.user.profilePic || null,
+    }
+    emitPostEngagementUpdate(id, { likeCount, likePreview })
     return res.status(200).json({
         message: 'post liked scfully',
         liked: true,
-        likeCount: Math.max(0, updated?.likeCount ?? 0),
+        likeCount,
     })
   }
     catch(error){
@@ -1153,6 +1186,11 @@ export const ReplyPost = async(req,res) => {
             }
         }
         
+        const refreshed = await Post.findById(id).select('replyCount').lean()
+        emitPostEngagementUpdate(id, {
+            replyCount: Math.max(0, refreshed?.replyCount ?? 0),
+        })
+
         res.status(200).json(savedReply)
 
     }
@@ -1517,6 +1555,11 @@ export const ReplyToComment = async(req, res) => {
             }
         }
         
+        const refreshedReply = await Post.findById(id).select('replyCount').lean()
+        emitPostEngagementUpdate(id, {
+            replyCount: Math.max(0, refreshedReply?.replyCount ?? 0),
+        })
+
         res.status(200).json(newReply)
     }
     catch(error) {
@@ -2375,6 +2418,11 @@ export const deleteComment = async(req,res) => {
         }
 
         await deleteCommentTree(postId, replyId)
+
+        const refreshed = await Post.findById(postId).select('replyCount').lean()
+        emitPostEngagementUpdate(postId, {
+            replyCount: Math.max(0, refreshed?.replyCount ?? 0),
+        })
 
         res.status(200).json({
             message: "Comment deleted successfully",
