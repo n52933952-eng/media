@@ -210,7 +210,21 @@ async function emitNewPostToAuthorFollowers(io, authorId, post) {
         .limit(10000)
         .lean()
     const followerIds = followerDocs.map((d) => d.followerId).filter(Boolean)
-    await emitToUserIds(io, followerIds, 'newPost', post)
+    const postObj = post.toObject ? post.toObject() : JSON.parse(JSON.stringify(post))
+    const recipientIds = [...new Set([...followerIds.map(String), String(authorId)])]
+    await emitToUserIds(io, recipientIds, 'newPost', postObj)
+}
+
+/** Collaborative posts also appear on contributor profiles — notify them in real time. */
+async function emitNewPostToCollaborators(io, post, posterId) {
+    if (!io || !post?.isCollaborative || !Array.isArray(post.contributors)) return 0
+    const posterStr = String(posterId)
+    const ids = post.contributors
+        .map((c) => (c._id || c).toString())
+        .filter((id) => id && id !== posterStr)
+    if (!ids.length) return 0
+    const postObj = post.toObject ? post.toObject() : JSON.parse(JSON.stringify(post))
+    return emitToUserIds(io, ids, 'newPost', postObj)
 }
 
 async function emitPostDeletedToAuthorFollowers(io, authorId, postId) {
@@ -393,6 +407,7 @@ export const createPost = async(req,res) => {
            const io = getIO()
            if (io) {
              await emitNewPostToAuthorFollowers(io, postedBy, newPost)
+             await emitNewPostToCollaborators(io, newPost, postedBy)
            }
 
            const { createActivity } = await import('./activity.js')
@@ -437,6 +452,7 @@ export const createPost = async(req,res) => {
        const io = getIO()
        if (io) {
          await emitNewPostToAuthorFollowers(io, postedBy, newPost)
+         await emitNewPostToCollaborators(io, newPost, postedBy)
        }
        
        res.status(200).json({message:"post created sufully", post: newPost})

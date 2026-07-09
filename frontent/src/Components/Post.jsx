@@ -11,7 +11,7 @@ import{UserContext} from '../context/UserContext'
 import{PostContext} from '../context/PostContext'
 import { SocketContext } from '../context/SocketContext'
 import { FiMail } from 'react-icons/fi'
-import { followIdToString } from '../utils/postUtils.js'
+import { followIdToString, mergePostUpdate } from '../utils/postUtils.js'
 import { isUserInOnlineList } from '../utils/presenceUtils.js'
 import PostEditorMenu from './PostEditorMenu'
 import FootballIcon from './FootballIcon'
@@ -25,11 +25,11 @@ import {
 } from '../utils/gameFeedPostUtils.js'
 import { isVideoUrl, mediaDisplayUrl } from '../utils/mediaUrl.js'
 import PostMediaCarousel, { FEED_CAROUSEL_FRAME_H } from './PostMediaCarousel'
-import { getPostCarouselSlides, getPostCarouselAudio, shouldShowPostCarousel } from '../utils/postCarousel.js'
+import { getPostCarouselSlides, getPostCarouselAudio, shouldShowPostCarousel, postHasDisplayableMedia } from '../utils/postCarousel.js'
 
 const apiBaseUrl = () => (import.meta.env.PROD ? window.location.origin : 'http://localhost:5000')
 
-const Post = ({post: initialPost, postedBy, onDelete, visibleVideoOnly = false, autoPlayMedia, showFeedExtras = true, isOwnProfile = true}) => {
+const Post = ({post: initialPost, postedBy, onDelete, onPostUpdated, visibleVideoOnly = false, autoPlayMedia, showFeedExtras = true, isOwnProfile = true}) => {
     
   // Local state for this specific post (used when not in feed context)
   const [localPost, setLocalPost] = useState(initialPost)
@@ -903,11 +903,15 @@ const showToast = useShowToast()
   })
   const applyPostUpdate = useCallback((updatedPost) => {
     if (!updatedPost) return
-    setLocalPost({ ...updatedPost })
+    const merged = mergePostUpdate(post, updatedPost)
+    setLocalPost(merged)
+    onPostUpdated?.(merged)
     if (setFollowPost) {
-      setFollowPost((prev) => prev.map((p) => (p._id === post._id ? updatedPost : p)))
+      setFollowPost((prev) =>
+        prev.map((p) => (p._id === post._id ? mergePostUpdate(p, updatedPost) : p)),
+      )
     }
-  }, [post._id, setFollowPost])
+  }, [post, post._id, setFollowPost, onPostUpdated])
 
   const isMyChannelFeedCard =
     !!post?.channelAddedBy && String(post.channelAddedBy) === String(user?._id)
@@ -1648,22 +1652,11 @@ const showToast = useShowToast()
     </Box>
   )}
   
-  {(post?.img || (Array.isArray(post?.images) && post.images.length)) && !isFootballPost && !isWeatherPost && !isChessPost && (
+  {(post?.img || (Array.isArray(post?.images) && post.images.length) || postHasDisplayableMedia(post)) && !isFootballPost && !isWeatherPost && !isChessPost && (
     <Box borderRadius={4} overflow="hidden" border="0.5px solid" borderColor="gray.light" my={2}>
-      {showCarousel && !rawMediaUrl.includes('youtube.com/embed') && !rawMediaUrl.includes('youtu.be') && !isVideoMedia ? (
+      {showCarousel && carouselSlides.length > 0 && !rawMediaUrl.includes('youtube.com/embed') && !rawMediaUrl.includes('youtu.be') && !isVideoMedia ? (
         <PostMediaCarousel slides={carouselSlides} audioUrl={carouselAudio} frameHeight={FEED_CAROUSEL_FRAME_H} />
-      ) : (
-      <>
-      {/* YouTube Embed (Al Jazeera Live or any YouTube video) */}
-      {(() => {
-        const isYouTube = post.img.includes('youtube.com/embed') || post.img.includes('youtu.be')
-        console.log('🎬 Checking media type:', {
-          url: post.img,
-          isYouTube,
-          username: postedBy?.username
-        })
-        return isYouTube
-      })() ? (
+      ) : post?.img && (post.img.includes('youtube.com/embed') || post.img.includes('youtu.be')) ? (
         <Box position="relative" paddingBottom="56.25%" height="0" overflow="hidden">
           <iframe
             src={post.img}
@@ -1674,13 +1667,13 @@ const showToast = useShowToast()
               left: 0,
               width: '100%',
               height: '100%',
-              border: 'none'
+              border: 'none',
             }}
             allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
             allowFullScreen
           />
         </Box>
-      ) : post.img.match(/\.(mp4|webm|ogg|mov)$/i) || post.img.includes('/video/upload/') ? (
+      ) : post?.img && (post.img.match(/\.(mp4|webm|ogg|mov)$/i) || post.img.includes('/video/upload/')) ? (
         <Box
           as="video"
           ref={videoRef}
@@ -1693,14 +1686,11 @@ const showToast = useShowToast()
           w="full"
           maxH="400px"
           onLoadedData={(e) => {
-            // Ensure video plays when loaded (some browsers need this)
             if (visibleVideoOnly && !isVideoInView) return
-            e.target.play().catch(err => {
-              console.log('Video autoplay prevented:', err)
-            })
+            e.target.play().catch(() => {})
           }}
         />
-      ) : (
+      ) : post?.img ? (
         <Box
           h={FEED_CAROUSEL_FRAME_H}
           w="full"
@@ -1710,20 +1700,20 @@ const showToast = useShowToast()
           justifyContent="center"
           overflow="hidden"
         >
-        <Image 
-          src={mediaUrl} 
-          maxH="100%"
-          maxW="100%"
-          w="auto"
-          h="auto"
-          objectFit="contain" 
-          loading="lazy"
-          alt="Post image"
-        />
+          <Image
+            src={mediaUrl}
+            maxH="100%"
+            maxW="100%"
+            w="auto"
+            h="auto"
+            objectFit="contain"
+            loading="lazy"
+            alt="Post image"
+          />
         </Box>
-      )}
-      </>
-      )}
+      ) : showCarousel && carouselSlides.length > 0 ? (
+        <PostMediaCarousel slides={carouselSlides} audioUrl={carouselAudio} frameHeight={FEED_CAROUSEL_FRAME_H} />
+      ) : null}
     </Box>
   )}
   

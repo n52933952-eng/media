@@ -20,7 +20,7 @@ import {
   mergeGameFeedPostData,
   isChessFeedPost,
 } from '../utils/gameFeedPostUtils.js'
-import { isFollowingUserId } from '../utils/postUtils.js'
+import { isFollowingUserId, mergePostUpdate } from '../utils/postUtils.js'
 
 
 
@@ -447,10 +447,7 @@ const HomePage = () => {
         }
 
         // Replace, then move/sort by updatedAt to make the update visible (Weather/Football updates)
-        const replaced = {
-          ...prev[idx],
-          ...updatedPost,
-        }
+        const replaced = mergePostUpdate(prev[idx], updatedPost)
 
         const next = [replaced, ...prev.filter((_, i) => i !== idx)]
 

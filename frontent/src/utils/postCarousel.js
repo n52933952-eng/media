@@ -79,6 +79,15 @@ export function shouldShowPostCarousel(post) {
   return false
 }
 
+/** True when the post has something to render in the media area (incl. collab contributor-only). */
+export function postHasDisplayableMedia(post) {
+  if (!post) return false
+  if (getPostCarouselSlides(post).length > 0) return true
+  if (post.img) return true
+  if (Array.isArray(post.images) && post.images.length > 0) return true
+  return false
+}
+
 /** Non-collaborative multi-photo carousel (owner manages photos). */
 export function isCarouselPost(post) {
   if (post?.isCollaborative) return false

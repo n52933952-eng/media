@@ -22,12 +22,13 @@ import {
 import {
   COMMENTS_PAGE_SIZE,
   mergeRepliesById,
+  mergePostUpdate,
   postCommentsApiUrl,
   postDetailApiUrl,
   hideChannelPostComments,
 } from '../utils/postUtils.js'
 import PostMediaCarousel, { POST_DETAIL_CAROUSEL_FRAME_H } from '../Components/PostMediaCarousel'
-import { getPostCarouselSlides, getPostCarouselAudio, shouldShowPostCarousel } from '../utils/postCarousel.js'
+import { getPostCarouselSlides, getPostCarouselAudio, shouldShowPostCarousel, postHasDisplayableMedia } from '../utils/postCarousel.js'
 
 const apiBaseUrl = () => (import.meta.env.PROD ? window.location.origin : 'http://localhost:5000')
 
@@ -512,7 +513,11 @@ const PostPage = () => {
             prev.map(p => {
               const pIdStr = p._id?.toString()
               if (pIdStr === updatedPostIdStr) {
-                return { ...updatedPost, replies: [], replyCount: updatedPost.replyCount ?? p.replyCount }
+                return mergePostUpdate(p, {
+                  ...updatedPost,
+                  replies: [],
+                  replyCount: updatedPost.replyCount ?? p.replyCount,
+                })
               }
               return p
             })
@@ -762,104 +767,62 @@ if(!post) {
       </VStack>
     )}
 
-    <Box borderRadius={16} overflow={"hidden"} border={"1px solid"} borderColor={"gray.light"} my={3}>
-      {(showCarousel || post?.img || (Array.isArray(post?.images) && post.images.length)) && (
-        showCarousel ? (
+    <Box borderRadius={16} overflow="hidden" border="1px solid" borderColor="gray.light" my={3}>
+      {(showCarousel || postHasDisplayableMedia(post)) && (
+        showCarousel && carouselSlides.length > 0 ? (
           <PostMediaCarousel slides={carouselSlides} audioUrl={carouselAudio} frameHeight={POST_DETAIL_CAROUSEL_FRAME_H} />
-        ) : post?.img && (() => {
-        // Check if it's a YouTube embed URL (channel posts use this format)
-        const isYouTubeEmbed = post.img.includes('youtube.com/embed')
-        
-        if (isYouTubeEmbed) {
-          // Use the embed URL directly (already in correct format from backend)
-          return (
-            <Box
-              position="relative"
-              w="full"
-              h="0"
-              paddingBottom="56.25%" // 16:9 aspect ratio
-              bg="black"
-            >
-              <iframe
-                src={post.img} // Use URL directly (already includes autoplay=1&mute=0)
-                title="Live Stream"
-                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-                allowFullScreen
-                style={{
-                  position: 'absolute',
-                  top: 0,
-                  left: 0,
-                  width: '100%',
-                  height: '100%',
-                  border: 'none'
-                }}
-              />
-            </Box>
-          )
-        }
-        
-        // Check if it's a regular YouTube URL (youtu.be or watch format)
-        const isYouTube = post.img.includes('youtu.be') || post.img.includes('youtube.com/watch')
-        if (isYouTube) {
-          // Extract YouTube video ID and convert to embed format
-          let videoId = ''
-          if (post.img.includes('youtu.be/')) {
-            videoId = post.img.split('youtu.be/')[1]?.split('?')[0] || ''
-          } else if (post.img.includes('youtube.com/watch?v=')) {
-            videoId = post.img.split('v=')[1]?.split('&')[0] || ''
-          }
-          
-          if (videoId) {
-            return (
-              <Box
-                position="relative"
-                w="full"
-                h="0"
-                paddingBottom="56.25%"
-                bg="black"
-              >
-                <iframe
-                  src={`https://www.youtube.com/embed/${videoId}?autoplay=1&rel=0`}
-                  title="Live Stream"
-                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                  allowFullScreen
-                  style={{
-                    position: 'absolute',
-                    top: 0,
-                    left: 0,
-                    width: '100%',
-                    height: '100%',
-                    border: 'none'
-                  }}
-                />
-              </Box>
-            )
-          }
-        }
-        
-        // Check if it's a video file
-        if (post.img.match(/\.(mp4|webm|ogg|mov)$/i) || post.img.includes('/video/upload/')) {
-          return (
-        <Box
-          as="video"
-          src={post.img}
-          controls
-          autoPlay
-          playsInline
-          muted={false}
-          w="full"
-          maxH="500px"
-          onLoadedMetadata={(e) => {
-            // Try to autoplay with sound on post detail page.
-            // Some browsers may still require prior user interaction.
-            e.currentTarget.play?.().catch(() => {})
-          }}
-        />
-          )
-        }
-        
-        // Default to image
-        return (
+        ) : post?.img && (post.img.includes('youtube.com/embed') || post.img.includes('youtu.be') || post.img.includes('youtube.com/watch')) ? (
+          (() => {
+            const isYouTubeEmbed = post.img.includes('youtube.com/embed')
+            if (isYouTubeEmbed) {
+              return (
+                <Box position="relative" w="full" h="0" paddingBottom="56.25%" bg="black">
+                  <iframe
+                    src={post.img}
+                    title="Live Stream"
+                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                    allowFullScreen
+                    style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', border: 'none' }}
+                  />
+                </Box>
+              )
+            }
+            let videoId = ''
+            if (post.img.includes('youtu.be/')) {
+              videoId = post.img.split('youtu.be/')[1]?.split('?')[0] || ''
+            } else if (post.img.includes('youtube.com/watch?v=')) {
+              videoId = post.img.split('v=')[1]?.split('&')[0] || ''
+            }
+            if (videoId) {
+              return (
+                <Box position="relative" w="full" h="0" paddingBottom="56.25%" bg="black">
+                  <iframe
+                    src={`https://www.youtube.com/embed/${videoId}?autoplay=1&rel=0`}
+                    title="Live Stream"
+                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                    allowFullScreen
+                    style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', border: 'none' }}
+                  />
+                </Box>
+              )
+            }
+            return null
+          })()
+        ) : post?.img && (post.img.match(/\.(mp4|webm|ogg|mov)$/i) || post.img.includes('/video/upload/')) ? (
+          <Box
+            as="video"
+            src={post.img}
+            controls
+            autoPlay
+            playsInline
+            muted={false}
+            w="full"
+            maxH="500px"
+            onLoadedMetadata={(e) => {
+              e.currentTarget.play?.().catch(() => {})
+            }}
+          />
+        ) : post?.img ? (
           <Box
             h={POST_DETAIL_CAROUSEL_FRAME_H}
             w="full"
@@ -869,11 +832,12 @@ if(!post) {
             justifyContent="center"
             overflow="hidden"
           >
-            <Image src={post?.img} maxH="100%" maxW="100%" w="auto" h="auto" objectFit="contain" />
+            <Image src={post.img} maxH="100%" maxW="100%" w="auto" h="auto" objectFit="contain" />
           </Box>
-        )
-      })())
-      }
+        ) : showCarousel && carouselSlides.length > 0 ? (
+          <PostMediaCarousel slides={carouselSlides} audioUrl={carouselAudio} frameHeight={POST_DETAIL_CAROUSEL_FRAME_H} />
+        ) : null
+      )}
     </Box>
 
 

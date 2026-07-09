@@ -9,6 +9,7 @@ import Post from '../Components/Post'
 import{UserContext} from '../context/UserContext'
 import{PostContext} from '../context/PostContext'
 import{SocketContext} from '../context/SocketContext'
+import { mergePostUpdate, postBelongsToProfile, upsertProfilePost } from '../utils/postUtils.js'
 
 const UserPage = () => {
  
@@ -334,9 +335,9 @@ const UserPage = () => {
    setActiveTab('posts') // Reset to posts tab when username changes
   },[username])
 
-  // Live collab / post edits while viewing this profile (same socket as home feed)
+  // Live profile updates: create, edit, delete (collab + regular)
   useEffect(() => {
-    if (!socket) return
+    if (!socket || !user) return
 
     const handlePostUpdated = (data) => {
       const postId = data.postId || data._id
@@ -346,46 +347,82 @@ const UserPage = () => {
 
       setPosts((prev) => {
         const idx = prev.findIndex((p) => p._id?.toString?.() === updatedPostIdStr)
-        if (idx === -1) return prev
-        const replaced = { ...prev[idx], ...updatedPost }
-        const next = [replaced, ...prev.filter((_, i) => i !== idx)]
-        next.sort((a, b) => {
-          const dateA = new Date(a.updatedAt || a.createdAt).getTime()
-          const dateB = new Date(b.updatedAt || b.createdAt).getTime()
-          return dateB - dateA
-        })
-        return next
+        if (idx !== -1) {
+          return upsertProfilePost(prev, updatedPost, updatedPostIdStr)
+        }
+        const merged = mergePostUpdate({}, updatedPost)
+        if (postBelongsToProfile(merged, user)) {
+          return upsertProfilePost(prev, merged, updatedPostIdStr)
+        }
+        return prev
       })
     }
 
-    socket.on('postUpdated', handlePostUpdated)
-    return () => socket.off('postUpdated', handlePostUpdated)
-  }, [socket])
+    const handleNewPost = (newPost) => {
+      if (!postBelongsToProfile(newPost, user)) return
+      const idStr = newPost._id?.toString?.()
+      if (!idStr) return
 
-  // Listen for new posts created by current user and add them immediately to profile page
-  useEffect(() => {
-    // Only update if viewing own profile page
-    if (!currentUser || !username || currentUser.username !== username) return
-    if (!followPost || followPost.length === 0) return
-    
-    // Find the newest post that belongs to this user and isn't already in posts
-    const newPost = followPost.find(p => {
-      const postUsername = p.postedBy?.username || p.postedBy?.username
-      return postUsername === username && !posts.some(existingPost => existingPost._id === p._id)
-    })
-    
-    if (newPost) {
-      // Add new post at the top of the list immediately
-      setPosts(prev => {
-        // Double check to prevent duplicates
-        const exists = prev.some(p => p._id === newPost._id)
-        if (exists) return prev
-        return [newPost, ...prev]
+      setPosts((prev) => {
+        if (prev.some((p) => p._id?.toString?.() === idStr)) return prev
+        return upsertProfilePost(prev, newPost, idStr)
       })
       setTotalPostsCount((n) => (typeof n === 'number' ? n + 1 : null))
     }
+
+    const handlePostDeleted = ({ postId }) => {
+      const idStr = postId?.toString?.()
+      if (!idStr) return
+      setPosts((prev) => {
+        if (!prev.some((p) => p._id?.toString?.() === idStr)) return prev
+        return prev.filter((p) => p._id?.toString?.() !== idStr)
+      })
+      setTotalPostsCount((n) => (typeof n === 'number' ? Math.max(0, n - 1) : null))
+    }
+
+    socket.on('postUpdated', handlePostUpdated)
+    socket.on('newPost', handleNewPost)
+    socket.on('postDeleted', handlePostDeleted)
+    return () => {
+      socket.off('postUpdated', handlePostUpdated)
+      socket.off('newPost', handleNewPost)
+      socket.off('postDeleted', handlePostDeleted)
+    }
+  }, [socket, user])
+
+  const handleProfilePostUpdated = useCallback((updatedPost) => {
+    if (!updatedPost?._id) return
+    const idStr = updatedPost._id?.toString?.()
+    setPosts((prev) =>
+      prev.map((p) => (p._id?.toString?.() === idStr ? mergePostUpdate(p, updatedPost) : p)),
+    )
+  }, [])
+
+  // Optimistic add when CreatePost updates followPost (own profile or collab contributor)
+  useEffect(() => {
+    if (!user || !followPost?.length) return
+
+    const missing = followPost.filter((p) => {
+      if (!postBelongsToProfile(p, user)) return false
+      return !posts.some((existing) => existing._id?.toString?.() === p._id?.toString?.())
+    })
+
+    if (missing.length === 0) return
+
+    setPosts((prev) => {
+      const toAdd = missing.filter(
+        (np) => !prev.some((p) => p._id?.toString?.() === np._id?.toString?.()),
+      )
+      if (toAdd.length === 0) return prev
+      let next = prev
+      for (const np of toAdd) {
+        next = upsertProfilePost(next, np, np._id)
+      }
+      return next
+    })
+    setTotalPostsCount((n) => (typeof n === 'number' ? n + missing.length : null))
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [followPost, username, currentUser])
+  }, [followPost, user])
 
 
 if(!user && loading){
@@ -441,6 +478,7 @@ if(!user && loading){
                         setPosts(prev => prev.filter(p => p._id !== postId))
                         setTotalPostsCount((n) => (typeof n === 'number' ? Math.max(0, n - 1) : null))
                       }}
+                      onPostUpdated={handleProfilePostUpdated}
                     />
                   ))}
                   
