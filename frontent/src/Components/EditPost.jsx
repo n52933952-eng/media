@@ -335,6 +335,7 @@ const EditPost = ({post, isOpen, onClose, onUpdate}) => {
   }
 
   const textColor = useColorModeValue('gray.800', 'white')
+  const collabHintBg = useColorModeValue('blue.50', 'whiteAlpha.100')
   
   return (
     <Modal isOpen={isOpen} onClose={handleClose} blockScrollOnMount={false} scrollBehavior="inside">
@@ -398,9 +399,13 @@ const EditPost = ({post, isOpen, onClose, onUpdate}) => {
                 ) : null}
               </>
             ) : isCollaborative ? (
-              <Text fontSize="sm" color="gray.500" mt={3}>
-                To change your photo, use “Change your photo” on the post.
-              </Text>
+              <Box mt={4} p={3} borderRadius="md" bg={collabHintBg}>
+                <Text fontSize="sm" fontWeight="medium">Collaborative post</Text>
+                <Text fontSize="sm" color="gray.500" mt={1}>
+                  Edit the caption here. To add or change your photo, close this and use
+                  {' '}<strong>✏️ Edit → Add your photo</strong> on the post.
+                </Text>
+              </Box>
             ) : (
               <>
             <Input 

@@ -1,9 +1,9 @@
 import React,{useEffect,useState,useContext,useCallback,useMemo,useRef} from 'react'
-import{Avatar,Flex,Text,Image,Box,Divider,Button,Spinner,VStack,HStack,Grid,GridItem,SimpleGrid,useColorModeValue,useDisclosure} from '@chakra-ui/react'
+import{Avatar,Flex,Text,Image,Box,Divider,Button,Spinner,VStack,HStack,Grid,GridItem,SimpleGrid,useColorModeValue} from '@chakra-ui/react'
 import { HiDotsHorizontal } from "react-icons/hi";
 import Actions from '../Components/Actions'
 import Comment from '../Components/Comment'
-import EditPost from '../Components/EditPost'
+import PostEditorMenu from '../Components/PostEditorMenu'
 import GetUserProfile from '../hooks/GetUserProfile.js'
 import{useParams, useSearchParams} from 'react-router-dom'
 import{PostContext} from '../context/PostContext'
@@ -169,10 +169,15 @@ const PostPage = () => {
     
     const showToast = useShowToast()
     
-    // Edit post modal state
-    const { isOpen: isEditPostOpen, onOpen: onEditPostOpen, onClose: onEditPostClose } = useDisclosure()
-
     const navigate = useNavigate()
+
+    const applyPostUpdate = useCallback(
+      (updatedPost) => {
+        if (!updatedPost?._id) return
+        setFollowPost([{ ...updatedPost, replies: postReplies }])
+      },
+      [setFollowPost, postReplies],
+    )
 
     // Color modes
     const cardBg = useColorModeValue('white', '#252b3b')
@@ -669,25 +674,7 @@ if(!post) {
         <Text fontSize="sm" color="gray.light" textAlign="right" width={36}>
          {formatDistanceToNow(new Date(post.createdAt))} ago </Text>
         
-        {/* Edit button for owner and contributors */}
-        {post?.isCollaborative && (
-          (user?._id?.toString() === post?.postedBy?._id?.toString() || 
-           (post?.contributors && Array.isArray(post.contributors) && 
-            post.contributors.some(c => (c._id || c).toString() === user?._id?.toString()))) && (
-            <Button
-              size="xs"
-              variant="outline"
-              colorScheme="blue"
-              onClick={(e) => {
-                e.preventDefault()
-                e.stopPropagation()
-                onEditPostOpen()
-              }}
-            >
-              ✏️ Edit Post
-            </Button>
-          )
-        )}
+        <PostEditorMenu post={post} onPostUpdated={applyPostUpdate} />
         
         {/* Delete button only for owner */}
         {user?._id?.toString() === post?.postedBy?._id?.toString() && (
@@ -943,21 +930,6 @@ if(!post) {
     </Box>
     )}
    
-      {/* Edit Post Modal */}
-      <EditPost
-        post={post}
-        isOpen={isEditPostOpen}
-        onClose={onEditPostClose}
-        onUpdate={(updatedPost) => {
-          // Update post in context
-          if (setFollowPost && updatedPost) {
-            setFollowPost(prev => prev.map(p => p._id === updatedPost._id ? updatedPost : p))
-          }
-          console.log('✅ Post updated on PostPage:', updatedPost?._id)
-        }}
-      />
- 
-     
     </Box>
   )
 }

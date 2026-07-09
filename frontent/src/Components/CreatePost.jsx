@@ -1,8 +1,7 @@
 import React,{useState,useRef,useContext} from 'react'
 import{AddIcon} from '@chakra-ui/icons'
 
-import {Button,useColorModeValue,useDisclosure,
-
+import {  Button,useColorModeValue,useDisclosure,
   Modal,
   ModalOverlay,
   ModalContent,
@@ -18,13 +17,16 @@ import {Button,useColorModeValue,useDisclosure,
   CloseButton,
   Flex,
   Box,
-  Checkbox,
   Wrap,
   WrapItem,
-  Badge
+  Badge,
+  ButtonGroup,
+  SimpleGrid,
+  Progress
 } from "@chakra-ui/react";
 
 import { BsFileImageFill } from "react-icons/bs";
+import { MdAddPhotoAlternate } from "react-icons/md";
 import useShowToast from '../hooks/useShowToast.js'
 import { compressVideo, needsCompression } from '../utils/videoCompress'
 import API_BASE_URL from '../config/api'
@@ -37,6 +39,7 @@ import{PostContext} from '../context/PostContext'
 
 
 const MAX_CHAR = 500
+const MAX_CAROUSEL = 4
 
 
 const CreatePost = () => {
@@ -52,7 +55,8 @@ const CreatePost = () => {
     const[loading,setLoading]=useState(false)
     const[uploadProgress,setUploadProgress]=useState(0)
     const[isUploading,setIsUploading]=useState(false)
-    const[isCollaborative,setIsCollaborative]=useState(false)
+    const[postType,setPostType]=useState('single') // single | carousel | collaborative
+    const isCollaborative = postType === 'collaborative'
     const [selectedCollaborators, setSelectedCollaborators] = useState([])
     const [carouselFiles, setCarouselFiles] = useState([])
     const [carouselPreviews, setCarouselPreviews] = useState([])
@@ -65,6 +69,8 @@ const CreatePost = () => {
    
      const showToast = useShowToast()
 
+     const hintBgCollab = useColorModeValue('blue.50', 'whiteAlpha.100')
+     const hintBgCarousel = useColorModeValue('purple.50', 'whiteAlpha.100')
  
     const[remaingChar,setRemaingChar]=useState(MAX_CHAR)
  
@@ -229,25 +235,47 @@ const CreatePost = () => {
     }
   }
 
-  const handleCarouselChange = (event) => {
-    if (isCollaborative) {
-      showToast('Not available', 'Collaborative posts use one photo per person — no carousel.', 'info')
-      if (carouselInput.current) carouselInput.current.value = ''
-      return
+  const switchPostType = (next) => {
+    if (next === postType) return
+    if (next === 'collaborative') {
+      enableCollaborativeMode()
+    } else {
+      setSelectedCollaborators([])
     }
-    const files = Array.from(event.target.files || []).slice(0, 4)
-    if (!files.length) return
-    if (files.some((f) => !f.type.startsWith('image/'))) {
-      showToast('Invalid file type', 'Carousel posts support photos only (up to 4)', 'error')
-      return
-    }
-    carouselPreviews.forEach((u) => { if (u?.startsWith('blob:')) URL.revokeObjectURL(u) })
-    if (imagePreview && imagePreview.startsWith('blob:')) URL.revokeObjectURL(imagePreview)
-    setImage(null)
-    setImagePreview('')
-    setCarouselFiles(files)
-    setCarouselPreviews(files.map((f) => URL.createObjectURL(f)))
+    if (next !== 'carousel') clearCarouselMedia()
+    if (next !== 'single' && next !== 'collaborative') clearSingleImageMedia()
+    if (next === 'collaborative' && image?.type?.startsWith('video/')) clearSingleImageMedia()
+    setPostType(next)
+  }
+
+  const handleAddCarouselPhoto = (event) => {
+    const file = event.target.files?.[0]
     if (carouselInput.current) carouselInput.current.value = ''
+    if (!file) return
+    if (!file.type.startsWith('image/')) {
+      showToast('Invalid file type', 'Carousel posts support photos only', 'error')
+      return
+    }
+    if (carouselFiles.length >= MAX_CAROUSEL) {
+      showToast('Limit reached', `Carousel supports up to ${MAX_CAROUSEL} photos`, 'info')
+      return
+    }
+    clearSingleImageMedia()
+    setCarouselFiles((prev) => [...prev, file])
+    setCarouselPreviews((prev) => [...prev, URL.createObjectURL(file)])
+  }
+
+  const removeCarouselAt = (idx) => {
+    setCarouselFiles((prev) => {
+      const next = prev.filter((_, i) => i !== idx)
+      if (next.length <= 1) setAudioFile(null)
+      return next
+    })
+    setCarouselPreviews((prev) => {
+      const url = prev[idx]
+      if (url?.startsWith('blob:')) URL.revokeObjectURL(url)
+      return prev.filter((_, i) => i !== idx)
+    })
   }
 
   const handleAudioChange = async (event) => {
@@ -306,6 +334,11 @@ const CreatePost = () => {
        setUploadProgress(0)
      }
 
+     if (postType === 'carousel' && carouselFiles.length === 0) {
+       showToast('Error', 'Add at least one photo for carousel', 'error')
+       return
+     }
+
      if (isCollaborative) {
        if (carouselFiles.length > 0 || audioFile) {
          showToast('Error', 'Collaborative posts cannot include multiple photos or music.', 'error')
@@ -342,7 +375,6 @@ const CreatePost = () => {
     } else if (image instanceof File) {
       const isVideo = image.type?.startsWith('video/')
       payload.img = await uploadMediaToR2(image, 'posts', { skipCompress: !!isVideo })
-      if (!isVideo) payload.images = [payload.img]
       setUploadProgress(80)
       if (audioFile) {
         payload.audio = await uploadMediaToR2(audioFile, 'posts', { skipCompress: true })
@@ -396,7 +428,7 @@ const CreatePost = () => {
     setImage(null)
     setImagePreview("")
     setUploadProgress(0)
-    setIsCollaborative(false)
+    setPostType('single')
     setSelectedCollaborators([])
     setLoading(false)
   }
@@ -437,10 +469,12 @@ const CreatePost = () => {
         isOpen={isOpen}
         onClose={() => {
           setSelectedCollaborators([])
+          setPostType('single')
           onClose()
         }}
         blockScrollOnMount={false}
         scrollBehavior="inside"
+        size="lg"
       >
         <ModalOverlay />
        
@@ -449,41 +483,59 @@ const CreatePost = () => {
          
           <ModalCloseButton />
           
-         
-         
           <ModalBody mb={6} overflowY="auto">
            <FormControl>
-           
-         <Textarea placeholder="post text gose here" value={postText}onChange={handleTextChnage}/>
-          
-          
-          
-            <Text fontSize="sm" fontWeight="bold" textAlign="right" color="gray.500">{remaingChar}/{MAX_CHAR}</Text>
-         
-            <Checkbox 
-              mt={3} 
-              isChecked={isCollaborative}
-              onChange={(e) => {
-                const next = e.target.checked
-                if (next) enableCollaborativeMode()
-                setIsCollaborative(next)
-                if (!next) setSelectedCollaborators([])
-              }}
-            >
-              <Text fontSize="sm">🤝 Make this a collaborative post (others can contribute)</Text>
-            </Checkbox>
 
-            {isCollaborative && (
-              <Text fontSize="xs" color="gray.500" mt={2}>
-                One photo per person — add yours now; contributors add theirs later. No carousel or music.
-              </Text>
+            <Text fontSize="sm" fontWeight="semibold" mb={2}>Post type</Text>
+            <ButtonGroup isAttached size="sm" mb={4} flexWrap="wrap">
+              <Button
+                variant={postType === 'single' ? 'solid' : 'outline'}
+                colorScheme="blue"
+                onClick={() => switchPostType('single')}
+              >
+                Photo / Video
+              </Button>
+              <Button
+                variant={postType === 'carousel' ? 'solid' : 'outline'}
+                colorScheme="blue"
+                onClick={() => switchPostType('carousel')}
+              >
+                Carousel
+              </Button>
+              <Button
+                variant={postType === 'collaborative' ? 'solid' : 'outline'}
+                colorScheme="blue"
+                onClick={() => switchPostType('collaborative')}
+              >
+                🤝 Collaborative
+              </Button>
+            </ButtonGroup>
+
+            {postType === 'collaborative' && (
+              <Box mb={4} p={3} borderRadius="md" bg={hintBgCollab}>
+                <Text fontSize="sm" fontWeight="medium">One photo per person</Text>
+                <Text fontSize="xs" color="gray.500" mt={1}>
+                  Add your photo now. Contributors add theirs later. No carousel or music.
+                </Text>
+              </Box>
             )}
 
-            {isCollaborative && user && (
-              <Box mt={3}>
-                <Text fontSize="xs" color="gray.500" mb={1}>
-                  Add contributors (optional). You are always included.
+            {postType === 'carousel' && (
+              <Box mb={4} p={3} borderRadius="md" bg={hintBgCarousel}>
+                <Text fontSize="sm" fontWeight="medium">Up to {MAX_CAROUSEL} photos</Text>
+                <Text fontSize="xs" color="gray.500" mt={1}>
+                  Add photos one by one. Optional music after the first photo.
                 </Text>
+              </Box>
+            )}
+           
+         <Textarea placeholder="What's on your mind?" value={postText} onChange={handleTextChnage}/>
+          
+            <Text fontSize="sm" fontWeight="bold" textAlign="right" color="gray.500">{remaingChar}/{MAX_CHAR}</Text>
+
+            {isCollaborative && user && (
+              <Box mt={4}>
+                <Text fontSize="sm" fontWeight="semibold" mb={2}>Contributors (optional)</Text>
                 <CollaboratorPicker
                   excludeUserIds={[
                     user._id?.toString(),
@@ -533,47 +585,8 @@ const CreatePost = () => {
               </Box>
             )}
          
-            <Input type="file" accept="image/*" multiple hidden ref={carouselInput} onChange={handleCarouselChange} />
+            <Input type="file" accept="image/*" hidden ref={carouselInput} onChange={handleAddCarouselPhoto} />
             <Input type="file" accept="audio/mpeg,audio/mp3,audio/*" hidden ref={audioInput} onChange={handleAudioChange} />
-
-            <Flex mt={3} gap={3} flexWrap="wrap" align="center">
-              <BsFileImageFill
-                onClick={() => imageInput.current.click()}
-                style={{ cursor: 'pointer' }}
-                title={isCollaborative ? 'Photo only' : 'Photo or video'}
-              />
-              {!isCollaborative && (
-              <>
-              <Button size="xs" variant="outline" onClick={() => carouselInput.current?.click()}>
-                Carousel (up to 4 photos)
-              </Button>
-              {carouselFiles.length > 0 && (
-                <Button size="xs" variant="outline" onClick={() => audioInput.current?.click()}>
-                  {audioFile ? '🎵 Change music' : 'Add music (MP3)'}
-                </Button>
-              )}
-              </>
-              )}
-            </Flex>
-
-            {!isCollaborative && carouselPreviews.length > 0 && (
-              <Flex mt={4} gap={2} flexWrap="wrap" position="relative">
-                {carouselPreviews.map((src, idx) => (
-                  <Image key={src} src={src} alt="" boxSize="120px" objectFit="cover" borderRadius="md" />
-                ))}
-                {audioFile && (
-                  <Text fontSize="sm" alignSelf="center">🎵 {audioFile.name}</Text>
-                )}
-                <CloseButton
-                  onClick={clearCarouselMedia}
-                  position="absolute"
-                  top={0}
-                  right={0}
-                  bg="gray.500"
-                />
-              </Flex>
-            )}
-
             <Input
               type="file"
               accept={isCollaborative ? 'image/*' : 'image/*,video/*'}
@@ -582,53 +595,111 @@ const CreatePost = () => {
               onChange={handleImageChange}
             />
 
-            {!isCollaborative && !carouselPreviews.length && (
-            <BsFileImageFill onClick={() => imageInput.current.click()} />
+            {postType === 'carousel' && (
+              <Box mt={4}>
+                <Text fontSize="sm" fontWeight="semibold" mb={2}>
+                  Photos ({carouselPreviews.length}/{MAX_CAROUSEL})
+                </Text>
+                <SimpleGrid columns={{ base: 2, md: 4 }} spacing={3}>
+                  {carouselPreviews.map((src, idx) => (
+                    <Box key={src} position="relative" borderRadius="md" overflow="hidden">
+                      <Image src={src} alt="" w="full" h="110px" objectFit="cover" />
+                      <CloseButton
+                        size="sm"
+                        position="absolute"
+                        top={1}
+                        right={1}
+                        bg="blackAlpha.700"
+                        color="white"
+                        onClick={() => removeCarouselAt(idx)}
+                      />
+                      <Text
+                        position="absolute"
+                        bottom={1}
+                        left={1}
+                        fontSize="xs"
+                        color="white"
+                        bg="blackAlpha.600"
+                        px={1.5}
+                        borderRadius="sm"
+                      >
+                        {idx + 1}
+                      </Text>
+                    </Box>
+                  ))}
+                  {carouselPreviews.length < MAX_CAROUSEL && (
+                    <Button
+                      h="110px"
+                      variant="outline"
+                      borderStyle="dashed"
+                      leftIcon={<MdAddPhotoAlternate />}
+                      onClick={() => carouselInput.current?.click()}
+                    >
+                      Add photo
+                    </Button>
+                  )}
+                </SimpleGrid>
+                {carouselPreviews.length > 0 && (
+                  <Button mt={3} size="sm" variant="outline" onClick={() => audioInput.current?.click()}>
+                    {audioFile ? `🎵 ${audioFile.name}` : 'Add music (optional, max 4 min)'}
+                  </Button>
+                )}
+              </Box>
             )}
-               
-               {imagePreview && !carouselPreviews.length &&
-                 <Flex mt={5} position="relative" w="full">
-                     {image?.type?.startsWith('image/') ? (
-                       <Image src={imagePreview} alt="Preview" maxH="400px" borderRadius="md" />
-                     ) : (
-                       <Box as="video" src={imagePreview} controls maxH="400px" borderRadius="md" />
-                     )}
-                     <CloseButton 
-                       onClick={() => {
-                         // Revoke object URL to free memory
-                         if (imagePreview && imagePreview.startsWith('blob:')) {
-                           URL.revokeObjectURL(imagePreview)
-                         }
-                         setImage(null)
-                         setImagePreview('')
-                         if (imageInput.current) {
-                           imageInput.current.value = ''
-                         }
-                       }} 
-                       position="absolute" 
-                       top={2} 
-                       right={2} 
-                       bg={"gray.500"}
-                     />
-                 </Flex>
-                 }
-            
-          
+
+            {(postType === 'single' || postType === 'collaborative') && (
+              <Box mt={4}>
+                <Text fontSize="sm" fontWeight="semibold" mb={2}>
+                  {isCollaborative ? 'Your photo' : 'Photo or video'}
+                </Text>
+                {!imagePreview ? (
+                  <Button
+                    variant="outline"
+                    leftIcon={<BsFileImageFill />}
+                    onClick={() => imageInput.current?.click()}
+                  >
+                    {isCollaborative ? 'Add your photo' : 'Choose file'}
+                  </Button>
+                ) : (
+                  <Flex mt={2} position="relative" w="full" direction="column" gap={2}>
+                    {image?.type?.startsWith('image/') || (isCollaborative && imagePreview) ? (
+                      <Image src={imagePreview} alt="Preview" maxH="320px" borderRadius="md" objectFit="contain" />
+                    ) : (
+                      <Box as="video" src={imagePreview} controls maxH="320px" borderRadius="md" />
+                    )}
+                    <Button size="sm" variant="outline" alignSelf="flex-start" onClick={clearSingleImageMedia}>
+                      Remove
+                    </Button>
+                  </Flex>
+                )}
+              </Box>
+            )}
+
+            {isUploading && uploadProgress > 0 && uploadProgress < 100 && (
+              <Box mt={4}>
+                <Text fontSize="xs" mb={1}>Processing… {Math.round(uploadProgress)}%</Text>
+                <Progress value={uploadProgress} size="sm" colorScheme="blue" borderRadius="md" />
+              </Box>
+            )}
           
            </FormControl>
          
           </ModalBody>
 
-        
-        
-        
-        
-        
           <ModalFooter>
-            <Button colorScheme='blue' mr={3} onClick={handleCreatePost} isLoading={loading}>
-              post
+            <Button
+              colorScheme="blue"
+              mr={3}
+              onClick={handleCreatePost}
+              isLoading={loading}
+              isDisabled={
+                !postText.trim() &&
+                !imagePreview &&
+                carouselPreviews.length === 0
+              }
+            >
+              Post
             </Button>
-         
           </ModalFooter>
      
         </ModalContent>
