@@ -674,7 +674,11 @@ if(!post) {
         <Text fontSize="sm" color="gray.light" textAlign="right" width={36}>
          {formatDistanceToNow(new Date(post.createdAt))} ago </Text>
         
-        <PostEditorMenu post={post} onPostUpdated={applyPostUpdate} />
+        <PostEditorMenu
+          post={post}
+          onPostUpdated={applyPostUpdate}
+          menuButtonProps={{ size: 'xs' }}
+        />
         
         {/* Delete button only for owner */}
         {user?._id?.toString() === post?.postedBy?._id?.toString() && (

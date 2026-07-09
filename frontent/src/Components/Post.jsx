@@ -13,11 +13,7 @@ import { SocketContext } from '../context/SocketContext'
 import { FiMail } from 'react-icons/fi'
 import { followIdToString } from '../utils/postUtils.js'
 import { isUserInOnlineList } from '../utils/presenceUtils.js'
-import AddContributorModal from './AddContributorModal'
-import ManageContributorsModal from './ManageContributorsModal'
-import AddCollaboratorPhotoModal from './AddCollaboratorPhotoModal'
-import CollaborativePostAudioModal from './CollaborativePostAudioModal'
-import EditPost from './EditPost'
+import PostEditorMenu from './PostEditorMenu'
 import FootballIcon from './FootballIcon'
 import FootballMatchCards from './FootballMatchCards'
 import { normalizeDbMatchForFootballFeed, isFootballMatchLive } from '../utils/footballFeed'
@@ -28,9 +24,8 @@ import {
   getChessGameDataForPost,
 } from '../utils/gameFeedPostUtils.js'
 import { isVideoUrl, mediaDisplayUrl } from '../utils/mediaUrl.js'
-import { parsePostFromApiResponse, postDetailApiUrl } from '../utils/postUtils.js'
 import PostMediaCarousel from './PostMediaCarousel'
-import { getPostCarouselSlides, getPostCarouselAudio, shouldShowPostCarousel, isCarouselPost, getMyCollaboratorImage } from '../utils/postCarousel.js'
+import { getPostCarouselSlides, getPostCarouselAudio, shouldShowPostCarousel } from '../utils/postCarousel.js'
 
 const apiBaseUrl = () => (import.meta.env.PROD ? window.location.origin : 'http://localhost:5000')
 
@@ -183,11 +178,6 @@ const showToast = useShowToast()
   const{user}=useContext(UserContext)
   const{followPost,setFollowPost,hideFeedPostFromFeed,hideFeedSourceFromFeed}=useContext(PostContext)
   const { socket, onlineUser } = useContext(SocketContext) || {}
-  const { isOpen: isAddContributorOpen, onOpen: onAddContributorOpen, onClose: onAddContributorClose } = useDisclosure()
-  const { isOpen: isManageContributorsOpen, onOpen: onManageContributorsOpen, onClose: onManageContributorsClose } = useDisclosure()
-  const { isOpen: isEditPostOpen, onOpen: onEditPostOpen, onClose: onEditPostClose } = useDisclosure()
-  const { isOpen: isCollabPhotoOpen, onOpen: onCollabPhotoOpen, onClose: onCollabPhotoClose } = useDisclosure()
-  const { isOpen: isCollabAudioOpen, onOpen: onCollabAudioOpen, onClose: onCollabAudioClose } = useDisclosure()
   
   // Color modes
   const cardBg = useColorModeValue('white', '#252b3b')
@@ -911,31 +901,6 @@ const showToast = useShowToast()
     const cId = (typeof c === 'string' ? c : c?._id)?.toString?.() ?? String(typeof c === 'string' ? c : c?._id ?? '')
     return !!cId && !!currentUserId && cId === currentUserId
   })
-
-  const isSomeoneElsesProfile = !showFeedExtras && isOwnProfile === false
-  const canActAsContributor = !!isContributor && !isSomeoneElsesProfile
-  const isCarouselOwnerPost = isCarouselPost(post) && isOwner
-  const canAddCollaborator = !!post.isCollaborative && (isOwner || canActAsContributor)
-  const canManageCollabAudio = !!post.isCollaborative && isOwner
-  const canManageCarouselAudio = isCarouselOwnerPost
-  const myCollaboratorPhoto = getMyCollaboratorImage(post, currentUserId)
-  const hasCollabAudio = !!carouselAudio
-
-  const canEditPostText =
-    !!user &&
-    !isChannelPost &&
-    !isWeatherPost &&
-    !isFootballPost &&
-    !isChessPost &&
-    !isCardPost &&
-    !post?.channelAddedBy &&
-    (isOwner || (!!post.isCollaborative && canActAsContributor))
-
-  const canShowPenMenu =
-    canEditPostText ||
-    (canAddCollaborator && !!post.isCollaborative) ||
-    isCarouselOwnerPost
-
   const applyPostUpdate = useCallback((updatedPost) => {
     if (!updatedPost) return
     setLocalPost({ ...updatedPost })
@@ -1751,234 +1716,21 @@ const showToast = useShowToast()
   )}
   
   
-  <Flex gap={2} my={1} align="center" flexWrap="wrap" data-no-navigate="true" onClick={(e) => e.stopPropagation()}>
+  <Flex gap={2} my={1} align="center" flexWrap="wrap" data-no-navigate="true" data-feed-actions="true" onClick={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()}>
     {!isChessPost && !isCardPost && (
       <Actions post={post} showFeedExtras={showFeedExtras} />
     )}
-    
-    {canShowPenMenu && (
-      <Menu>
-        <MenuButton
-          as={Button}
-          size="xs"
-          variant="outline"
-          colorScheme="blue"
-          onClick={(e) => {
-            e.preventDefault()
-            e.stopPropagation()
-            blockPostNavBriefly()
-          }}
-        >
-          ✏️
-        </MenuButton>
-        <MenuList zIndex={1500}>
-          {canEditPostText && (
-            <MenuItem
-              onClick={(e) => {
-                e.stopPropagation()
-                onEditPostOpen()
-              }}
-            >
-              {isCarouselOwnerPost ? 'Edit caption & photos' : 'Edit caption'}
-            </MenuItem>
-          )}
-          {post.isCollaborative && canAddCollaborator && (
-            <>
-              <MenuItem
-                onClick={(e) => {
-                  e.stopPropagation()
-                  onCollabPhotoOpen()
-                }}
-              >
-                {myCollaboratorPhoto ? 'Change your photo' : 'Add your photo'}
-              </MenuItem>
-              <MenuItem
-                onClick={(e) => {
-                  e.stopPropagation()
-                  onAddContributorOpen()
-                }}
-              >
-                Add contributor
-              </MenuItem>
-              {(isOwner || canActAsContributor) && post.contributors?.length > 0 && (
-                <MenuItem
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    onManageContributorsOpen()
-                  }}
-                >
-                  Manage contributors
-                </MenuItem>
-              )}
-            </>
-          )}
-          {(canManageCollabAudio || canManageCarouselAudio) && (
-            <MenuItem
-              onClick={(e) => {
-                e.stopPropagation()
-                onCollabAudioOpen()
-              }}
-            >
-              {hasCollabAudio ? 'Change music' : 'Add music'}
-            </MenuItem>
-          )}
-        </MenuList>
-      </Menu>
-    )}
-    
-    {/* Add Contributor Modal */}
-    <AddContributorModal
-      isOpen={isAddContributorOpen}
-      onClose={onAddContributorClose}
-      post={(() => {
-        console.log('🔵 [Post] Passing post to AddContributorModal:', {
-          postId: post?._id?.substring(0, 8),
-          isCollaborative: post?.isCollaborative,
-          contributorsCount: post?.contributors?.length
-        })
-        return post
-      })()}
-      onContributorAdded={(updatedPost) => {
-        console.log('🔥🔥🔥 [Post] ============ onContributorAdded CALLBACK TRIGGERED ============')
-        console.log('🔥🔥🔥 [Post] Timestamp:', new Date().toISOString())
-        console.log('🔥 [Post] Updated post received:', updatedPost ? 'YES' : 'NO')
-        console.log('🔥 [Post] Current post._id:', post._id)
-        
-        if (updatedPost) {
-          console.log('🔥🔥🔥 [Post] UPDATED POST DATA:')
-          console.log('🔥 [Post] - Post ID:', updatedPost._id)
-          console.log('🔥 [Post] - isCollaborative:', updatedPost.isCollaborative)
-          console.log('🔥 [Post] - Contributors count:', updatedPost.contributors?.length)
-          console.log('🔥 [Post] - Contributors array:', updatedPost.contributors)
-          console.log('🔥 [Post] Full contributors JSON:', JSON.stringify(updatedPost.contributors?.map(c => ({
-            id: (c._id || c)?.toString()?.substring(0, 8),
-            name: c.name,
-            username: c.username
-          })), null, 2))
-          
-          // IMMEDIATELY update local state - this ensures the owner sees the update right away
-          console.log('🔥🔥🔥 [Post] UPDATING LOCAL STATE IMMEDIATELY')
-          setLocalPost({ ...updatedPost })
-          
-          // Also update feed state if post is in feed
-          setFollowPost(prevPosts => {
-            console.log('🔥🔥🔥 [Post] ============ UPDATING FEED STATE ============')
-            console.log('🔥 [Post] Current feed has', prevPosts.length, 'posts')
-            console.log('🔥 [Post] Looking for post ID:', post._id)
-            
-            let foundPost = false
-            const newPosts = []
-            
-            for (const p of prevPosts) {
-              if (p._id === post._id) {
-                console.log('🔥🔥🔥 [Post] FOUND POST IN FEED! Replacing...')
-                console.log('🔥 [Post] OLD post contributors:', p.contributors?.length || 0)
-                console.log('🔥 [Post] NEW post contributors:', updatedPost.contributors?.length || 0)
-                console.log('🔥 [Post] NEW contributors data:', JSON.stringify(updatedPost.contributors?.map(c => ({
-                  id: (c._id || c)?.toString()?.substring(0, 8),
-                  name: c.name,
-                  username: c.username
-                })), null, 2))
-                
-                // Push completely new object with spread to ensure new reference
-                newPosts.push({ ...updatedPost })
-                foundPost = true
-              } else {
-                newPosts.push(p)
-              }
-            }
-            
-            if (foundPost) {
-              console.log('🔥🔥🔥 [Post] POST REPLACED IN FEED! Returning new array...')
-            } else {
-              console.error('❌❌❌ [Post] POST NOT FOUND IN FEED! (But local state already updated)')
-            }
-            console.log('🔥 [Post] Returning array of length:', newPosts.length)
-            
-            // Return completely new array reference
-            return [...newPosts]
-          })
-          
-          // Force a small delay and check if update happened
-          setTimeout(() => {
-            console.log('🔍 [Post] Checking if post updated in 100ms...')
-          }, 100)
-        } else {
-          console.log('⚠️ [Post] No updated post provided, fetching...')
-          fetch(postDetailApiUrl(post._id), { credentials: 'include' })
-          .then(res => res.json())
-          .then(data => {
-            const fetched = parsePostFromApiResponse(data)
-            if (fetched) {
-              console.log('✅ [Post] Fetched and updating post')
-              setFollowPost(prev => prev.map(p => p._id === post._id ? { ...fetched } : p))
-            }
-          })
-          .catch(error => console.error('❌ [Post] Error refreshing post:', error))
-        }
-      }}
-    />
-    
-    <EditPost
-      post={post}
-      isOpen={isEditPostOpen}
-      onClose={onEditPostClose}
-      onUpdate={applyPostUpdate}
-    />
 
-    <AddCollaboratorPhotoModal
-      isOpen={isCollabPhotoOpen}
-      onClose={onCollabPhotoClose}
+    <PostEditorMenu
       post={post}
-      onSaved={applyPostUpdate}
-    />
-
-    <CollaborativePostAudioModal
-      isOpen={isCollabAudioOpen}
-      onClose={onCollabAudioClose}
-      post={post}
-      onSaved={applyPostUpdate}
-    />
-    
-    {/* Manage Contributors Modal */}
-    <ManageContributorsModal
-      isOpen={isManageContributorsOpen}
-      onClose={onManageContributorsClose}
-      post={post}
-      onContributorRemoved={(updatedPost) => {
-        console.log('🔥 [Post] onContributorRemoved called')
-        if (updatedPost) {
-          // IMMEDIATELY update local state - ensures owner sees update right away
-          console.log('🔥 [Post] UPDATING LOCAL STATE IMMEDIATELY after removal')
-          setLocalPost({ ...updatedPost })
-          
-          // Also update feed state if post is in feed
-          setFollowPost(prev => {
-            const updated = prev.map(p => p._id === post._id ? updatedPost : p)
-            const foundInFeed = prev.some(p => p._id === post._id)
-            console.log(foundInFeed ? '✅ [Post] Updated in feed' : '⚠️ [Post] Not in feed (but local state updated)')
-            return updated
-          })
-          console.log('✅ [Post] Updated post after removing contributor:', updatedPost.contributors?.length)
-        } else {
-          // Fallback: fetch post data if not provided
-          fetch(postDetailApiUrl(post._id), { credentials: 'include' })
-          .then(res => res.json())
-          .then(data => {
-            const fetched = parsePostFromApiResponse(data)
-            if (fetched) {
-              console.log('🔄 [Post] Fetched post, updating local state')
-              setLocalPost({ ...fetched })
-              
-              setFollowPost(prev => {
-                const updated = prev.map(p => p._id === post._id ? fetched : p)
-                return updated
-              })
-            }
-          })
-          .catch(error => console.error('Error refreshing post:', error))
-        }
+      onPostUpdated={applyPostUpdate}
+      showFeedExtras={showFeedExtras}
+      isOwnProfile={isOwnProfile}
+      iconOnly
+      onMenuStateChange={(open) => {
+        menuOpenRef.current = open
       }}
+      onMenuInteraction={blockPostNavBriefly}
     />
   </Flex>
   

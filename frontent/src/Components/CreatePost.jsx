@@ -22,7 +22,8 @@ import {  Button,useColorModeValue,useDisclosure,
   Badge,
   ButtonGroup,
   SimpleGrid,
-  Progress
+  Progress,
+  Avatar
 } from "@chakra-ui/react";
 
 import { BsFileImageFill } from "react-icons/bs";
@@ -71,6 +72,8 @@ const CreatePost = () => {
 
      const hintBgCollab = useColorModeValue('blue.50', 'whiteAlpha.100')
      const hintBgCarousel = useColorModeValue('purple.50', 'whiteAlpha.100')
+     const selectedChipsBg = useColorModeValue('blue.50', 'whiteAlpha.100')
+     const collabPhotoBorder = useColorModeValue('blue.100', 'whiteAlpha.200')
  
     const[remaingChar,setRemaingChar]=useState(MAX_CHAR)
  
@@ -515,7 +518,7 @@ const CreatePost = () => {
               <Box mb={4} p={3} borderRadius="md" bg={hintBgCollab}>
                 <Text fontSize="sm" fontWeight="medium">One photo per person</Text>
                 <Text fontSize="xs" color="gray.500" mt={1}>
-                  Add your photo now. Contributors add theirs later. No carousel or music.
+                  Add your photo first, then invite contributors. They add their photos later.
                 </Text>
               </Box>
             )}
@@ -528,15 +531,98 @@ const CreatePost = () => {
                 </Text>
               </Box>
             )}
-           
-         <Textarea placeholder="What's on your mind?" value={postText} onChange={handleTextChnage}/>
-          
+
+            <Input type="file" accept="image/*" hidden ref={carouselInput} onChange={handleAddCarouselPhoto} />
+            <Input type="file" accept="audio/mpeg,audio/mp3,audio/*" hidden ref={audioInput} onChange={handleAudioChange} />
+            <Input
+              type="file"
+              accept={isCollaborative ? 'image/*' : 'image/*,video/*'}
+              hidden
+              ref={imageInput}
+              onChange={handleImageChange}
+            />
+
+            {/* Collaborative: photo first so users don't scroll to find it */}
+            {postType === 'collaborative' && (
+              <Box mb={4} p={3} borderRadius="md" borderWidth="1px" borderColor={collabPhotoBorder}>
+                <Text fontSize="sm" fontWeight="semibold" mb={2}>1. Your photo</Text>
+                {!imagePreview ? (
+                  <Button
+                    w="full"
+                    h="100px"
+                    variant="outline"
+                    borderStyle="dashed"
+                    leftIcon={<MdAddPhotoAlternate />}
+                    onClick={() => imageInput.current?.click()}
+                  >
+                    Add your photo
+                  </Button>
+                ) : (
+                  <Flex direction="column" gap={2} align="center">
+                    <Image src={imagePreview} alt="Preview" maxH="160px" borderRadius="md" objectFit="contain" />
+                    <Button size="sm" variant="outline" onClick={clearSingleImageMedia}>
+                      Change photo
+                    </Button>
+                  </Flex>
+                )}
+              </Box>
+            )}
+
+            <Text fontSize="sm" fontWeight="semibold" mb={2}>
+              {isCollaborative ? '2. Caption (optional)' : 'Caption'}
+            </Text>
+            <Textarea placeholder="What's on your mind?" value={postText} onChange={handleTextChnage}/>
             <Text fontSize="sm" fontWeight="bold" textAlign="right" color="gray.500">{remaingChar}/{MAX_CHAR}</Text>
+
+            {isCollaborative && selectedCollaborators.length > 0 && (
+              <Box mt={4} p={3} borderRadius="md" bg={selectedChipsBg}>
+                <Text fontSize="sm" fontWeight="semibold" mb={2}>
+                  Selected contributors ({selectedCollaborators.length})
+                </Text>
+                <Wrap spacing={2}>
+                  {selectedCollaborators.map((su) => (
+                    <WrapItem key={su._id}>
+                      <Badge
+                        display="inline-flex"
+                        alignItems="center"
+                        gap={1}
+                        px={2}
+                        py={1}
+                        borderRadius="md"
+                        variant="subtle"
+                        colorScheme="blue"
+                      >
+                        <Avatar size="2xs" src={su.profilePic} name={su.name || su.username} />
+                        {su.name || su.username}
+                        <Box
+                          as="button"
+                          type="button"
+                          aria-label="Remove"
+                          onClick={() =>
+                            setSelectedCollaborators((p) =>
+                              p.filter((x) => String(x._id) !== String(su._id))
+                            )
+                          }
+                          ml={1}
+                          fontWeight="bold"
+                          lineHeight={1}
+                        >
+                          ×
+                        </Box>
+                      </Badge>
+                    </WrapItem>
+                  ))}
+                </Wrap>
+              </Box>
+            )}
 
             {isCollaborative && user && (
               <Box mt={4}>
-                <Text fontSize="sm" fontWeight="semibold" mb={2}>Contributors (optional)</Text>
+                <Text fontSize="sm" fontWeight="semibold" mb={2}>
+                  3. Add contributors (optional)
+                </Text>
                 <CollaboratorPicker
+                  pageSize={6}
                   excludeUserIds={[
                     user._id?.toString(),
                     ...selectedCollaborators.map((s) => String(s._id)),
@@ -547,53 +633,8 @@ const CreatePost = () => {
                     }
                   }}
                 />
-                {selectedCollaborators.length > 0 && (
-                  <Wrap mt={2} spacing={2}>
-                    {selectedCollaborators.map((su) => (
-                      <WrapItem key={su._id}>
-                        <Badge
-                          display="inline-flex"
-                          alignItems="center"
-                          gap={1}
-                          px={2}
-                          py={1}
-                          borderRadius="md"
-                          variant="subtle"
-                          colorScheme="blue"
-                        >
-                          {su.name || su.username}
-                          <Box
-                            as="button"
-                            type="button"
-                            aria-label="Remove"
-                            onClick={() =>
-                              setSelectedCollaborators((p) =>
-                                p.filter((x) => String(x._id) !== String(su._id))
-                              )
-                            }
-                            ml={1}
-                            fontWeight="bold"
-                            lineHeight={1}
-                          >
-                            ×
-                          </Box>
-                        </Badge>
-                      </WrapItem>
-                    ))}
-                  </Wrap>
-                )}
               </Box>
             )}
-         
-            <Input type="file" accept="image/*" hidden ref={carouselInput} onChange={handleAddCarouselPhoto} />
-            <Input type="file" accept="audio/mpeg,audio/mp3,audio/*" hidden ref={audioInput} onChange={handleAudioChange} />
-            <Input
-              type="file"
-              accept={isCollaborative ? 'image/*' : 'image/*,video/*'}
-              hidden
-              ref={imageInput}
-              onChange={handleImageChange}
-            />
 
             {postType === 'carousel' && (
               <Box mt={4}>
@@ -647,22 +688,20 @@ const CreatePost = () => {
               </Box>
             )}
 
-            {(postType === 'single' || postType === 'collaborative') && (
+            {postType === 'single' && (
               <Box mt={4}>
-                <Text fontSize="sm" fontWeight="semibold" mb={2}>
-                  {isCollaborative ? 'Your photo' : 'Photo or video'}
-                </Text>
+                <Text fontSize="sm" fontWeight="semibold" mb={2}>Photo or video</Text>
                 {!imagePreview ? (
                   <Button
                     variant="outline"
                     leftIcon={<BsFileImageFill />}
                     onClick={() => imageInput.current?.click()}
                   >
-                    {isCollaborative ? 'Add your photo' : 'Choose file'}
+                    Choose file
                   </Button>
                 ) : (
                   <Flex mt={2} position="relative" w="full" direction="column" gap={2}>
-                    {image?.type?.startsWith('image/') || (isCollaborative && imagePreview) ? (
+                    {image?.type?.startsWith('image/') ? (
                       <Image src={imagePreview} alt="Preview" maxH="320px" borderRadius="md" objectFit="contain" />
                     ) : (
                       <Box as="video" src={imagePreview} controls maxH="320px" borderRadius="md" />

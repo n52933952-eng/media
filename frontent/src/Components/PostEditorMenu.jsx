@@ -1,5 +1,6 @@
 import React, { useCallback, useContext, useMemo } from 'react'
 import {
+  Box,
   Button,
   Menu,
   MenuButton,
@@ -22,9 +23,14 @@ import {
 import { isChessFeedPost, isGoFishFeedPost } from '../utils/gameFeedPostUtils.js'
 import { parsePostFromApiResponse, postDetailApiUrl } from '../utils/postUtils.js'
 
+const stopMenuEvent = (e, blockNav) => {
+  e.preventDefault()
+  e.stopPropagation()
+  blockNav?.()
+}
+
 /**
  * Owner/contributor actions for a post (edit caption, collab photo, contributors, music).
- * Used on post detail page and feed cards.
  */
 const PostEditorMenu = ({
   post,
@@ -32,6 +38,9 @@ const PostEditorMenu = ({
   menuButtonProps = {},
   showFeedExtras = false,
   isOwnProfile = true,
+  iconOnly = false,
+  onMenuStateChange,
+  onMenuInteraction,
 }) => {
   const { user } = useContext(UserContext)
   const { setFollowPost } = useContext(PostContext) || {}
@@ -61,7 +70,6 @@ const PostEditorMenu = ({
   const isSomeoneElsesProfile = !showFeedExtras && isOwnProfile === false
   const canActAsContributor = !!isContributor && !isSomeoneElsesProfile
   const isCarouselOwnerPost = isCarouselPost(post) && isOwner
-  const canAddCollaborator = !!post?.isCollaborative && (isOwner || canActAsContributor)
   const canManageCollabAudio = !!post?.isCollaborative && isOwner
   const canManageCarouselAudio = isCarouselOwnerPost
   const myCollaboratorPhoto = getMyCollaboratorImage(post, currentUserId)
@@ -78,9 +86,12 @@ const PostEditorMenu = ({
     !post?.channelAddedBy &&
     (isOwner || (!!post?.isCollaborative && canActAsContributor))
 
+  const canManageCollabPost =
+    !!post?.isCollaborative && (isOwner || isContributor)
+
   const canShowPenMenu =
     canEditPostText ||
-    (canAddCollaborator && !!post?.isCollaborative) ||
+    canManageCollabPost ||
     isCarouselOwnerPost
 
   const applyPostUpdate = useCallback(
@@ -107,48 +118,80 @@ const PostEditorMenu = ({
       .catch(() => {})
   }, [post?._id, applyPostUpdate])
 
+  const runMenuAction = (action) => (e) => {
+    stopMenuEvent(e, onMenuInteraction)
+    action()
+  }
+
   if (!post || !canShowPenMenu) return null
 
   return (
     <>
-      <Menu>
-        <MenuButton
-          as={Button}
-          size="xs"
-          variant="outline"
-          colorScheme="blue"
-          onClick={(e) => {
-            e.preventDefault()
-            e.stopPropagation()
+      <Box
+        as="span"
+        display="inline-flex"
+        data-no-navigate="true"
+        data-feed-actions="true"
+        onClick={(e) => e.stopPropagation()}
+        onMouseDown={(e) => e.stopPropagation()}
+      >
+        <Menu
+          placement="bottom-end"
+          isLazy
+          strategy="fixed"
+          onOpen={() => {
+            onMenuStateChange?.(true)
+            onMenuInteraction?.()
           }}
-          {...menuButtonProps}
+          onClose={() => {
+            onMenuStateChange?.(false)
+            onMenuInteraction?.()
+          }}
         >
-          ✏️ Edit
-        </MenuButton>
-        <MenuList zIndex={1500}>
-          {canEditPostText && (
-            <MenuItem onClick={onEditPostOpen}>
-              {isCarouselOwnerPost ? 'Edit caption & photos' : 'Edit caption'}
-            </MenuItem>
-          )}
-          {post.isCollaborative && canAddCollaborator && (
-            <>
-              <MenuItem onClick={onCollabPhotoOpen}>
-                {myCollaboratorPhoto ? 'Change your photo' : 'Add your photo'}
+          <MenuButton
+            as={Button}
+            size="xs"
+            variant="outline"
+            colorScheme="blue"
+            type="button"
+            aria-label="Edit post"
+            onClick={(e) => stopMenuEvent(e, onMenuInteraction)}
+            onMouseDown={(e) => stopMenuEvent(e, onMenuInteraction)}
+            {...menuButtonProps}
+          >
+            {iconOnly ? '✏️' : '✏️ Edit'}
+          </MenuButton>
+          <MenuList zIndex={2000}>
+            {canEditPostText && (
+              <MenuItem onClick={runMenuAction(onEditPostOpen)}>
+                {isCarouselOwnerPost ? 'Edit caption & photos' : 'Edit caption'}
               </MenuItem>
-              <MenuItem onClick={onAddContributorOpen}>Add contributor</MenuItem>
-              {(isOwner || canActAsContributor) && post.contributors?.length > 0 && (
-                <MenuItem onClick={onManageContributorsOpen}>Manage contributors</MenuItem>
-              )}
-            </>
-          )}
-          {(canManageCollabAudio || canManageCarouselAudio) && (
-            <MenuItem onClick={onCollabAudioOpen}>
-              {hasCollabAudio ? 'Change music' : 'Add music'}
-            </MenuItem>
-          )}
-        </MenuList>
-      </Menu>
+            )}
+            {canManageCollabPost && (
+              <>
+                <MenuItem onClick={runMenuAction(onCollabPhotoOpen)}>
+                  {myCollaboratorPhoto ? 'Change your photo' : 'Add your photo'}
+                </MenuItem>
+                {(isOwner || canActAsContributor) && (
+                  <MenuItem onClick={runMenuAction(onAddContributorOpen)}>
+                    Add contributor
+                  </MenuItem>
+                )}
+                {(isOwner || canActAsContributor) && post.contributors?.length > 0 && (
+                  <MenuItem onClick={runMenuAction(onManageContributorsOpen)}>
+                    Manage contributors
+                  </MenuItem>
+                )}
+              </>
+            )}
+            {(canManageCollabAudio || canManageCarouselAudio) && (
+              <MenuItem onClick={runMenuAction(onCollabAudioOpen)}>
+                {hasCollabAudio ? 'Change music' : 'Add music'}
+              </MenuItem>
+            )}
+          </MenuList>
+        </Menu>
+      </Box>
 
       <AddContributorModal
         isOpen={isAddContributorOpen}

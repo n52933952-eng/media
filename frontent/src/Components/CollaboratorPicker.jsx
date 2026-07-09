@@ -7,31 +7,41 @@ import {
   HStack,
   Avatar,
   Spinner,
+  Button,
+  IconButton,
   useColorModeValue,
 } from '@chakra-ui/react'
+import { ChevronLeftIcon, ChevronRightIcon } from '@chakra-ui/icons'
 import API_BASE_URL from '../config/api'
 import { SYSTEM_COLLABORATOR_USERNAMES } from '../utils/collaborators'
 
+const DEFAULT_PAGE_SIZE = 6
+
 /**
- * Same behavior as mobile CollaboratorPicker: following list + debounced search (300ms, 2+ chars).
- * @param {{ excludeUserIds: string[], onSelectUser: (u: object) => void }} props
+ * Following list + debounced search, paginated rows (avoids long scroll lists).
  */
-const CollaboratorPicker = ({ excludeUserIds = [], onSelectUser }) => {
+const CollaboratorPicker = ({
+  excludeUserIds = [],
+  onSelectUser,
+  pageSize = DEFAULT_PAGE_SIZE,
+}) => {
   const [searchQuery, setSearchQuery] = useState('')
   const [searchResults, setSearchResults] = useState([])
   const [followingUsers, setFollowingUsers] = useState([])
   const [isSearching, setIsSearching] = useState(false)
   const [isLoadingFollowing, setIsLoadingFollowing] = useState(false)
+  const [page, setPage] = useState(0)
 
   const borderColor = useColorModeValue('gray.200', 'gray.600')
   const bg = useColorModeValue('white', 'gray.800')
+  const panelBg = useColorModeValue('gray.50', 'gray.900')
   const textColor = useColorModeValue('gray.800', 'white')
   const mutedColor = useColorModeValue('gray.600', 'gray.400')
-  const rowHover = useColorModeValue('gray.50', 'gray.700')
+  const rowHover = useColorModeValue('gray.100', 'gray.700')
 
   const exclude = useMemo(
     () => new Set((excludeUserIds || []).filter(Boolean).map((id) => String(id))),
-    [excludeUserIds]
+    [excludeUserIds],
   )
 
   useEffect(() => {
@@ -64,6 +74,7 @@ const CollaboratorPicker = ({ excludeUserIds = [], onSelectUser }) => {
         const id = u._id?.toString()
         if (!id || exclude.has(id)) return false
         if (SYSTEM_COLLABORATOR_USERNAMES.has(u.username || '')) return false
+        if (!q) return true
         const nameMatch = u.name?.toLowerCase().includes(q.toLowerCase())
         const usernameMatch = u.username?.toLowerCase().includes(q.toLowerCase())
         return nameMatch || usernameMatch
@@ -77,7 +88,7 @@ const CollaboratorPicker = ({ excludeUserIds = [], onSelectUser }) => {
       try {
         const res = await fetch(
           `${API_BASE_URL}/api/user/search?search=${encodeURIComponent(q)}`,
-          { credentials: 'include' }
+          { credentials: 'include' },
         )
         const data = await res.json()
         const list = res.ok && Array.isArray(data) ? data : []
@@ -99,8 +110,9 @@ const CollaboratorPicker = ({ excludeUserIds = [], onSelectUser }) => {
     return () => clearTimeout(timer)
   }, [searchQuery, followingUsers, excludeKey, exclude])
 
-  const showFollowingBlock = !searchQuery.trim() && followingUsers.length > 0
-  const showSearchBlock = searchQuery.trim().length >= 1 && searchResults.length > 0
+  useEffect(() => {
+    setPage(0)
+  }, [searchQuery, excludeKey])
 
   const canPick = (u) => {
     const id = u._id?.toString()
@@ -110,6 +122,26 @@ const CollaboratorPicker = ({ excludeUserIds = [], onSelectUser }) => {
       !SYSTEM_COLLABORATOR_USERNAMES.has(u.username || '')
     )
   }
+
+  const visibleUsers = useMemo(
+    () => searchResults.filter(canPick),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [searchResults, excludeKey],
+  )
+
+  const totalPages = Math.max(1, Math.ceil(visibleUsers.length / pageSize))
+  const safePage = Math.min(page, totalPages - 1)
+  const pageUsers = visibleUsers.slice(
+    safePage * pageSize,
+    safePage * pageSize + pageSize,
+  )
+
+  const listLabel = (() => {
+    const q = searchQuery.trim()
+    if (!q) return 'People you follow'
+    if (q.length < 2) return 'Matching people you follow'
+    return 'Search results'
+  })()
 
   const Row = ({ u }) => {
     const id = u._id?.toString()
@@ -121,10 +153,9 @@ const CollaboratorPicker = ({ excludeUserIds = [], onSelectUser }) => {
         borderRadius="md"
         borderWidth="1px"
         borderColor={borderColor}
-        cursor="pointer"
-        _hover={{ bg: rowHover }}
-        onClick={() => onSelectUser(u)}
         spacing={3}
+        bg={bg}
+        _hover={{ bg: rowHover }}
       >
         <Avatar size="sm" src={u.profilePic} name={u.name || u.username} />
         <Box flex={1} minW={0} textAlign="left">
@@ -135,68 +166,99 @@ const CollaboratorPicker = ({ excludeUserIds = [], onSelectUser }) => {
             @{u.username}
           </Text>
         </Box>
-        <Text fontSize="sm" fontWeight="600" color="blue.400">
+        <Button
+          size="xs"
+          colorScheme="blue"
+          variant="outline"
+          type="button"
+          onClick={() => onSelectUser(u)}
+        >
           Add
-        </Text>
+        </Button>
       </HStack>
     )
   }
 
   return (
-    <VStack align="stretch" spacing={2} mt={2}>
+    <VStack align="stretch" spacing={2}>
       <Input
         size="sm"
-        placeholder="Search people to add as contributors…"
+        placeholder="Search people to add…"
         value={searchQuery}
         onChange={(e) => setSearchQuery(e.target.value)}
         bg={bg}
         borderColor={borderColor}
       />
-      {isSearching && <Spinner size="sm" alignSelf="center" />}
 
-      {showFollowingBlock && (
-        <Box>
-          <Text fontSize="xs" fontWeight="600" color={mutedColor} mb={2}>
-            People you follow
-          </Text>
-          {isLoadingFollowing ? (
+      <Box
+        borderWidth="1px"
+        borderColor={borderColor}
+        borderRadius="md"
+        bg={panelBg}
+        p={2}
+        minH="120px"
+      >
+        {isSearching || isLoadingFollowing ? (
+          <HStack justify="center" py={6}>
             <Spinner size="sm" />
-          ) : (
+            <Text fontSize="sm" color={mutedColor}>Loading…</Text>
+          </HStack>
+        ) : visibleUsers.length === 0 ? (
+          <Text fontSize="sm" color={mutedColor} textAlign="center" py={6}>
+            {!searchQuery.trim() && followingUsers.length === 0
+              ? 'You are not following anyone yet. Search by name (2+ letters).'
+              : searchQuery.trim().length === 1
+                ? 'Type another letter to search everyone.'
+                : 'No users found.'}
+          </Text>
+        ) : (
+          <>
+            <HStack justify="space-between" mb={2} px={1}>
+              <Text fontSize="xs" fontWeight="600" color={mutedColor}>
+                {listLabel} · {visibleUsers.length}
+              </Text>
+              {totalPages > 1 && (
+                <Text fontSize="xs" color={mutedColor}>
+                  {safePage + 1} / {totalPages}
+                </Text>
+              )}
+            </HStack>
             <VStack align="stretch" spacing={2}>
-              {followingUsers.filter(canPick).map((fu) => (
-                <Row key={fu._id} u={fu} />
+              {pageUsers.map((u) => (
+                <Row key={u._id} u={u} />
               ))}
             </VStack>
-          )}
-        </Box>
-      )}
-
-      {showSearchBlock && searchQuery.trim().length >= 1 && (
-        <Box>
-          <Text fontSize="xs" fontWeight="600" color={mutedColor} mb={2}>
-            {searchQuery.trim().length < 2 ? 'Matching people you follow' : 'Search results'}
-          </Text>
-          <VStack align="stretch" spacing={2}>
-            {searchResults.filter(canPick).map((r) => (
-              <Row key={r._id} u={r} />
-            ))}
-          </VStack>
-        </Box>
-      )}
-
-      {searchQuery.trim().length >= 1 && searchResults.length === 0 && !isSearching && (
-        <Text fontSize="sm" color={mutedColor} textAlign="center">
-          {searchQuery.trim().length === 1
-            ? 'Type another letter to search everyone, or pick from the list above.'
-            : 'No users found.'}
-        </Text>
-      )}
-
-      {!searchQuery && !isLoadingFollowing && followingUsers.length === 0 && (
-        <Text fontSize="sm" color={mutedColor} textAlign="center">
-          You are not following anyone yet. Search by name (2+ letters) to add contributors.
-        </Text>
-      )}
+            {totalPages > 1 && (
+              <HStack justify="center" mt={3} spacing={2}>
+                <IconButton
+                  aria-label="Previous page"
+                  icon={<ChevronLeftIcon />}
+                  size="sm"
+                  variant="outline"
+                  isDisabled={safePage <= 0}
+                  onClick={() => setPage((p) => Math.max(0, p - 1))}
+                />
+                <Button
+                  size="xs"
+                  variant="ghost"
+                  onClick={() => setPage(0)}
+                  isDisabled={safePage === 0}
+                >
+                  First
+                </Button>
+                <IconButton
+                  aria-label="Next page"
+                  icon={<ChevronRightIcon />}
+                  size="sm"
+                  variant="outline"
+                  isDisabled={safePage >= totalPages - 1}
+                  onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+                />
+              </HStack>
+            )}
+          </>
+        )}
+      </Box>
     </VStack>
   )
 }
