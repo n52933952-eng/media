@@ -8,6 +8,7 @@ import { formatDistanceToNow } from 'date-fns'
 import Post from '../Components/Post'
 import{UserContext} from '../context/UserContext'
 import{PostContext} from '../context/PostContext'
+import{SocketContext} from '../context/SocketContext'
 
 const UserPage = () => {
  
@@ -24,6 +25,7 @@ const UserPage = () => {
    const{username}=useParams()
    const{user:currentUser}=useContext(UserContext)
    const{followPost,setFollowPost}=useContext(PostContext)
+   const{socket}=useContext(SocketContext) || {}
     
    const showToast = useShowToast()
    
@@ -331,6 +333,34 @@ const UserPage = () => {
    setTotalPostsCount(null)
    setActiveTab('posts') // Reset to posts tab when username changes
   },[username])
+
+  // Live collab / post edits while viewing this profile (same socket as home feed)
+  useEffect(() => {
+    if (!socket) return
+
+    const handlePostUpdated = (data) => {
+      const postId = data.postId || data._id
+      const updatedPost = data.post || data
+      const updatedPostIdStr = postId?.toString?.()
+      if (!updatedPostIdStr) return
+
+      setPosts((prev) => {
+        const idx = prev.findIndex((p) => p._id?.toString?.() === updatedPostIdStr)
+        if (idx === -1) return prev
+        const replaced = { ...prev[idx], ...updatedPost }
+        const next = [replaced, ...prev.filter((_, i) => i !== idx)]
+        next.sort((a, b) => {
+          const dateA = new Date(a.updatedAt || a.createdAt).getTime()
+          const dateB = new Date(b.updatedAt || b.createdAt).getTime()
+          return dateB - dateA
+        })
+        return next
+      })
+    }
+
+    socket.on('postUpdated', handlePostUpdated)
+    return () => socket.off('postUpdated', handlePostUpdated)
+  }, [socket])
 
   // Listen for new posts created by current user and add them immediately to profile page
   useEffect(() => {
