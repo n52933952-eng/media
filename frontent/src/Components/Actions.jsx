@@ -56,6 +56,8 @@ const Actions = ({ post, showFeedExtras = true, onReplyAdded }) => {
 	const likePreviewRef = useRef(likePreview)
 	const lastOtherPreviewRef = useRef(null)
 	const likeSeqRef = useRef(0)
+	const pendingLikeRef = useRef(false)
+	const likeMutationAtRef = useRef(0)
 	likePreviewRef.current = likePreview
 
 	const selfId = user?._id?.toString?.() || String(user?._id || '')
@@ -73,7 +75,11 @@ const Actions = ({ post, showFeedExtras = true, onReplyAdded }) => {
 		rememberOtherPreview(likePreview)
 	}, [post?.likePreview, likePreview, rememberOtherPreview])
 
+	// Sync from parent/socket — skip while our like request is in flight (same as mobile)
 	useEffect(() => {
+		if (pendingLikeRef.current) return
+		if (Date.now() - likeMutationAtRef.current < 1200) return
+
 		setLiked(post?.likedByMe ?? post?.likes?.includes(user?._id) ?? false)
 		setLikeCount(post?.likeCount ?? post?.likes?.length ?? 0)
 		const incoming = post?.likePreview || null
@@ -84,7 +90,6 @@ const Actions = ({ post, showFeedExtras = true, onReplyAdded }) => {
 		} else if (count <= 0) {
 			setLikePreview(null)
 		}
-		// count > 0 + null incoming → keep current preview (don't wipe on unlike race)
 	}, [post?._id, post?.likedByMe, post?.likeCount, post?.likes, post?.likePreview, user?._id, rememberOtherPreview])
     
 	const{followPost,setFollowPost}=useContext(PostContext)
@@ -178,6 +183,8 @@ const Actions = ({ post, showFeedExtras = true, onReplyAdded }) => {
 			  (previewId(previousPreview) !== selfId ? previousPreview : null)
 
 	 const seq = ++likeSeqRef.current
+	 pendingLikeRef.current = true
+	 likeMutationAtRef.current = Date.now()
 	 setLiked(optimisticLiked)
 	 setLikeCount(optimisticCount)
 	 setLikePreview(optimisticPreview)
@@ -199,7 +206,7 @@ const Actions = ({ post, showFeedExtras = true, onReplyAdded }) => {
 	const newLiked = typeof data?.liked === 'boolean' ? data.liked : optimisticLiked
 	const newCount =
 		typeof data?.likeCount === 'number'
-			? data.likeCount
+			? Math.max(0, data.likeCount)
 			: optimisticCount
 
 	let newPreview
@@ -214,6 +221,7 @@ const Actions = ({ post, showFeedExtras = true, onReplyAdded }) => {
 		newPreview = lastOtherPreviewRef.current || null
 	}
 
+	likeMutationAtRef.current = Date.now()
 	setFollowPost((prev) =>
 		prev.map((p) =>
 			p._id === post._id
@@ -237,6 +245,10 @@ const Actions = ({ post, showFeedExtras = true, onReplyAdded }) => {
 		setLikeCount(previousCount)
 		setLikePreview(previousPreview)
 		likePreviewRef.current = previousPreview
+	 } finally {
+		if (seq === likeSeqRef.current) {
+			pendingLikeRef.current = false
+		}
 	 }
   }
 

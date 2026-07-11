@@ -91,14 +91,13 @@ const PostEditorMenu = ({
     !post?.channelAddedBy &&
     (isOwner || (!!post?.isCollaborative && canActAsContributor))
 
-  // Match mobile: no edit menu on someone else's profile (even if you're a contributor)
+  // Match mobile: never show edit on someone else's profile
   const canManageCollabPost =
     !!post?.isCollaborative && (isOwner || canActAsContributor)
 
   const canShowPenMenu =
-    canEditPostText ||
-    canManageCollabPost ||
-    isCarouselOwnerPost
+    !isSomeoneElsesProfile &&
+    (canEditPostText || canManageCollabPost || isCarouselOwnerPost)
 
   const applyPostUpdate = useCallback(
     (updatedPost) => {

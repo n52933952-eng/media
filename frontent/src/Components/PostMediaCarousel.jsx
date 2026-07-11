@@ -228,40 +228,64 @@ const PostMediaCarousel = ({
 
       {multi ? (
         <HStack justify="center" mt={2} spacing={2} flexWrap="wrap">
-          {slides.map((s, i) => (
-            <Box
-              key={s.key}
-              as="button"
-              type="button"
-              aria-label={`Go to slide ${i + 1}`}
-              aria-current={i === index ? 'true' : undefined}
-              onClick={() => setIndex(i)}
-              p={0}
-              border="none"
-              bg="transparent"
-              cursor="pointer"
-              opacity={i === index ? 1 : 0.55}
-              transform={i === index ? 'scale(1.08)' : 'scale(1)'}
-              transition="all 0.15s ease"
-            >
-              {s.profilePic ? (
-                <Avatar
-                  src={s.profilePic}
-                  name={s.name || s.username}
-                  size="sm"
-                  borderWidth="2px"
-                  borderColor={i === index ? dotActive : 'transparent'}
-                />
-              ) : (
-                <Box
-                  w={i === index ? '10px' : '8px'}
-                  h={i === index ? '10px' : '8px'}
-                  borderRadius="full"
-                  bg={i === index ? dotActive : dotIdle}
-                />
-              )}
-            </Box>
-          ))}
+          {slides.map((s, i) => {
+            const thumbSrc = mediaDisplayUrl(s.img)
+            const distinctUsers = new Set(slides.map((x) => String(x.userId || '')).filter(Boolean)).size > 1
+            // Collab with different people: avatar tabs. Same-user carousel: photo thumbs (not repeated face).
+            const useAvatarTab = distinctUsers && !!s.profilePic
+            return (
+              <Box
+                key={s.key}
+                as="button"
+                type="button"
+                aria-label={`Go to slide ${i + 1}`}
+                aria-current={i === index ? 'true' : undefined}
+                onClick={() => setIndex(i)}
+                p={0}
+                border="none"
+                bg="transparent"
+                cursor="pointer"
+                opacity={i === index ? 1 : 0.55}
+                transform={i === index ? 'scale(1.08)' : 'scale(1)'}
+                transition="all 0.15s ease"
+              >
+                {useAvatarTab ? (
+                  <Avatar
+                    src={s.profilePic}
+                    name={s.name || s.username}
+                    size="sm"
+                    borderWidth="2px"
+                    borderColor={i === index ? dotActive : 'transparent'}
+                  />
+                ) : thumbSrc ? (
+                  <Box
+                    w="36px"
+                    h="36px"
+                    borderRadius="full"
+                    overflow="hidden"
+                    borderWidth="2px"
+                    borderColor={i === index ? dotActive : 'transparent'}
+                  >
+                    <Image
+                      src={thumbSrc}
+                      alt=""
+                      w="100%"
+                      h="100%"
+                      objectFit="cover"
+                      draggable={false}
+                    />
+                  </Box>
+                ) : (
+                  <Box
+                    w={i === index ? '10px' : '8px'}
+                    h={i === index ? '10px' : '8px'}
+                    borderRadius="full"
+                    bg={i === index ? dotActive : dotIdle}
+                  />
+                )}
+              </Box>
+            )
+          })}
         </HStack>
       ) : null}
     </Box>
