@@ -954,7 +954,12 @@ export const LikePost = async(req,res) => {
         await invalidateUserFeedCache(userId)
         const likePreview = count > 0 ? await getLatestLikePreview(id) : null
         emitPostEngagementUpdate(id, { likeCount: count, likePreview })
-        return res.status(200).json({ message: 'post unlike scfully', liked: false, likeCount: count })
+        return res.status(200).json({
+            message: 'post unlike scfully',
+            liked: false,
+            likeCount: count,
+            likePreview,
+        })
     }
 
     // Newly liked — create the Like doc; ignore the unique-index race on a double tap.
@@ -971,6 +976,7 @@ export const LikePost = async(req,res) => {
                 message: 'post liked scfully',
                 liked: true,
                 likeCount: curCount,
+                likePreview,
             })
         }
         throw e
@@ -1013,6 +1019,7 @@ export const LikePost = async(req,res) => {
         message: 'post liked scfully',
         liked: true,
         likeCount,
+        likePreview,
     })
   }
     catch(error){

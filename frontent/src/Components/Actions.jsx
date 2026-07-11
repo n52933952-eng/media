@@ -19,7 +19,7 @@ import {
 	useToast,
 } from "@chakra-ui/react";
 
-import{useState,useContext,useMemo,useEffect} from 'react'
+import{useState,useContext,useMemo,useEffect,useRef,useCallback} from 'react'
 import{UserContext} from '../context/UserContext'
 import{PostContext} from '../context/PostContext'
 import useShowToast from '../hooks/useShowToast.js'
@@ -90,7 +90,12 @@ const Actions = ({ post, showFeedExtras = true, onReplyAdded }) => {
 	const[reply,setReply]=useState("")
 	const [conversations, setConversations] = useState([])
 	const [loadingConversations, setLoadingConversations] = useState(false)
+	const [loadingMoreConversations, setLoadingMoreConversations] = useState(false)
+	const [shareConversationsHasMore, setShareConversationsHasMore] = useState(false)
 	const [sendingShareToId, setSendingShareToId] = useState(null)
+	const shareConversationsCursorRef = useRef(null)
+	const SHARE_CONVERSATIONS_PAGE = 9
+	const loadingMoreConversationsRef = useRef(false)
   
 	const[loading,setLoading]=useState(false)
  
@@ -111,7 +116,8 @@ const Actions = ({ post, showFeedExtras = true, onReplyAdded }) => {
 	}, [post])
 	const permalink = useMemo(() => {
 		const username = post?.postedBy?.username || post?.postedBy?.name || 'post'
-		return `${window.location.origin}/${username}/post/${post?._id}`
+		const siteOrigin = (import.meta.env.VITE_PUBLIC_SITE_URL || 'https://playsocial.social').replace(/\/$/, '')
+		return `${siteOrigin}/${username}/post/${post?._id}`
 	}, [post?._id, post?.postedBy?.username, post?.postedBy?.name])
   
 	
@@ -168,11 +174,30 @@ const Actions = ({ post, showFeedExtras = true, onReplyAdded }) => {
 	 }
   }
 
-  const fetchConversations = async () => {
+  const fetchConversations = useCallback(async ({ loadMore = false } = {}) => {
 	if (!showFeedExtras || !ENABLE_POST_SHARE_TO_CHAT || !user) return
-	setLoadingConversations(true)
+	if (loadMore) {
+		if (
+			loadingMoreConversationsRef.current ||
+			!shareConversationsHasMore ||
+			!shareConversationsCursorRef.current
+		) {
+			return
+		}
+		loadingMoreConversationsRef.current = true
+		setLoadingMoreConversations(true)
+	} else {
+		setLoadingConversations(true)
+		shareConversationsCursorRef.current = null
+		setShareConversationsHasMore(false)
+	}
+
 	try {
-		const res = await fetch(`${baseUrl}/api/message/conversations?limit=30`, {
+		const params = new URLSearchParams({ limit: String(SHARE_CONVERSATIONS_PAGE) })
+		if (loadMore && shareConversationsCursorRef.current) {
+			params.set('cursor', shareConversationsCursorRef.current)
+		}
+		const res = await fetch(`${baseUrl}/api/message/conversations?${params.toString()}`, {
 			credentials: 'include',
 		})
 		const data = await res.json()
@@ -180,14 +205,31 @@ const Actions = ({ post, showFeedExtras = true, onReplyAdded }) => {
 			throw new Error(data?.error || 'Failed to load conversations')
 		}
 		const list = Array.isArray(data?.conversations) ? data.conversations : (Array.isArray(data) ? data : [])
-		setConversations(list)
+		const nextCursor = typeof data?.nextCursor === 'string' && data.nextCursor ? data.nextCursor : null
+		const hasMore = !!data?.hasMore && !!nextCursor
+		shareConversationsCursorRef.current = nextCursor
+		setShareConversationsHasMore(hasMore)
+		setConversations((prev) => {
+			if (!loadMore) return list
+			const seen = new Set(prev.map((c) => String(c?._id || '')))
+			const fresh = list.filter((c) => {
+				const id = String(c?._id || '')
+				return id && !seen.has(id)
+			})
+			return [...prev, ...fresh]
+		})
 	} catch (e) {
 		console.error('[Actions] fetch conversations:', e)
-		showToast('Error', 'Could not load chats', 'error')
+		if (!loadMore) showToast('Error', 'Could not load chats', 'error')
 	} finally {
-		setLoadingConversations(false)
+		if (loadMore) {
+			loadingMoreConversationsRef.current = false
+			setLoadingMoreConversations(false)
+		} else {
+			setLoadingConversations(false)
+		}
 	}
-  }
+  }, [showFeedExtras, ENABLE_POST_SHARE_TO_CHAT, user, shareConversationsHasMore, baseUrl, showToast])
 
   const openShareModal = () => {
 	if (!showFeedExtras) return
@@ -196,7 +238,15 @@ const Actions = ({ post, showFeedExtras = true, onReplyAdded }) => {
 		return
 	}
 	onShareOpen()
-	fetchConversations()
+	setConversations([])
+	fetchConversations({ loadMore: false })
+  }
+
+  const handleShareListScroll = (e) => {
+	const el = e.currentTarget
+	if (!el || !shareConversationsHasMore || loadingMoreConversations) return
+	const nearBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 48
+	if (nearBottom) fetchConversations({ loadMore: true })
   }
 
   const getConversationLabel = (conv) => {
@@ -564,9 +614,6 @@ return (
 					<ModalHeader>Share to chat</ModalHeader>
 					<ModalCloseButton />
 					<ModalBody pb={4}>
-						<Text fontSize="sm" color="gray.500" mb={3} noOfLines={2}>
-							{permalink}
-						</Text>
 						{loadingConversations ? (
 							<Flex justify="center" py={6}>
 								<Spinner size="md" />
@@ -574,7 +621,13 @@ return (
 						) : conversations.length === 0 ? (
 							<Text fontSize="sm" color="gray.500">No chats found</Text>
 						) : (
-							<Flex direction="column" gap={2} maxH="320px" overflowY="auto">
+							<Flex
+								direction="column"
+								gap={2}
+								maxH="320px"
+								overflowY="auto"
+								onScroll={handleShareListScroll}
+							>
 								{conversations.map((conv) => (
 									<Button
 										key={conv?._id}
@@ -587,6 +640,11 @@ return (
 										{conv?.isGroup ? '👥 ' : '💬 '}{getConversationLabel(conv)}
 									</Button>
 								))}
+								{loadingMoreConversations ? (
+									<Flex justify="center" py={2}>
+										<Spinner size="sm" />
+									</Flex>
+								) : null}
 							</Flex>
 						)}
 					</ModalBody>
