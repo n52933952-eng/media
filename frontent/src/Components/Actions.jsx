@@ -53,12 +53,38 @@ const Actions = ({ post, showFeedExtras = true, onReplyAdded }) => {
 		post?.likeCount ?? post?.likes?.length ?? 0,
 	)
 	const [likePreview, setLikePreview] = useState(post?.likePreview || null)
+	const likePreviewRef = useRef(likePreview)
+	const lastOtherPreviewRef = useRef(null)
+	likePreviewRef.current = likePreview
+
+	const selfId = user?._id?.toString?.() || String(user?._id || '')
+	const previewId = (p) => (p?._id != null ? String(p._id) : '')
+
+	const rememberOtherPreview = useCallback((p) => {
+		if (!p) return
+		const pid = previewId(p)
+		if (!pid || (selfId && pid === selfId)) return
+		lastOtherPreviewRef.current = p
+	}, [selfId])
+
+	useEffect(() => {
+		rememberOtherPreview(post?.likePreview)
+		rememberOtherPreview(likePreview)
+	}, [post?.likePreview, likePreview, rememberOtherPreview])
 
 	useEffect(() => {
 		setLiked(post?.likedByMe ?? post?.likes?.includes(user?._id) ?? false)
 		setLikeCount(post?.likeCount ?? post?.likes?.length ?? 0)
-		setLikePreview(post?.likePreview || null)
-	}, [post?._id, post?.likedByMe, post?.likeCount, post?.likes, post?.likePreview, user?._id])
+		const incoming = post?.likePreview || null
+		const count = post?.likeCount ?? post?.likes?.length ?? 0
+		if (incoming) {
+			rememberOtherPreview(incoming)
+			setLikePreview(incoming)
+		} else if (count <= 0) {
+			setLikePreview(null)
+		}
+		// count > 0 + null incoming → keep current preview (don't wipe on unlike race)
+	}, [post?._id, post?.likedByMe, post?.likeCount, post?.likes, post?.likePreview, user?._id, rememberOtherPreview])
     
 	const{followPost,setFollowPost}=useContext(PostContext)
    
@@ -128,6 +154,33 @@ const Actions = ({ post, showFeedExtras = true, onReplyAdded }) => {
      e?.stopPropagation?.()
      if(!user) return 
 
+	 const previousLiked = liked
+	 const previousCount = likeCount
+	 const previousPreview = likePreviewRef.current
+	 rememberOtherPreview(previousPreview)
+
+	 const selfPreview = {
+		_id: user._id,
+		username: user.username,
+		name: user.name,
+		profilePic: user.profilePic || null,
+	 }
+
+	 // Optimistic UI first
+	 const optimisticLiked = !previousLiked
+	 const optimisticCount = Math.max(0, previousCount + (optimisticLiked ? 1 : -1))
+	 const optimisticPreview = optimisticLiked
+		? selfPreview
+		: optimisticCount <= 0
+			? null
+			: lastOtherPreviewRef.current ||
+			  (previewId(previousPreview) !== selfId ? previousPreview : null)
+
+	 setLiked(optimisticLiked)
+	 setLikeCount(optimisticCount)
+	 setLikePreview(optimisticPreview)
+	 likePreviewRef.current = optimisticPreview
+
 	 try{
     const res = await fetch(`${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/post/likes/` + post._id,{
 		credentials:"include",
@@ -138,21 +191,23 @@ const Actions = ({ post, showFeedExtras = true, onReplyAdded }) => {
 	})
     const data = await res.json()
 
-	const newLiked = typeof data?.liked === 'boolean' ? data.liked : !liked
+	const newLiked = typeof data?.liked === 'boolean' ? data.liked : optimisticLiked
 	const newCount =
 		typeof data?.likeCount === 'number'
 			? data.likeCount
-			: newLiked
-				? likeCount + 1
-				: Math.max(0, likeCount - 1)
-	const newPreview = newLiked && user
-		? {
-			_id: user._id,
-			username: user.username,
-			name: user.name,
-			profilePic: user.profilePic || null,
-		}
-		: likePreview
+			: optimisticCount
+
+	let newPreview
+	if (newLiked) {
+		newPreview = data?.likePreview || selfPreview
+	} else if (newCount <= 0) {
+		newPreview = null
+	} else if (data?.likePreview) {
+		newPreview = data.likePreview
+		rememberOtherPreview(data.likePreview)
+	} else {
+		newPreview = lastOtherPreviewRef.current || null
+	}
 
 	setFollowPost(
 		followPost.map((p) =>
@@ -161,16 +216,21 @@ const Actions = ({ post, showFeedExtras = true, onReplyAdded }) => {
 					...p,
 					likedByMe: newLiked,
 					likeCount: newCount,
-					...(newLiked && user ? { likePreview: newPreview } : {}),
+					likePreview: newPreview,
 				}
 				: p,
 		),
 	)
 	setLiked(newLiked)
 	setLikeCount(newCount)
-	if (newLiked && user) setLikePreview(newPreview)
+	setLikePreview(newPreview)
+	likePreviewRef.current = newPreview
 	 }catch(error){
 		console.log(error)
+		setLiked(previousLiked)
+		setLikeCount(previousCount)
+		setLikePreview(previousPreview)
+		likePreviewRef.current = previousPreview
 	 }
   }
 
@@ -556,10 +616,10 @@ return (
 				<Box w={0.5} h={0.5} borderRadius={"full"} bg={"gray.light"}></Box>
 				</>
 				)}
-				{likeCount > 0 && likePreview?.profilePic ? (
+				{likeCount > 0 && (liked ? user?.profilePic : likePreview?.profilePic) ? (
 					<Box
 						as="img"
-						src={likePreview.profilePic}
+						src={liked ? user.profilePic : likePreview.profilePic}
 						alt=""
 						w="18px"
 						h="18px"
