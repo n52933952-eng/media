@@ -225,6 +225,7 @@ const UserPage = () => {
 
 
  const fetchUserPost = async(isLoadMore = false) => {
+   const requestedUsername = username
    if (isLoadMore) {
      setLoadingMore(true)
    } else {
@@ -236,11 +237,14 @@ const UserPage = () => {
   
   try{
     const currentSkip = isLoadMore ? skip : 0
-    const res = await fetch(`${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/post/user/${username}?limit=${POSTS_PER_PAGE}&skip=${currentSkip}`,{
+    const res = await fetch(`${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/post/user/${requestedUsername}?limit=${POSTS_PER_PAGE}&skip=${currentSkip}`,{
       credentials:"include",
     })
 
    const data = await res.json()
+
+   // Ignore late responses after navigating to another profile
+   if (requestedUsername !== username) return
 
    if(res.ok){
      const newPosts = data.posts || data || []
@@ -265,11 +269,14 @@ const UserPage = () => {
 
   }
   catch(error){
+    if (requestedUsername !== username) return
     console.log(error)
     showToast("Error", "Failed to load posts", "error")
   }finally{
-    setLoadingpost(false)
-    setLoadingMore(false)
+    if (requestedUsername === username) {
+      setLoadingpost(false)
+      setLoadingMore(false)
+    }
   }
  }
  
@@ -341,25 +348,29 @@ const UserPage = () => {
     if (!socket || !user) return
 
     const handlePostUpdated = (data) => {
-      const postId = data.postId || data._id
-      const updatedPost = data.post || data
-      const updatedPostIdStr = postId?.toString?.()
+      const updatedPost = data?.post || data
+      const updatedPostIdStr =
+        data?.postId?.toString?.() ||
+        updatedPost?._id?.toString?.() ||
+        null
       if (!updatedPostIdStr) return
 
       setPosts((prev) => {
         const idx = prev.findIndex((p) => p._id?.toString?.() === updatedPostIdStr)
         if (idx !== -1) {
+          const merged = mergePostUpdate(prev[idx], updatedPost)
+          if (!postBelongsToProfile(merged, user)) {
+            return prev.filter((p) => p._id?.toString?.() !== updatedPostIdStr)
+          }
           return upsertProfilePost(prev, updatedPost, updatedPostIdStr)
         }
-        const merged = mergePostUpdate({}, updatedPost)
-        if (postBelongsToProfile(merged, user)) {
-          return upsertProfilePost(prev, merged, updatedPostIdStr)
-        }
-        return prev
+        if (!postBelongsToProfile(updatedPost, user)) return prev
+        return upsertProfilePost(prev, updatedPost, updatedPostIdStr)
       })
     }
 
-    const handleNewPost = (newPost) => {
+    const handleNewPost = (payload) => {
+      const newPost = payload?.post || payload
       if (!postBelongsToProfile(newPost, user)) return
       const idStr = newPost._id?.toString?.()
       if (!idStr) return
@@ -409,12 +420,20 @@ const UserPage = () => {
     )
   }, [])
 
-  // Optimistic add when CreatePost updates followPost (own profile or collab contributor)
+  // Only pull YOUR authored posts from feed create — never copy followed users' feed posts
   useEffect(() => {
     if (!user || !followPost?.length) return
+    const profileId = user._id != null ? String(user._id) : ''
+    if (!profileId) return
 
     const missing = followPost.filter((p) => {
-      if (!postBelongsToProfile(p, user)) return false
+      const authorId =
+        typeof p?.postedBy === 'object' && p?.postedBy?._id != null
+          ? String(p.postedBy._id)
+          : p?.postedBy != null
+            ? String(p.postedBy)
+            : ''
+      if (!authorId || authorId !== profileId) return false
       return !posts.some((existing) => existing._id?.toString?.() === p._id?.toString?.())
     })
 
