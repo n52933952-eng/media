@@ -21,7 +21,7 @@ import {
   isCarouselPost,
 } from '../utils/postCarousel.js'
 import { isChessFeedPost, isGoFishFeedPost } from '../utils/gameFeedPostUtils.js'
-import { parsePostFromApiResponse, postDetailApiUrl } from '../utils/postUtils.js'
+import { parsePostFromApiResponse, postDetailApiUrl, mergePostUpdate } from '../utils/postUtils.js'
 
 const stopBubble = (e, blockNav) => {
   e.stopPropagation()
@@ -91,8 +91,9 @@ const PostEditorMenu = ({
     !post?.channelAddedBy &&
     (isOwner || (!!post?.isCollaborative && canActAsContributor))
 
+  // Match mobile: no edit menu on someone else's profile (even if you're a contributor)
   const canManageCollabPost =
-    !!post?.isCollaborative && (isOwner || isContributor)
+    !!post?.isCollaborative && (isOwner || canActAsContributor)
 
   const canShowPenMenu =
     canEditPostText ||
@@ -105,7 +106,11 @@ const PostEditorMenu = ({
       onPostUpdated?.(updatedPost)
       if (setFollowPost) {
         setFollowPost((prev) =>
-          prev.map((p) => (String(p._id) === String(updatedPost._id) ? updatedPost : p)),
+          prev.map((p) =>
+            String(p._id) === String(updatedPost._id)
+              ? mergePostUpdate(p, updatedPost)
+              : p,
+          ),
         )
       }
     },

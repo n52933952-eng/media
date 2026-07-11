@@ -34,6 +34,8 @@ const Post = ({post: initialPost, postedBy, onDelete, onPostUpdated, visibleVide
     
   // Local state for this specific post (used when not in feed context)
   const [localPost, setLocalPost] = useState(initialPost)
+  const [contribHydrateMap, setContribHydrateMap] = useState({})
+  const contribHydrateInFlightRef = useRef({})
   
   // Use local post or initial post
   const post = localPost || initialPost
@@ -46,11 +48,78 @@ const Post = ({post: initialPost, postedBy, onDelete, onPostUpdated, visibleVide
   const carouselAudio = useMemo(() => getPostCarouselAudio(post), [post?.audio])
   const showCarousel = shouldShowPostCarousel(post)
   
-  // Update local post when initialPost changes (e.g., from parent re-fetch)
+  // Keep local post in sync without wiping richer contributor data from a stale parent render
   useEffect(() => {
-    console.log('🔄 [Post] Initial post prop changed, updating local state')
-    setLocalPost(initialPost)
+    if (!initialPost) return
+    setLocalPost((prev) => {
+      if (!prev || String(prev._id) !== String(initialPost._id)) return initialPost
+      const prevT = new Date(prev.updatedAt || prev.createdAt || 0).getTime()
+      const nextT = new Date(initialPost.updatedAt || initialPost.createdAt || 0).getTime()
+      if (nextT < prevT) {
+        return {
+          ...mergePostUpdate(prev, initialPost),
+          contributors: prev.contributors,
+          updatedAt: prev.updatedAt,
+        }
+      }
+      return mergePostUpdate(prev, initialPost)
+    })
   }, [initialPost])
+
+  // Hydrate contributor avatars when API/socket returns ids only (same as mobile)
+  useEffect(() => {
+    if (!post?.isCollaborative || !Array.isArray(post?.contributors)) return
+    const todo = []
+    for (const c of post.contributors) {
+      const id =
+        typeof c === 'string' || typeof c === 'number'
+          ? String(c)
+          : c?._id != null
+            ? String(c._id)
+            : ''
+      if (!id) continue
+      const hasIdentity =
+        typeof c === 'object' && !!(c.username || c.name || c.profilePic)
+      if (hasIdentity || contribHydrateMap[id] || contribHydrateInFlightRef.current[id]) continue
+      todo.push(id)
+    }
+    if (!todo.length) return
+
+    let cancelled = false
+    todo.forEach((id) => {
+      contribHydrateInFlightRef.current[id] = true
+    })
+
+    ;(async () => {
+      const next = {}
+      await Promise.all(
+        todo.slice(0, 12).map(async (id) => {
+          try {
+            const res = await fetch(
+              `${apiBaseUrl()}/api/user/getUserPro/${encodeURIComponent(id)}`,
+              { credentials: 'include' },
+            )
+            const data = await res.json()
+            const u = data?.user ?? data
+            if (res.ok && u) next[id] = u
+          } catch {
+            /* ignore */
+          }
+        }),
+      )
+      if (cancelled) return
+      if (Object.keys(next).length) {
+        setContribHydrateMap((prev) => ({ ...prev, ...next }))
+      }
+      todo.forEach((id) => {
+        contribHydrateInFlightRef.current[id] = false
+      })
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [post?.isCollaborative, post?.contributors, contribHydrateMap])
 
   useEffect(() => {
     // Feed can pass explicit playback control (single active video).
@@ -1261,125 +1330,115 @@ const showToast = useShowToast()
   
     </Flex>
     
-    {/* Collaborative Post Badge */}
-    {post?.isCollaborative && (
-      <Flex 
-        align="center" 
-        gap={2} 
-        mb={2} 
-        p={2} 
-        bg={useColorModeValue('blue.50', 'blue.900')} 
-        borderRadius="md"
-        onClick={(e) => {
-          e.preventDefault()
-          e.stopPropagation()
-        }}
-      >
-        <Text fontSize="xs">🤝</Text>
-        <Text fontSize="xs" color={secondaryTextColor}>
-          Collaborative Post
-        </Text>
-        {post?.contributors && Array.isArray(post.contributors) && post.contributors.length > 0 && (() => {
-          console.log('🟢🟢🟢 [Post] ============ RENDERING CONTRIBUTORS BADGE ============')
-          console.log('🟢 [Post] Contributors array length:', post.contributors.length)
-          console.log('🟢 [Post] Full contributors array:', JSON.stringify(post.contributors, null, 2))
-          
-          // Filter out the owner from contributors list for display (owner is shown separately)
-          // Handle both cases: postedBy as object with _id, or as direct ID
-          const ownerId = postedBy?._id?.toString() || post.postedBy?._id?.toString() || post.postedBy?.toString() || postedBy?.toString()
-          console.log('🟢 [Post] Owner ID for filtering:', ownerId)
-          console.log('🟢 [Post] postedBy:', postedBy)
-          console.log('🟢 [Post] post.postedBy:', post.postedBy)
-          
-          const displayContributors = post.contributors.filter((contributor) => {
+    {/* Collaborative contributors — compact chips (aligned with mobile) */}
+    {post?.isCollaborative &&
+      Array.isArray(post?.contributors) &&
+      post.contributors.length > 0 &&
+      (() => {
+        const ownerId =
+          postedBy?._id?.toString() ||
+          post.postedBy?._id?.toString() ||
+          post.postedBy?.toString() ||
+          postedBy?.toString() ||
+          ''
+        const displayContributors = post.contributors
+          .filter((contributor) => {
             const contributorId = (contributor?._id || contributor)?.toString()
-            const isOwner = contributorId === ownerId
-            console.log('🟢 [Post] Checking contributor:', {
-              contributorId: contributorId,
-              contributorIdShort: contributorId?.substring(0, 8),
-              name: contributor?.name,
-              username: contributor?.username,
-              ownerId: ownerId,
-              ownerIdShort: ownerId?.substring(0, 8),
-              isOwner: isOwner,
-              willInclude: !isOwner
-            })
-            // Skip if this contributor is the owner
-            return contributorId && !isOwner
-          }).slice(0, 5)
-          
-          console.log('🟢🟢🟢 [Post] Display contributors AFTER FILTER:', displayContributors.length)
-          console.log('🟢 [Post] Filtered contributors:', JSON.stringify(displayContributors.map(c => ({
-            id: (c._id || c)?.toString()?.substring(0, 8),
-            name: c.name,
-            username: c.username
-          })), null, 2))
-          
-          // If no contributors after filtering (only owner), don't show contributors section
-          if (displayContributors.length === 0) {
-            console.log('⚠️⚠️⚠️ [Post] NO CONTRIBUTORS TO DISPLAY after filtering (all filtered out)')
-            return null
-          }
-          
-          console.log('🟢🟢🟢 [Post] Will display', displayContributors.length, 'contributors')
-          
-          return (
-            <Flex align="center" gap={1} ml="auto" flexWrap="wrap">
-              <Text fontSize="xs" color={secondaryTextColor}>
-                Contributors:
-              </Text>
+            return contributorId && contributorId !== ownerId
+          })
+          .slice(0, 8)
+
+        if (displayContributors.length === 0) return null
+
+        return (
+          <Flex
+            direction="column"
+            gap={1.5}
+            mb={2}
+            onClick={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
+            }}
+          >
+            <Text
+              fontSize="13px"
+              fontWeight="600"
+              color={secondaryTextColor}
+              letterSpacing="0.01em"
+            >
+              Contributors
+            </Text>
+            <Flex align="center" gap={2} overflowX="auto" pb={0.5} sx={{ scrollbarWidth: 'none' }}>
               {displayContributors.map((contributor, idx) => {
-                console.log('🔵 [Post] Rendering contributor avatar:', contributor?.name || contributor?.username)
-                // Ensure we have a proper contributor object with populated data
                 const contributorId = (contributor?._id || contributor)?.toString()
-                const contributorName = contributor?.name || contributor?.username || null
-                const contributorUsername = contributor?.username || null
-                const contributorProfilePic = contributor?.profilePic || null
-                
-                // Skip if we don't have enough data to display
-                if (!contributorName && !contributorUsername) {
-                  console.warn('Contributor missing name/username:', contributor)
-                  return null
-                }
-                
+                const hydrated =
+                  contributorId && contribHydrateMap[contributorId]
+                    ? contribHydrateMap[contributorId]
+                    : null
+                const cObj = hydrated || (typeof contributor === 'object' ? contributor : null)
+                const contributorName = cObj?.name || cObj?.username || null
+                const contributorUsername = cObj?.username || null
+                const contributorProfilePic = cObj?.profilePic || null
+                const label = contributorName || contributorUsername || '?'
+
                 return (
-                  <Tooltip 
-                    key={contributorId || contributor?._id || idx} 
-                    label={contributorName || contributorUsername || 'Contributor'}
+                  <Tooltip
+                    key={contributorId || idx}
+                    label={label !== '?' ? label : 'Contributor'}
                   >
-                    <Box position="relative" display="inline-block">
+                    <Flex
+                      direction="column"
+                      align="center"
+                      gap={1}
+                      minW="40px"
+                      cursor={contributorUsername ? 'pointer' : 'default'}
+                      onClick={(e) => {
+                        e.preventDefault()
+                        e.stopPropagation()
+                        if (contributorUsername) navigate(`/${contributorUsername}`)
+                      }}
+                      _hover={contributorUsername ? { opacity: 0.85 } : undefined}
+                      transition="opacity 0.15s"
+                    >
                       <Avatar
-                        src={contributorProfilePic}
-                        name={contributorName || contributorUsername || 'C'}
-                        size="xs"
-                        ml={-1}
-                        border="2px solid"
-                        borderColor={cardBg}
-                        cursor="pointer"
-                        onClick={(e) => {
-                          e.preventDefault()
-                          e.stopPropagation()
-                          if (contributorUsername) {
-                            navigate(`/${contributorUsername}`)
-                          }
-                        }}
-                        _hover={{ transform: 'scale(1.1)', zIndex: 10 }}
-                        transition="all 0.2s"
+                        src={contributorProfilePic || undefined}
+                        name={label}
+                        size="sm"
+                        boxSize="32px"
+                        borderWidth="1px"
+                        borderColor={borderColor}
                       />
-                    </Box>
+                      {!showFeedExtras ? (
+                        <Text
+                          fontSize="10px"
+                          color={secondaryTextColor}
+                          noOfLines={1}
+                          maxW="48px"
+                          textAlign="center"
+                        >
+                          {label}
+                        </Text>
+                      ) : null}
+                    </Flex>
                   </Tooltip>
                 )
               })}
-              {post.contributors.length > displayContributors.length + 1 && (
-                <Text fontSize="xs" color={secondaryTextColor} ml={1}>
-                  +{post.contributors.length - displayContributors.length - 1}
+              {post.contributors.filter((c) => {
+                const id = (c?._id || c)?.toString()
+                return id && id !== ownerId
+              }).length > displayContributors.length && (
+                <Text fontSize="xs" color={secondaryTextColor} flexShrink={0}>
+                  +
+                  {post.contributors.filter((c) => {
+                    const id = (c?._id || c)?.toString()
+                    return id && id !== ownerId
+                  }).length - displayContributors.length}
                 </Text>
               )}
             </Flex>
-          )
-        })()}
-      </Flex>
-    )}
+          </Flex>
+        )
+      })()}
     
      {/* Post text — hide for Football: copy is often stale (“no live matches”) while live cards come from API */}
      <Box>

@@ -249,41 +249,43 @@ const AddContributorModal = ({ isOpen, onClose, post, onContributorAdded }) => {
 
       // Check if ANY succeeded
       if (successful.length > 0) {
-        // Use the post data from the first successful response (backend returns updated post)
-        const successResponse = successful[0]
+        // Last successful response has the full contributors list
+        const successResponse = successful[successful.length - 1]
         
         // Check if backend returned the updated post in the response
         if (successResponse.data && successResponse.data.post) {
-          console.log('✅ [AddContributorModal] Backend returned updated post directly')
-          console.log('✅ [AddContributorModal] POST DATA:', JSON.stringify({
-            postId: successResponse.data.post._id?.substring(0, 8),
-            contributorsCount: successResponse.data.post.contributors?.length,
-            contributors: successResponse.data.post.contributors?.map(c => ({
-              id: (c._id || c)?.toString()?.substring(0, 8),
-              name: c.name,
-              username: c.username,
-              hasProfilePic: !!c.profilePic
-            }))
-          }, null, 2))
+          const apiPost = successResponse.data.post
+          const selectedById = new Map(
+            selectedUsers.map((u) => [String(u._id), u]),
+          )
+          // Enrich thin/missing contributor fields from the users we just added
+          const enrichedPost = {
+            ...apiPost,
+            contributors: (apiPost.contributors || []).map((c) => {
+              const id = String(c?._id || c || '')
+              const selected = selectedById.get(id)
+              if (!selected) return typeof c === 'object' ? c : { _id: c }
+              const base = typeof c === 'object' ? c : { _id: c }
+              return {
+                ...selected,
+                ...base,
+                username: base.username || selected.username,
+                name: base.name || selected.name,
+                profilePic: base.profilePic || selected.profilePic || null,
+              }
+            }),
+          }
           
-          // Show success toast
           showToast(
             'Success',
-            `Added ${successful.length} contributor${successful.length > 1 ? 's' : ''}. Contributors: ${successResponse.data.post.contributors?.length}`,
+            `Added ${successful.length} contributor${successful.length > 1 ? 's' : ''}`,
             'success'
           )
           
-          // Call callback with updated post data from response
           if (onContributorAdded) {
-            console.log('✅✅✅ [AddContributorModal] CALLING onContributorAdded NOW!')
-            console.log('✅ [AddContributorModal] Contributors in response:', successResponse.data.post.contributors?.length)
-            onContributorAdded(successResponse.data.post)
-            console.log('✅✅✅ [AddContributorModal] onContributorAdded CALLED!')
-          } else {
-            console.error('❌❌❌ [AddContributorModal] onContributorAdded callback is NULL!')
+            onContributorAdded(enrichedPost)
           }
           
-          // Close modal and reset
           onClose()
           setSelectedUsers([])
           setSearchQuery('')

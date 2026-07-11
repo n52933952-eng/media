@@ -55,6 +55,7 @@ const Actions = ({ post, showFeedExtras = true, onReplyAdded }) => {
 	const [likePreview, setLikePreview] = useState(post?.likePreview || null)
 	const likePreviewRef = useRef(likePreview)
 	const lastOtherPreviewRef = useRef(null)
+	const likeSeqRef = useRef(0)
 	likePreviewRef.current = likePreview
 
 	const selfId = user?._id?.toString?.() || String(user?._id || '')
@@ -176,6 +177,7 @@ const Actions = ({ post, showFeedExtras = true, onReplyAdded }) => {
 			: lastOtherPreviewRef.current ||
 			  (previewId(previousPreview) !== selfId ? previousPreview : null)
 
+	 const seq = ++likeSeqRef.current
 	 setLiked(optimisticLiked)
 	 setLikeCount(optimisticCount)
 	 setLikePreview(optimisticPreview)
@@ -191,6 +193,9 @@ const Actions = ({ post, showFeedExtras = true, onReplyAdded }) => {
 	})
     const data = await res.json()
 
+	// Fast double-tap: ignore older responses so your avatar doesn't flash back
+	if (seq !== likeSeqRef.current) return
+
 	const newLiked = typeof data?.liked === 'boolean' ? data.liked : optimisticLiked
 	const newCount =
 		typeof data?.likeCount === 'number'
@@ -202,15 +207,15 @@ const Actions = ({ post, showFeedExtras = true, onReplyAdded }) => {
 		newPreview = data?.likePreview || selfPreview
 	} else if (newCount <= 0) {
 		newPreview = null
-	} else if (data?.likePreview) {
+	} else if (data?.likePreview && previewId(data.likePreview) !== selfId) {
 		newPreview = data.likePreview
 		rememberOtherPreview(data.likePreview)
 	} else {
 		newPreview = lastOtherPreviewRef.current || null
 	}
 
-	setFollowPost(
-		followPost.map((p) =>
+	setFollowPost((prev) =>
+		prev.map((p) =>
 			p._id === post._id
 				? {
 					...p,
@@ -227,6 +232,7 @@ const Actions = ({ post, showFeedExtras = true, onReplyAdded }) => {
 	likePreviewRef.current = newPreview
 	 }catch(error){
 		console.log(error)
+		if (seq !== likeSeqRef.current) return
 		setLiked(previousLiked)
 		setLikeCount(previousCount)
 		setLikePreview(previousPreview)
