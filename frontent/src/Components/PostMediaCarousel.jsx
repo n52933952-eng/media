@@ -60,6 +60,11 @@ const PostMediaCarousel = ({
   const slide = slides[index] || slides[0]
   const src = mediaDisplayUrl(slide.img)
   const multi = slides.length > 1
+  const distinctUsers = new Set(
+    slides.map((x) => String(x.userId || '')).filter(Boolean),
+  ).size
+  // Owner-only carousel: no name badge (author is already in the post header)
+  const showSlideAttribution = distinctUsers > 1
 
   const toggleAudio = () => {
     const el = audioRef.current
@@ -124,7 +129,7 @@ const PostMediaCarousel = ({
           draggable={false}
         />
 
-        {slide.name || slide.username || slide.profilePic ? (
+        {showSlideAttribution && (slide.name || slide.username || slide.profilePic) ? (
           <HStack
             position="absolute"
             left={3}
@@ -230,9 +235,8 @@ const PostMediaCarousel = ({
         <HStack justify="center" mt={2} spacing={2} flexWrap="wrap">
           {slides.map((s, i) => {
             const thumbSrc = mediaDisplayUrl(s.img)
-            const distinctUsers = new Set(slides.map((x) => String(x.userId || '')).filter(Boolean)).size > 1
-            // Collab with different people: avatar tabs. Same-user carousel: photo thumbs (not repeated face).
-            const useAvatarTab = distinctUsers && !!s.profilePic
+            // Collab with different people: avatar tabs. Same-user carousel: photo thumbs.
+            const useAvatarTab = distinctUsers > 1 && !!s.profilePic
             return (
               <Box
                 key={s.key}

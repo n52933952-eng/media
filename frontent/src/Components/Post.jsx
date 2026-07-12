@@ -1779,22 +1779,24 @@ const showToast = useShowToast()
   )}
   
   
-  <Flex gap={2} my={1} align="center" flexWrap="wrap" data-no-navigate="true" data-feed-actions="true" onClick={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()}>
+  <Flex gap={2} my={1} align="flex-start" flexWrap="nowrap" data-no-navigate="true" data-feed-actions="true" onClick={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()}>
     {!isChessPost && !isCardPost && (
       <Actions post={post} showFeedExtras={showFeedExtras} />
     )}
 
-    <PostEditorMenu
-      post={post}
-      onPostUpdated={applyPostUpdate}
-      showFeedExtras={showFeedExtras}
-      isOwnProfile={isOwnProfile}
-      iconOnly
-      onMenuStateChange={(open) => {
-        menuOpenRef.current = open
-      }}
-      onMenuInteraction={blockPostNavBriefly}
-    />
+    <Box mt={2} flexShrink={0} alignSelf="flex-start">
+      <PostEditorMenu
+        post={post}
+        onPostUpdated={applyPostUpdate}
+        showFeedExtras={showFeedExtras}
+        isOwnProfile={isOwnProfile}
+        iconOnly
+        onMenuStateChange={(open) => {
+          menuOpenRef.current = open
+        }}
+        onMenuInteraction={blockPostNavBriefly}
+      />
+    </Box>
   </Flex>
   
    </Flex>

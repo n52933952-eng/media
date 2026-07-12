@@ -558,18 +558,26 @@ return (
 				e.stopPropagation()
 			}}
 		>
-			<Flex gap={3} my={2}>
+			<Flex gap={3} my={2} alignItems="center" minH="24px">
+				<Box
+					w="24px"
+					h="24px"
+					display="flex"
+					alignItems="center"
+					justifyContent="center"
+					flexShrink={0}
+					cursor="pointer"
+					onClick={handlelikeandunlike}
+				>
 				<svg
 					aria-label='Like'
-					color={liked ? "rgb(237, 73, 86)" : ""}
+					color={liked ? "rgb(237, 73, 86)" : "currentColor"}
 					fill={liked ? "rgb(237, 73, 86)" : "transparent"}
 					height='19'
 					role='img'
 					viewBox='0 0 24 22'
 					width='20'
-					style={{ cursor: 'pointer' }}
-                    onClick={handlelikeandunlike}
-				
+					style={{ display: 'block', overflow: 'visible' }}
 				>
 					<path
 						d='M1 7.66c0 4.575 3.899 9.086 9.987 12.934.338.203.74.406 1.013.406.283 0 .686-.203 1.013-.406C19.1 16.746 23 12.234 23 7.66 23 3.736 20.245 1 16.672 1 14.603 1 12.98 1.94 12 3.352 11.042 1.952 9.408 1 7.328 1 3.766 1 1 3.736 1 7.66Z'
@@ -577,6 +585,7 @@ return (
 						strokeWidth='2'
 					></path>
 				</svg>
+				</Box>
 
 				{!hideComments && (
 				<svg
@@ -625,7 +634,7 @@ return (
 			)}
 			</Flex>
 
-			<Flex gap={2} alignItems={"center"}>
+			<Flex gap={2} alignItems="center" minH="18px">
 				{!hideComments && (
 				<>
 				<Text color={"gray.light"} fontSize='sm'>
@@ -634,6 +643,7 @@ return (
 				<Box w={0.5} h={0.5} borderRadius={"full"} bg={"gray.light"}></Box>
 				</>
 				)}
+				<Box w="18px" h="18px" flexShrink={0} display="flex" alignItems="center" justifyContent="center">
 				{likeCount > 0 && (liked ? user?.profilePic : likePreview?.profilePic) ? (
 					<Box
 						as="img"
@@ -643,12 +653,13 @@ return (
 						h="18px"
 						borderRadius="full"
 						objectFit="cover"
-						flexShrink={0}
 					/>
 				) : null}
+				</Box>
 				<Text
 					color={"gray.light"}
 					fontSize='sm'
+					minW="4.5em"
 					cursor={likeCount > 0 ? 'pointer' : 'default'}
 					onClick={(e) => {
 						e.preventDefault()
