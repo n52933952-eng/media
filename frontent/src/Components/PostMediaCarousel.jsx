@@ -37,6 +37,40 @@ const PostMediaCarousel = ({
     return () => el.removeEventListener('ended', onEnded)
   }, [audioUrl])
 
+  // Stop music when carousel leaves the viewport (scroll away) or tab hides
+  useEffect(() => {
+    if (!audioUrl) return undefined
+    const root = containerRef.current
+    if (!root) return undefined
+
+    const pauseAudio = () => {
+      const el = audioRef.current
+      if (el && !el.paused) el.pause()
+      setPlaying(false)
+    }
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (!entry?.isIntersecting || entry.intersectionRatio < 0.25) {
+          pauseAudio()
+        }
+      },
+      { threshold: [0, 0.25, 0.5] },
+    )
+    observer.observe(root)
+
+    const onVisibility = () => {
+      if (document.hidden) pauseAudio()
+    }
+    document.addEventListener('visibilitychange', onVisibility)
+
+    return () => {
+      observer.disconnect()
+      document.removeEventListener('visibilitychange', onVisibility)
+      pauseAudio()
+    }
+  }, [audioUrl])
+
   const goPrev = useCallback(() => {
     setIndex((i) => (i - 1 + slides.length) % slides.length)
   }, [slides.length])
