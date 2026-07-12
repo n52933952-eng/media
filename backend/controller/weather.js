@@ -704,53 +704,64 @@ export const saveWeatherPreferences = async (req, res) => {
         
         console.log(`✅ [saveWeatherPreferences] Saved ${validCities.length} cities for user ${user.username}`)
         
-        // Fetch and cache weather for user's selected cities immediately (in background, non-blocking)
+        // Cache weather for newly selected cities BEFORE responding so My Weather can show them immediately
         if (validCities.length > 0) {
-            console.log(`🌤️ [saveWeatherPreferences] Fetching weather for ${validCities.length} cities in background...`)
-            console.log(`🌤️ [saveWeatherPreferences] Cities to fetch:`, validCities.map(c => `${c.name} (${c.country})`))
-            
-            // Use setImmediate to run in background without blocking response
-            setImmediate(async () => {
-                for (let i = 0; i < validCities.length; i++) { // Removed limit - fetch all selected cities
-                    const city = validCities[i]
-                    // Add delay between requests to avoid rate limiting (60 calls/minute = 1 per second)
-                    if (i > 0) {
-                        await new Promise(resolve => setTimeout(resolve, 1100))
+            console.log(`🌤️ [saveWeatherPreferences] Ensuring weather cache for ${validCities.length} cities...`)
+            let apiCalls = 0
+            for (const city of validCities) {
+                try {
+                    if (!city.lat || !city.lon || city.lat === 0 || city.lon === 0) {
+                        console.warn(`⚠️ [saveWeatherPreferences] Skipping ${city.name} - missing coordinates`)
+                        continue
                     }
-                    
-                    try {
-                        // Only fetch if we have valid coordinates
-                        if (city.lat && city.lon && city.lat !== 0 && city.lon !== 0) {
-                            const endpoint = `/weather?lat=${city.lat}&lon=${city.lon}`
-                            const result = await fetchFromWeatherAPI(endpoint)
-                            
-                            if (result.success && result.data) {
-                                const convertedWeather = convertWeatherFormat(result.data, city)
-                                await Weather.findOneAndUpdate(
-                                    { 
-                                        'location.city': convertedWeather.location.city,
-                                        'location.country': convertedWeather.location.country
-                                    },
-                                    convertedWeather,
-                                    { upsert: true, new: true }
-                                )
-                                console.log(`✅ [saveWeatherPreferences] Cached weather for ${city.name}: ${convertedWeather.current.temperature}°C`)
-                            } else {
-                                console.warn(`⚠️ [saveWeatherPreferences] Failed to fetch weather for ${city.name}: ${result.error}`)
-                            }
-                        } else {
-                            console.warn(`⚠️ [saveWeatherPreferences] Skipping ${city.name} - missing coordinates (lat: ${city.lat}, lon: ${city.lon})`)
-                        }
-                    } catch (error) {
-                        console.error(`❌ [saveWeatherPreferences] Error fetching weather for ${city.name}:`, error)
+
+                    const existing = await Weather.findOne({
+                        'location.city': new RegExp(`^${city.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i'),
+                        'location.country': new RegExp(`^${String(city.country || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i'),
+                    }).lean()
+
+                    // Fresh enough (< 30 min) — skip OpenWeather call
+                    const freshEnough =
+                        existing?.current?.temperature != null &&
+                        existing?.lastUpdated &&
+                        Date.now() - new Date(existing.lastUpdated).getTime() < 30 * 60 * 1000
+                    if (freshEnough) continue
+
+                    if (apiCalls > 0) {
+                        await new Promise((resolve) => setTimeout(resolve, 1100))
                     }
+                    apiCalls += 1
+
+                    const endpoint = `/weather?lat=${city.lat}&lon=${city.lon}`
+                    const result = await fetchFromWeatherAPI(endpoint)
+                    if (result.success && result.data) {
+                        const convertedWeather = convertWeatherFormat(result.data, city)
+                        await Weather.findOneAndUpdate(
+                            {
+                                'location.city': convertedWeather.location.city,
+                                'location.country': convertedWeather.location.country,
+                            },
+                            convertedWeather,
+                            { upsert: true, new: true },
+                        )
+                        console.log(
+                            `✅ [saveWeatherPreferences] Cached weather for ${city.name}: ${convertedWeather.current.temperature}°C`,
+                        )
+                    } else {
+                        console.warn(
+                            `⚠️ [saveWeatherPreferences] Failed to fetch weather for ${city.name}: ${result.error}`,
+                        )
+                    }
+                } catch (error) {
+                    console.error(`❌ [saveWeatherPreferences] Error fetching weather for ${city.name}:`, error)
                 }
-                console.log(`✅ [saveWeatherPreferences] Finished caching weather for ${validCities.length} cities`)
-                
-                // Refresh global weather cache + prune legacy weather posts (no feed posts)
+            }
+
+            // Feed sync can stay in background
+            setImmediate(async () => {
                 try {
                     await autoPostWeatherUpdate()
-                    console.log(`✅ [saveWeatherPreferences] Triggered weather sync after fetching cities`)
+                    console.log(`✅ [saveWeatherPreferences] Triggered weather sync after save`)
                 } catch (error) {
                     console.error(`❌ [saveWeatherPreferences] Error triggering post update:`, error)
                 }
