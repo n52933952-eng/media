@@ -646,6 +646,7 @@ export const UpdateUser = async(req,res) => {
 
       const previousProfilePic = user.profilePic || ''
       const previousUsername = user.username || ''
+      const previousName = user.name || ''
       if (profilePic && isR2Url(profilePic)) {
         try {
           assertManagedMediaUrls([profilePic])
@@ -670,13 +671,15 @@ export const UpdateUser = async(req,res) => {
 
       const profilePicChanged = !!(profilePic && profilePic !== previousProfilePic)
       const usernameChanged = !!(username && username !== previousUsername)
+      const nameChanged = !!(name && name !== previousName)
 
       user = await user.save()
 
-      if (profilePicChanged || usernameChanged) {
+      if (profilePicChanged || usernameChanged || nameChanged) {
         try {
           await updateCommentDenormForUser(userId, {
             username: user.username,
+            name: user.name,
             profilePic: user.profilePic,
           })
           await Post.updateMany(
@@ -684,12 +687,13 @@ export const UpdateUser = async(req,res) => {
             {
               $set: {
                 "replies.$[reply].username": user.username,
+                "replies.$[reply].name": user.name,
                 "replies.$[reply].userProfilePic": user.profilePic,
               },
             },
             { arrayFilters: [{ "reply.userId": userId }], timestamps: false }
           )
-          console.log(`✅ Updated all comments for user ${user.username} with new profile picture/username`)
+          console.log(`✅ Updated all comments for user ${user.username} with new profile picture/username/name`)
         } catch (updateError) {
           console.error('Error updating comments with new profile picture:', updateError)
         }

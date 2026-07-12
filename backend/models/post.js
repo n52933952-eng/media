@@ -167,6 +167,9 @@ const PostSchema = mongoose.Schema({
             username:{
                 type:String
             },
+            name:{
+                type:String
+            },
           
             date: {
              type: Date,

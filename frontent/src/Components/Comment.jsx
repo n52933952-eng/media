@@ -571,7 +571,7 @@ const Comment = ({ reply, postId, allReplies, postedBy, onRepliesChange, onReply
 
     <Flex w="full" gap={1} flexDirection="column">
         <Flex justifyContent="space-between" w="full" alignItems="center">
-            <Text>{reply.username}</Text>
+            <Text fontWeight="semibold">{reply.name || reply.username}</Text>
            
             <Flex alignItems="center" gap={2}>
                <Text fontSize="sm">

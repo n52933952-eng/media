@@ -4,7 +4,7 @@ import Post, { MAX_REPLIES_PER_POST } from '../models/post.js'
 
 /** Only fields needed for comment list UI — keeps Mongo payload small. */
 const COMMENT_LIST_SELECT =
-  '_id userId text username userProfilePic date parentReplyId likes mentionedUser footballMatchId'
+  '_id userId text username name userProfilePic date parentReplyId likes mentionedUser footballMatchId'
 
 function toObjectId(value) {
   const s = String(value)
@@ -31,6 +31,7 @@ export function formatCommentForApi(doc) {
     userId: d.userId,
     text: d.text,
     username: d.username,
+    name: d.name || '',
     userProfilePic: d.userProfilePic,
     date: d.date,
     parentReplyId: d.parentReplyId ?? null,
@@ -38,6 +39,30 @@ export function formatCommentForApi(doc) {
     mentionedUser: d.mentionedUser ?? null,
     footballMatchId: d.footballMatchId ?? null,
   }
+}
+
+/** Fill missing display names from User (older comments only stored username). */
+async function enrichCommentNames(comments) {
+  if (!Array.isArray(comments) || !comments.length) return comments || []
+  const missingIds = [
+    ...new Set(
+      comments
+        .filter((c) => c && !c.name && c.userId)
+        .map((c) => String(c.userId)),
+    ),
+  ]
+  if (!missingIds.length) return comments
+
+  const User = (await import('../models/user.js')).default
+  const users = await User.find({ _id: { $in: missingIds } })
+    .select('name')
+    .lean()
+  const nameById = new Map(users.map((u) => [String(u._id), u.name || '']))
+  return comments.map((c) => {
+    if (c?.name || !c?.userId) return c
+    const n = nameById.get(String(c.userId))
+    return n ? { ...c, name: n } : c
+  })
 }
 
 export async function getCommentCountForPost(postId) {
@@ -95,11 +120,11 @@ export async function attachReplyCountsToPosts(posts) {
 export async function getCommentsForPost(postId) {
   const pid = String(postId)
   const docs = await Comment.find({ postId: pid }).sort({ date: 1 }).lean()
-  if (docs.length) return docs.map(formatCommentForApi)
+  if (docs.length) return enrichCommentNames(docs.map(formatCommentForApi))
 
   const post = await Post.findById(pid).select('replies').lean()
   if (!Array.isArray(post?.replies) || !post.replies.length) return []
-  return post.replies.map((r) => formatCommentForApi(r))
+  return enrichCommentNames(post.replies.map((r) => formatCommentForApi(r)))
 }
 
 async function getDescendantCommentsForRoots(postId, rootIds) {
@@ -201,7 +226,7 @@ export async function getPostCommentsPaginated(
     }
     const thread = collectEmbeddedThreadReplies(embedded, pageRoots)
     return {
-      replies: thread.map(formatCommentForApi),
+      replies: await enrichCommentNames(thread.map(formatCommentForApi)),
       total: post?.replyCount ?? topLevel.length,
       hasMore: skipNum + pageRoots.length < topLevel.length,
     }
@@ -227,7 +252,7 @@ export async function getPostCommentsPaginated(
   merged.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
 
   return {
-    replies: merged,
+    replies: await enrichCommentNames(merged),
     total: null,
     hasMore,
   }
@@ -254,6 +279,7 @@ export async function createComment({
   postId,
   userId,
   username,
+  name,
   userProfilePic,
   text,
   parentReplyId = null,
@@ -266,6 +292,7 @@ export async function createComment({
     postId,
     userId,
     username,
+    name: name || '',
     userProfilePic,
     text,
     parentReplyId: parentReplyId || null,
@@ -375,9 +402,10 @@ export async function toggleCommentLike(postId, commentId, userId) {
   return { doc: reply, isLiked: !isLiked, likesCount: reply.likes.length }
 }
 
-export async function updateCommentDenormForUser(userId, { username, profilePic }) {
+export async function updateCommentDenormForUser(userId, { username, name, profilePic }) {
   const $set = {}
   if (username != null) $set.username = username
+  if (name != null) $set.name = name
   if (profilePic != null) $set.userProfilePic = profilePic
   if (!Object.keys($set).length) return
   await Comment.updateMany({ userId }, { $set })

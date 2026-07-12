@@ -274,8 +274,15 @@ const WeatherPage = () => {
         }
     }
 
-    const getWeatherIcon = (iconCode) =>
-        `https://openweathermap.org/img/wn/${iconCode}@2x.png`
+    const getWeatherIcon = (iconCode, timezoneOffset) => {
+        let code = iconCode || '01d'
+        if (typeof timezoneOffset === 'number') {
+            const h = new Date(Date.now() + timezoneOffset * 1000).getUTCHours()
+            const isNight = h >= 19 || h < 6
+            code = isNight ? String(code).replace(/d$/i, 'n') : String(code).replace(/n$/i, 'd')
+        }
+        return `https://openweathermap.org/img/wn/${code}@2x.png`
+    }
 
     const myWeather = useMemo(() => {
         const names = new Set(selectedCities.map(cityNameOf).filter(Boolean))
@@ -470,12 +477,23 @@ const WeatherPage = () => {
                                                 {Math.round(hero.current?.temperature ?? 0)}°
                                             </Text>
                                             {hero.current?.condition?.icon && (
-                                                <Image
-                                                    src={getWeatherIcon(hero.current.condition.icon)}
-                                                    alt=""
+                                                <Flex
+                                                    align="center"
+                                                    justify="center"
                                                     boxSize="56px"
+                                                    borderRadius="full"
+                                                    bg="whiteAlpha.200"
                                                     mb={1}
+                                                >
+                                                    <Image
+                                                    src={getWeatherIcon(
+                                                        hero.current.condition.icon,
+                                                        hero.location?.timezoneOffset,
+                                                    )}
+                                                    alt=""
+                                                    boxSize="48px"
                                                 />
+                                                </Flex>
                                             )}
                                         </HStack>
                                         <Text
@@ -558,11 +576,23 @@ const WeatherPage = () => {
                                         </Box>
                                         <HStack spacing={2}>
                                             {w.current?.condition?.icon && (
-                                                <Image
-                                                    src={getWeatherIcon(w.current.condition.icon)}
+                                                <Flex
+                                                    align="center"
+                                                    justify="center"
+                                                    boxSize="40px"
+                                                    borderRadius="full"
+                                                    bg="blackAlpha.100"
+                                                    _dark={{ bg: 'whiteAlpha.200' }}
+                                                >
+                                                    <Image
+                                                    src={getWeatherIcon(
+                                                        w.current.condition.icon,
+                                                        w.location?.timezoneOffset,
+                                                    )}
                                                     alt=""
                                                     boxSize="36px"
                                                 />
+                                                </Flex>
                                             )}
                                             <Text fontSize="xl" fontWeight="700" color={rowPalette.accent}>
                                                 {Math.round(w.current?.temperature ?? 0)}°

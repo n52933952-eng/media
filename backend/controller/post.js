@@ -1113,6 +1113,7 @@ export const ReplyPost = async(req,res) => {
             return res.status(400).json({ error: 'Comment text is required', message: 'Comment text is required' })
         }
         const username = req.user.username
+        const name = req.user.name
         const userId = req.user._id 
         const id = req.params.id 
         const userProfilePic = req.user.profilePic 
@@ -1134,6 +1135,7 @@ export const ReplyPost = async(req,res) => {
                 postId: id,
             userId,
                 username,
+                name,
             userProfilePic,
                 text: trimmedText,
                 footballMatchId,
@@ -1462,6 +1464,7 @@ export const ReplyToComment = async(req, res) => {
         }
         const { id } = req.params  // This is the post ID
         const username = req.user.username
+        const name = req.user.name
         const userId = req.user._id
         const userProfilePic = req.user.profilePic
 
@@ -1493,6 +1496,7 @@ export const ReplyToComment = async(req, res) => {
                 postId: id,
             userId,
                 username,
+                name,
             userProfilePic,
                 text: trimmedText,
                 parentReplyId: parentReplyId || null,

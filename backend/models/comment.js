@@ -24,6 +24,7 @@ const CommentSchema = new mongoose.Schema(
     },
     text: { type: String, required: true },
     username: { type: String, default: '' },
+    name: { type: String, default: '' },
     userProfilePic: { type: String, default: '' },
     date: { type: Date, default: Date.now, index: true },
     parentReplyId: {
