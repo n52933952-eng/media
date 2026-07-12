@@ -66,7 +66,14 @@ const convertWeatherFormat = (weatherData, cityInfo) => {
             city: cityInfo.name || weatherData.name,
             country: cityInfo.country || weatherData.sys?.country || '',
             lat: cityInfo.lat || weatherData.coord?.lat,
-            lon: cityInfo.lon || weatherData.coord?.lon
+            lon: cityInfo.lon || weatherData.coord?.lon,
+            // Current weather API: shift in seconds from UTC
+            timezoneOffset:
+                typeof weatherData.timezone === 'number'
+                    ? weatherData.timezone
+                    : typeof weatherData.city?.timezone === 'number'
+                      ? weatherData.city.timezone
+                      : null,
         },
         current: {
             temperature: Math.round(current.main?.temp || current.temp),

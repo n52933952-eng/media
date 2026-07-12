@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useContext, useCallback } from 'react'
+import React, { useState, useEffect, useContext, useCallback, useMemo } from 'react'
 import {
     Box,
     Container,
@@ -13,208 +13,151 @@ import {
     useColorModeValue,
     VStack,
     HStack,
-    Badge,
-    SimpleGrid,
-    IconButton,
-    Table,
-    Thead,
-    Tbody,
-    Tr,
-    Th,
-    Td,
-    TableContainer,
-    Checkbox,
-    Divider,
-    Alert,
-    AlertIcon,
-    AlertTitle,
-    AlertDescription
+    Wrap,
+    WrapItem,
+    Tag,
+    TagLabel,
+    TagCloseButton,
+    Image,
 } from '@chakra-ui/react'
-import { SearchIcon, DeleteIcon, AddIcon } from '@chakra-ui/icons'
+import { SearchIcon } from '@chakra-ui/icons'
 import { UserContext } from '../context/UserContext'
-import { SocketContext } from '../context/SocketContext'
 import useShowToast from '../hooks/useShowToast'
 
-// In-memory cache for weather data (shared across component instances)
-// Also expose to window for Post component to use
 const weatherCache = {
     data: null,
     timestamp: null,
     preferences: null,
-    CACHE_TTL: 5 * 60 * 1000 // 5 minutes
+    CACHE_TTL: 5 * 60 * 1000,
 }
 
-// Expose to window for Post component
 if (typeof window !== 'undefined') {
     window.weatherCache = weatherCache
 }
 
+const cityNameOf = (c) => (typeof c === 'string' ? c : c?.name)
+
+/** OpenWeatherMap timezone offset (seconds from UTC) → HH:mm in that city */
+const formatCityLocalTime = (timezoneOffsetSec) => {
+    if (typeof timezoneOffsetSec !== 'number' || Number.isNaN(timezoneOffsetSec)) return null
+    const d = new Date(Date.now() + timezoneOffsetSec * 1000)
+    const h = String(d.getUTCHours()).padStart(2, '0')
+    const m = String(d.getUTCMinutes()).padStart(2, '0')
+    return `${h}:${m}`
+}
+
 const WeatherPage = () => {
     const { user } = useContext(UserContext)
-    const { socket } = useContext(SocketContext) || {}
+    const [activeTab, setActiveTab] = useState('my')
     const [weatherData, setWeatherData] = useState([])
     const [loading, setLoading] = useState(true)
-    
-    // City selection states
     const [selectedCities, setSelectedCities] = useState([])
     const [searchQuery, setSearchQuery] = useState('')
     const [searchResults, setSearchResults] = useState([])
     const [searchLoading, setSearchLoading] = useState(false)
     const [saving, setSaving] = useState(false)
-    
+    const [heroCity, setHeroCity] = useState(null)
+    const [clockTick, setClockTick] = useState(0)
+
     const showToast = useShowToast()
-    
-    const bgColor = useColorModeValue('white', 'gray.800')
-    const borderColor = useColorModeValue('gray.200', 'gray.700')
+
+    useEffect(() => {
+        const id = setInterval(() => setClockTick((n) => n + 1), 30000)
+        return () => clearInterval(id)
+    }, [])
+
+    const pageBg = useColorModeValue('#f6f7f9', '#0f1219')
+    const surface = useColorModeValue('white', '#1a1f2e')
+    const borderColor = useColorModeValue('#e4e7ec', '#2a3142')
     const textColor = useColorModeValue('gray.800', 'white')
-    const secondaryTextColor = useColorModeValue('gray.600', 'gray.400')
-    const cardBg = useColorModeValue('white', '#252b3b')
-    
-    // Load user's saved cities
+    const muted = useColorModeValue('gray.500', 'gray.400')
+    const tabTrack = useColorModeValue('#eceef2', '#252b3b')
+    const hoverRow = useColorModeValue('gray.50', 'whiteAlpha.50')
+    const accent = useColorModeValue('blue.600', 'blue.300')
+
     const loadPreferences = useCallback(async () => {
-        if (!user) return
-        
+        if (!user) {
+            setSelectedCities([])
+            return []
+        }
         try {
-            const baseUrl = import.meta.env.PROD ? window.location.origin : "http://localhost:5000"
+            const baseUrl = import.meta.env.PROD ? window.location.origin : 'http://localhost:5000'
             const res = await fetch(`${baseUrl}/api/weather/preferences`, {
                 credentials: 'include',
-                cache: 'no-cache' // Always fetch fresh data
+                cache: 'no-cache',
             })
             const data = await res.json()
-            
-            if (res.ok && data.cities) {
-                console.log('🌤️ [WeatherPage] Loaded preferences from backend:', data.cities.length, 'cities')
-                setSelectedCities(data.cities)
-                return data.cities
-            } else {
-                setSelectedCities([])
-                return []
+            if (res.ok) {
+                const list = data.cities || data.selectedCities || []
+                setSelectedCities(Array.isArray(list) ? list : [])
+                return list
             }
+            setSelectedCities([])
+            return []
         } catch (error) {
             console.error('Error loading preferences:', error)
             return []
         }
     }, [user])
-    
-    useEffect(() => {
-        loadPreferences()
-    }, [user, loadPreferences])
-    
-    // Fetch weather function - always fetch all available cities from database to show in table
-    const fetchWeather = async (silent = false) => {
+
+    const fetchWeather = useCallback(async (silent = false) => {
         try {
-            const baseUrl = import.meta.env.PROD ? window.location.origin : "http://localhost:5000"
-            const cacheKey = 'default' // Always use default cache key for all cities
-            
-            // Check memory cache first
+            const baseUrl = import.meta.env.PROD ? window.location.origin : 'http://localhost:5000'
             const now = Date.now()
-            if (weatherCache.data && 
-                weatherCache.preferences === cacheKey &&
-                weatherCache.timestamp && 
-                (now - weatherCache.timestamp) < weatherCache.CACHE_TTL) {
-                console.log('💾 [WeatherPage] Using cached weather data')
+
+            if (
+                weatherCache.data &&
+                weatherCache.timestamp &&
+                now - weatherCache.timestamp < weatherCache.CACHE_TTL
+            ) {
                 setWeatherData(weatherCache.data)
                 if (!silent) setLoading(false)
                 return
             }
-            
-            // Check localStorage cache as fallback
-            try {
-                const cached = localStorage.getItem(`weatherCache_${cacheKey}`)
-                if (cached) {
-                    const parsed = JSON.parse(cached)
-                    if (parsed.timestamp && (now - parsed.timestamp) < weatherCache.CACHE_TTL) {
-                        console.log('💾 [WeatherPage] Using localStorage cached weather data')
-                        setWeatherData(parsed.data)
-                        weatherCache.data = parsed.data
-                        weatherCache.timestamp = parsed.timestamp
-                        weatherCache.preferences = cacheKey
-                        if (!silent) setLoading(false)
-                        return
-                    }
-                }
-            } catch (e) {
-                console.error('Error reading localStorage cache:', e)
-            }
-            
-            if (!silent) {
-                console.log('🌤️ [WeatherPage] Fetching all available cities from database...')
-                setLoading(true)
-            }
-            
-            // Always fetch all available cities from database to show in table
-            const res = await fetch(
-                `${baseUrl}/api/weather?limit=50`, // Fetch more cities (up to 50)
-                { credentials: 'include' }
-            )
+
+            if (!silent) setLoading(true)
+
+            const res = await fetch(`${baseUrl}/api/weather?limit=50`, { credentials: 'include' })
             const data = await res.json()
-            
+
             if (res.ok && data.weather) {
-                // Update cache
                 weatherCache.data = data.weather || []
                 weatherCache.timestamp = now
-                weatherCache.preferences = cacheKey
-                
-                // Also save to localStorage
-                try {
-                    localStorage.setItem(`weatherCache_${cacheKey}`, JSON.stringify({
-                        data: data.weather || [],
-                        timestamp: now
-                    }))
-                } catch (e) {
-                    console.error('Error saving to localStorage cache:', e)
-                }
-                
-                if (!silent) console.log('🌤️ [WeatherPage] Loaded', data.weather.length, 'cities from database')
                 setWeatherData(data.weather || [])
-            } else {
-                console.error('🌤️ [WeatherPage] Weather request failed:', data)
-                if (!silent) {
-                    showToast('Error', 'Failed to load weather data', 'error')
-                }
+            } else if (!silent) {
+                showToast('Error', 'Failed to load weather data', 'error')
             }
-            
         } catch (error) {
-            console.error('🌤️ [WeatherPage] Error fetching weather:', error)
-            if (!silent) {
-                showToast('Error', 'Failed to load weather', 'error')
-            }
+            console.error('Error fetching weather:', error)
+            if (!silent) showToast('Error', 'Failed to load weather', 'error')
         } finally {
-            if (!silent) {
-                setLoading(false)
-                console.log('🌤️ [WeatherPage] Finished fetching weather')
-            }
+            if (!silent) setLoading(false)
         }
-    }
-    
-    // Initial fetch on mount - always fetch default cities to show in table
+    }, [showToast])
+
     useEffect(() => {
-        console.log('🌤️ [WeatherPage] Initial fetch - loading default cities for table')
+        loadPreferences()
+    }, [loadPreferences])
+
+    useEffect(() => {
         fetchWeather()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []) // Only run once on mount
-    
-    // Search cities
+    }, [fetchWeather])
+
     const handleSearch = async (query) => {
         setSearchQuery(query)
-        
         if (query.trim().length < 2) {
             setSearchResults([])
             return
         }
-        
         setSearchLoading(true)
         try {
-            const baseUrl = import.meta.env.PROD ? window.location.origin : "http://localhost:5000"
+            const baseUrl = import.meta.env.PROD ? window.location.origin : 'http://localhost:5000'
             const res = await fetch(
                 `${baseUrl}/api/weather/search?query=${encodeURIComponent(query)}`,
-                { credentials: 'include' }
+                { credentials: 'include' },
             )
             const data = await res.json()
-            
-            if (res.ok && data.cities) {
-                setSearchResults(data.cities)
-            }
+            if (res.ok && data.cities) setSearchResults(data.cities)
         } catch (error) {
             console.error('Error searching cities:', error)
             showToast('Error', 'Failed to search cities', 'error')
@@ -222,82 +165,71 @@ const WeatherPage = () => {
             setSearchLoading(false)
         }
     }
-    
-    // Add city to selection
+
+    const isSelected = (name, country) =>
+        selectedCities.some((c) => {
+            if (typeof c === 'string') return c === name
+            return c.name === name && (!country || !c.country || c.country === country)
+        })
+
     const handleAddCity = (city) => {
+        if (!user) {
+            showToast('Error', 'Please login to save preferences', 'error')
+            return
+        }
         if (selectedCities.length >= 10) {
             showToast('Info', 'Maximum 10 cities allowed', 'info')
             return
         }
-        
-        const exists = selectedCities.some(c => 
-            c.name === city.name && c.country === city.country
-        )
-        
-        if (exists) {
+        if (isSelected(city.name, city.country)) {
             showToast('Info', 'City already added', 'info')
             return
         }
-        
-        const updatedCities = [...selectedCities, city]
-        setSelectedCities(updatedCities)
+        setSelectedCities((prev) => [...prev, city])
         setSearchQuery('')
         setSearchResults([])
-        
-        console.log('✅ [WeatherPage] Added city to selection:', city.name)
     }
-    
-    // Remove city from selection (no auto-save, user must click Save button)
-    const handleRemoveCity = (index) => {
-        const updatedCities = selectedCities.filter((_, i) => i !== index)
-        setSelectedCities(updatedCities)
-        console.log('✅ [WeatherPage] Removed city from selection')
+
+    const handleRemoveCity = (name) => {
+        setSelectedCities((prev) => prev.filter((c) => cityNameOf(c) !== name))
     }
-    
-    // Save preferences
+
     const handleSavePreferences = async () => {
         if (!user) {
             showToast('Error', 'Please login to save preferences', 'error')
             return
         }
-        
+        if (selectedCities.length === 0) {
+            showToast('Info', 'Select at least one city', 'info')
+            return
+        }
         setSaving(true)
         try {
-            const baseUrl = import.meta.env.PROD ? window.location.origin : "http://localhost:5000"
+            const baseUrl = import.meta.env.PROD ? window.location.origin : 'http://localhost:5000'
             const res = await fetch(`${baseUrl}/api/weather/preferences`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 credentials: 'include',
-                body: JSON.stringify({ cities: selectedCities })
+                body: JSON.stringify({ cities: selectedCities }),
             })
-            
             const data = await res.json()
-            
             if (res.ok) {
                 showToast('Success', 'Your cities have been saved.', 'success')
-                
-                // Clear all weather caches so UI and weather cards refresh
                 if (window.weatherCache) {
                     window.weatherCache.data = null
                     window.weatherCache.timestamp = null
                     window.weatherCache.preferences = null
                 }
-                
-                // Clear localStorage cache
                 try {
-                    Object.keys(localStorage).forEach(key => {
-                        if (key.startsWith('weatherCache_')) {
-                            localStorage.removeItem(key)
-                        }
+                    Object.keys(localStorage).forEach((key) => {
+                        if (key.startsWith('weatherCache_')) localStorage.removeItem(key)
                     })
-                } catch (e) {
-                    console.error('Error clearing localStorage cache:', e)
-                }
-                
-                window.dispatchEvent(new CustomEvent('weatherPreferencesUpdated', { 
-                    detail: { cities: selectedCities } 
-                }))
-                console.log('✅ [WeatherPage] Preferences saved, cache cleared')
+                } catch (_) {}
+                window.dispatchEvent(
+                    new CustomEvent('weatherPreferencesUpdated', { detail: { cities: selectedCities } }),
+                )
+                await fetchWeather(true)
+                setActiveTab('my')
             } else {
                 showToast('Error', data.error || 'Failed to save preferences', 'error')
             }
@@ -308,263 +240,361 @@ const WeatherPage = () => {
             setSaving(false)
         }
     }
-    
-    // Get weather icon URL
-    const getWeatherIcon = (iconCode) => {
-        return `https://openweathermap.org/img/wn/${iconCode}@2x.png`
-    }
-    
+
+    const getWeatherIcon = (iconCode) =>
+        `https://openweathermap.org/img/wn/${iconCode}@2x.png`
+
+    const myWeather = useMemo(() => {
+        const names = new Set(selectedCities.map(cityNameOf).filter(Boolean))
+        if (!names.size) return []
+        const byName = new Map()
+        for (const w of weatherData) {
+            const city = w.location?.city
+            if (city && names.has(city)) byName.set(city, w)
+        }
+        const ordered = []
+        for (const c of selectedCities) {
+            const hit = byName.get(cityNameOf(c))
+            if (hit) ordered.push(hit)
+        }
+        return ordered
+    }, [weatherData, selectedCities])
+
+    useEffect(() => {
+        if (!myWeather.length) {
+            setHeroCity(null)
+            return
+        }
+        const still =
+            heroCity &&
+            myWeather.some((w) => w.location?.city === heroCity)
+        if (!still) setHeroCity(myWeather[0].location?.city)
+    }, [myWeather, heroCity])
+
+    const hero =
+        myWeather.find((w) => w.location?.city === heroCity) || myWeather[0] || null
+    const rest = myWeather.filter((w) => w.location?.city !== hero?.location?.city)
+    const heroLocalTime = useMemo(
+        () => formatCityLocalTime(hero?.location?.timezoneOffset),
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+        [hero?.location?.timezoneOffset, clockTick],
+    )
+
+    const TabButton = ({ id, label }) => (
+        <Button
+            flex={1}
+            size="sm"
+            variant="ghost"
+            bg={activeTab === id ? surface : 'transparent'}
+            color={activeTab === id ? textColor : muted}
+            fontWeight={activeTab === id ? '700' : '600'}
+            borderRadius="10px"
+            onClick={() => setActiveTab(id)}
+            _hover={{ bg: activeTab === id ? surface : hoverRow }}
+        >
+            {label}
+        </Button>
+    )
+
     return (
-        <Container maxW="1200px" py={6}>
-            {/* Header */}
-            <VStack spacing={6} align="stretch">
-                <Flex align="center" justify="space-between">
-                    <HStack spacing={3}>
-                        <Text fontSize="4xl">🌤️</Text>
-                        <VStack align="start" spacing={0}>
-                            <Heading size="lg">World Temperatures — Weather Around The World</Heading>
-                            <Text fontSize="sm" color={secondaryTextColor}>
-                                Search and save up to 10 cities for your personal weather list
-                            </Text>
-                        </VStack>
-                    </HStack>
-                </Flex>
-                
-                {/* Onboarding Alert */}
-                {user && selectedCities.length === 0 && (
-                    <Alert status="info" borderRadius="md">
-                        <AlertIcon />
-                        <Box>
-                            <AlertTitle>Select your cities!</AlertTitle>
-                            <AlertDescription>
-                                Search and add cities below, then tap Save cities to keep your list
-                            </AlertDescription>
-                        </Box>
-                    </Alert>
-                )}
-                
-                {!user && (
-                    <Alert status="info" borderRadius="md">
-                        <AlertIcon />
-                        <AlertDescription>
-                            Sign in to select and save your preferred cities
-                        </AlertDescription>
-                    </Alert>
-                )}
-                
-                {/* Search Box */}
-                {user && (
-                    <Box
-                        bg={bgColor}
-                        borderRadius="lg"
-                        border="1px solid"
-                        borderColor={borderColor}
-                        p={4}
-                    >
-                        <VStack spacing={3} align="stretch">
-                            <Text fontWeight="semibold" fontSize="sm">Search & Select Cities (Max 10)</Text>
-                            <InputGroup>
-                                <InputLeftElement pointerEvents="none">
-                                    <SearchIcon color="gray.400" />
-                                </InputLeftElement>
-                                <Input
-                                    placeholder="Search for city or place... (e.g., London, Paris, Tokyo)"
-                                    value={searchQuery}
-                                    onChange={(e) => handleSearch(e.target.value)}
-                                    size="lg"
-                                />
-                            </InputGroup>
-                            
-                            {/* Search Results */}
-                            {searchLoading && (
-                                <Flex justify="center" py={2}>
-                                    <Spinner size="sm" />
-                                </Flex>
-                            )}
-                            
-                            {searchResults.length > 0 && (
-                                <Box maxH="200px" overflowY="auto">
-                                    <VStack align="stretch" spacing={1}>
-                                        {searchResults.map((city, index) => {
-                                            const isSelected = selectedCities.some(c => 
-                                                c.name === city.name && c.country === city.country
-                                            )
-                                            return (
-                                                <Flex
-                                                    key={index}
-                                                    p={2}
-                                                    borderRadius="md"
-                                                    border="1px solid"
-                                                    borderColor={borderColor}
-                                                    justify="space-between"
-                                                    align="center"
-                                                    bg={isSelected ? 'blue.50' : 'transparent'}
-                                                    _hover={{ bg: useColorModeValue('gray.50', 'gray.700') }}
-                                                >
-                                                    <Text fontSize="sm" fontWeight="medium">
-                                                        {city.name}{city.state ? `, ${city.state}` : ''}, {city.country}
-                                                    </Text>
-                                                    <Button
-                                                        size="xs"
-                                                        colorScheme={isSelected ? 'red' : 'blue'}
-                                                        onClick={() => isSelected ? handleRemoveCity(selectedCities.findIndex(c => c.name === city.name && c.country === city.country)) : handleAddCity(city)}
-                                                        isDisabled={!isSelected && selectedCities.length >= 10}
-                                                    >
-                                                        {isSelected ? 'Remove' : 'Add'}
-                                                    </Button>
-                                                </Flex>
-                                            )
-                                        })}
-                                    </VStack>
-                                </Box>
-                            )}
-                            
-                            {/* Selected Cities Count */}
-                            <Flex justify="space-between" align="center">
-                                <Text fontSize="sm" color={secondaryTextColor}>
-                                    Selected: {selectedCities.length}/10 cities
-                                </Text>
-                                {selectedCities.length > 0 && (
-                                    <Button
-                                        colorScheme="blue"
-                                        size="sm"
-                                        onClick={handleSavePreferences}
-                                        isLoading={saving}
-                                    >
-                                        Save cities
-                                    </Button>
-                                )}
-                            </Flex>
-                        </VStack>
+        <Box minH="100vh" bg={pageBg}>
+            <Container maxW="720px" py={{ base: 5, md: 8 }} px={{ base: 4, md: 6 }}>
+                <VStack spacing={5} align="stretch">
+                    <Box>
+                        <Heading size="lg" color={textColor} letterSpacing="-0.02em">
+                            Weather
+                        </Heading>
+                        <Text mt={1} fontSize="sm" color={muted}>
+                            {user
+                                ? `${selectedCities.length}/10 cities selected`
+                                : 'Sign in to build your personal city list'}
+                        </Text>
                     </Box>
-                )}
-                
-                <Divider />
-                
-                {/* Weather Table */}
-                <Box
-                    bg={bgColor}
-                    borderRadius="lg"
-                    border="1px solid"
-                    borderColor={borderColor}
-                    overflow="hidden"
-                >
-                    {loading ? (
-                        <Flex justify="center" py={10}>
-                            <Spinner size="xl" />
-                        </Flex>
-                    ) : weatherData.length > 0 ? (
-                        <TableContainer>
-                            <Table variant="simple">
-                                <Thead bg={useColorModeValue('gray.50', 'gray.700')}>
-                                    <Tr>
-                                        {user && <Th width="50px"></Th>}
-                                        <Th>Location</Th>
-                                        <Th>Temperature</Th>
-                                        <Th>Condition</Th>
-                                        <Th>Humidity</Th>
-                                        <Th>Wind</Th>
-                                        <Th>Last Updated</Th>
-                                    </Tr>
-                                </Thead>
-                                <Tbody>
-                                    {weatherData.map((weather, index) => {
-                                        const cityName = weather.location?.city
-                                        const isSelected = selectedCities.some(c => c.name === cityName)
-                                        
-                                        return (
-                                            <Tr key={weather._id || index} _hover={{ bg: useColorModeValue('gray.50', 'gray.700') }}>
-                                                {user && (
-                                                    <Td>
-                                                        <Checkbox
-                                                            isChecked={isSelected}
-                                                            onChange={(e) => {
-                                                                if (e.target.checked) {
-                                                                    if (selectedCities.length < 10) {
-                                                                        handleAddCity({
-                                                                            name: cityName,
-                                                                            country: weather.location?.country,
-                                                                            lat: weather.location?.lat,
-                                                                            lon: weather.location?.lon
-                                                                        })
-                                                                    }
-                                                                } else {
-                                                                    const idx = selectedCities.findIndex(c => c.name === cityName)
-                                                                    if (idx >= 0) handleRemoveCity(idx)
-                                                                }
-                                                            }}
-                                                            isDisabled={!isSelected && selectedCities.length >= 10}
-                                                        />
-                                                    </Td>
-                                                )}
-                                                <Td>
-                                                    <VStack align="start" spacing={0}>
-                                                        <Text fontWeight="semibold" fontSize="md">
-                                                            {cityName}
-                                                        </Text>
-                                                        <Text fontSize="xs" color={secondaryTextColor}>
-                                                            {weather.location?.country}
-                                                        </Text>
-                                                    </VStack>
-                                                </Td>
-                                                <Td>
-                                                    <HStack>
-                                                        {weather.current?.condition?.icon && (
-                                                            <img 
-                                                                src={getWeatherIcon(weather.current.condition.icon)} 
-                                                                alt={weather.current.condition.main}
-                                                                style={{ width: '40px', height: '40px' }}
-                                                            />
-                                                        )}
-                                                        <Text fontSize="xl" fontWeight="bold">
-                                                            {weather.current?.temperature}°C
-                                                        </Text>
-                                                    </HStack>
-                                                </Td>
-                                                <Td>
-                                                    <Text fontSize="sm" textTransform="capitalize">
-                                                        {weather.current?.condition?.description}
-                                                    </Text>
-                                                </Td>
-                                                <Td>
-                                                    <Text fontSize="sm">
-                                                        {weather.current?.humidity}%
-                                                    </Text>
-                                                </Td>
-                                                <Td>
-                                                    <Text fontSize="sm">
-                                                        {weather.current?.windSpeed?.toFixed(1)} m/s
-                                                    </Text>
-                                                </Td>
-                                                <Td>
-                                                    <Text fontSize="xs" color={secondaryTextColor}>
-                                                        {new Date(weather.lastUpdated).toLocaleString('en-US', { 
-                                                            hour: '2-digit', 
-                                                            minute: '2-digit',
-                                                            month: 'short',
-                                                            day: 'numeric'
-                                                        })}
-                                                    </Text>
-                                                </Td>
-                                            </Tr>
-                                        )
-                                    })}
-                                </Tbody>
-                            </Table>
-                        </TableContainer>
+
+                    <Flex p="3px" bg={tabTrack} borderRadius="12px" gap={1}>
+                        <TabButton id="my" label="My Weather" />
+                        <TabButton id="cities" label="Cities" />
+                    </Flex>
+
+                    {activeTab === 'my' ? (
+                        loading ? (
+                            <Flex justify="center" py={16}>
+                                <Spinner size="lg" color={accent} />
+                            </Flex>
+                        ) : !user ? (
+                            <Box
+                                bg={surface}
+                                borderWidth="1px"
+                                borderColor={borderColor}
+                                borderRadius="16px"
+                                p={8}
+                                textAlign="center"
+                            >
+                                <Text color={textColor} fontWeight="600" mb={2}>
+                                    Sign in to see your weather
+                                </Text>
+                                <Text color={muted} fontSize="sm">
+                                    Save up to 10 cities and view live conditions here.
+                                </Text>
+                            </Box>
+                        ) : myWeather.length === 0 ? (
+                            <Box
+                                bg={surface}
+                                borderWidth="1px"
+                                borderColor={borderColor}
+                                borderRadius="16px"
+                                p={8}
+                                textAlign="center"
+                            >
+                                <Text color={textColor} fontWeight="600" mb={2}>
+                                    No cities yet
+                                </Text>
+                                <Text color={muted} fontSize="sm" mb={5}>
+                                    Add cities to see live conditions in one place.
+                                </Text>
+                                <Button colorScheme="blue" onClick={() => setActiveTab('cities')}>
+                                    Add cities
+                                </Button>
+                            </Box>
+                        ) : (
+                            <VStack spacing={4} align="stretch">
+                                {hero && (
+                                    <Box
+                                        bg={surface}
+                                        borderWidth="1px"
+                                        borderColor={borderColor}
+                                        borderRadius="16px"
+                                        px={{ base: 5, md: 7 }}
+                                        py={{ base: 6, md: 8 }}
+                                    >
+                                        <Text fontSize="sm" fontWeight="600" color={muted} mb={2}>
+                                            {hero.location?.city}
+                                            {hero.location?.country ? `, ${hero.location.country}` : ''}
+                                            {heroLocalTime ? ` · ${heroLocalTime}` : ''}
+                                        </Text>
+                                        <HStack align="flex-end" spacing={3}>
+                                            <Text
+                                                fontSize={{ base: '5xl', md: '6xl' }}
+                                                fontWeight="300"
+                                                color={textColor}
+                                                lineHeight="1"
+                                                letterSpacing="-0.04em"
+                                            >
+                                                {Math.round(hero.current?.temperature ?? 0)}°
+                                            </Text>
+                                            {hero.current?.condition?.icon && (
+                                                <Image
+                                                    src={getWeatherIcon(hero.current.condition.icon)}
+                                                    alt=""
+                                                    boxSize="56px"
+                                                    mb={1}
+                                                />
+                                            )}
+                                        </HStack>
+                                        <Text
+                                            mt={3}
+                                            fontSize="md"
+                                            color={textColor}
+                                            textTransform="capitalize"
+                                        >
+                                            {hero.current?.condition?.description ||
+                                                hero.current?.condition?.main}
+                                        </Text>
+                                        <HStack mt={4} spacing={5} color={muted} fontSize="sm">
+                                            <Text>Humidity {hero.current?.humidity ?? 0}%</Text>
+                                            <Text>
+                                                Wind {(hero.current?.windSpeed ?? 0).toFixed(1)} m/s
+                                            </Text>
+                                        </HStack>
+                                    </Box>
+                                )}
+
+                                {rest.map((w) => {
+                                    const localTime = formatCityLocalTime(w.location?.timezoneOffset)
+                                    return (
+                                    <Flex
+                                        key={w._id || w.location?.city}
+                                        as="button"
+                                        type="button"
+                                        onClick={() => setHeroCity(w.location?.city)}
+                                        align="center"
+                                        justify="space-between"
+                                        bg={surface}
+                                        borderWidth="1px"
+                                        borderColor={borderColor}
+                                        borderRadius="12px"
+                                        px={4}
+                                        py={3.5}
+                                        textAlign="left"
+                                        _hover={{ bg: hoverRow }}
+                                        transition="background 0.15s"
+                                    >
+                                        <Box>
+                                            <Text fontWeight="600" color={textColor}>
+                                                {w.location?.city}
+                                            </Text>
+                                            <Text fontSize="sm" color={muted} textTransform="capitalize">
+                                                {w.current?.condition?.description ||
+                                                    w.current?.condition?.main}
+                                                {localTime ? ` · ${localTime}` : ''}
+                                            </Text>
+                                        </Box>
+                                        <HStack spacing={2}>
+                                            {w.current?.condition?.icon && (
+                                                <Image
+                                                    src={getWeatherIcon(w.current.condition.icon)}
+                                                    alt=""
+                                                    boxSize="36px"
+                                                />
+                                            )}
+                                            <Text fontSize="xl" fontWeight="600" color={textColor}>
+                                                {Math.round(w.current?.temperature ?? 0)}°
+                                            </Text>
+                                        </HStack>
+                                    </Flex>
+                                    )
+                                })}
+                            </VStack>
+                        )
                     ) : (
-                        <Box textAlign="center" py={10}>
-                            <Text fontSize="lg" color={secondaryTextColor} mb={2}>
-                                🌤️ No weather data available
-                            </Text>
-                            <Text fontSize="sm" color={secondaryTextColor}>
-                                Weather updates will appear here soon
-                            </Text>
+                        <Box
+                            bg={surface}
+                            borderWidth="1px"
+                            borderColor={borderColor}
+                            borderRadius="16px"
+                            p={{ base: 4, md: 5 }}
+                        >
+                            {!user ? (
+                                <Text color={muted} fontSize="sm">
+                                    Sign in to search and save cities.
+                                </Text>
+                            ) : (
+                                <VStack spacing={4} align="stretch">
+                                    <Text fontSize="sm" color={muted}>
+                                        Search and add up to 10 cities, then save.
+                                    </Text>
+
+                                    {selectedCities.length > 0 && (
+                                        <Box>
+                                            <Text fontSize="xs" fontWeight="700" color={muted} mb={2}>
+                                                SELECTED
+                                            </Text>
+                                            <Wrap spacing={2}>
+                                                {selectedCities.map((c, i) => {
+                                                    const name = cityNameOf(c)
+                                                    return (
+                                                        <WrapItem key={`${name}-${i}`}>
+                                                            <Tag
+                                                                size="md"
+                                                                borderRadius="full"
+                                                                variant="subtle"
+                                                                colorScheme="gray"
+                                                            >
+                                                                <TagLabel>{name}</TagLabel>
+                                                                <TagCloseButton
+                                                                    onClick={() => handleRemoveCity(name)}
+                                                                />
+                                                            </Tag>
+                                                        </WrapItem>
+                                                    )
+                                                })}
+                                            </Wrap>
+                                        </Box>
+                                    )}
+
+                                    <InputGroup size="lg">
+                                        <InputLeftElement pointerEvents="none">
+                                            <SearchIcon color="gray.400" />
+                                        </InputLeftElement>
+                                        <Input
+                                            placeholder="Search city…"
+                                            value={searchQuery}
+                                            onChange={(e) => handleSearch(e.target.value)}
+                                            borderRadius="12px"
+                                            bg={pageBg}
+                                            borderColor={borderColor}
+                                        />
+                                    </InputGroup>
+
+                                    {searchLoading && (
+                                        <Flex justify="center" py={2}>
+                                            <Spinner size="sm" />
+                                        </Flex>
+                                    )}
+
+                                    {searchResults.length > 0 && (
+                                        <VStack align="stretch" spacing={0} maxH="280px" overflowY="auto">
+                                            {searchResults.map((city, index) => {
+                                                const selected = isSelected(city.name, city.country)
+                                                return (
+                                                    <Flex
+                                                        key={`${city.name}-${city.country}-${index}`}
+                                                        py={3}
+                                                        px={1}
+                                                        borderBottomWidth="1px"
+                                                        borderColor={borderColor}
+                                                        justify="space-between"
+                                                        align="center"
+                                                        _hover={{ bg: hoverRow }}
+                                                    >
+                                                        <Box>
+                                                            <Text fontSize="sm" fontWeight="600" color={textColor}>
+                                                                {city.name}
+                                                                {city.country ? `, ${city.country}` : ''}
+                                                            </Text>
+                                                            {city.state && (
+                                                                <Text fontSize="xs" color={muted}>
+                                                                    {city.state}
+                                                                </Text>
+                                                            )}
+                                                        </Box>
+                                                        <Button
+                                                            size="xs"
+                                                            variant={selected ? 'ghost' : 'solid'}
+                                                            colorScheme={selected ? 'gray' : 'blue'}
+                                                            onClick={() =>
+                                                                selected
+                                                                    ? handleRemoveCity(city.name)
+                                                                    : handleAddCity(city)
+                                                            }
+                                                            isDisabled={!selected && selectedCities.length >= 10}
+                                                        >
+                                                            {selected ? 'Remove' : 'Add'}
+                                                        </Button>
+                                                    </Flex>
+                                                )
+                                            })}
+                                        </VStack>
+                                    )}
+
+                                    {searchQuery.trim().length >= 2 &&
+                                        !searchLoading &&
+                                        searchResults.length === 0 && (
+                                            <Text fontSize="sm" color={muted} textAlign="center" py={4}>
+                                                No cities found for “{searchQuery}”
+                                            </Text>
+                                        )}
+
+                                    <Flex justify="space-between" align="center" pt={1}>
+                                        <Text fontSize="sm" color={muted}>
+                                            {selectedCities.length}/10 cities
+                                        </Text>
+                                        <Button
+                                            colorScheme="blue"
+                                            onClick={handleSavePreferences}
+                                            isLoading={saving}
+                                            isDisabled={selectedCities.length === 0}
+                                        >
+                                            Save cities
+                                        </Button>
+                                    </Flex>
+                                </VStack>
+                            )}
                         </Box>
                     )}
-                </Box>
-            </VStack>
-        </Container>
+                </VStack>
+            </Container>
+        </Box>
     )
 }
 

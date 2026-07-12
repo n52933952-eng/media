@@ -12,7 +12,9 @@ const WeatherSchema = mongoose.Schema({
             required: true
         },
         lat: Number,
-        lon: Number
+        lon: Number,
+        /** OpenWeatherMap timezone: seconds offset from UTC */
+        timezoneOffset: Number,
     },
     
     current: {
