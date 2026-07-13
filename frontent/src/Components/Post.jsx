@@ -1023,6 +1023,9 @@ const showToast = useShowToast()
     !!postedById &&
     /^[0-9a-fA-F]{24}$/.test(postedById)
 
+  // Match mobile: hide owner edit/delete on someone else's profile
+  const isSomeoneElsesProfile = !showFeedExtras && isOwnProfile === false
+
   const isFollowedAuthor = useMemo(() => {
     if (!showFeedExtras || !user?.following?.length || !postedById || isOwner) return false
     return user.following.some((entry) => followIdToString(entry) === postedById)
@@ -1312,8 +1315,10 @@ const showToast = useShowToast()
           </Box>
         ) : null}
 
-         {/* Show delete button if user is post author OR user added this channel post */}
-         {(user?._id === postedBy?._id || (post?.channelAddedBy && post.channelAddedBy === user?._id?.toString())) && (
+         {/* Delete: owner (or channel adder) — only on own profile / feed, not on someone else's profile */}
+         {!isSomeoneElsesProfile &&
+           (user?._id === postedBy?._id ||
+             (post?.channelAddedBy && post.channelAddedBy === user?._id?.toString())) && (
            <MdOutlineDeleteOutline 
              onClick={(e) => {
                e.preventDefault()
