@@ -18,7 +18,6 @@ import {
     Tag,
     TagLabel,
     TagCloseButton,
-    Image,
     IconButton,
 } from '@chakra-ui/react'
 import { SearchIcon } from '@chakra-ui/icons'
@@ -274,14 +273,22 @@ const WeatherPage = () => {
         }
     }
 
-    const getWeatherIcon = (iconCode, timezoneOffset) => {
-        let code = iconCode || '01d'
+    const getWeatherIconEmoji = (condition, iconCode, timezoneOffset) => {
+        // OpenWeatherMap PNGs are nearly invisible on dark UI — use emoji like mobile.
+        let isNight = typeof iconCode === 'string' && /n$/i.test(iconCode)
         if (typeof timezoneOffset === 'number') {
             const h = new Date(Date.now() + timezoneOffset * 1000).getUTCHours()
-            const isNight = h >= 19 || h < 6
-            code = isNight ? String(code).replace(/d$/i, 'n') : String(code).replace(/n$/i, 'd')
+            isNight = h >= 19 || h < 6
         }
-        return `https://openweathermap.org/img/wn/${code}@2x.png`
+        const cond = (condition || '').toLowerCase()
+        if (cond.includes('clear') || cond.includes('sunny')) return isNight ? '🌙' : '☀️'
+        if (cond.includes('few clouds') || cond.includes('scattered')) return isNight ? '☁️' : '⛅'
+        if (cond.includes('cloud')) return '☁️'
+        if (cond.includes('rain') || cond.includes('drizzle')) return '🌧️'
+        if (cond.includes('snow')) return '❄️'
+        if (cond.includes('storm') || cond.includes('thunder')) return '⛈️'
+        if (cond.includes('fog') || cond.includes('mist') || cond.includes('haze')) return '🌫️'
+        return isNight ? '🌙' : '🌤️'
     }
 
     const myWeather = useMemo(() => {
@@ -476,25 +483,23 @@ const WeatherPage = () => {
                                             >
                                                 {Math.round(hero.current?.temperature ?? 0)}°
                                             </Text>
-                                            {hero.current?.condition?.icon && (
-                                                <Flex
-                                                    align="center"
-                                                    justify="center"
-                                                    boxSize="56px"
-                                                    borderRadius="full"
-                                                    bg="whiteAlpha.200"
-                                                    mb={1}
-                                                >
-                                                    <Image
-                                                    src={getWeatherIcon(
-                                                        hero.current.condition.icon,
+                                            <Flex
+                                                align="center"
+                                                justify="center"
+                                                boxSize="56px"
+                                                borderRadius="full"
+                                                bg="whiteAlpha.200"
+                                                mb={1}
+                                            >
+                                                <Text fontSize="2xl" lineHeight="1">
+                                                    {getWeatherIconEmoji(
+                                                        hero.current?.condition?.description ||
+                                                            hero.current?.condition?.main,
+                                                        hero.current?.condition?.icon,
                                                         hero.location?.timezoneOffset,
                                                     )}
-                                                    alt=""
-                                                    boxSize="48px"
-                                                />
-                                                </Flex>
-                                            )}
+                                                </Text>
+                                            </Flex>
                                         </HStack>
                                         <Text
                                             mt={3}
@@ -575,25 +580,23 @@ const WeatherPage = () => {
                                             </Text>
                                         </Box>
                                         <HStack spacing={2}>
-                                            {w.current?.condition?.icon && (
-                                                <Flex
-                                                    align="center"
-                                                    justify="center"
-                                                    boxSize="40px"
-                                                    borderRadius="full"
-                                                    bg="blackAlpha.100"
-                                                    _dark={{ bg: 'whiteAlpha.200' }}
-                                                >
-                                                    <Image
-                                                    src={getWeatherIcon(
-                                                        w.current.condition.icon,
+                                            <Flex
+                                                align="center"
+                                                justify="center"
+                                                boxSize="40px"
+                                                borderRadius="full"
+                                                bg="blackAlpha.100"
+                                                _dark={{ bg: 'whiteAlpha.200' }}
+                                            >
+                                                <Text fontSize="xl" lineHeight="1">
+                                                    {getWeatherIconEmoji(
+                                                        w.current?.condition?.description ||
+                                                            w.current?.condition?.main,
+                                                        w.current?.condition?.icon,
                                                         w.location?.timezoneOffset,
                                                     )}
-                                                    alt=""
-                                                    boxSize="36px"
-                                                />
-                                                </Flex>
-                                            )}
+                                                </Text>
+                                            </Flex>
                                             <Text fontSize="xl" fontWeight="700" color={rowPalette.accent}>
                                                 {Math.round(w.current?.temperature ?? 0)}°
                                             </Text>
