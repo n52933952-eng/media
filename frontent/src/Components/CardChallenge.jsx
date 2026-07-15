@@ -26,7 +26,7 @@ import API_BASE_URL from '../config/api'
 
 const CardChallenge = ({ compact = false }) => {
     const { user } = useContext(UserContext)
-    const { socket, onlineUsers } = useContext(SocketContext)
+    const { socket, onlineUsers, mergePresenceWatchIds } = useContext(SocketContext)
     const { endNormalLiveBeforeInterrupt } = useLiveBroadcast()
     const { isOpen, onOpen, onClose } = useDisclosure()
     const [availableUsers, setAvailableUsers] = useState([])
@@ -98,7 +98,11 @@ const CardChallenge = ({ compact = false }) => {
                     const snapshot = await new Promise((resolve) => {
                         const timer = setTimeout(() => resolve(null), 2000)
                         socket.once('presenceSnapshot', (data) => { clearTimeout(timer); resolve(data) })
-                        socket.emit('presenceSubscribe', { userIds: connectionIds })
+                        if (typeof mergePresenceWatchIds === 'function') {
+                            mergePresenceWatchIds(connectionIds)
+                        } else {
+                            socket.emit('presenceSubscribe', { userIds: connectionIds })
+                        }
                     })
                     if (snapshot?.onlineUsers) {
                         snapshot.onlineUsers.forEach(u => {

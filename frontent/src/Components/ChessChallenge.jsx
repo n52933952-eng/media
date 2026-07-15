@@ -27,7 +27,7 @@ import API_BASE_URL from '../config/api'
 
 const ChessChallenge = ({ compact = false }) => {
     const { user, setOrientation } = useContext(UserContext)
-    const { socket, onlineUsers } = useContext(SocketContext)
+    const { socket, onlineUsers, mergePresenceWatchIds } = useContext(SocketContext)
     const { endNormalLiveBeforeInterrupt } = useLiveBroadcast()
     const { isOpen, onOpen, onClose } = useDisclosure()
     const [availableUsers, setAvailableUsers] = useState([])
@@ -137,7 +137,11 @@ const ChessChallenge = ({ compact = false }) => {
                             clearTimeout(timer)
                             resolve(data)
                         })
-                        socket.emit('presenceSubscribe', { userIds: connectionIds })
+                        if (typeof mergePresenceWatchIds === 'function') {
+                            mergePresenceWatchIds(connectionIds)
+                        } else {
+                            socket.emit('presenceSubscribe', { userIds: connectionIds })
+                        }
                     })
                     if (snapshot?.onlineUsers) {
                         snapshot.onlineUsers.forEach(u => {

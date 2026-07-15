@@ -50,6 +50,48 @@ export const SocketContextProvider = ({ children }) => {
   const messageSoundAudio = useRef(new Audio(messageSound)); // Audio for new unread message notification
   const chessToneAudio = useRef(new Audio(chessTone)); // Audio for chess challenge notification
   const selectedConversationIdRef = useRef(null); // Track which conversation is currently open
+
+  // One merged presenceSubscribe for the whole app (like mobile). Backend replaces the room set on each emit —
+  // never subscribe from individual Posts with a single userId (that wiped feed online dots).
+  const socketRef = useRef(null)
+  const presenceFollowingIdsRef = useRef([])
+  const presenceExtraIdsRef = useRef([])
+  const lastPresenceSubscribeKeyRef = useRef('')
+  const flushPresenceSubscribeRef = useRef(() => {})
+
+  const flushPresenceSubscribe = useCallback(() => {
+    const sock = socketRef.current
+    if (!sock?.connected) return
+    const merged = new Set()
+    const addId = (raw) => {
+      const id = userIdToStr(raw?._id ?? raw)
+      if (id && /^[0-9a-fA-F]{24}$/.test(id)) merged.add(id)
+    }
+    ;(presenceFollowingIdsRef.current || []).forEach(addId)
+    ;(presenceExtraIdsRef.current || []).forEach(addId)
+    ;(user?.following || []).forEach(addId)
+    ;(user?.followers || []).forEach(addId)
+    const list = Array.from(merged)
+    const key = list.slice().sort().join('|')
+    if (key === lastPresenceSubscribeKeyRef.current) return
+    lastPresenceSubscribeKeyRef.current = key
+    if (list.length === 0) return
+    sock.emit('presenceSubscribe', { userIds: list })
+  }, [user?.following, user?.followers])
+
+  flushPresenceSubscribeRef.current = flushPresenceSubscribe
+
+  /** Merge temporary watch ids (messages / challenge modals) without dropping following. */
+  const mergePresenceWatchIds = useCallback((userIds = []) => {
+    const next = []
+    for (const raw of Array.isArray(userIds) ? userIds : []) {
+      const id = userIdToStr(raw?._id ?? raw)
+      if (id && /^[0-9a-fA-F]{24}$/.test(id)) next.push(id)
+    }
+    presenceExtraIdsRef.current = next
+    lastPresenceSubscribeKeyRef.current = ''
+    flushPresenceSubscribeRef.current()
+  }, [])
   
   // Ensure audio is ready to play (browser autoplay policy)
   useEffect(() => {
@@ -194,12 +236,17 @@ export const SocketContextProvider = ({ children }) => {
       // Win race with another device (e.g. mobile) that may emit offline right after we connect.
       window.setTimeout(emitClientPresenceOnline, 300)
       window.setTimeout(emitClientPresenceOnline, 2000)
+      // Force presence rooms after reconnect (same id set must re-join).
+      lastPresenceSubscribeKeyRef.current = ''
+      window.setTimeout(() => flushPresenceSubscribeRef.current(), 50)
+      window.setTimeout(() => flushPresenceSubscribeRef.current(), 500)
     });
 
     newSocket.on('disconnect', () => {
       console.log('⚠️ Socket disconnected');
     });
 
+    socketRef.current = newSocket
     setSocket(newSocket);
     setMe(currentUserId);
 
@@ -409,9 +456,53 @@ export const SocketContextProvider = ({ children }) => {
       newSocket?.off('footballPageUpdate');
       newSocket?.off('storyStripChanged');
       newSocket?.off('chessGameEnded');
+      newSocket?.off('getOnlineUser');
+      newSocket?.off('presenceSnapshot');
+      newSocket?.off('presenceUpdate');
+      if (socketRef.current === newSocket) socketRef.current = null
+      lastPresenceSubscribeKeyRef.current = ''
       newSocket.close();
     };
   }, [user?._id]);
+
+  // Load following (source of truth for feed green dots) and subscribe once for the whole app.
+  useEffect(() => {
+    const currentUserId = userIdToStr(user?._id)
+    if (!currentUserId || !socket) return undefined
+
+    let cancelled = false
+    const baseUrl = import.meta.env.PROD ? window.location.origin : 'http://localhost:5000'
+
+    const loadFollowingAndSubscribe = async () => {
+      try {
+        const res = await fetch(`${baseUrl}/api/user/following`, { credentials: 'include' })
+        if (!res.ok) return
+        const data = await res.json()
+        const list = Array.isArray(data) ? data : (Array.isArray(data?.users) ? data.users : [])
+        if (cancelled) return
+        presenceFollowingIdsRef.current = list
+          .map((u) => userIdToStr(u?._id ?? u))
+          .filter((id) => id && /^[0-9a-fA-F]{24}$/.test(id))
+        lastPresenceSubscribeKeyRef.current = ''
+        flushPresenceSubscribeRef.current()
+      } catch {
+        /* ignore — still try user.following from context via flush */
+        if (!cancelled) {
+          lastPresenceSubscribeKeyRef.current = ''
+          flushPresenceSubscribeRef.current()
+        }
+      }
+    }
+
+    loadFollowingAndSubscribe()
+    if (socket.connected) {
+      flushPresenceSubscribeRef.current()
+    }
+
+    return () => {
+      cancelled = true
+    }
+  }, [socket, user?._id, flushPresenceSubscribe])
 
   // Keep Redis presence "online" while this tab is active so calls + presenceSubscribe match mobile.
   // Do not emit "offline" on tab blur — socket should still receive callUser when the tab is in the background.
@@ -1472,6 +1563,7 @@ export const SocketContextProvider = ({ children }) => {
         leaveCall,
         onlineUser,
         onlineUsers: onlineUser, // Export as onlineUsers for consistency
+        mergePresenceWatchIds,
         busyUsers, // Export busyUsers so components can check if a user is busy
         totalUnreadCount, // Export total unread message count
         notificationCount, // Export unread notification count

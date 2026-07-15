@@ -12,7 +12,7 @@ import API_BASE_URL from '../config/api'
 
 const RaceChallenge = ({ compact = false }) => {
     const { user } = useContext(UserContext)
-    const { socket, onlineUsers } = useContext(SocketContext)
+    const { socket, onlineUsers, mergePresenceWatchIds } = useContext(SocketContext)
     const { isOpen, onOpen, onClose } = useDisclosure()
     const [availableUsers, setAvailableUsers]   = useState([])
     const [loading,        setLoading]           = useState(false)
@@ -82,7 +82,12 @@ const RaceChallenge = ({ compact = false }) => {
                     const snap = await new Promise((resolve) => {
                         const t = setTimeout(() => resolve(null), 2000)
                         socket.once('presenceSnapshot', (d) => { clearTimeout(t); resolve(d) })
-                        socket.emit('presenceSubscribe', { userIds: allUsers.map(u => u._id?.toString()).filter(Boolean) })
+                        const ids = allUsers.map(u => u._id?.toString()).filter(Boolean)
+                        if (typeof mergePresenceWatchIds === 'function') {
+                            mergePresenceWatchIds(ids)
+                        } else {
+                            socket.emit('presenceSubscribe', { userIds: ids })
+                        }
                     })
                     if (snap?.onlineUsers) {
                         snap.onlineUsers.forEach(u => {

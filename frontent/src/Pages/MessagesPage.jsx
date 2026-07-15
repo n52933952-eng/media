@@ -232,7 +232,7 @@ const MessagesPage = () => {
   const location = useLocation()
   const { user } = useContext(UserContext)
   const socketContext = useContext(SocketContext)
-  const { socket, onlineUser, setSelectedConversationId } = socketContext || {}
+  const { socket, onlineUser, setSelectedConversationId, mergePresenceWatchIds } = socketContext || {}
   // LiveKit replaces old WebRTC call system
   const { startCall, busyUsers, isCalling, callAccepted } = useContext(LiveKitContext) || {}
   // Group calling
@@ -485,13 +485,12 @@ const MessagesPage = () => {
     fetchFollowedUsers()
   }, [user?._id])
 
-  // Subscribe to targeted presence for followed users so Online Friends is accurate
-  // even when the global getOnlineUser broadcast is disabled in production
+  // Merge conversation partners into app-wide presence watch (does not drop feed following rooms)
   useEffect(() => {
-    if (!socket || followedUsers.length === 0) return
+    if (!followedUsers.length || typeof mergePresenceWatchIds !== 'function') return
     const userIds = followedUsers.map(u => u._id?.toString()).filter(Boolean)
-    socket.emit('presenceSubscribe', { userIds })
-  }, [socket, followedUsers])
+    mergePresenceWatchIds(userIds)
+  }, [followedUsers, mergePresenceWatchIds])
 
   // Update followed users list when conversations change (add users you're chatting with)
   useEffect(() => {

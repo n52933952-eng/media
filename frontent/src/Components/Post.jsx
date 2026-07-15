@@ -1042,11 +1042,6 @@ const showToast = useShowToast()
 
   const authorIsOnline = showAuthorPresenceDot && isUserInOnlineList(onlineUser, postedById)
 
-  useEffect(() => {
-    if (!socket || !showAuthorPresenceDot || !postedById) return
-    socket.emit('presenceSubscribe', { userIds: [postedById] })
-  }, [socket, showAuthorPresenceDot, postedById])
-
   const onMessagePostOwner = (e) => {
     e?.preventDefault?.()
     e?.stopPropagation?.()
