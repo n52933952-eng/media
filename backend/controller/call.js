@@ -1,7 +1,7 @@
 import User from '../models/user.js'
 import Conversation from '../models/conversation.js'
 import LiveStream from '../models/liveStream.js'
-import { getIO, getRecipientSockedId } from '../socket/socket.js'
+import { getIO, getRecipientSockedId, emitStatusToFollowersOf } from '../socket/socket.js'
 import * as redisService from '../services/redis.js'
 import { AccessToken } from 'livekit-server-sdk'
 
@@ -284,7 +284,11 @@ export const cancelCall = async (req, res) => {
                 io.to(receiverSocketId).emit('CallCanceled')
                 io.to(receiverSocketId).emit('livekit:callCanceled', lkPayload)
             }
-            io.emit('cancleCall', { userToCall: conversationId, from: sender })
+            void emitStatusToFollowersOf(
+                [conversationId, sender],
+                'cancleCall',
+                { userToCall: conversationId, from: sender },
+            )
         }
 
         return res.status(200).json({ success: true })

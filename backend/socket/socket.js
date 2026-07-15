@@ -128,6 +128,45 @@ export const getUserSelfRoomId = (userId) => {
     return uid ? `${USER_SELF_ROOM_PREFIX}${uid}` : null
 }
 
+/**
+ * Scale-safe busy / available UI fanout (replaces global `io.emit` for these events).
+ * Same event names + payloads — live apps keep working without a new build.
+ * Recipients = subject user(s) (multi-device) + their followers only.
+ * Call blocking still uses Redis `isUserBusy` and does not depend on this.
+ */
+export const emitStatusToFollowersOf = async (subjectUserIds, event, payload) => {
+    if (!io || !event) return 0
+    try {
+        const { getFollowerIdsForUser } = await import('../services/followGraph.js')
+        const subjects = uniqueUserIds(Array.isArray(subjectUserIds) ? subjectUserIds : [subjectUserIds])
+        if (subjects.length === 0) return 0
+
+        const recipients = new Set(subjects)
+        await Promise.all(
+            subjects.map(async (uid) => {
+                const followers = await getFollowerIdsForUser(uid)
+                for (const f of followers || []) {
+                    const fid = normalizeUserId(f) || (f != null && String(f).trim() !== '' ? String(f).trim() : null)
+                    if (fid) recipients.add(fid)
+                }
+            }),
+        )
+
+        let n = 0
+        for (const rid of recipients) {
+            const room = getUserSelfRoomId(rid)
+            if (room) {
+                io.to(room).emit(event, payload)
+                n++
+            }
+        }
+        return n
+    } catch (e) {
+        console.error('❌ [emitStatusToFollowersOf]', event, e?.message || e)
+        return 0
+    }
+}
+
 const uniqueUserIds = (ids) => {
     const out = []
     const seen = new Set()
@@ -1864,7 +1903,11 @@ export const initializeSocket = async (app) => {
             User.findByIdAndUpdate(callerId, { inCall: true }).catch(err => console.log('Error updating caller inCall status:', err))
             User.findByIdAndUpdate(receiverId, { inCall: true }).catch(err => console.log('Error updating receiver inCall status:', err))
 
-            io.emit("callBusy", { userToCall: receiverId, from: callerId })
+            void emitStatusToFollowersOf(
+                [receiverId, callerId],
+                'callBusy',
+                { userToCall: receiverId, from: callerId },
+            )
         })
 
         // WebRTC: Handle request call signal (when user comes online after receiving push notification)
@@ -2110,7 +2153,11 @@ export const initializeSocket = async (app) => {
             if (receiverSocketId) io.to(receiverSocketId).emit("CallCanceled", cancelPayload)
             if (senderSocketId) io.to(senderSocketId).emit("CallCanceled", cancelPayload)
             if (hadActiveCall) {
-                io.emit("cancleCall", { userToCall: conversationId, from: sender })
+                void emitStatusToFollowersOf(
+                    [conversationId, sender],
+                    'cancleCall',
+                    { userToCall: conversationId, from: sender },
+                )
             }
         })
 
@@ -2146,7 +2193,11 @@ export const initializeSocket = async (app) => {
                 ])
                 User.findByIdAndUpdate(callerId,  { inCall: true }).catch(() => {})
                 User.findByIdAndUpdate(receiverId, { inCall: true }).catch(() => {})
-                io.emit('callBusy', { userToCall: receiverId, from: callerId })
+                void emitStatusToFollowersOf(
+                    [receiverId, callerId],
+                    'callBusy',
+                    { userToCall: receiverId, from: callerId },
+                )
 
                 const incomingPayload = {
                     from:            callerId,
@@ -2222,7 +2273,11 @@ export const initializeSocket = async (app) => {
                             await clearCallStateForPair(callerId, receiverId)
                             User.findByIdAndUpdate(callerId, { inCall: false }).catch(() => {})
                             User.findByIdAndUpdate(receiverId, { inCall: false }).catch(() => {})
-                            io.emit('cancleCall', { userToCall: receiverId, from: callerId })
+                            void emitStatusToFollowersOf(
+                                [receiverId, callerId],
+                                'cancleCall',
+                                { userToCall: receiverId, from: callerId },
+                            )
 
                             const timeoutPayload = { from: callerId, roomName, reason: 'timeout' }
                             const callerLiveSocketId = await resolveLiveSocketIdForUser(callerId)
@@ -2256,7 +2311,11 @@ export const initializeSocket = async (app) => {
                 await clearCallStateForPair(callerId, receiverId)
                 User.findByIdAndUpdate(callerId,  { inCall: false }).catch(() => {})
                 User.findByIdAndUpdate(receiverId, { inCall: false }).catch(() => {})
-                io.emit('cancleCall', { userToCall: receiverId, from: callerId })
+                void emitStatusToFollowersOf(
+                    [receiverId, callerId],
+                    'cancleCall',
+                    { userToCall: receiverId, from: callerId },
+                )
 
                 const receiverSocketData = await getUserSocket(receiverId)
                 const receiverSocketId   = receiverSocketData?.socketId
@@ -2290,7 +2349,11 @@ export const initializeSocket = async (app) => {
                 await clearCallStateForPair(callerId, receiverId)
                 User.findByIdAndUpdate(callerId,  { inCall: false }).catch(() => {})
                 User.findByIdAndUpdate(receiverId, { inCall: false }).catch(() => {})
-                io.emit('cancleCall', { userToCall: receiverId, from: callerId })
+                void emitStatusToFollowersOf(
+                    [receiverId, callerId],
+                    'cancleCall',
+                    { userToCall: receiverId, from: callerId },
+                )
 
                 const callerSocketData = await getUserSocket(String(callerId))
                 const callerSocketId   = callerSocketData?.socketId
@@ -2905,10 +2968,9 @@ export const initializeSocket = async (app) => {
                 io.to(accepterSocketId).emit('acceptChessChallenge', accepterPayload)
             }
 
-            // Broadcast busy status to ALL online users so they know these users are in a game
-            // This allows the chess challenge modal to filter out busy users
-            io.emit("userBusyChess", { userId: fromId })
-            io.emit("userBusyChess", { userId: toId })
+            // Busy UI: followers of each player only (same event/payload — no client update needed)
+            void emitStatusToFollowersOf([fromId], 'userBusyChess', { userId: fromId })
+            void emitStatusToFollowersOf([toId], 'userBusyChess', { userId: toId })
             
             // Initialize game state (starting position) in Redis
             if (roomId) {
@@ -3128,15 +3190,13 @@ export const initializeSocket = async (app) => {
                 console.log(`🗑️ Cleaned up game state for room ${roomId}`)
             }
             
-            // Make users available again - TARGETED to specific users only (not all users)
-            // This is critical for scalability - don't broadcast to 1M users!
+            // Available UI: followers of each player only
             if (resignerSocketId) {
-                // Broadcast to all users that these players are now available
-                io.emit("userAvailableChess", { userId })
-                io.emit("userAvailableChess", { userId: to })
+                void emitStatusToFollowersOf([userId], 'userAvailableChess', { userId })
+                void emitStatusToFollowersOf([to], 'userAvailableChess', { userId: to })
             }
             if (recipientSocketId) {
-                // Already broadcast above, but keep this for consistency
+                // Already handled above when resignerSocketId is set
             }
         })
 
@@ -3199,15 +3259,13 @@ export const initializeSocket = async (app) => {
                 console.log(`🗑️ Cleaned up game state for room ${roomId}`)
             }
             
-            // Make users available again - TARGETED to specific users only (not all users)
-            // This is critical for scalability - don't broadcast to 1M users!
+            // Available UI: followers of each player only
             if (player1SocketId) {
-                // Broadcast to all users that these players are now available
-                io.emit("userAvailableChess", { userId: player1 })
-                io.emit("userAvailableChess", { userId: player2 })
+                void emitStatusToFollowersOf([player1], 'userAvailableChess', { userId: player1 })
+                void emitStatusToFollowersOf([player2], 'userAvailableChess', { userId: player2 })
             }
             if (player2SocketId) {
-                // Already broadcast above, but keep this for consistency
+                // Already handled above when player1SocketId is set
             }
         })
 
@@ -3265,9 +3323,9 @@ export const initializeSocket = async (app) => {
                 if (s) s.join(roomId)
                 io.to(accepterSock.socketId).emit('acceptRaceChallenge', { roomId, opponentId: toId })
             }
-            // Tell all clients these two users are now in a race (for busy-status UI)
-            io.emit('userBusyRace', { userId: toId })
-            io.emit('userBusyRace', { userId: fromId })
+            // Busy UI: followers of each player only
+            void emitStatusToFollowersOf([toId], 'userBusyRace', { userId: toId })
+            void emitStatusToFollowersOf([fromId], 'userBusyRace', { userId: fromId })
             console.log(`🏎️ Race room ${roomId} created for ${toId} vs ${fromId}`)
         })
 
@@ -3503,8 +3561,8 @@ export const initializeSocket = async (app) => {
                 if (p1Data?.socketId) io.to(p1Data.socketId).emit('raceResult', { winnerId, time })
                 if (p2Data?.socketId) io.to(p2Data.socketId).emit('raceResult', { winnerId, time })
                 // Clear Redis immediately so new challenges work (15s delay left users "busy" for no reason)
-                io.emit('userAvailableRace', { userId: id1 })
-                io.emit('userAvailableRace', { userId: id2 })
+                void emitStatusToFollowersOf([id1], 'userAvailableRace', { userId: id1 })
+                void emitStatusToFollowersOf([id2], 'userAvailableRace', { userId: id2 })
                 await deleteActiveRaceGame(id1).catch(() => {})
                 await deleteActiveRaceGame(id2).catch(() => {})
                 await deleteRaceGameState(roomId).catch(() => {})
@@ -3545,8 +3603,8 @@ export const initializeSocket = async (app) => {
             }
 
             // 3. Mark both players available again (must run even when payload omitted player ids)
-            if (p1) io.emit('userAvailableRace', { userId: p1 })
-            if (p2) io.emit('userAvailableRace', { userId: p2 })
+            if (p1) void emitStatusToFollowersOf([p1], 'userAvailableRace', { userId: p1 })
+            if (p2) void emitStatusToFollowersOf([p2], 'userAvailableRace', { userId: p2 })
 
             // 4. Cleanup Redis (only delete when we have real ids — avoids activeRaceGame:undefined)
             if (p1) await deleteActiveRaceGame(p1).catch(() => {})
@@ -3649,8 +3707,8 @@ export const initializeSocket = async (app) => {
                 )
             }
 
-            io.emit('userBusyCard', { userId: fromId })
-            io.emit('userBusyCard', { userId: toId })
+            void emitStatusToFollowersOf([fromId], 'userBusyCard', { userId: fromId })
+            void emitStatusToFollowersOf([toId], 'userBusyCard', { userId: toId })
 
             if (roomId && gameState) {
                 console.log(`🃏 [acceptCardChallenge] Game state initialized:`, {
@@ -3906,8 +3964,16 @@ export const initializeSocket = async (app) => {
                                 await deleteCardGameState(roomId)
                                 
                                 // Make users available
-                                io.emit("userAvailableCard", { userId: currentState.players[0].userId })
-                                io.emit("userAvailableCard", { userId: currentState.players[1].userId })
+                                void emitStatusToFollowersOf(
+                                    [currentState.players[0].userId],
+                                    'userAvailableCard',
+                                    { userId: currentState.players[0].userId },
+                                )
+                                void emitStatusToFollowersOf(
+                                    [currentState.players[1].userId],
+                                    'userAvailableCard',
+                                    { userId: currentState.players[1].userId },
+                                )
                             }
                         }
                     } catch (error) {
@@ -3995,9 +4061,9 @@ export const initializeSocket = async (app) => {
             }
             
             // Make users available again (always emit, even if resigner disconnected)
-            io.emit("userAvailableCard", { userId })
+            void emitStatusToFollowersOf([userId], 'userAvailableCard', { userId })
             if (opponentId) {
-                io.emit("userAvailableCard", { userId: opponentId })
+                void emitStatusToFollowersOf([opponentId], 'userAvailableCard', { userId: opponentId })
                 console.log(`✅ [resignCard] Made users available: ${userId} and ${opponentId}`)
             } else {
                 console.log(`⚠️ [resignCard] Made user available but opponentId missing: ${userId}`)
@@ -4057,8 +4123,8 @@ export const initializeSocket = async (app) => {
             
             // Make users available again
             if (player1SocketId) {
-                io.emit("userAvailableCard", { userId: player1 })
-                io.emit("userAvailableCard", { userId: player2 })
+                void emitStatusToFollowersOf([player1], 'userAvailableCard', { userId: player1 })
+                void emitStatusToFollowersOf([player2], 'userAvailableCard', { userId: player2 })
             }
         })
 
@@ -4259,8 +4325,12 @@ export const initializeSocket = async (app) => {
                                     const otherUserData = await getUserSocket(otherUserId)
                                     if (otherUserData?.socketId) {
                                         io.to(otherUserData.socketId).emit('CallCanceled')
-                                        io.emit('cancleCall', { userToCall: otherUserId, from: uid })
                                     }
+                                    void emitStatusToFollowersOf(
+                                        [otherUserId, uid],
+                                        'cancleCall',
+                                        { userToCall: otherUserId, from: uid },
+                                    )
                                     try {
                                         const { sendCallEndedNotificationToUser } = await import('../services/fcmNotifications.js')
                                         const fcmResult = await sendCallEndedNotificationToUser(otherUserId, uid)
@@ -4442,10 +4512,10 @@ export const initializeSocket = async (app) => {
                         if (otherData?.socketId) {
                             io.to(otherData.socketId).emit('raceOpponentLeft')
                         }
-                        io.emit('userAvailableRace', { userId: otherPlayerId })
+                        void emitStatusToFollowersOf([otherPlayerId], 'userAvailableRace', { userId: otherPlayerId })
                         await deleteActiveRaceGame(otherPlayerId).catch(() => {})
                     }
-                    io.emit('userAvailableRace', { userId: disconnectedUserId })
+                    void emitStatusToFollowersOf([disconnectedUserId], 'userAvailableRace', { userId: disconnectedUserId })
                     await deleteActiveRaceGame(disconnectedUserId).catch(() => {})
                     await deleteRaceGameState(raceRoomId).catch(() => {})
                     try { io.in(raceRoomId).socketsLeave(raceRoomId) } catch (_) {}
@@ -4526,9 +4596,9 @@ export const initializeSocket = async (app) => {
                     console.log(`🗑️ Cleaned up card game state for room ${gameRoomId}`)
                     
                     // Make users available again
-                    io.emit("userAvailableCard", { userId: disconnectedUserId })
+                    void emitStatusToFollowersOf([disconnectedUserId], 'userAvailableCard', { userId: disconnectedUserId })
                     if (otherPlayerId) {
-                        io.emit("userAvailableCard", { userId: otherPlayerId })
+                        void emitStatusToFollowersOf([otherPlayerId], 'userAvailableCard', { userId: otherPlayerId })
                     }
                 }, 10000) // Wait 10 seconds before ending game
             }
