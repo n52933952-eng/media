@@ -48,7 +48,12 @@ const PostPage = () => {
    const{followPost,setFollowPost}=useContext(PostContext)
    const {socket} = useContext(SocketContext) || {}
 
-    const post = followPost[0]
+    // Never use followPost[0] — that flashes the wrong feed/profile post until fetch finishes.
+    const post = useMemo(() => {
+      if (!id) return null
+      const list = Array.isArray(followPost) ? followPost : []
+      return list.find((p) => String(p?._id) === String(id)) || null
+    }, [followPost, id])
 
     const carouselSlides = useMemo(() => (post ? getPostCarouselSlides(post) : []), [post])
     const carouselAudio = useMemo(() => (post ? getPostCarouselAudio(post) : null), [post?.audio])
@@ -177,7 +182,17 @@ const PostPage = () => {
     const applyPostUpdate = useCallback(
       (updatedPost) => {
         if (!updatedPost?._id) return
-        setFollowPost([{ ...updatedPost, replies: postReplies }])
+        setFollowPost((prev) => {
+          const list = Array.isArray(prev) ? prev : []
+          const nextPost = { ...updatedPost, replies: postReplies }
+          const idx = list.findIndex((p) => String(p?._id) === String(updatedPost._id))
+          if (idx >= 0) {
+            const copy = [...list]
+            copy[idx] = mergePostUpdate(list[idx], nextPost)
+            return copy
+          }
+          return [nextPost, ...list]
+        })
       },
       [setFollowPost, postReplies],
     )
@@ -606,6 +621,8 @@ const PostPage = () => {
     useEffect(() => {
    
     const getpost = async() => {
+      const requestedId = String(id || '')
+      if (!requestedId) return
     
       const res = await fetch(postDetailApiUrl(id, { includeReplies: false }),{
         credentials: "include",
@@ -613,8 +630,19 @@ const PostPage = () => {
 
       const data = await res.json()
 
-      if(res.ok){
-        setFollowPost([{ ...data, replies: [] }])
+      if(res.ok && data?._id){
+        // Keep feed/profile list intact — update or insert the opened post by id.
+        setFollowPost((prev) => {
+          const nextPost = { ...data, replies: [] }
+          const list = Array.isArray(prev) ? prev : []
+          const idx = list.findIndex((p) => String(p?._id) === String(nextPost._id))
+          if (idx >= 0) {
+            const copy = [...list]
+            copy[idx] = mergePostUpdate(list[idx], nextPost)
+            return copy
+          }
+          return [nextPost, ...list]
+        })
         setPostReplies([])
         setCommentsHasMore(false)
         commentsSkipRef.current = 0
@@ -638,7 +666,7 @@ const PostPage = () => {
    return () => {
      document.removeEventListener('visibilitychange', handleVisibilityChange)
    }
-  },[id, setFollowPost])
+  },[id, setFollowPost, footballMatchId])
 
   useEffect(() => {
     const el = loadMoreRef.current
@@ -700,8 +728,10 @@ if(!post) {
     const data = await res.json()
 
      if(res.ok){
-      // Remove post from context
-      setFollowPost([])
+      // Remove deleted post from context (keep rest of feed/profile list)
+      setFollowPost((prev) =>
+        (Array.isArray(prev) ? prev : []).filter((p) => String(p?._id) !== String(post._id)),
+      )
       showToast("Success","POST deleted","success")
       navigate(`/${user.username}`)
      } else {
@@ -935,7 +965,14 @@ if(!post) {
       </VStack>
     )}
 
-    <Box borderRadius={16} overflow="hidden" border="1px solid" borderColor="gray.light" my={3}>
+    <Box
+      key={`detail-media-${post._id}`}
+      borderRadius={16}
+      overflow="hidden"
+      border="1px solid"
+      borderColor="gray.light"
+      my={3}
+    >
       {(showCarousel || postHasDisplayableMedia(post)) && (
         showCarousel && carouselSlides.length > 0 ? (
           <PostMediaCarousel slides={carouselSlides} audioUrl={carouselAudio} frameHeight={POST_DETAIL_CAROUSEL_FRAME_H} />

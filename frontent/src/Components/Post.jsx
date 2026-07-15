@@ -1719,11 +1719,20 @@ const showToast = useShowToast()
   )}
   
   {(post?.img || (Array.isArray(post?.images) && post.images.length) || postHasDisplayableMedia(post)) && !isFootballPost && !isWeatherPost && !isChessPost && (
-    <Box borderRadius={4} overflow="hidden" border="0.5px solid" borderColor="gray.light" my={2}>
+    <Box
+      key={`feed-media-${post._id}`}
+      borderRadius={4}
+      overflow="hidden"
+      border="0.5px solid"
+      borderColor="gray.light"
+      my={2}
+      cursor="pointer"
+      title="Open post"
+    >
       {showCarousel && carouselSlides.length > 0 && !rawMediaUrl.includes('youtube.com/embed') && !rawMediaUrl.includes('youtu.be') && !isVideoMedia ? (
         <PostMediaCarousel slides={carouselSlides} audioUrl={carouselAudio} frameHeight={FEED_CAROUSEL_FRAME_H} />
       ) : post?.img && (post.img.includes('youtube.com/embed') || post.img.includes('youtu.be')) ? (
-        <Box position="relative" paddingBottom="56.25%" height="0" overflow="hidden">
+        <Box position="relative" paddingBottom="56.25%" height="0" overflow="hidden" cursor="pointer">
           <iframe
             src={post.img}
             title="Live Stream"
@@ -1734,6 +1743,7 @@ const showToast = useShowToast()
               width: '100%',
               height: '100%',
               border: 'none',
+              pointerEvents: 'none',
             }}
             allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
             allowFullScreen
@@ -1742,6 +1752,7 @@ const showToast = useShowToast()
       ) : post?.img && (post.img.match(/\.(mp4|webm|ogg|mov)$/i) || post.img.includes('/video/upload/')) ? (
         <Box
           as="video"
+          key={`feed-video-${post._id}-${mediaUrl}`}
           ref={videoRef}
           src={mediaUrl}
           controls
@@ -1751,6 +1762,7 @@ const showToast = useShowToast()
           loop
           w="full"
           maxH="400px"
+          cursor="pointer"
           onLoadedData={(e) => {
             if (visibleVideoOnly && !isVideoInView) return
             e.target.play().catch(() => {})
@@ -1765,8 +1777,10 @@ const showToast = useShowToast()
           alignItems="center"
           justifyContent="center"
           overflow="hidden"
+          cursor="pointer"
         >
           <Image
+            key={`feed-img-${post._id}-${mediaUrl}`}
             src={mediaUrl}
             maxH="100%"
             maxW="100%"
@@ -1775,6 +1789,8 @@ const showToast = useShowToast()
             objectFit="contain"
             loading="lazy"
             alt="Post image"
+            cursor="pointer"
+            pointerEvents="none"
           />
         </Box>
       ) : showCarousel && carouselSlides.length > 0 ? (
