@@ -148,7 +148,8 @@ const PostMediaCarousel = ({
         onPointerDown={onPointerDown}
         onPointerUp={onPointerUp}
         onPointerCancel={() => { dragStartX.current = null }}
-        cursor={multi ? 'pointer' : 'default'}
+        cursor="pointer"
+        sx={{ cursor: 'pointer !important', '& img': { cursor: 'pointer !important' } }}
         userSelect="none"
       >
         <Image

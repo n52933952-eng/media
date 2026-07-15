@@ -1721,6 +1721,7 @@ const showToast = useShowToast()
   {(post?.img || (Array.isArray(post?.images) && post.images.length) || postHasDisplayableMedia(post)) && !isFootballPost && !isWeatherPost && !isChessPost && (
     <Box
       key={`feed-media-${post._id}`}
+      data-post-media="true"
       borderRadius={4}
       overflow="hidden"
       border="0.5px solid"
@@ -1728,6 +1729,10 @@ const showToast = useShowToast()
       my={2}
       cursor="pointer"
       title="Open post"
+      sx={{
+        cursor: 'pointer !important',
+        '& img, & video': { cursor: 'pointer !important' },
+      }}
     >
       {showCarousel && carouselSlides.length > 0 && !rawMediaUrl.includes('youtube.com/embed') && !rawMediaUrl.includes('youtu.be') && !isVideoMedia ? (
         <PostMediaCarousel slides={carouselSlides} audioUrl={carouselAudio} frameHeight={FEED_CAROUSEL_FRAME_H} />
@@ -1789,8 +1794,7 @@ const showToast = useShowToast()
             objectFit="contain"
             loading="lazy"
             alt="Post image"
-            cursor="pointer"
-            pointerEvents="none"
+            style={{ cursor: 'pointer' }}
           />
         </Box>
       ) : showCarousel && carouselSlides.length > 0 ? (
@@ -1865,6 +1869,11 @@ const showToast = useShowToast()
         }
       }}
       cursor="pointer"
+      sx={{
+        cursor: 'pointer !important',
+        '& img, & video': { cursor: 'pointer !important' },
+        '& [data-post-media]': { cursor: 'pointer !important' },
+      }}
     >
       {postContent}
     </Box>
