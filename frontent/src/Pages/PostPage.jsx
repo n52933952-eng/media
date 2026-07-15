@@ -1,5 +1,5 @@
 import React,{useEffect,useState,useContext,useCallback,useMemo,useRef} from 'react'
-import{Avatar,Flex,Text,Image,Box,Divider,Button,Spinner,VStack,HStack,Grid,GridItem,SimpleGrid,useColorModeValue} from '@chakra-ui/react'
+import{Avatar,Flex,Text,Image,Box,Divider,Button,Spinner,VStack,HStack,Grid,GridItem,SimpleGrid,Tooltip,useColorModeValue} from '@chakra-ui/react'
 import { HiDotsHorizontal } from "react-icons/hi";
 import Actions from '../Components/Actions'
 import Comment from '../Components/Comment'
@@ -187,6 +187,64 @@ const PostPage = () => {
     const borderColor = useColorModeValue('#e1e4ea', '#2d3548')
     const textColor = useColorModeValue('gray.800', 'white')
     const secondaryTextColor = useColorModeValue('gray.600', 'gray.400')
+
+    const [contribHydrateMap, setContribHydrateMap] = useState({})
+    const contribHydrateInFlightRef = useRef({})
+
+    // Hydrate contributor avatars when API returns ids only (same as feed Post)
+    useEffect(() => {
+      if (!post?.isCollaborative || !Array.isArray(post?.contributors)) return
+      const todo = []
+      for (const c of post.contributors) {
+        const id =
+          typeof c === 'string' || typeof c === 'number'
+            ? String(c)
+            : c?._id != null
+              ? String(c._id)
+              : ''
+        if (!id) continue
+        const hasIdentity =
+          typeof c === 'object' && !!(c.username || c.name || c.profilePic)
+        if (hasIdentity || contribHydrateMap[id] || contribHydrateInFlightRef.current[id]) continue
+        todo.push(id)
+      }
+      if (!todo.length) return
+
+      let cancelled = false
+      todo.forEach((id) => {
+        contribHydrateInFlightRef.current[id] = true
+      })
+
+      ;(async () => {
+        const next = {}
+        await Promise.all(
+          todo.slice(0, 12).map(async (id) => {
+            try {
+              const res = await fetch(
+                `${apiBaseUrl()}/api/user/getUserPro/${encodeURIComponent(id)}`,
+                { credentials: 'include' },
+              )
+              const data = await res.json()
+              const u = data?.user ?? data
+              if (res.ok && u) next[id] = u
+            } catch {
+              /* ignore */
+            }
+          }),
+        )
+        if (cancelled) return
+        if (Object.keys(next).length) {
+          setContribHydrateMap((prev) => ({ ...prev, ...next }))
+        }
+        todo.forEach((id) => {
+          contribHydrateInFlightRef.current[id] = false
+        })
+      })()
+
+      return () => {
+        cancelled = true
+      }
+    }, [post?.isCollaborative, post?.contributors, contribHydrateMap])
     
     // Football channel posts: live cards come from API (same as feed); footballData is only a fallback
     const isFootballPost = userpro?.username === 'Football'
@@ -706,6 +764,103 @@ if(!post) {
 
 
       </Flex>
+
+    {/* Collaborative contributors (aligned with feed Post) */}
+    {post?.isCollaborative &&
+      Array.isArray(post?.contributors) &&
+      post.contributors.length > 0 &&
+      (() => {
+        const ownerId =
+          post?.postedBy?._id?.toString() ||
+          post?.postedBy?.toString() ||
+          userpro?._id?.toString() ||
+          ''
+        const displayContributors = post.contributors
+          .filter((contributor) => {
+            const contributorId = (contributor?._id || contributor)?.toString()
+            return contributorId && contributorId !== ownerId
+          })
+          .slice(0, 8)
+
+        if (displayContributors.length === 0) return null
+
+        return (
+          <Flex direction="column" gap={1.5} mt={3} mb={1}>
+            <Text
+              fontSize="13px"
+              fontWeight="600"
+              color={secondaryTextColor}
+              letterSpacing="0.01em"
+            >
+              Contributors
+            </Text>
+            <Flex align="center" gap={2} overflowX="auto" pb={0.5} sx={{ scrollbarWidth: 'none' }}>
+              {displayContributors.map((contributor, idx) => {
+                const contributorId = (contributor?._id || contributor)?.toString()
+                const hydrated =
+                  contributorId && contribHydrateMap[contributorId]
+                    ? contribHydrateMap[contributorId]
+                    : null
+                const cObj = hydrated || (typeof contributor === 'object' ? contributor : null)
+                const contributorName = cObj?.name || cObj?.username || null
+                const contributorUsername = cObj?.username || null
+                const contributorProfilePic = cObj?.profilePic || null
+                const label = contributorName || contributorUsername || '?'
+
+                return (
+                  <Tooltip
+                    key={contributorId || idx}
+                    label={label !== '?' ? label : 'Contributor'}
+                  >
+                    <Flex
+                      direction="column"
+                      align="center"
+                      gap={1}
+                      minW="40px"
+                      cursor={contributorUsername ? 'pointer' : 'default'}
+                      onClick={() => {
+                        if (contributorUsername) navigate(`/${contributorUsername}`)
+                      }}
+                      _hover={contributorUsername ? { opacity: 0.85 } : undefined}
+                      transition="opacity 0.15s"
+                    >
+                      <Avatar
+                        src={contributorProfilePic || undefined}
+                        name={label}
+                        size="sm"
+                        boxSize="32px"
+                        borderWidth="1px"
+                        borderColor={borderColor}
+                      />
+                      <Text
+                        fontSize="10px"
+                        color={secondaryTextColor}
+                        noOfLines={1}
+                        maxW="48px"
+                        textAlign="center"
+                      >
+                        {label}
+                      </Text>
+                    </Flex>
+                  </Tooltip>
+                )
+              })}
+              {post.contributors.filter((c) => {
+                const id = (c?._id || c)?.toString()
+                return id && id !== ownerId
+              }).length > displayContributors.length && (
+                <Text fontSize="xs" color={secondaryTextColor} flexShrink={0}>
+                  +
+                  {post.contributors.filter((c) => {
+                    const id = (c?._id || c)?.toString()
+                    return id && id !== ownerId
+                  }).length - displayContributors.length}
+                </Text>
+              )}
+            </Flex>
+          </Flex>
+        )
+      })()}
 
     {userpro?.username !== 'Football' && <Text my={3}>{post?.text}</Text>}
 

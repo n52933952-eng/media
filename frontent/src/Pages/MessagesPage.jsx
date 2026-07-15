@@ -61,6 +61,31 @@ import { parseLiveShareMessage, liveSharePreviewText, resolveLiveShareFromMessag
 
 const MSG_API_BASE = import.meta.env.VITE_API_URL || (import.meta.env.PROD ? window.location.origin : 'http://localhost:5000')
 
+/** Match mobile CreateGroupScreen: paginated following picker. */
+const GROUP_FOLLOWING_PAGE_SIZE = 30
+const EXCLUDED_SYSTEM_USERNAMES = new Set(
+  [
+    'Football',
+    'Weather',
+    'AlJazeera',
+    'NBCNews',
+    'BeinSportsNews',
+    'SkyNews',
+    'Cartoonito',
+    'NatGeoKids',
+    'SciShowKids',
+    'JJAnimalTime',
+    'KidsArabic',
+    'NatGeoAnimals',
+    'MBCDrama',
+    'Fox11',
+  ].map((u) => u.toLowerCase()),
+)
+const isExcludedSystemUsername = (username) => {
+  const u = String(username || '').trim().toLowerCase()
+  return !u || EXCLUDED_SYSTEM_USERNAMES.has(u)
+}
+
 /** Match socket `userId` strings to API user `_id` (string or ObjectId) — strict === fails and hides online friends. */
 const idStr = (id) => {
   if (id == null || id === '') return ''
@@ -253,6 +278,17 @@ const MessagesPage = () => {
   const [savingGroupName, setSavingGroupName] = useState(false)
   const [addMembersVisible, setAddMembersVisible] = useState(false)
   const [addingMemberId, setAddingMemberId] = useState(null)
+  // New Group / Add Members picker (paginated like mobile)
+  const [groupPickerUsers, setGroupPickerUsers] = useState([])
+  const [groupPickerLoading, setGroupPickerLoading] = useState(false)
+  const [groupPickerLoadingMore, setGroupPickerLoadingMore] = useState(false)
+  const [groupPickerHasMore, setGroupPickerHasMore] = useState(false)
+  const groupPickerCursorRef = useRef(null)
+  const groupPickerSeenIdsRef = useRef(new Set())
+  const groupPickerHasMoreRef = useRef(false)
+  const groupPickerLoadingMoreRef = useRef(false)
+  const groupPickerUserScrolledRef = useRef(false)
+  const groupPickerLastLoadMoreAtRef = useRef(0)
 
   // Refs
   const messagesEndRef = useRef(null)
@@ -1654,6 +1690,131 @@ const MessagesPage = () => {
     }
   }, [])
 
+  const parseGroupFollowingPage = useCallback((data, loadMore) => {
+    // Legacy API (no limit): plain array — client-page like mobile.
+    if (Array.isArray(data)) {
+      const skip = loadMore ? groupPickerSeenIdsRef.current.size : 0
+      const page = data.slice(skip, skip + GROUP_FOLLOWING_PAGE_SIZE)
+      const hasMore = skip + GROUP_FOLLOWING_PAGE_SIZE < data.length
+      return {
+        page,
+        nextCursor: hasMore ? String(skip + GROUP_FOLLOWING_PAGE_SIZE) : null,
+        hasMore,
+      }
+    }
+    const page = Array.isArray(data?.users) ? data.users : []
+    const nextCursor = data?.nextCursor ?? null
+    const hasMore = !!data?.hasMore && !!nextCursor
+    return { page, nextCursor, hasMore }
+  }, [])
+
+  const fetchGroupFollowingPage = useCallback(
+    async (loadMore = false) => {
+      if (!user?._id) return
+      if (loadMore) {
+        if (
+          !groupPickerHasMoreRef.current ||
+          groupPickerLoadingMoreRef.current ||
+          !groupPickerCursorRef.current
+        ) {
+          return
+        }
+        groupPickerLoadingMoreRef.current = true
+        setGroupPickerLoadingMore(true)
+      } else {
+        setGroupPickerLoading(true)
+        groupPickerCursorRef.current = null
+        groupPickerSeenIdsRef.current = new Set()
+        groupPickerHasMoreRef.current = false
+        setGroupPickerHasMore(false)
+        groupPickerUserScrolledRef.current = false
+        groupPickerLastLoadMoreAtRef.current = 0
+      }
+
+      try {
+        const parts = [`limit=${GROUP_FOLLOWING_PAGE_SIZE}`]
+        if (loadMore && groupPickerCursorRef.current) {
+          const c = String(groupPickerCursorRef.current)
+          if (/^[0-9a-fA-F]{24}$/.test(c)) {
+            parts.push(`cursor=${encodeURIComponent(c)}`)
+          } else {
+            parts.push(`skip=${encodeURIComponent(c)}`)
+          }
+        }
+        const baseUrl = import.meta.env.PROD ? window.location.origin : 'http://localhost:5000'
+        const res = await fetch(`${baseUrl}/api/user/following?${parts.join('&')}`, {
+          credentials: 'include',
+        })
+        if (!res.ok) throw new Error('Failed to load following')
+        const data = await res.json()
+        const { page, nextCursor, hasMore } = parseGroupFollowingPage(data, loadMore)
+        groupPickerCursorRef.current = nextCursor
+        groupPickerHasMoreRef.current = hasMore
+        setGroupPickerHasMore(hasMore)
+
+        const accepted = (Array.isArray(page) ? page : []).filter(
+          (u) => u?._id && !isExcludedSystemUsername(u.username),
+        )
+
+        if (loadMore) {
+          setGroupPickerUsers((prev) => {
+            const merged = [...prev]
+            for (const u of accepted) {
+              const id = idStr(u._id)
+              if (!id || groupPickerSeenIdsRef.current.has(id)) continue
+              groupPickerSeenIdsRef.current.add(id)
+              merged.push(u)
+            }
+            return merged
+          })
+        } else {
+          const next = []
+          const seen = new Set()
+          for (const u of accepted) {
+            const id = idStr(u._id)
+            if (!id || seen.has(id)) continue
+            seen.add(id)
+            next.push(u)
+          }
+          groupPickerSeenIdsRef.current = seen
+          setGroupPickerUsers(next)
+        }
+      } catch (e) {
+        if (!loadMore) setGroupPickerUsers([])
+        showToast('Error', e?.message || 'Could not load following list', 'error')
+      } finally {
+        groupPickerLoadingMoreRef.current = false
+        if (loadMore) setGroupPickerLoadingMore(false)
+        else setGroupPickerLoading(false)
+      }
+    },
+    [user?._id, parseGroupFollowingPage, showToast],
+  )
+
+  const handleOpenNewGroupModal = useCallback(() => {
+    setGroupNameInput('')
+    setSelectedGroupMembers([])
+    openGroupModal()
+    fetchGroupFollowingPage(false)
+  }, [openGroupModal, fetchGroupFollowingPage])
+
+  const handleGroupPickerScroll = useCallback(
+    (e) => {
+      const el = e?.currentTarget
+      if (!el) return
+      if (el.scrollTop > 8) groupPickerUserScrolledRef.current = true
+      if (!groupPickerUserScrolledRef.current) return
+      if (!groupPickerHasMoreRef.current || groupPickerLoadingMoreRef.current) return
+      const nearBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 48
+      if (!nearBottom) return
+      const now = Date.now()
+      if (now - groupPickerLastLoadMoreAtRef.current < 500) return
+      groupPickerLastLoadMoreAtRef.current = now
+      fetchGroupFollowingPage(true)
+    },
+    [fetchGroupFollowingPage],
+  )
+
   // Create a group conversation
   const handleCreateGroup = async () => {
     if (creatingGroup || !groupNameInput.trim() || selectedGroupMembers.length === 0) return
@@ -2444,7 +2605,7 @@ const MessagesPage = () => {
               size="sm"
               variant="ghost"
               colorScheme="blue"
-              onClick={openGroupModal}
+              onClick={handleOpenNewGroupModal}
               title="New Group"
             />
           </Flex>
@@ -4148,8 +4309,24 @@ const MessagesPage = () => {
               mb={4}
             />
             <Text fontSize="sm" fontWeight="semibold" mb={2} color="gray.500">Select members</Text>
-            <VStack align="stretch" maxH="280px" overflowY="auto" spacing={1}>
-              {followedUsers.map(u => (
+            <VStack
+              align="stretch"
+              maxH="280px"
+              overflowY="auto"
+              spacing={1}
+              onScroll={handleGroupPickerScroll}
+            >
+              {groupPickerLoading && groupPickerUsers.length === 0 && (
+                <Flex justify="center" py={6}>
+                  <Spinner size="sm" color="blue.400" />
+                </Flex>
+              )}
+              {!groupPickerLoading && groupPickerUsers.length === 0 && (
+                <Text fontSize="sm" color="gray.500" textAlign="center" py={4}>
+                  Follow people to add them to a group
+                </Text>
+              )}
+              {groupPickerUsers.map((u) => (
                 <Flex
                   key={u._id}
                   alignItems="center"
@@ -4158,21 +4335,28 @@ const MessagesPage = () => {
                   borderRadius="md"
                   cursor="pointer"
                   _hover={{ bg: hoverBg }}
-                  onClick={() => setSelectedGroupMembers(prev =>
-                    prev.includes(u._id) ? prev.filter(id => id !== u._id) : [...prev, u._id]
+                  onClick={() => setSelectedGroupMembers((prev) =>
+                    prev.includes(u._id) ? prev.filter((id) => id !== u._id) : [...prev, u._id]
                   )}
                 >
                   <Checkbox isChecked={selectedGroupMembers.includes(u._id)} pointerEvents="none" />
                   <Avatar size="sm" src={u.profilePic} name={u.name || u.username} />
                   <Box flex={1} minW={0}>
-                    <Text fontSize="sm" noOfLines={1} color={useColorModeValue('black','white')}>{u.name || u.username}</Text>
+                    <Text fontSize="sm" noOfLines={1} color={useColorModeValue('black', 'white')}>
+                      {u.name || u.username}
+                    </Text>
+                    {u.username && u.name !== u.username && (
+                      <Text fontSize="xs" color="gray.500" noOfLines={1}>
+                        @{u.username}
+                      </Text>
+                    )}
                   </Box>
                 </Flex>
               ))}
-              {followedUsers.length === 0 && (
-                <Text fontSize="sm" color="gray.500" textAlign="center" py={4}>
-                  Follow people to add them to a group
-                </Text>
+              {groupPickerLoadingMore && (
+                <Flex justify="center" py={2}>
+                  <Spinner size="xs" color="blue.400" />
+                </Flex>
               )}
             </VStack>
           </ModalBody>
@@ -4194,7 +4378,7 @@ const MessagesPage = () => {
       {selectedConversation?.isGroup && (() => {
         const iAmAdmin = idStr(selectedConversation.admin) === idStr(user?._id) || idStr(selectedConversation.admin?._id) === idStr(user?._id)
         const currentMembers = (selectedConversation.participants || []).map(p => idStr(p._id || p))
-        const addableUsers = followedUsers.filter(u => !currentMembers.includes(idStr(u._id)))
+        const addableUsers = groupPickerUsers.filter(u => !currentMembers.includes(idStr(u._id)))
         return (
         <Drawer isOpen={isGroupInfoOpen} onClose={() => { closeGroupInfo(); setEditGroupNameVisible(false); setAddMembersVisible(false) }} placement="right" size="sm">
           <DrawerOverlay />
@@ -4284,20 +4468,46 @@ const MessagesPage = () => {
                     variant="outline"
                     colorScheme="blue"
                     w="100%"
-                    onClick={() => setAddMembersVisible(v => !v)}
+                    onClick={() => {
+                      setAddMembersVisible((v) => {
+                        const next = !v
+                        if (next) fetchGroupFollowingPage(false)
+                        return next
+                      })
+                    }}
                     mb={addMembersVisible ? 2 : 0}
                   >
                     {addMembersVisible ? 'Hide' : 'Add Members'}
                   </Button>
                   {addMembersVisible && (
-                    <VStack align="stretch" spacing={1} maxH="200px" overflowY="auto" borderRadius="md" border="1px solid" borderColor={borderColor} p={1}>
-                      {addableUsers.length === 0 && (
+                    <VStack
+                      align="stretch"
+                      spacing={1}
+                      maxH="200px"
+                      overflowY="auto"
+                      borderRadius="md"
+                      border="1px solid"
+                      borderColor={borderColor}
+                      p={1}
+                      onScroll={handleGroupPickerScroll}
+                    >
+                      {groupPickerLoading && addableUsers.length === 0 && (
+                        <Flex justify="center" py={3}>
+                          <Spinner size="sm" color="blue.400" />
+                        </Flex>
+                      )}
+                      {!groupPickerLoading && addableUsers.length === 0 && (
                         <Text fontSize="sm" color="gray.500" textAlign="center" py={3}>No more people to add</Text>
                       )}
                       {addableUsers.map(u => (
                         <Flex key={u._id} alignItems="center" gap={2} p={1.5} borderRadius="md" _hover={{ bg: hoverBg }}>
                           <Avatar size="xs" src={u.profilePic} name={u.name || u.username} />
-                          <Text fontSize="sm" flex={1} noOfLines={1} color={useColorModeValue('black','white')}>{u.name || u.username}</Text>
+                          <Box flex={1} minW={0}>
+                            <Text fontSize="sm" noOfLines={1} color={useColorModeValue('black','white')}>{u.name || u.username}</Text>
+                            {u.username && u.name !== u.username && (
+                              <Text fontSize="xs" color="gray.500" noOfLines={1}>@{u.username}</Text>
+                            )}
+                          </Box>
                           <Button
                             size="xs"
                             colorScheme="blue"
@@ -4308,6 +4518,11 @@ const MessagesPage = () => {
                           </Button>
                         </Flex>
                       ))}
+                      {groupPickerLoadingMore && (
+                        <Flex justify="center" py={2}>
+                          <Spinner size="xs" color="blue.400" />
+                        </Flex>
+                      )}
                     </VStack>
                   )}
                 </Box>
