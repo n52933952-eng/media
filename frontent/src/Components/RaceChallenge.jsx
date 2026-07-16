@@ -1,4 +1,4 @@
-import React, { useState, useContext, useEffect, useRef, useCallback } from 'react'
+import React, { useContext, useEffect, useRef, useCallback } from 'react'
 import {
     Box, Button, VStack, Text, useColorModeValue,
     Modal, ModalOverlay, ModalContent, ModalHeader, ModalBody, ModalCloseButton,
@@ -8,115 +8,33 @@ import { useNavigate } from 'react-router-dom'
 import { UserContext } from '../context/UserContext'
 import { SocketContext } from '../context/SocketContext'
 import useShowToast from '../hooks/useShowToast'
-import API_BASE_URL from '../config/api'
+import { useOnlineGameOpponents } from '../hooks/useOnlineGameOpponents.js'
 
 const RaceChallenge = ({ compact = false }) => {
     const { user } = useContext(UserContext)
-    const { socket, onlineUsers, mergePresenceWatchIds } = useContext(SocketContext)
+    const { socket } = useContext(SocketContext)
     const { isOpen, onOpen, onClose } = useDisclosure()
-    const [availableUsers, setAvailableUsers]   = useState([])
-    const [loading,        setLoading]           = useState(false)
-    const [busyUsers,      setBusyUsers]         = useState([])
-    const [hasConnections, setHasConnections]    = useState(false)
-    const navigate        = useNavigate()
-    const showToast       = useShowToast()
-    const sentToRef       = useRef(null)
+    const {
+        availableUsers,
+        loading,
+        loadingMore,
+        hasConnections,
+        busyUsers,
+        fetchBusyGameUserIds,
+        fetchAvailableUsers,
+        handleModalScroll,
+    } = useOnlineGameOpponents()
+    const navigate = useNavigate()
+    const showToast = useShowToast()
+    const sentToRef = useRef(null)
     const challengeTimerRef = useRef(null)
 
-    const bgColor            = useColorModeValue('white', '#0f172a')
-    const borderColor        = useColorModeValue('gray.200', '#1e3a5f')
-    const hoverBg            = useColorModeValue('gray.50',  '#1a2740')
-    const textColor          = useColorModeValue('gray.800', 'white')
+    const bgColor = useColorModeValue('white', '#0f172a')
+    const borderColor = useColorModeValue('gray.200', '#1e3a5f')
+    const hoverBg = useColorModeValue('gray.50', '#1a2740')
+    const textColor = useColorModeValue('gray.800', 'white')
     const secondaryTextColor = useColorModeValue('gray.600', 'gray.400')
 
-    const base = API_BASE_URL || (import.meta.env.PROD ? window.location.origin : 'http://localhost:5000')
-
-    const fetchBusyGameUserIds = useCallback(async () => {
-        try {
-            const busyRes = await fetch(`${base}/api/user/busyGameUsers`, { credentials: 'include' })
-            if (busyRes.ok) {
-                const { busyUserIds } = await busyRes.json()
-                const ids = busyUserIds || []
-                setBusyUsers(ids)
-                return ids
-            }
-        } catch { /* ignore */ }
-        return []
-    }, [base])
-
-    // ── Fetch online friends who are available ────────────────────────────────
-    const fetchAvailableUsers = async () => {
-        if (!user) return
-        setLoading(true)
-        setHasConnections(false)
-        try {
-            const busyIdsNow = await fetchBusyGameUserIds()
-
-            let allUsers = []
-            try {
-                const [fwRes, frRes] = await Promise.all([
-                    fetch(`${base}/api/user/following`, { credentials: 'include' }),
-                    fetch(`${base}/api/user/followers`, { credentials: 'include' }),
-                ])
-                const toList = async (r) => {
-                    if (!r.ok) return []
-                    const d = await r.json()
-                    return Array.isArray(d) ? d : (Array.isArray(d.users) ? d.users : [])
-                }
-                const [fw, fr] = await Promise.all([toList(fwRes), toList(frRes)])
-                const seen = new Set()
-                const merged = [...fw, ...fr].filter(u => {
-                    if (!u?._id) return false
-                    const id = u._id.toString()
-                    if (seen.has(id)) return false
-                    seen.add(id)
-                    return id !== user._id?.toString()
-                })
-                if (merged.length > 0) { setHasConnections(true); allUsers = merged }
-            } catch { /* ignore */ }
-
-            // Online presence check
-            let presenceSet = new Set()
-            if (socket && allUsers.length > 0) {
-                try {
-                    const snap = await new Promise((resolve) => {
-                        const t = setTimeout(() => resolve(null), 2000)
-                        socket.once('presenceSnapshot', (d) => { clearTimeout(t); resolve(d) })
-                        const ids = allUsers.map(u => u._id?.toString()).filter(Boolean)
-                        if (typeof mergePresenceWatchIds === 'function') {
-                            mergePresenceWatchIds(ids)
-                        } else {
-                            socket.emit('presenceSubscribe', { userIds: ids })
-                        }
-                    })
-                    if (snap?.onlineUsers) {
-                        snap.onlineUsers.forEach(u => {
-                            const id = typeof u === 'object' ? u.userId?.toString() : u?.toString()
-                            if (id) presenceSet.add(id)
-                        })
-                    }
-                } catch (_) {}
-            }
-            const globalSet = new Set(
-                (Array.isArray(onlineUsers) ? onlineUsers : []).map(o => (
-                    typeof o === 'object' ? o.userId?.toString() : o?.toString()
-                )).filter(Boolean)
-            )
-
-            setAvailableUsers(allUsers.filter((u) => {
-                const id = u._id?.toString()
-                const online = presenceSet.size > 0 ? presenceSet.has(id) : globalSet.has(id)
-                const notBusy = !busyIdsNow.some((b) => b?.toString() === id)
-                return id !== user._id?.toString() && online && notBusy
-            }))
-        } catch (e) {
-            console.error('RaceChallenge fetch error:', e)
-        } finally {
-            setLoading(false)
-        }
-    }
-
-    // Cancel any running no-response timer
     const clearChallengeTimer = useCallback(() => {
         if (challengeTimerRef.current) {
             clearTimeout(challengeTimerRef.current)
@@ -124,14 +42,13 @@ const RaceChallenge = ({ compact = false }) => {
         }
     }, [])
 
-    // ── Socket listeners ──────────────────────────────────────────────────────
     useEffect(() => {
         if (!socket) return
 
         const syncBusy = () => {
             fetchBusyGameUserIds()
         }
-        const onAccepted  = (data) => {
+        const onAccepted = (data) => {
             if (!data?.roomId) return
             const weChallenger = sentToRef.current && data.opponentId?.toString() === sentToRef.current.toString()
             if (weChallenger) {
@@ -163,7 +80,7 @@ const RaceChallenge = ({ compact = false }) => {
         socket.on('userBusyRace', syncBusy)
         socket.on('userAvailableRace', syncBusy)
         socket.on('acceptRaceChallenge', onAccepted)
-        socket.on('raceDeclined',        onDeclined)
+        socket.on('raceDeclined', onDeclined)
         socket.on('gameChallengeBlocked', onBlocked)
 
         return () => {
@@ -178,25 +95,30 @@ const RaceChallenge = ({ compact = false }) => {
             socket.off('gameChallengeBlocked', onBlocked)
             clearChallengeTimer()
         }
-    }, [socket, navigate, showToast, user, fetchBusyGameUserIds, clearChallengeTimer])
+    }, [socket, navigate, showToast, fetchBusyGameUserIds, clearChallengeTimer])
 
-    const handleOpenModal = () => { fetchAvailableUsers(); onOpen() }
+    const handleOpenModal = () => {
+        void fetchAvailableUsers('replace')
+        onOpen()
+    }
 
     const handleChallenge = (opponent) => {
-        if (!socket) { showToast('Error', 'Connection lost. Please refresh.', 'error'); return }
+        if (!socket) {
+            showToast('Error', 'Connection lost. Please refresh.', 'error')
+            return
+        }
         clearChallengeTimer()
         sentToRef.current = opponent._id?.toString()
         localStorage.setItem('racePendingTo', opponent._id?.toString())
         socket.emit('raceChallenge', {
-            from:            user._id,
-            to:              opponent._id,
-            fromName:        user.name,
-            fromUsername:    user.username,
-            fromProfilePic:  user.profilePic,
+            from: user._id,
+            to: opponent._id,
+            fromName: user.name,
+            fromUsername: user.username,
+            fromProfilePic: user.profilePic,
         })
         showToast('Sent! 🏎️', `Race challenge sent to ${opponent.name}!`, 'success')
         onClose()
-        // Auto-clear after 30 s if no response (opponent offline, closed app, etc.)
         challengeTimerRef.current = setTimeout(() => {
             if (sentToRef.current) {
                 sentToRef.current = null
@@ -206,10 +128,8 @@ const RaceChallenge = ({ compact = false }) => {
         }, 30000)
     }
 
-    // ── UI ────────────────────────────────────────────────────────────────────
     return (
         <>
-            {/* Challenge card / button */}
             <Box
                 bg={bgColor}
                 borderRadius="md"
@@ -224,7 +144,6 @@ const RaceChallenge = ({ compact = false }) => {
                 maxW={compact ? '100%' : '280px'}
                 w="100%"
             >
-                {/* Banner */}
                 <Box
                     position="relative"
                     paddingBottom={compact ? '72%' : '100%'}
@@ -232,7 +151,6 @@ const RaceChallenge = ({ compact = false }) => {
                     overflow="hidden"
                     sx={{ isolation: 'isolate' }}
                 >
-                    {/* Road stripes — fewer / subtler in compact row to avoid bright seams */}
                     {[...Array(compact ? 4 : 6)].map((_, i) => (
                         <Box
                             key={i}
@@ -240,7 +158,8 @@ const RaceChallenge = ({ compact = false }) => {
                             bottom={`${i * (compact ? 22 : 18)}%`}
                             left="50%"
                             transform="translateX(-50%) perspective(80px) rotateX(45deg)"
-                            w="8px" h={compact ? '8%' : '8%'}
+                            w="8px"
+                            h={compact ? '8%' : '8%'}
                             bg={compact ? 'rgba(255,255,255,0.35)' : 'rgba(255,255,255,0.6)'}
                             borderRadius="2px"
                             pointerEvents="none"
@@ -295,7 +214,6 @@ const RaceChallenge = ({ compact = false }) => {
                 </Button>
             </Box>
 
-            {/* Opponent picker modal */}
             <Modal isOpen={isOpen} onClose={onClose} isCentered>
                 <ModalOverlay backdropFilter="blur(4px)" />
                 <ModalContent bg={bgColor} borderRadius="2xl" border="1px solid" borderColor={borderColor}>
@@ -306,6 +224,7 @@ const RaceChallenge = ({ compact = false }) => {
                         maxH="min(420px, 65vh)"
                         overflowY="auto"
                         sx={{ scrollbarGutter: 'stable' }}
+                        onScroll={handleModalScroll}
                     >
                         {loading ? (
                             <Flex justify="center" py={10}><Spinner size="lg" color="red.400" /></Flex>
@@ -321,7 +240,7 @@ const RaceChallenge = ({ compact = false }) => {
                             </VStack>
                         ) : (
                             <VStack spacing={3} align="stretch">
-                                {availableUsers.map(opp => {
+                                {availableUsers.map((opp) => {
                                     const busy = busyUsers.includes(opp._id?.toString())
                                     return (
                                         <Flex
@@ -361,6 +280,9 @@ const RaceChallenge = ({ compact = false }) => {
                                         </Flex>
                                     )
                                 })}
+                                {loadingMore && (
+                                    <Flex justify="center" py={3}><Spinner size="sm" color="red.400" /></Flex>
+                                )}
                             </VStack>
                         )}
                     </ModalBody>

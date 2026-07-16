@@ -1,4 +1,4 @@
-import React, { useState, useContext, useEffect, useCallback } from 'react'
+import React, { useContext, useEffect, useRef } from 'react'
 import {
     Box,
     Button,
@@ -22,121 +22,33 @@ import { UserContext } from '../context/UserContext'
 import { SocketContext } from '../context/SocketContext'
 import useShowToast from '../hooks/useShowToast'
 import { useLiveBroadcast } from '../context/LiveBroadcastContext'
-import API_BASE_URL from '../config/api'
+import { useOnlineGameOpponents } from '../hooks/useOnlineGameOpponents.js'
 
 const CardChallenge = ({ compact = false }) => {
     const { user } = useContext(UserContext)
-    const { socket, onlineUsers, mergePresenceWatchIds } = useContext(SocketContext)
+    const { socket } = useContext(SocketContext)
     const { endNormalLiveBeforeInterrupt } = useLiveBroadcast()
     const { isOpen, onOpen, onClose } = useDisclosure()
-    const [availableUsers, setAvailableUsers] = useState([])
-    const [loading, setLoading] = useState(false)
-    const [busyUsers, setBusyUsers] = useState([])
-    const [hasConnections, setHasConnections] = useState(false)
+    const {
+        availableUsers,
+        loading,
+        loadingMore,
+        hasConnections,
+        busyUsers,
+        fetchBusyGameUserIds,
+        fetchAvailableUsers,
+        handleModalScroll,
+    } = useOnlineGameOpponents()
     const navigate = useNavigate()
     const showToast = useShowToast()
     // Track who WE challenged so we can distinguish when acceptCardChallenge arrives
-    const sentChallengeToRef = React.useRef(null)
+    const sentChallengeToRef = useRef(null)
 
     const bgColor = useColorModeValue('white', '#1a1a1a')
     const borderColor = useColorModeValue('gray.200', '#2d2d2d')
     const hoverBg = useColorModeValue('gray.50', '#252525')
     const textColor = useColorModeValue('gray.800', 'white')
     const secondaryTextColor = useColorModeValue('gray.600', 'gray.400')
-
-    const baseUrl = API_BASE_URL || (import.meta.env.PROD ? window.location.origin : 'http://localhost:5000')
-
-    const fetchBusyGameUserIds = useCallback(async () => {
-        try {
-            const busyRes = await fetch(`${baseUrl}/api/user/busyGameUsers`, { credentials: 'include' })
-            if (busyRes.ok) {
-                const { busyUserIds } = await busyRes.json()
-                const ids = busyUserIds || []
-                setBusyUsers(ids)
-                return ids
-            }
-        } catch { /* ignore */ }
-        return []
-    }, [baseUrl])
-
-    const fetchAvailableUsers = async () => {
-        if (!user) return
-        try {
-            setLoading(true)
-            setHasConnections(false)
-            const busyIdsNow = await fetchBusyGameUserIds()
-
-            // Fetch following + followers
-            let allUsers = []
-            try {
-                const [followingRes, followersRes] = await Promise.all([
-                    fetch(`${baseUrl}/api/user/following`, { credentials: 'include' }),
-                    fetch(`${baseUrl}/api/user/followers`, { credentials: 'include' }),
-                ])
-                const toList = async (res) => {
-                    if (!res.ok) return []
-                    const data = await res.json()
-                    return Array.isArray(data) ? data : (Array.isArray(data.users) ? data.users : [])
-                }
-                const [followingList, followersList] = await Promise.all([toList(followingRes), toList(followersRes)])
-                const seen = new Set()
-                const merged = [...followingList, ...followersList].filter(u => {
-                    if (!u?._id) return false
-                    const id = u._id.toString()
-                    if (seen.has(id)) return false
-                    seen.add(id)
-                    return id !== user._id?.toString()
-                })
-                if (merged.length > 0) { setHasConnections(true); allUsers = merged }
-            } catch { /* ignore */ }
-
-            // Presence snapshot
-            let presenceOnlineSet = new Set()
-            if (socket && allUsers.length > 0) {
-                const connectionIds = allUsers.map(u => u._id?.toString()).filter(Boolean)
-                try {
-                    const snapshot = await new Promise((resolve) => {
-                        const timer = setTimeout(() => resolve(null), 2000)
-                        socket.once('presenceSnapshot', (data) => { clearTimeout(timer); resolve(data) })
-                        if (typeof mergePresenceWatchIds === 'function') {
-                            mergePresenceWatchIds(connectionIds)
-                        } else {
-                            socket.emit('presenceSubscribe', { userIds: connectionIds })
-                        }
-                    })
-                    if (snapshot?.onlineUsers) {
-                        snapshot.onlineUsers.forEach(u => {
-                            const id = typeof u === 'object' ? u.userId?.toString() : u?.toString()
-                            if (id) presenceOnlineSet.add(id)
-                        })
-                    }
-                } catch (_) {}
-            }
-            const globalOnlineSet = new Set(
-                (Array.isArray(onlineUsers) ? onlineUsers : []).map(o => {
-                    if (typeof o === 'object' && o !== null) return o.userId?.toString()
-                    return o?.toString()
-                }).filter(Boolean)
-            )
-
-            const onlineAvailableUsers = allUsers.filter(u => {
-                const userIdStr = u._id?.toString()
-                const currentUserIdStr = user._id?.toString()
-                if (!userIdStr || !currentUserIdStr) return false
-                const isOnline = presenceOnlineSet.size > 0
-                    ? presenceOnlineSet.has(userIdStr)
-                    : globalOnlineSet.has(userIdStr)
-                const isNotSelf = userIdStr !== currentUserIdStr
-                const isNotBusy = !busyIdsNow.some((busyId) => busyId?.toString() === userIdStr)
-                return isOnline && isNotSelf && isNotBusy
-            })
-            setAvailableUsers(onlineAvailableUsers)
-        } catch (error) {
-            console.error('Error fetching users:', error)
-        } finally {
-            setLoading(false)
-        }
-    }
 
     useEffect(() => {
         if (!socket) return
@@ -179,7 +91,7 @@ const CardChallenge = ({ compact = false }) => {
     }, [socket, navigate, showToast, user, fetchBusyGameUserIds, endNormalLiveBeforeInterrupt])
 
     const handleOpenModal = () => {
-        fetchAvailableUsers()
+        void fetchAvailableUsers('replace')
         onOpen()
     }
 
@@ -280,6 +192,7 @@ const CardChallenge = ({ compact = false }) => {
                         maxH="min(420px, 65vh)"
                         overflowY="auto"
                         sx={{ scrollbarGutter: 'stable' }}
+                        onScroll={handleModalScroll}
                     >
                         {loading ? (
                             <Flex justify="center" py={10}><Spinner size="lg" /></Flex>
@@ -332,6 +245,9 @@ const CardChallenge = ({ compact = false }) => {
                                         </Flex>
                                     )
                                 })}
+                                {loadingMore && (
+                                    <Flex justify="center" py={3}><Spinner size="sm" /></Flex>
+                                )}
                             </VStack>
                         )}
                     </ModalBody>

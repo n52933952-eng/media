@@ -1,4 +1,4 @@
-import React, { useState, useContext, useEffect, useCallback } from 'react'
+import React, { useState, useContext, useEffect, useCallback, useRef } from 'react'
 import {
     Box,
     Button,
@@ -24,6 +24,11 @@ import { SocketContext } from '../context/SocketContext'
 import useShowToast from '../hooks/useShowToast'
 import { useLiveBroadcast } from '../context/LiveBroadcastContext'
 import API_BASE_URL from '../config/api'
+import {
+    createOpponentPagerState,
+    fetchNextOnlineOpponentBatch,
+    GAME_OPPONENT_PAGE_SIZE,
+} from '../utils/fetchOnlineGameOpponents.js'
 
 const ChessChallenge = ({ compact = false }) => {
     const { user, setOrientation } = useContext(UserContext)
@@ -32,8 +37,12 @@ const ChessChallenge = ({ compact = false }) => {
     const { isOpen, onOpen, onClose } = useDisclosure()
     const [availableUsers, setAvailableUsers] = useState([])
     const [loading, setLoading] = useState(false)
+    const [loadingMore, setLoadingMore] = useState(false)
+    const [hasMore, setHasMore] = useState(false)
     const [busyUsers, setBusyUsers] = useState([])
-    const [hasConnections, setHasConnections] = useState(false) // true if we had following+followers to check
+    const [hasConnections, setHasConnections] = useState(false)
+    const opponentPagerRef = useRef(createOpponentPagerState())
+    const opponentShownIdsRef = useRef(new Set())
     const navigate = useNavigate()
     const showToast = useShowToast()
 
@@ -45,12 +54,9 @@ const ChessChallenge = ({ compact = false }) => {
 
     const baseUrl = API_BASE_URL || (import.meta.env.PROD ? window.location.origin : 'http://localhost:5000')
 
-    /** Returns current busy ids (also updates state). Use the return value when filtering in the same tick — React state is async. */
     const fetchBusyGameUserIds = useCallback(async () => {
         try {
-            const busyRes = await fetch(`${baseUrl}/api/user/busyGameUsers`, {
-                credentials: 'include',
-            })
+            const busyRes = await fetch(`${baseUrl}/api/user/busyGameUsers`, { credentials: 'include' })
             if (busyRes.ok) {
                 const { busyUserIds } = await busyRes.json()
                 const ids = busyUserIds || []
@@ -58,147 +64,80 @@ const ChessChallenge = ({ compact = false }) => {
                 return ids
             }
         } catch (err) {
-            console.warn('⚠️ [ChessChallenge] Failed to fetch busy game users:', err)
+            console.warn('Failed to fetch busy game users:', err)
         }
         return []
     }, [baseUrl])
 
-    // Normalize ID (backend may return string or { _id: "..." })
-    const toIdStr = (id) => {
+    const idStr = (id) => {
         const raw = id?._id ?? id
-        const s = (typeof raw?.toString === 'function' ? raw.toString() : String(raw ?? '')).trim()
-        return /^[0-9a-fA-F]{24}$/.test(s) ? s : null
+        const str = (typeof raw?.toString === 'function' ? raw.toString() : String(raw ?? '')).trim()
+        return /^[0-9a-fA-F]{24}$/.test(str) ? str : null
     }
 
-    // Fetch followers and following who are online
-    const fetchAvailableUsers = async () => {
-        if (!user) return
-        
-        try {
+    const isUserOnlineNow = useCallback((userId) => {
+        const target = idStr(userId)
+        if (!target) return false
+        return (Array.isArray(onlineUsers) ? onlineUsers : []).some((o) => {
+            const oid = typeof o === 'object' && o !== null ? o.userId?.toString() : o?.toString()
+            return oid === target
+        })
+    }, [onlineUsers])
+
+    const fetchAvailableUsers = useCallback(async (mode = 'replace') => {
+        if (!user?._id) return
+        if (mode === 'append') {
+            if (loadingMore || loading || opponentPagerRef.current.done) return
+            setLoadingMore(true)
+        } else {
             setLoading(true)
+            opponentPagerRef.current = createOpponentPagerState()
+            opponentShownIdsRef.current = new Set()
+            setAvailableUsers([])
+            setHasMore(false)
             setHasConnections(false)
-            // Anyone in chess, card, or race — use returned ids for filtering (state updates async)
-            const busyIdsNow = await fetchBusyGameUserIds()
-            if (import.meta.env.DEV) {
-                console.log('♟️ [ChessChallenge] Synced busy game users from Redis')
-            }
-            
-            // Fetch following + followers using the Follow-collection-backed endpoints
-            let allUsers = []
-            try {
-                const [followingRes, followersRes] = await Promise.all([
-                    fetch(`${baseUrl}/api/user/following`, { credentials: 'include' }),
-                    fetch(`${baseUrl}/api/user/followers`, { credentials: 'include' }),
-                ])
-
-                const toList = async (res) => {
-                    if (!res.ok) return []
-                    const data = await res.json()
-                    return Array.isArray(data) ? data : (Array.isArray(data.users) ? data.users : [])
-                }
-
-                const [followingList, followersList] = await Promise.all([toList(followingRes), toList(followersRes)])
-
-                if (import.meta.env.DEV) {
-                    console.log(`♟️ [ChessChallenge] following: ${followingList.length}, followers: ${followersList.length}`)
-                }
-
-                // Merge and deduplicate (by _id string)
-                const seen = new Set()
-                const merged = [...followingList, ...followersList].filter(u => {
-                    if (!u?._id) return false
-                    const id = u._id.toString()
-                    if (seen.has(id)) return false
-                    seen.add(id)
-                    return id !== user._id?.toString()
-                })
-
-                if (merged.length > 0) {
-                    setHasConnections(true)
-                    allUsers = merged
-                }
-
-                if (import.meta.env.DEV) {
-                    console.log(`♟️ [ChessChallenge] Total unique connections: ${allUsers.length}`)
-                }
-            } catch (err) {
-                console.warn('⚠️ [ChessChallenge] Error fetching connections:', err)
-            }
-            
-            // Use presenceSubscribe to get accurate real-time presence
-            // (works even when global getOnlineUser broadcast is disabled for scale)
-            let presenceOnlineSet = new Set()
-            if (socket && allUsers.length > 0) {
-                const connectionIds = allUsers.map(u => u._id?.toString()).filter(Boolean)
-                try {
-                    const snapshot = await new Promise((resolve) => {
-                        const timer = setTimeout(() => resolve(null), 2000) // 2s timeout
-                        socket.once('presenceSnapshot', (data) => {
-                            clearTimeout(timer)
-                            resolve(data)
-                        })
-                        if (typeof mergePresenceWatchIds === 'function') {
-                            mergePresenceWatchIds(connectionIds)
-                        } else {
-                            socket.emit('presenceSubscribe', { userIds: connectionIds })
-                        }
-                    })
-                    if (snapshot?.onlineUsers) {
-                        snapshot.onlineUsers.forEach(u => {
-                            const id = typeof u === 'object' ? u.userId?.toString() : u?.toString()
-                            if (id) presenceOnlineSet.add(id)
-                        })
-                        if (import.meta.env.DEV) {
-                            console.log(`♟️ [ChessChallenge] presenceSnapshot: ${presenceOnlineSet.size} online of ${connectionIds.length}`)
-                        }
+        }
+        try {
+            const busyIdsNow = mode === 'replace' ? await fetchBusyGameUserIds() : busyUsers
+            const watched = []
+            const { users, pager } = await fetchNextOnlineOpponentBatch({
+                baseUrl,
+                currentUserId: user._id,
+                isOnline: isUserOnlineNow,
+                busyUserIds: busyIdsNow,
+                pager: opponentPagerRef.current,
+                alreadyShownIds: opponentShownIdsRef.current,
+                targetCount: GAME_OPPONENT_PAGE_SIZE,
+                beforeFilterPage: async (pageUsers) => {
+                    if (pageUsers.length) setHasConnections(true)
+                    for (const u of pageUsers) {
+                        if (!watched.includes(u._id)) watched.push(u._id)
                     }
-                } catch (_) {}
-            }
-
-            // Also build a Set from the legacy global onlineUsers list as a fallback
-            const globalOnlineSet = new Set(
-                (Array.isArray(onlineUsers) ? onlineUsers : []).map(o => {
-                    if (typeof o === 'object' && o !== null) return o.userId?.toString()
-                    return o?.toString()
-                }).filter(Boolean)
-            )
-
-            // Filter to only online users who are not busy
-            const onlineAvailableUsers = allUsers.filter(u => {
-                // Convert both to strings for comparison
-                const userIdStr = u._id?.toString()
-                const currentUserIdStr = user._id?.toString()
-                
-                if (!userIdStr || !currentUserIdStr) {
-                    return false
-                }
-                
-                // Check via presenceSubscribe snapshot first, fall back to global list
-                const isOnline = presenceOnlineSet.size > 0
-                    ? presenceOnlineSet.has(userIdStr)
-                    : globalOnlineSet.has(userIdStr)
-                
-                const isNotSelf = userIdStr !== currentUserIdStr
-                const isNotBusy = !busyIdsNow.some((busyId) => busyId?.toString() === userIdStr)
-                
-                if (import.meta.env.DEV && isOnline && isNotSelf) {
-                    console.log(`✅ [ChessChallenge] User ${u.username} (${userIdStr}) is online and available`)
-                }
-                
-                return isOnline && isNotSelf && isNotBusy
+                    if (typeof mergePresenceWatchIds === 'function') mergePresenceWatchIds(watched)
+                    await new Promise((r) => setTimeout(r, 280))
+                },
             })
-            
-            if (import.meta.env.DEV) {
-                console.log(`♟️ [ChessChallenge] Found ${onlineAvailableUsers.length} online available users out of ${allUsers.length} total connections`)
-                console.log(`♟️ [ChessChallenge] Online users from socket:`, onlineUsers)
-                console.log(`♟️ [ChessChallenge] All fetched users:`, allUsers.map(u => ({ id: u._id?.toString(), username: u.username })))
-            }
-            
-            setAvailableUsers(onlineAvailableUsers)
+            opponentPagerRef.current = pager
+            for (const u of users) opponentShownIdsRef.current.add(u._id)
+            setAvailableUsers((prev) => (mode === 'replace' ? users : [...prev, ...users]))
+            setHasMore(!pager.done)
         } catch (error) {
             console.error('Error fetching users:', error)
+            if (mode === 'replace') {
+                setAvailableUsers([])
+                setHasMore(false)
+            }
         } finally {
-            setLoading(false)
+            if (mode === 'replace') setLoading(false)
+            else setLoadingMore(false)
+        }
+    }, [user?._id, loadingMore, loading, busyUsers, baseUrl, fetchBusyGameUserIds, isUserOnlineNow, mergePresenceWatchIds])
+
+    const handleModalScroll = (e) => {
+        const el = e.currentTarget
+        if (!el || loadingMore || loading || !hasMore) return
+        if (el.scrollTop + el.clientHeight >= el.scrollHeight - 48) {
+            void fetchAvailableUsers('append')
         }
     }
 
@@ -257,7 +196,7 @@ const ChessChallenge = ({ compact = false }) => {
     }, [socket, navigate, showToast, setOrientation, fetchBusyGameUserIds, endNormalLiveBeforeInterrupt])
 
     const handleOpenModal = () => {
-        fetchAvailableUsers()
+        void fetchAvailableUsers('replace')
         onOpen()
     }
 
@@ -384,6 +323,7 @@ const ChessChallenge = ({ compact = false }) => {
                         maxH="min(420px, 65vh)"
                         overflowY="auto"
                         sx={{ scrollbarGutter: 'stable' }}
+                        onScroll={handleModalScroll}
                     >
                         {loading ? (
                             <Flex justify="center" py={10}>
@@ -446,6 +386,9 @@ const ChessChallenge = ({ compact = false }) => {
                                         </Flex>
                                     )
                                 })}
+                                {loadingMore && (
+                                    <Flex justify="center" py={3}><Spinner size="sm" /></Flex>
+                                )}
                             </VStack>
                         )}
                     </ModalBody>
