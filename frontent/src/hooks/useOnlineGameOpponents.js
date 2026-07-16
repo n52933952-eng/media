@@ -6,7 +6,8 @@ import {
   createOpponentPagerState,
   fetchNextOnlineOpponentBatch,
   GAME_OPPONENT_PAGE_SIZE,
-} from './fetchOnlineGameOpponents.js'
+  GAME_OPPONENT_SCAN_PAGE_SIZE,
+} from '../utils/fetchOnlineGameOpponents.js'
 
 /**
  * Paginated online opponents for chess/card/race challenge modals (9 at a time).
@@ -79,6 +80,7 @@ export function useOnlineGameOpponents() {
       try {
         const busyIdsNow = mode === 'replace' ? await fetchBusyGameUserIds() : busyUsers
         const watched = []
+        let presencePrimed = false
         const { users, pager } = await fetchNextOnlineOpponentBatch({
           baseUrl,
           currentUserId: user._id,
@@ -87,13 +89,17 @@ export function useOnlineGameOpponents() {
           pager: opponentPagerRef.current,
           alreadyShownIds: opponentShownIdsRef.current,
           targetCount: GAME_OPPONENT_PAGE_SIZE,
+          connectionPageSize: GAME_OPPONENT_SCAN_PAGE_SIZE,
           beforeFilterPage: async (pageUsers) => {
             if (pageUsers.length) setHasConnections(true)
             for (const u of pageUsers) {
               if (!watched.includes(u._id)) watched.push(u._id)
             }
             if (typeof mergePresenceWatchIds === 'function') mergePresenceWatchIds(watched)
-            await new Promise((r) => setTimeout(r, 280))
+            if (!presencePrimed) {
+              presencePrimed = true
+              await new Promise((r) => setTimeout(r, 120))
+            }
           },
         })
         opponentPagerRef.current = pager

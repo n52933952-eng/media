@@ -1,5 +1,7 @@
 /** How many online opponents to show / load per scroll batch. */
 export const GAME_OPPONENT_PAGE_SIZE = 9
+/** How many connections to scan per API call (bigger = fewer round-trips). */
+export const GAME_OPPONENT_SCAN_PAGE_SIZE = 48
 
 /**
  * @typedef {{ source: 'following' | 'followers', skip: number, done: boolean }} OpponentPagerState
@@ -56,7 +58,7 @@ export async function fetchNextOnlineOpponentBatch({
   pager,
   alreadyShownIds,
   targetCount = GAME_OPPONENT_PAGE_SIZE,
-  connectionPageSize = GAME_OPPONENT_PAGE_SIZE,
+  connectionPageSize = GAME_OPPONENT_SCAN_PAGE_SIZE,
   beforeFilterPage,
 }) {
   const nextPager = { ...pager }
@@ -65,7 +67,7 @@ export async function fetchNextOnlineOpponentBatch({
   const myId = String(currentUserId || '')
   const collected = []
   let fetches = 0
-  const maxFetches = 40
+  const maxFetches = 12
 
   while (collected.length < targetCount && !nextPager.done && fetches < maxFetches) {
     fetches += 1
