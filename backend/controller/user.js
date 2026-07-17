@@ -643,7 +643,7 @@ export const UpdateUser = async(req,res) => {
         const hashPassword = await bcryptjs.hashSync(password,10)
         user.password = hashPassword
       }
-
+       
       const previousProfilePic = user.profilePic || ''
       const previousUsername = user.username || ''
       const previousName = user.name || ''
@@ -661,19 +661,19 @@ export const UpdateUser = async(req,res) => {
         profilePic = ''
       }
 
-      user.name = name || user.name
-      user.username = username || user.username 
-      user.email = email || user.email 
-      user.profilePic = profilePic || user.profilePic 
-      user.bio = bio || user.bio
-      user.country = country !== undefined ? country : user.country
-      user.instagram = instagram !== undefined ? instagram : user.instagram
+          user.name = name || user.name
+          user.username = username || user.username
+          user.email = email || user.email
+          user.profilePic = profilePic || user.profilePic
+          user.bio = bio || user.bio
+          user.country = country !== undefined ? country : user.country
+          user.instagram = instagram !== undefined ? instagram : user.instagram
 
       const profilePicChanged = !!(profilePic && profilePic !== previousProfilePic)
       const usernameChanged = !!(username && username !== previousUsername)
       const nameChanged = !!(name && name !== previousName)
 
-      user = await user.save()
+          user = await user.save()
 
       if (profilePicChanged || usernameChanged || nameChanged) {
         try {

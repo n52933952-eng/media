@@ -85,9 +85,9 @@ const WeatherPage = () => {
     const [saving, setSaving] = useState(false)
     const [heroCity, setHeroCity] = useState(null)
     const [clockTick, setClockTick] = useState(0)
-
+    
     const showToast = useShowToast()
-
+    
     useEffect(() => {
         const id = setInterval(() => setClockTick((n) => n + 1), 30000)
         return () => clearInterval(id)
@@ -129,7 +129,7 @@ const WeatherPage = () => {
             return []
         }
     }, [user])
-
+    
     const fetchWeather = useCallback(async (silent = false) => {
         try {
             const baseUrl = import.meta.env.PROD ? window.location.origin : 'http://localhost:5000'
@@ -137,25 +137,25 @@ const WeatherPage = () => {
 
             if (
                 weatherCache.data &&
-                weatherCache.timestamp &&
+                weatherCache.timestamp && 
                 now - weatherCache.timestamp < weatherCache.CACHE_TTL
             ) {
                 setWeatherData(weatherCache.data)
                 if (!silent) setLoading(false)
                 return
             }
-
+            
             if (!silent) setLoading(true)
 
             const res = await fetch(`${baseUrl}/api/weather?limit=50`, { credentials: 'include' })
             const data = await res.json()
-
+            
             if (res.ok && data.weather) {
                 weatherCache.data = data.weather || []
                 weatherCache.timestamp = now
                 setWeatherData(data.weather || [])
             } else if (!silent) {
-                showToast('Error', 'Failed to load weather data', 'error')
+                    showToast('Error', 'Failed to load weather data', 'error')
             }
         } catch (error) {
             console.error('Error fetching weather:', error)
@@ -172,7 +172,7 @@ const WeatherPage = () => {
     useEffect(() => {
         fetchWeather()
     }, [fetchWeather])
-
+    
     const handleSearch = async (query) => {
         setSearchQuery(query)
         if (query.trim().length < 2) {
@@ -195,7 +195,7 @@ const WeatherPage = () => {
             setSearchLoading(false)
         }
     }
-
+    
     const isSelected = (name, country) =>
         selectedCities.some((c) => {
             if (typeof c === 'string') return c === name
@@ -272,7 +272,7 @@ const WeatherPage = () => {
             setSaving(false)
         }
     }
-
+    
     const getWeatherIconEmoji = (condition, iconCode, timezoneOffset) => {
         // OpenWeatherMap PNGs are nearly invisible on dark UI — use emoji like mobile.
         let isNight = typeof iconCode === 'string' && /n$/i.test(iconCode)
@@ -364,7 +364,7 @@ const WeatherPage = () => {
             </Button>
         )
     }
-
+    
     return (
         <Box minH="100vh" bg={pageBg}>
             <Container maxW="720px" py={{ base: 5, md: 8 }} px={{ base: 4, md: 6 }}>
@@ -653,38 +653,38 @@ const WeatherPage = () => {
                                     )}
 
                                     <InputGroup size="lg">
-                                        <InputLeftElement pointerEvents="none">
-                                            <SearchIcon color="gray.400" />
-                                        </InputLeftElement>
-                                        <Input
+                                <InputLeftElement pointerEvents="none">
+                                    <SearchIcon color="gray.400" />
+                                </InputLeftElement>
+                                <Input
                                             placeholder="Search city…"
-                                            value={searchQuery}
-                                            onChange={(e) => handleSearch(e.target.value)}
+                                    value={searchQuery}
+                                    onChange={(e) => handleSearch(e.target.value)}
                                             borderRadius="12px"
                                             bg={pageBg}
                                             borderColor={borderColor}
-                                        />
-                                    </InputGroup>
-
-                                    {searchLoading && (
-                                        <Flex justify="center" py={2}>
-                                            <Spinner size="sm" />
-                                        </Flex>
-                                    )}
-
-                                    {searchResults.length > 0 && (
+                                />
+                            </InputGroup>
+                            
+                            {searchLoading && (
+                                <Flex justify="center" py={2}>
+                                    <Spinner size="sm" />
+                                </Flex>
+                            )}
+                            
+                            {searchResults.length > 0 && (
                                         <VStack align="stretch" spacing={0} maxH="280px" overflowY="auto">
-                                            {searchResults.map((city, index) => {
+                                        {searchResults.map((city, index) => {
                                                 const selected = isSelected(city.name, city.country)
-                                                return (
-                                                    <Flex
+                                            return (
+                                                <Flex
                                                         key={`${city.name}-${city.country}-${index}`}
                                                         py={3}
                                                         px={1}
                                                         borderBottomWidth="1px"
-                                                        borderColor={borderColor}
-                                                        justify="space-between"
-                                                        align="center"
+                                                    borderColor={borderColor}
+                                                    justify="space-between"
+                                                    align="center"
                                                         _hover={{ bg: hoverRow }}
                                                     >
                                                         <Box>
@@ -695,11 +695,11 @@ const WeatherPage = () => {
                                                             {city.state && (
                                                                 <Text fontSize="xs" color={muted}>
                                                                     {city.state}
-                                                                </Text>
+                                                    </Text>
                                                             )}
                                                         </Box>
-                                                        <Button
-                                                            size="xs"
+                                                    <Button
+                                                        size="xs"
                                                             variant={selected ? 'ghost' : 'solid'}
                                                             colorScheme={selected ? 'gray' : 'blue'}
                                                             onClick={() =>
@@ -710,11 +710,11 @@ const WeatherPage = () => {
                                                             isDisabled={!selected && selectedCities.length >= 10}
                                                         >
                                                             {selected ? 'Remove' : 'Add'}
-                                                        </Button>
-                                                    </Flex>
-                                                )
-                                            })}
-                                        </VStack>
+                                                    </Button>
+                                                </Flex>
+                                            )
+                                        })}
+                                    </VStack>
                                     )}
 
                                     {searchQuery.trim().length >= 2 &&
@@ -728,23 +728,23 @@ const WeatherPage = () => {
                                     <Flex justify="space-between" align="center" pt={1}>
                                         <Text fontSize="sm" color={muted}>
                                             {selectedCities.length}/10 cities
-                                        </Text>
-                                        <Button
-                                            colorScheme="blue"
-                                            onClick={handleSavePreferences}
-                                            isLoading={saving}
-                                        >
+                                </Text>
+                                    <Button
+                                        colorScheme="blue"
+                                        onClick={handleSavePreferences}
+                                        isLoading={saving}
+                                    >
                                             {selectedCities.length === 0
                                                 ? 'Clear all cities'
                                                 : `Save cities · ${selectedCities.length}/10`}
-                                        </Button>
-                                    </Flex>
-                                </VStack>
+                                    </Button>
+                            </Flex>
+                        </VStack>
                             )}
                         </Box>
                     )}
-                </VStack>
-            </Container>
+            </VStack>
+        </Container>
         </Box>
     )
 }

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useContext, useMemo, useRef } from 'react'
-import { Box, Flex, Text, Avatar, VStack, HStack, Spinner, useColorModeValue, Divider, IconButton } from '@chakra-ui/react'
+import { Box, Flex, Text, Avatar, VStack, HStack, Spinner, useColorModeValue, IconButton } from '@chakra-ui/react'
 import { useNavigate } from 'react-router-dom'
 import { SocketContext } from '../context/SocketContext'
 import { UserContext } from '../context/UserContext'
@@ -39,11 +39,15 @@ const ActivityFeed = () => {
     /** Bumps every minute so "X ago" stays current without a full refresh */
     const [relativeTimeTick, setRelativeTimeTick] = useState(0)
 
-    const bgColor = useColorModeValue('white', '#1a1a1a')
     const cardBg = useColorModeValue('white', '#252b3b')
     const borderColor = useColorModeValue('gray.200', '#2d2d2d')
     const textColor = useColorModeValue('gray.800', 'white')
     const secondaryTextColor = useColorModeValue('gray.600', 'gray.400')
+    const rowHoverBg = useColorModeValue('blackAlpha.50', 'whiteAlpha.200')
+    const nameColor = useColorModeValue('blue.500', '#1DA1F2')
+    const scrollbarThumb = useColorModeValue('gray.300', 'gray.600')
+    const scrollbarThumbHover = useColorModeValue('gray.400', 'gray.500')
+    const deleteHoverBg = useColorModeValue('red.50', 'red.900')
 
     // When user follows/unfollows, following[] changes — refetch so existing 6h activities appear immediately (no full page refresh)
     const followingFingerprint = useMemo(() => {
@@ -166,23 +170,73 @@ const ActivityFeed = () => {
         }
     }
 
-    const getActivityText = (activity) => {
-        const userName = activity.userId?.name || activity.userId?.username || 'Someone'
-        
+    const openUserProfile = (e, username) => {
+        e?.stopPropagation?.()
+        e?.preventDefault?.()
+        const u = typeof username === 'string' ? username.trim() : ''
+        if (!u) return
+        navigate(`/${u}`)
+    }
+
+    /** Blue pressable names — same behavior as mobile Activity. */
+    const renderActivityText = (activity) => {
+        const actorName = activity.userId?.name || activity.userId?.username || 'Someone'
+        const actorUsername = activity.userId?.username
+        const targetName =
+            activity.targetUser?.name || activity.targetUser?.username || 'someone'
+        const targetUsername = activity.targetUser?.username
+
+        const Name = ({ label, username }) => (
+            <Text
+                as="span"
+                color={nameColor}
+                fontWeight="700"
+                cursor="pointer"
+                _hover={{ textDecoration: 'underline' }}
+                onClick={(e) => openUserProfile(e, username)}
+            >
+                {label}
+            </Text>
+        )
+
         switch (activity.type) {
             case 'like':
-                return `${userName} liked a post`
+                return (
+                    <>
+                        <Name label={actorName} username={actorUsername} /> liked a post
+                    </>
+                )
             case 'comment':
-                return `${userName} commented on a post`
+                return (
+                    <>
+                        <Name label={actorName} username={actorUsername} /> commented on a post
+                    </>
+                )
             case 'follow':
-                const targetName = activity.targetUser?.name || activity.targetUser?.username || 'someone'
-                return `${userName} followed ${targetName}`
+                return (
+                    <>
+                        <Name label={actorName} username={actorUsername} /> started following{' '}
+                        <Name label={targetName} username={targetUsername} />
+                    </>
+                )
             case 'post':
-                return `${userName} created a post`
+                return (
+                    <>
+                        <Name label={actorName} username={actorUsername} /> created a new post
+                    </>
+                )
             case 'reply':
-                return `${userName} replied to a comment`
+                return (
+                    <>
+                        <Name label={actorName} username={actorUsername} /> replied to a comment
+                    </>
+                )
             default:
-                return `${userName} did something`
+                return (
+                    <>
+                        <Name label={actorName} username={actorUsername} /> performed an action
+                    </>
+                )
         }
     }
 
@@ -192,9 +246,9 @@ const ActivityFeed = () => {
             if (username) {
                 navigate(`/${username}/post/${activity.postId._id}`)
             }
-        } else if (activity.targetUser) {
+        } else if (activity.targetUser?.username) {
             navigate(`/${activity.targetUser.username}`)
-        } else if (activity.userId) {
+        } else if (activity.userId?.username) {
             navigate(`/${activity.userId.username}`)
         }
     }
@@ -314,75 +368,75 @@ const ActivityFeed = () => {
                             background: 'transparent',
                         },
                         '&::-webkit-scrollbar-thumb': {
-                            background: useColorModeValue('gray.300', 'gray.600'),
+                            background: scrollbarThumb,
                             borderRadius: '3px',
                         },
                         '&::-webkit-scrollbar-thumb:hover': {
-                            background: useColorModeValue('gray.400', 'gray.500'),
+                            background: scrollbarThumbHover,
                         },
                     }}
                 >
                     {activities.map((activity, index) => (
-                        <React.Fragment key={activity._id || index}>
-                            <Flex
-                                align="center"
-                                gap={2}
-                                p={2}
-                                borderRadius="md"
-                                _hover={{ bg: useColorModeValue('gray.50', 'gray.700') }}
-                                cursor="pointer"
-                                onClick={() => handleActivityClick(activity)}
-                                transition="all 0.2s"
-                                position="relative"
-                            >
-                                <IconButton
-                                    icon={<CloseIcon boxSize="10px" />}
-                                    size="xs"
-                                    variant="ghost"
-                                    aria-label="Delete activity"
-                                    onClick={(e) => handleDeleteActivity(activity._id, e)}
+                        <Flex
+                            key={activity._id || index}
+                            align="center"
+                            gap={2}
+                            p={2}
+                            borderRadius="14px"
+                            border="1px solid"
+                            borderColor={borderColor}
+                            _hover={{ bg: rowHoverBg }}
+                            cursor="pointer"
+                            onClick={() => handleActivityClick(activity)}
+                            transition="background 0.15s ease"
+                            position="relative"
+                        >
+                            <IconButton
+                                icon={<CloseIcon boxSize="10px" />}
+                                size="xs"
+                                variant="ghost"
+                                aria-label="Delete activity"
+                                onClick={(e) => handleDeleteActivity(activity._id, e)}
+                                color={secondaryTextColor}
+                                opacity={0.6}
+                                _hover={{ 
+                                    color: 'red.500', 
+                                    bg: deleteHoverBg,
+                                    opacity: 1 
+                                }}
+                                flexShrink={0}
+                                minW="16px"
+                                h="16px"
+                                w="16px"
+                            />
+                            <Text fontSize="sm">{getActivityIcon(activity.type)}</Text>
+                            <Avatar
+                                src={activity.userId?.profilePic}
+                                name={activity.userId?.name || activity.userId?.username}
+                                size="xs"
+                            />
+                            <Flex direction="column" flex={1} minW={0}>
+                                <Text 
+                                    fontSize="xs" 
+                                    color={textColor}
+                                    noOfLines={2}
+                                    dir="ltr"
+                                    textAlign="left"
+                                >
+                                    {renderActivityText(activity)}
+                                </Text>
+                                <Text 
+                                    fontSize="2xs" 
                                     color={secondaryTextColor}
-                                    opacity={0.6}
-                                    _hover={{ 
-                                        color: 'red.500', 
-                                        bg: useColorModeValue('red.50', 'red.900'),
-                                        opacity: 1 
-                                    }}
-                                    flexShrink={0}
-                                    minW="16px"
-                                    h="16px"
-                                    w="16px"
-                                />
-                                <Text fontSize="sm">{getActivityIcon(activity.type)}</Text>
-                                <Avatar
-                                    src={activity.userId?.profilePic}
-                                    name={activity.userId?.name || activity.userId?.username}
-                                    size="xs"
-                                />
-                                <Flex direction="column" flex={1} minW={0}>
-                                    <Text 
-                                        fontSize="xs" 
-                                        color={textColor}
-                                        noOfLines={1}
-                                    >
-                                        {getActivityText(activity)}
-                                    </Text>
-                                    <Text 
-                                        fontSize="2xs" 
-                                        color={secondaryTextColor}
-                                    >
-                                        {(() => {
-                                            const at = parseActivityCreatedAt(activity.createdAt)
-                                            if (!at) return '—'
-                                            return formatDistanceToNow(at, { addSuffix: true })
-                                        })()}
-                                    </Text>
-                                </Flex>
+                                >
+                                    {(() => {
+                                        const at = parseActivityCreatedAt(activity.createdAt)
+                                        if (!at) return '—'
+                                        return formatDistanceToNow(at, { addSuffix: true })
+                                    })()}
+                                </Text>
                             </Flex>
-                            {index < activities.length - 1 && (
-                                <Divider borderColor={borderColor} />
-                            )}
-                        </React.Fragment>
+                        </Flex>
                     ))}
                 </VStack>
             )}

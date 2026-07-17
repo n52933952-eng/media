@@ -67,6 +67,9 @@ const PostPage = () => {
     const commentsSkipRef = useRef(0)
     const loadMoreRef = useRef(null)
     const commentsFetchGenRef = useRef(0)
+    /** Avoid infinite spinner when opening a deleted post from a notification. */
+    const [postLoadFailed, setPostLoadFailed] = useState(false)
+    const missingPostHandledRef = useRef(false)
 
     /** From feed: `?fixture=<id>` scopes comments to that match thread */
     const footballMatchId = fixtureIdParam || null
@@ -619,54 +622,100 @@ const PostPage = () => {
     }, [socket, post?._id, setFollowPost])
 
     useEffect(() => {
-   
-    const getpost = async() => {
-      const requestedId = String(id || '')
-      if (!requestedId) return
-    
-      const res = await fetch(postDetailApiUrl(id, { includeReplies: false }),{
-        credentials: "include",
-      })
+      // Reset when opening a different post id
+      setPostLoadFailed(false)
+      missingPostHandledRef.current = false
 
-      const data = await res.json()
+      const getpost = async (opts = {}) => {
+        const requestedId = String(id || '')
+        if (!requestedId) return
+        const silent = opts.silent === true
 
-      if(res.ok && data?._id){
-        // Keep feed/profile list intact — update or insert the opened post by id.
-        setFollowPost((prev) => {
-          const nextPost = { ...data, replies: [] }
-          const list = Array.isArray(prev) ? prev : []
-          const idx = list.findIndex((p) => String(p?._id) === String(nextPost._id))
-          if (idx >= 0) {
-            const copy = [...list]
-            copy[idx] = mergePostUpdate(list[idx], nextPost)
-            return copy
+        try {
+          const res = await fetch(postDetailApiUrl(id, { includeReplies: false }), {
+            credentials: 'include',
+          })
+
+          const data = await res.json().catch(() => ({}))
+
+          if (res.ok && data?._id) {
+            setPostLoadFailed(false)
+            missingPostHandledRef.current = false
+            // Keep feed/profile list intact — update or insert the opened post by id.
+            setFollowPost((prev) => {
+              const nextPost = { ...data, replies: [] }
+              const list = Array.isArray(prev) ? prev : []
+              const idx = list.findIndex((p) => String(p?._id) === String(nextPost._id))
+              if (idx >= 0) {
+                const copy = [...list]
+                copy[idx] = mergePostUpdate(list[idx], nextPost)
+                return copy
+              }
+              return [nextPost, ...list]
+            })
+            setPostReplies([])
+            setCommentsHasMore(false)
+            commentsSkipRef.current = 0
+            commentsFetchGenRef.current += 1
+            if (!hideChannelPostComments(data) || footballMatchId) {
+              fetchCommentsPageRef.current(false)
+            }
+            return
           }
-          return [nextPost, ...list]
-        })
-        setPostReplies([])
-        setCommentsHasMore(false)
-        commentsSkipRef.current = 0
-        commentsFetchGenRef.current += 1
-        if (!hideChannelPostComments(data) || footballMatchId) {
-          fetchCommentsPageRef.current(false)
+
+          // Deleted / missing post (same idea as mobile PostDetailScreen)
+          const msg = String(data?.message || data?.error || '').toLowerCase()
+          const missing =
+            res.status === 404 ||
+            msg.includes('no post') ||
+            msg.includes('not found') ||
+            msg.includes('post not found')
+
+          if (missing) {
+            setFollowPost((prev) =>
+              (Array.isArray(prev) ? prev : []).filter(
+                (p) => String(p?._id) !== requestedId,
+              ),
+            )
+            setPostLoadFailed(true)
+            if (!missingPostHandledRef.current) {
+              missingPostHandledRef.current = true
+              if (!silent) {
+                showToast('Info', 'Post not found', 'info')
+              }
+              if (window.history.length > 1) navigate(-1)
+              else navigate('/notifications')
+            }
+          } else if (!silent) {
+            setPostLoadFailed(true)
+            showToast('Error', data?.error || data?.message || 'Failed to load post', 'error')
+          }
+        } catch (err) {
+          console.error('Error loading post:', err)
+          if (!silent && !missingPostHandledRef.current) {
+            setPostLoadFailed(true)
+            missingPostHandledRef.current = true
+            showToast('Error', 'Failed to load post', 'error')
+            if (window.history.length > 1) navigate(-1)
+            else navigate('/notifications')
+          }
         }
       }
-      }
 
-   getpost()
-   
-   // Refresh post when page becomes visible (in case profile was updated)
-   const handleVisibilityChange = () => {
-     if (document.visibilityState === 'visible') {
-       getpost()
-     }
-   }
-   document.addEventListener('visibilitychange', handleVisibilityChange)
-   
-   return () => {
-     document.removeEventListener('visibilitychange', handleVisibilityChange)
-   }
-  },[id, setFollowPost, footballMatchId])
+      getpost()
+
+      // Refresh post when page becomes visible (in case profile was updated)
+      const handleVisibilityChange = () => {
+        if (document.visibilityState === 'visible') {
+          getpost({ silent: true })
+        }
+      }
+      document.addEventListener('visibilitychange', handleVisibilityChange)
+
+      return () => {
+        document.removeEventListener('visibilitychange', handleVisibilityChange)
+      }
+    }, [id, setFollowPost, footballMatchId, showToast, navigate])
 
   useEffect(() => {
     const el = loadMoreRef.current
@@ -703,6 +752,18 @@ const PostPage = () => {
   console.log(followPost)
   
 if(!post) {
+  if (postLoadFailed) {
+    return (
+      <Flex justifyContent="center" minH="70vh" alignItems="center" direction="column" gap={3}>
+        <Text color={textColor} fontWeight="600">
+          Post not found
+        </Text>
+        <Button size="sm" onClick={() => (window.history.length > 1 ? navigate(-1) : navigate('/notifications'))}>
+          Go back
+        </Button>
+      </Flex>
+    )
+  }
   return (
     <Flex justifyContent="center" minH="70vh" alignItems="center">
       <Spinner size="xl" />
