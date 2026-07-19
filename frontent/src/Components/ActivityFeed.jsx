@@ -12,6 +12,8 @@ import { followIdToString } from '../utils/postUtils.js'
 // How long an activity stays visible. Must match backend ACTIVITY_RETENTION_HOURS.
 const ACTIVITY_RETENTION_HOURS = 12
 const ACTIVITY_RETENTION_MS = ACTIVITY_RETENTION_HOURS * 60 * 60 * 1000
+// Must match backend ACTIVITY_MAX_PER_USER.
+const ACTIVITY_MAX = 40
 
 /** Normalize API/socket createdAt (ISO string, ms, Date, or Mongo-style { $date }) for relative labels */
 function parseActivityCreatedAt(value) {
@@ -94,7 +96,7 @@ const ActivityFeed = () => {
                     const retentionCutoff = new Date(Date.now() - ACTIVITY_RETENTION_MS)
                     const recentActivities = data.activities
                         .filter((activity) => new Date(activity.createdAt) >= retentionCutoff)
-                        .slice(0, 15)
+                        .slice(0, ACTIVITY_MAX)
                     setActivities(recentActivities)
                 }
             } catch (error) {
@@ -147,7 +149,7 @@ const ActivityFeed = () => {
                 const deduped = newId
                     ? recentActivities.filter(a => String(a?._id) !== newId)
                     : recentActivities
-                const updated = [activity, ...deduped].slice(0, 15)
+                const updated = [activity, ...deduped].slice(0, ACTIVITY_MAX)
                 return updated
             })
         }
