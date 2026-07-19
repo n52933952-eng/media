@@ -921,14 +921,21 @@ export const deleteMessage = async (req, res) => {
     // Delete the message
     await Message.findByIdAndDelete(messageId)
 
-    // Emit only to participants in this conversation (not a global broadcast)
+    // Emit only to participants in this conversation (not a global broadcast).
+    // Conversation room + each participant's self room: room membership can lag
+    // right after reconnect, which made deletion "sometimes" miss the other user.
     if (conversation) {
       const io = getIO()
       if (io) {
-        io.to(message.conversationId.toString()).emit("messageDeleted", {
+        const payload = {
           conversationId: message.conversationId.toString(),
           messageId: messageId,
-        })
+        }
+        io.to(message.conversationId.toString()).emit('messageDeleted', payload)
+        for (const pid of conversation.participants || []) {
+          const selfRoom = getUserSelfRoomId(idStr(pid))
+          if (selfRoom) io.to(selfRoom).emit('messageDeleted', payload)
+        }
       }
     }
 
