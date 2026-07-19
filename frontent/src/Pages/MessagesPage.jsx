@@ -1499,7 +1499,7 @@ const MessagesPage = () => {
     }
   }, [socket, selectedConversation?._id])
 
-  // Listen for reaction updates
+  // Listen for reaction / single-message deletion — only when a chat is open
   useEffect(() => {
     if (!socket || !selectedConversation?._id) return
 
@@ -1525,87 +1525,145 @@ const MessagesPage = () => {
       }
     }
 
-    socket.on("messageReactionUpdated", handleReactionUpdate)
-
-    // Listen for message deletion
     const handleMessageDeleted = ({ conversationId, messageId }) => {
       if (selectedConversation?._id && selectedConversation._id.toString() === conversationId) {
         setMessages((prev) => prev.filter((msg) => msg._id !== messageId))
       }
     }
+
+    socket.on("messageReactionUpdated", handleReactionUpdate)
     socket.on("messageDeleted", handleMessageDeleted)
 
-    // ── Group socket events ──────────────────────────────────────────────
+    return () => {
+      socket.off("messageReactionUpdated", handleReactionUpdate)
+      socket.off("messageDeleted", handleMessageDeleted)
+    }
+  }, [socket, selectedConversation?._id, selectedConversation?.isGroup, selectedConversation?.participants, user?._id])
+
+  // List-level conversation/group events — always bound while Messages page is mounted
+  // (must NOT require an open chat, or sidebar won't update for other users).
+  useEffect(() => {
+    if (!socket || !user?._id) return
+
+    const convIdEq = (a, b) => {
+      if (a == null || b == null) return false
+      return String(a) === String(b)
+    }
+    const clearIfSelected = (conversationId) => {
+      const selectedId = selectedConversationIdRef.current
+      if (convIdEq(selectedId, conversationId)) {
+        setSelectedConversation(null)
+        setMessages([])
+        setSelectedConversationId?.(null)
+      }
+    }
+
     const handleGroupCreated = (conv) => {
-      setConversations(prev => {
-        if (prev.some(c => c._id === conv._id)) return prev
+      if (!conv?._id) return
+      setConversations((prev) => {
+        if (prev.some((c) => convIdEq(c._id, conv._id))) return prev
         return [conv, ...prev]
       })
     }
     const handleGroupInfoUpdated = ({ conversationId, groupName, groupAvatar }) => {
-      setConversations(prev => prev.map(c => c._id === conversationId ? { ...c, groupName, groupAvatar } : c))
-      if (selectedConversation?._id === conversationId) setSelectedConversation(prev => prev ? { ...prev, groupName, groupAvatar } : prev)
+      setConversations((prev) =>
+        prev.map((c) =>
+          convIdEq(c._id, conversationId) ? { ...c, groupName, groupAvatar } : c,
+        ),
+      )
+      if (convIdEq(selectedConversationIdRef.current, conversationId)) {
+        setSelectedConversation((prev) => (prev ? { ...prev, groupName, groupAvatar } : prev))
+      }
     }
     const handleGroupMemberAdded = ({ conversationId, participant }) => {
-      setConversations(prev => prev.map(c => c._id === conversationId ? { ...c, participants: [...(c.participants || []), participant] } : c))
-      if (selectedConversation?._id === conversationId) setSelectedConversation(prev => prev ? { ...prev, participants: [...(prev.participants || []), participant] } : prev)
+      setConversations((prev) =>
+        prev.map((c) =>
+          convIdEq(c._id, conversationId)
+            ? { ...c, participants: [...(c.participants || []), participant] }
+            : c,
+        ),
+      )
+      if (convIdEq(selectedConversationIdRef.current, conversationId)) {
+        setSelectedConversation((prev) =>
+          prev ? { ...prev, participants: [...(prev.participants || []), participant] } : prev,
+        )
+      }
     }
     const handleGroupMemberRemoved = ({ conversationId, userId: removedId }) => {
-      setConversations(prev => prev.map(c => c._id === conversationId ? { ...c, participants: (c.participants || []).filter(p => idStr(p._id || p) !== idStr(removedId)) } : c))
-      if (selectedConversation?._id === conversationId) setSelectedConversation(prev => prev ? { ...prev, participants: (prev.participants || []).filter(p => idStr(p._id || p) !== idStr(removedId)) } : prev)
+      setConversations((prev) =>
+        prev.map((c) =>
+          convIdEq(c._id, conversationId)
+            ? {
+                ...c,
+                participants: (c.participants || []).filter(
+                  (p) => idStr(p._id || p) !== idStr(removedId),
+                ),
+              }
+            : c,
+        ),
+      )
+      if (convIdEq(selectedConversationIdRef.current, conversationId)) {
+        setSelectedConversation((prev) =>
+          prev
+            ? {
+                ...prev,
+                participants: (prev.participants || []).filter(
+                  (p) => idStr(p._id || p) !== idStr(removedId),
+                ),
+              }
+            : prev,
+        )
+      }
     }
     const handleGroupMemberLeft = ({ conversationId, userId: leftId, newAdmin }) => {
       if (idStr(leftId) === idStr(user?._id)) {
-        setConversations(prev => prev.filter(c => c._id !== conversationId))
-        if (selectedConversation?._id === conversationId) setSelectedConversation(null)
+        setConversations((prev) => prev.filter((c) => !convIdEq(c._id, conversationId)))
+        clearIfSelected(conversationId)
       } else {
         handleGroupMemberRemoved({ conversationId, userId: leftId })
-        if (newAdmin && selectedConversation?._id === conversationId) setSelectedConversation(prev => prev ? { ...prev, admin: newAdmin } : prev)
+        if (newAdmin && convIdEq(selectedConversationIdRef.current, conversationId)) {
+          setSelectedConversation((prev) => (prev ? { ...prev, admin: newAdmin } : prev))
+        }
       }
     }
     const handleRemovedFromGroup = ({ conversationId }) => {
-      setConversations(prev => prev.filter(c => c._id !== conversationId))
-      if (selectedConversation?._id === conversationId) setSelectedConversation(null)
+      setConversations((prev) => prev.filter((c) => !convIdEq(c._id, conversationId)))
+      clearIfSelected(conversationId)
     }
     const handleGroupDeleted = ({ conversationId }) => {
-      setConversations(prev => prev.filter(c => c._id !== conversationId))
-      if (selectedConversation?._id === conversationId) {
-        setSelectedConversation(null)
-        setMessages([])
-      }
+      if (conversationId == null) return
+      setConversations((prev) => prev.filter((c) => !convIdEq(c._id, conversationId)))
+      clearIfSelected(conversationId)
     }
     const handleConversationDeleted = ({ conversationId }) => {
-      setConversations(prev => prev.filter(c => c._id !== conversationId))
-      if (selectedConversation?._id === conversationId) {
-        setSelectedConversation(null)
-        setMessages([])
-      }
+      if (conversationId == null) return
+      setConversations((prev) => prev.filter((c) => !convIdEq(c._id, conversationId)))
+      clearIfSelected(conversationId)
     }
-    socket.on('groupCreated', handleGroupCreated)
-    socket.on('groupInfoUpdated', handleGroupInfoUpdated)
-    socket.on('groupMemberAdded', handleGroupMemberAdded)
-    socket.on('groupMemberRemoved', handleGroupMemberRemoved)
-    socket.on('groupMemberLeft', handleGroupMemberLeft)
-    socket.on('removedFromGroup', handleRemovedFromGroup)
-    socket.on('groupDeleted', handleGroupDeleted)
-    socket.on('conversationDeleted', handleConversationDeleted)
 
     const removeLiveShareCards = (streamerId, conversationId) => {
       const sid = String(streamerId || '')
       if (!sid) return
-      const myConv = selectedConversation?._id != null ? String(selectedConversation._id) : ''
+      const myConv =
+        selectedConversationIdRef.current != null
+          ? String(selectedConversationIdRef.current)
+          : ''
       if (conversationId && myConv && String(conversationId) !== myConv) return
-      setMessages((prev) => prev.filter((m) => {
-        const live = resolveLiveShareFromMessage(m)
-        return !live || String(live.streamerId) !== sid
-      }))
-      setConversations((prev) => prev.map((conv) => {
-        const convId = conv?._id != null ? String(conv._id) : ''
-        if (conversationId && convId !== String(conversationId)) return conv
-        const live = resolveLiveShareFromMessage(conv?.lastMessage)
-        if (!live || String(live.streamerId) !== sid) return conv
-        return { ...conv, lastMessage: { ...conv.lastMessage, text: '' } }
-      }))
+      setMessages((prev) =>
+        prev.filter((m) => {
+          const live = resolveLiveShareFromMessage(m)
+          return !live || String(live.streamerId) !== sid
+        }),
+      )
+      setConversations((prev) =>
+        prev.map((conv) => {
+          const convId = conv?._id != null ? String(conv._id) : ''
+          if (conversationId && convId !== String(conversationId)) return conv
+          const live = resolveLiveShareFromMessage(conv?.lastMessage)
+          if (!live || String(live.streamerId) !== sid) return conv
+          return { ...conv, lastMessage: { ...conv.lastMessage, text: '' } }
+        }),
+      )
     }
     const handleLiveShareExpired = (data) => {
       if (data?.streamerId != null) {
@@ -1615,12 +1673,30 @@ const MessagesPage = () => {
     const handleLiveStreamEnded = (data) => {
       if (data?.streamerId != null) removeLiveShareCards(String(data.streamerId))
     }
+
+    socket.off('groupCreated', handleGroupCreated)
+    socket.off('groupInfoUpdated', handleGroupInfoUpdated)
+    socket.off('groupMemberAdded', handleGroupMemberAdded)
+    socket.off('groupMemberRemoved', handleGroupMemberRemoved)
+    socket.off('groupMemberLeft', handleGroupMemberLeft)
+    socket.off('removedFromGroup', handleRemovedFromGroup)
+    socket.off('groupDeleted', handleGroupDeleted)
+    socket.off('conversationDeleted', handleConversationDeleted)
+    socket.off('liveShareExpired', handleLiveShareExpired)
+    socket.off('livekit:streamEnded', handleLiveStreamEnded)
+
+    socket.on('groupCreated', handleGroupCreated)
+    socket.on('groupInfoUpdated', handleGroupInfoUpdated)
+    socket.on('groupMemberAdded', handleGroupMemberAdded)
+    socket.on('groupMemberRemoved', handleGroupMemberRemoved)
+    socket.on('groupMemberLeft', handleGroupMemberLeft)
+    socket.on('removedFromGroup', handleRemovedFromGroup)
+    socket.on('groupDeleted', handleGroupDeleted)
+    socket.on('conversationDeleted', handleConversationDeleted)
     socket.on('liveShareExpired', handleLiveShareExpired)
     socket.on('livekit:streamEnded', handleLiveStreamEnded)
 
     return () => {
-      socket.off("messageReactionUpdated", handleReactionUpdate)
-      socket.off("messageDeleted", handleMessageDeleted)
       socket.off('groupCreated', handleGroupCreated)
       socket.off('groupInfoUpdated', handleGroupInfoUpdated)
       socket.off('groupMemberAdded', handleGroupMemberAdded)
@@ -1632,7 +1708,7 @@ const MessagesPage = () => {
       socket.off('liveShareExpired', handleLiveShareExpired)
       socket.off('livekit:streamEnded', handleLiveStreamEnded)
     }
-  }, [socket, selectedConversation?._id])
+  }, [socket, user?._id, setSelectedConversationId])
 
   // Handle typing indicator - emit typingStart when user types
   const handleTyping = () => {

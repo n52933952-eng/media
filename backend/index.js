@@ -57,46 +57,117 @@ app.use(cors({
 }))
 
 
-// Configure MongoDB connection with connection pooling for scalability
-mongoose.connect(process.env.MONGO, {
-    maxPoolSize: 50,        // Maximum number of connections in the pool
-    minPoolSize: 5,         // Minimum number of connections in the pool
-    serverSelectionTimeoutMS: 5000, // How long to try selecting a server
-    socketTimeoutMS: 45000, // How long to wait for a socket
-    family: 4,              // Use IPv4, skip trying IPv6
-    retryWrites: true,      // Retry writes on network errors
-    w: 'majority'            // Write concern: wait for majority of replicas
-})
-.then(async () => {
-    console.log("✅ MongoDB Connected with connection pooling")
-    
-    // Initialize Redis after MongoDB connection
-    await initRedis()
-
-    await logEmailTransportStatus()
-    
-    // Initialize Firebase Cloud Messaging for call notifications
-    console.log('🔥 [Index] About to initialize FCM...');
-    console.log('🔥 [Index] FIREBASE_SERVICE_ACCOUNT exists:', !!process.env.FIREBASE_SERVICE_ACCOUNT);
-    console.log('🔥 [Index] FIREBASE_SERVICE_ACCOUNT length:', process.env.FIREBASE_SERVICE_ACCOUNT?.length || 0);
+// Configure MongoDB connection with connection pooling for scalability.
+// Startup order (required for multi-server socket fan-out): Mongo → Redis → Socket.IO → listen.
+async function startServer() {
     try {
-      initializeFCM();
-      console.log('🔥 [Index] FCM initialization call completed');
-      
-      // Check status after initialization
-      setTimeout(async () => {
-        const status = getFCMStatus();
-        console.log('🔥 [Index] FCM Status after init:', JSON.stringify(status, null, 2));
-      }, 1000);
+        await mongoose.connect(process.env.MONGO, {
+            maxPoolSize: 50,        // Maximum number of connections in the pool
+            minPoolSize: 5,         // Minimum number of connections in the pool
+            serverSelectionTimeoutMS: 5000, // How long to try selecting a server
+            socketTimeoutMS: 45000, // How long to wait for a socket
+            family: 4,              // Use IPv4, skip trying IPv6
+            retryWrites: true,      // Retry writes on network errors
+            w: 'majority'            // Write concern: wait for majority of replicas
+        })
+        console.log("✅ MongoDB Connected with connection pooling")
+
+        // Redis MUST be ready before Socket.IO attaches the Redis adapter.
+        await initRedis()
+
+        await logEmailTransportStatus()
+
+        // Initialize Firebase Cloud Messaging for call notifications
+        console.log('🔥 [Index] About to initialize FCM...');
+        console.log('🔥 [Index] FIREBASE_SERVICE_ACCOUNT exists:', !!process.env.FIREBASE_SERVICE_ACCOUNT);
+        console.log('🔥 [Index] FIREBASE_SERVICE_ACCOUNT length:', process.env.FIREBASE_SERVICE_ACCOUNT?.length || 0);
+        try {
+            initializeFCM();
+            console.log('🔥 [Index] FCM initialization call completed');
+            setTimeout(async () => {
+                const status = getFCMStatus();
+                console.log('🔥 [Index] FCM Status after init:', JSON.stringify(status, null, 2));
+            }, 1000);
+        } catch (error) {
+            console.error('❌ [Index] Error calling initializeFCM:', error);
+            console.error('❌ [Index] Error stack:', error.stack);
+        }
+
+        const result = await initializeSocket(app)
+        const server = result.server
+        server.listen(process.env.PORT, () => {
+            console.log("✅ Server is running on port", process.env.PORT)
+            console.log("✅ App is ready for 1M+ users with Redis scaling!")
+
+            // Initialize Football Cron Jobs AFTER socket is initialized (IMPORTANT: Socket must be ready first!)
+            console.log("⚽ Initializing Football Cron Jobs (Socket.IO is ready)...")
+            initializeFootballCron()
+            console.log("✅ Football Cron Jobs initialized successfully")
+
+            // Initialize Weather Cron Jobs AFTER socket is initialized
+            console.log("🌤️ Initializing Weather Cron Jobs (Socket.IO is ready)...")
+            initializeWeatherCron()
+            console.log("✅ Weather Cron Jobs initialized successfully")
+
+            // Ensure Football account exists on startup
+            setTimeout(async () => {
+                try {
+                    const User = (await import('./models/user.js')).default
+                    let footballAccount = await User.findOne({ username: 'Football' })
+
+                    if (!footballAccount) {
+                        console.log('📦 Creating Football system account on startup...')
+                        footballAccount = new User({
+                            name: 'Football Live',
+                            username: 'Football',
+                            email: 'football@system.app',
+                            password: Math.random().toString(36),
+                            bio: '⚽ Live football scores, fixtures & updates from top leagues worldwide 🏆',
+                            profilePic: 'https://cdn-icons-png.flaticon.com/512/53/53283.png'
+                        })
+                        await footballAccount.save()
+                        console.log('✅ Football system account created on startup')
+                    } else {
+                        console.log('✅ Football account already exists')
+                    }
+                } catch (error) {
+                    console.error('❌ Error checking Football account on startup:', error)
+                }
+            }, 2000) // Run 2 seconds after server starts
+
+            // Ensure Weather account exists on startup
+            setTimeout(async () => {
+                try {
+                    const { getWeatherAccount } = await import('./controller/weather.js')
+                    await getWeatherAccount()
+                } catch (error) {
+                    console.error('❌ Error checking Weather account on startup:', error)
+                }
+            }, 2500) // Run 2.5 seconds after server starts
+
+            // Initialize Chess Post Cleanup Cron Job
+            initializeChessPostCleanup()
+            //
+            // Initialize Activity Cleanup Cron Job
+            initializeActivityCleanup()
+
+            // Expired stories: MongoDB + R2 storage cleanup
+            initializeStoryCleanup()
+
+            // Old notifications (14d) + chat messages (100d) — batched, capped per run
+            initializeDataRetentionCleanup()
+
+            // Moment Capsule: frequent due-check for accurate short reminders (1m/5m).
+            // Tunable via env; default 10s for near-real-time without heavy load.
+            const capsuleCheckMs = Number(process.env.CAPSULE_CHECK_INTERVAL_MS || 10 * 1000)
+            setInterval(processDueCapsules, Math.max(1000, capsuleCheckMs))
+            processDueCapsules() // run once immediately on startup
+        })
     } catch (error) {
-      console.error('❌ [Index] Error calling initializeFCM:', error);
-      console.error('❌ [Index] Error stack:', error.stack);
+        console.error('❌ Failed to start server:', error)
+        process.exit(1)
     }
-})
-.catch((error) => {
-    console.error("❌ MongoDB connection error:", error)
-    process.exit(1) // Exit if database connection fails
-})
+}
 
 
 
@@ -196,98 +267,12 @@ app.get('*', (req, res) => {
     res.sendFile(path.join(__dirname, '../frontent/dist/index.html'))
 })
 
+// Start only after all Express routes above are registered.
+startServer()
 
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-// Initialize Socket.IO with the Express app (async - waits for Redis adapter setup)
-// Start server using the HTTP server from Socket.IO
-initializeSocket(app).then((result) => {
-    const server = result.server
-    server.listen(process.env.PORT, () => {
-        console.log("✅ Server is running on port", process.env.PORT)
-        console.log("✅ App is ready for 1M+ users with Redis scaling!")
-        
-        // Initialize Football Cron Jobs AFTER socket is initialized (IMPORTANT: Socket must be ready first!)
-        console.log("⚽ Initializing Football Cron Jobs (Socket.IO is ready)...")
-        initializeFootballCron()
-        console.log("✅ Football Cron Jobs initialized successfully")
-        
-        // Initialize Weather Cron Jobs AFTER socket is initialized
-        console.log("🌤️ Initializing Weather Cron Jobs (Socket.IO is ready)...")
-        initializeWeatherCron()
-        console.log("✅ Weather Cron Jobs initialized successfully")
-        
-        // Ensure Football account exists on startup
-        setTimeout(async () => {
-            try {
-                const User = (await import('./models/user.js')).default
-                let footballAccount = await User.findOne({ username: 'Football' })
-                
-                if (!footballAccount) {
-                    console.log('📦 Creating Football system account on startup...')
-                    footballAccount = new User({
-                        name: 'Football Live',
-                        username: 'Football',
-                        email: 'football@system.app',
-                        password: Math.random().toString(36),
-                        bio: '⚽ Live football scores, fixtures & updates from top leagues worldwide 🏆',
-                        profilePic: 'https://cdn-icons-png.flaticon.com/512/53/53283.png'
-                    })
-                    await footballAccount.save()
-                    console.log('✅ Football system account created on startup')
-                } else {
-                    console.log('✅ Football account already exists')
-                }
-            } catch (error) {
-                console.error('❌ Error checking Football account on startup:', error)
-            }
-        }, 2000) // Run 2 seconds after server starts
-        
-        // Ensure Weather account exists on startup
-        setTimeout(async () => {
-            try {
-                const { getWeatherAccount } = await import('./controller/weather.js')
-                await getWeatherAccount()
-            } catch (error) {
-                console.error('❌ Error checking Weather account on startup:', error)
-            }
-        }, 2500) // Run 2.5 seconds after server starts
-        
-        // Initialize Chess Post Cleanup Cron Job
-        initializeChessPostCleanup()
-        //
-        // Initialize Activity Cleanup Cron Job
-        initializeActivityCleanup()
-
-        // Expired stories: MongoDB + R2 storage cleanup
-        initializeStoryCleanup()
-
-        // Old notifications (14d) + chat messages (100d) — batched, capped per run
-        initializeDataRetentionCleanup()
-
-        // Moment Capsule: frequent due-check for accurate short reminders (1m/5m).
-        // Tunable via env; default 10s for near-real-time without heavy load.
-        const capsuleCheckMs = Number(process.env.CAPSULE_CHECK_INTERVAL_MS || 10 * 1000)
-        setInterval(processDueCapsules, Math.max(1000, capsuleCheckMs))
-        processDueCapsules() // run once immediately on startup
-    })
-}).catch((error) => {
-    console.error('❌ Failed to initialize Socket.IO:', error)
-    process.exit(1)
-})
 
 
 

@@ -1175,22 +1175,24 @@ export const initializeSocket = async (app) => {
         }
     })
 
-    // Set up Redis adapter for Socket.IO (REQUIRED for multi-server scaling)
+    // Set up Redis adapter for Socket.IO (REQUIRED for multi-server scaling).
+    // Caller must await initRedis() before initializeSocket so pub/sub clients exist.
     if (process.env.REDIS_URL) {
         try {
             const { createAdapter } = await import('@socket.io/redis-adapter')
             const { getRedisPubSub } = await import('../services/redis.js')
             const pubSub = getRedisPubSub()
-            
+
             if (pubSub && pubSub.pubClient && pubSub.subClient) {
                 io.adapter(createAdapter(pubSub.pubClient, pubSub.subClient))
                 console.log('✅ Socket.IO Redis adapter configured - ready for multi-server scaling!')
             } else {
-                console.warn('⚠️  Redis pub/sub clients not available - Socket.IO adapter not configured')
+                console.error('❌ CRITICAL: Redis pub/sub clients not available - Socket.IO adapter required')
+                process.exit(1)
             }
         } catch (error) {
             console.error('❌ Failed to set up Socket.IO Redis adapter:', error.message)
-            // Don't exit - app can work with single server, but won't scale horizontally
+            process.exit(1)
         }
     }
 

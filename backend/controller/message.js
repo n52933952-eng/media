@@ -827,16 +827,57 @@ export const getTotalUnreadCount = async (req, res) => {
   }
 }
 
+/** DELETE /api/message/conversation/:id — DM-only; both participants get a targeted tombstone. */
 export const deletconversation = async (req, res) => {
   try {
+    const requesterId = idStr(req.user?._id)
     const convId = req.params.id
-    const conv = await Conversation.findById(convId).select('groupAvatar').lean()
-    await destroyMediaAssetsForConversation(convId)
-    if (conv?.groupAvatar && isManagedMediaUrl(String(conv.groupAvatar))) {
-      await destroyMediaAssetForMessageImgUrl(conv.groupAvatar)
+    if (!requesterId) return res.status(401).json({ error: 'Unauthorized' })
+    if (!convId || !mongoose.Types.ObjectId.isValid(convId)) {
+      return res.status(400).json({ error: 'Invalid conversation id' })
     }
-    await Message.deleteMany({ conversationId: convId })
-    await Conversation.findByIdAndDelete(convId)
+
+    const conversation = await Conversation.findById(convId).select(
+      '_id isGroup participants groupAvatar',
+    )
+    if (!conversation) {
+      return res.status(404).json({ error: 'Conversation not found' })
+    }
+    // Groups use DELETE /api/message/group/:id (admin-only).
+    if (conversation.isGroup) {
+      return res.status(400).json({ error: 'Use group delete endpoint for groups' })
+    }
+
+    const participantIds = (conversation.participants || [])
+      .map((p) => idStr(p))
+      .filter(Boolean)
+    if (participantIds.length !== 2 || !participantIds.includes(requesterId)) {
+      return res.status(403).json({ error: 'Not authorized to delete this conversation' })
+    }
+
+    const convIdStr = idStr(conversation._id)
+
+    await destroyMediaAssetsForConversation(conversation._id)
+    if (conversation.groupAvatar && isManagedMediaUrl(String(conversation.groupAvatar))) {
+      await destroyMediaAssetForMessageImgUrl(conversation.groupAvatar)
+    }
+    await Message.deleteMany({ conversationId: conversation._id })
+    await Conversation.findByIdAndDelete(conversation._id)
+    await clearConversationUnreadForUsers(participantIds, convIdStr)
+
+    // Emit AFTER commit — O(1) fan-out to each user's self room (all tabs/devices).
+    const io = getIO()
+    if (io) {
+      const payload = { conversationId: convIdStr }
+      for (const uid of participantIds) {
+        const selfRoom = getUserSelfRoomId(uid)
+        if (selfRoom) io.to(selfRoom).emit('conversationDeleted', payload)
+      }
+      for (const uid of participantIds) {
+        emitUnreadCountUpdate(io, uid, getUserSocket).catch(() => {})
+      }
+    }
+
     res.status(200).json('all deleted')
   } catch (error) {
     res.status(500).json({ error: error.message })
@@ -1139,12 +1180,9 @@ export const deleteGroup = async (req, res) => {
     if (idStr(conversation.admin) !== idStr(adminId)) return res.status(403).json({ error: 'Only admin can delete the group' })
 
     const conversationId = idStr(conversation._id)
-
-    // Notify all members before deleting
-    const io = getIO()
-    if (io) {
-      io.to(conversationId).emit('groupDeleted', { conversationId })
-    }
+    const participantIds = (conversation.participants || [])
+      .map((p) => idStr(p))
+      .filter(Boolean)
 
     await destroyMediaAssetsForConversation(conversation._id)
     if (conversation.groupAvatar && isManagedMediaUrl(String(conversation.groupAvatar))) {
@@ -1152,6 +1190,22 @@ export const deleteGroup = async (req, res) => {
     }
     await Message.deleteMany({ conversationId: conversation._id })
     await Conversation.findByIdAndDelete(conversation._id)
+    await clearConversationUnreadForUsers(participantIds, conversationId)
+
+    // Emit AFTER commit — conversation room + each member's self room (list updates
+    // even if a socket hasn't joined the group room yet). Still O(members), never global.
+    const io = getIO()
+    if (io) {
+      const payload = { conversationId }
+      io.to(conversationId).emit('groupDeleted', payload)
+      for (const uid of participantIds) {
+        const selfRoom = getUserSelfRoomId(uid)
+        if (selfRoom) io.to(selfRoom).emit('groupDeleted', payload)
+      }
+      for (const uid of participantIds) {
+        emitUnreadCountUpdate(io, uid, getUserSocket).catch(() => {})
+      }
+    }
 
     res.status(200).json({ ok: true })
   } catch (error) {
