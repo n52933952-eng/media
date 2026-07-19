@@ -4,14 +4,18 @@ import { emitToUserIds } from '../services/postSocketEmit.js'
 import User from '../models/user.js'
 import Follow from '../models/follow.js'
 
+// How long an activity stays visible/stored. Keep server + clients in sync.
+export const ACTIVITY_RETENTION_HOURS = 12
+const ACTIVITY_RETENTION_MS = ACTIVITY_RETENTION_HOURS * 60 * 60 * 1000
+
 // Create an activity and emit to followers
 export const createActivity = async (userId, type, options = {}) => {
     try {
-        // Delete activities older than 6 hours
-        const sixHoursAgo = new Date(Date.now() - 6 * 60 * 60 * 1000)
+        // Delete this user's activities past the retention window
+        const retentionCutoff = new Date(Date.now() - ACTIVITY_RETENTION_MS)
         await Activity.deleteMany({
             userId: userId,
-            createdAt: { $lt: sixHoursAgo }
+            createdAt: { $lt: retentionCutoff }
         })
         
         // Get current activity count for this user
@@ -85,16 +89,16 @@ export const getActivities = async (req, res) => {
         const followingDocs = await Follow.find({ followerId: userId }).select('followeeId').limit(5000).lean()
         const followingIds = followingDocs.map(d => d.followeeId?.toString?.() ?? String(d.followeeId))
 
-        // Only get activities from last 6 hours
-        const sixHoursAgo = new Date(Date.now() - 6 * 60 * 60 * 1000)
-        
+        // Only get activities from the retention window
+        const retentionCutoff = new Date(Date.now() - ACTIVITY_RETENTION_MS)
+
         console.log(`📊 [getActivities] Fetching activities for ${followingIds.length} followed users`)
-        console.log(`📊 [getActivities] Current time: ${new Date().toISOString()}, 6 hours ago: ${sixHoursAgo.toISOString()}`)
+        console.log(`📊 [getActivities] Current time: ${new Date().toISOString()}, cutoff (${ACTIVITY_RETENTION_HOURS}h ago): ${retentionCutoff.toISOString()}`)
 
         // Get activities from users they follow (only recent ones, max 15)
         const activities = await Activity.find({
             userId: { $in: followingIds },
-            createdAt: { $gte: sixHoursAgo } // Only activities from last 6 hours
+            createdAt: { $gte: retentionCutoff } // Only activities within retention window
         })
         .populate('userId', 'username name profilePic')
         .populate('targetUser', 'username name profilePic')
@@ -117,7 +121,7 @@ export const getActivities = async (req, res) => {
             console.log(`   Oldest: ${oldestActivity.createdAt?.toISOString()} (${Math.round((Date.now() - new Date(oldestActivity.createdAt).getTime()) / (1000 * 60 * 60))}h ago)`);
             console.log(`   Newest: ${newestActivity.createdAt?.toISOString()} (${Math.round((Date.now() - new Date(newestActivity.createdAt).getTime()) / (1000 * 60))}m ago)`);
         } else {
-            console.log(`📊 [getActivities] No activities found in last 6 hours`);
+            console.log(`📊 [getActivities] No activities found in last ${ACTIVITY_RETENTION_HOURS} hours`);
         }
 
         res.status(200).json({ activities })
@@ -158,22 +162,22 @@ export const deleteActivity = async (req, res) => {
     }
 }
 
-// Cleanup old activities (older than 6 hours) - call this periodically
+// Cleanup old activities (older than retention window) - call this periodically
 export const cleanupOldActivities = async () => {
     try {
-        const sixHoursAgo = new Date(Date.now() - 6 * 60 * 60 * 1000)
-        const sixHoursAgoISO = sixHoursAgo.toISOString()
-        
-        console.log(`🧹 [cleanupOldActivities] Starting cleanup - deleting activities older than 6 hours (before ${sixHoursAgoISO})`)
-        
+        const retentionCutoff = new Date(Date.now() - ACTIVITY_RETENTION_MS)
+        const retentionCutoffISO = retentionCutoff.toISOString()
+
+        console.log(`🧹 [cleanupOldActivities] Starting cleanup - deleting activities older than ${ACTIVITY_RETENTION_HOURS} hours (before ${retentionCutoffISO})`)
+
         const result = await Activity.deleteMany({
-            createdAt: { $lt: sixHoursAgo }
+            createdAt: { $lt: retentionCutoff }
         })
-        
+
         if (result.deletedCount > 0) {
-            console.log(`✅ [cleanupOldActivities] Deleted ${result.deletedCount} old activities (older than 6 hours)`)
+            console.log(`✅ [cleanupOldActivities] Deleted ${result.deletedCount} old activities (older than ${ACTIVITY_RETENTION_HOURS} hours)`)
         } else {
-            console.log(`✅ [cleanupOldActivities] No old activities to delete (all activities are within last 6 hours)`)
+            console.log(`✅ [cleanupOldActivities] No old activities to delete (all within last ${ACTIVITY_RETENTION_HOURS} hours)`)
         }
         
         // Also ensure each user has max 15 activities (delete oldest if more)

@@ -9,6 +9,10 @@ import API_BASE_URL from '../config/api'
 
 import { followIdToString } from '../utils/postUtils.js'
 
+// How long an activity stays visible. Must match backend ACTIVITY_RETENTION_HOURS.
+const ACTIVITY_RETENTION_HOURS = 12
+const ACTIVITY_RETENTION_MS = ACTIVITY_RETENTION_HOURS * 60 * 60 * 1000
+
 /** Normalize API/socket createdAt (ISO string, ms, Date, or Mongo-style { $date }) for relative labels */
 function parseActivityCreatedAt(value) {
     if (value == null) return null
@@ -87,9 +91,9 @@ const ActivityFeed = () => {
                 })
                 const data = await res.json()
                 if (!ac.signal.aborted && res.ok && data.activities) {
-                    const sixHoursAgo = new Date(Date.now() - 6 * 60 * 60 * 1000)
+                    const retentionCutoff = new Date(Date.now() - ACTIVITY_RETENTION_MS)
                     const recentActivities = data.activities
-                        .filter((activity) => new Date(activity.createdAt) >= sixHoursAgo)
+                        .filter((activity) => new Date(activity.createdAt) >= retentionCutoff)
                         .slice(0, 15)
                     setActivities(recentActivities)
                 }
@@ -133,13 +137,17 @@ const ActivityFeed = () => {
             }
             
             setActivities(prev => {
-                // Filter out activities older than 6 hours
-                const sixHoursAgo = new Date(Date.now() - 6 * 60 * 60 * 1000)
-                const recentActivities = prev.filter(a => 
-                    new Date(a.createdAt) >= sixHoursAgo
+                // Filter out activities past the retention window
+                const retentionCutoff = new Date(Date.now() - ACTIVITY_RETENTION_MS)
+                const recentActivities = prev.filter(a =>
+                    new Date(a.createdAt) >= retentionCutoff
                 )
-                // Add new activity at the beginning, replace old ones if limit reached (keep only 15)
-                const updated = [activity, ...recentActivities].slice(0, 15)
+                // Dedupe by id, add newest first, keep only 15
+                const newId = activity?._id != null ? String(activity._id) : ''
+                const deduped = newId
+                    ? recentActivities.filter(a => String(a?._id) !== newId)
+                    : recentActivities
+                const updated = [activity, ...deduped].slice(0, 15)
                 return updated
             })
         }
