@@ -1503,25 +1503,20 @@ const MessagesPage = () => {
   useEffect(() => {
     if (!socket || !selectedConversation?._id) return
 
-    const handleReactionUpdate = async ({ conversationId, messageId }) => {
-      if (selectedConversation?._id && conversationId === selectedConversation._id.toString()) {
-        try {
-          const base = import.meta.env.PROD ? window.location.origin : 'http://localhost:5000'
-          const isGroupConv = !!selectedConversation.isGroup
-          const otherUser = isGroupConv ? null : selectedConversation.participants.find(p => idStr(p._id) !== idStr(user?._id)) || selectedConversation.participants[0]
-          const url = isGroupConv
-            ? `${base}/api/message/${selectedConversation._id}?limit=12&conversationId=${selectedConversation._id}`
-            : `${base}/api/message/${otherUser._id}?limit=12`
-          if (!isGroupConv && !otherUser?._id) return
-          const res = await fetch(url, { credentials: 'include' })
-          const data = await res.json()
-          if (res.ok) {
-            setMessages(data.messages || [])
-            setHasMoreMessages(data.hasMore || false)
-          }
-        } catch (error) {
-          console.error('Error fetching updated messages:', error)
-        }
+    const handleReactionUpdate = ({ conversationId, messageId, reactions }) => {
+      if (
+        selectedConversation?._id &&
+        String(conversationId) === String(selectedConversation._id) &&
+        messageId != null &&
+        Array.isArray(reactions)
+      ) {
+        // Canonical server state; idempotent even if this device initiated it.
+        // Update one message without replacing loaded/paginated chat history.
+        setMessages((prev) =>
+          prev.map((msg) =>
+            String(msg?._id) === String(messageId) ? { ...msg, reactions } : msg,
+          ),
+        )
       }
     }
 
@@ -1538,7 +1533,7 @@ const MessagesPage = () => {
       socket.off("messageReactionUpdated", handleReactionUpdate)
       socket.off("messageDeleted", handleMessageDeleted)
     }
-  }, [socket, selectedConversation?._id, selectedConversation?.isGroup, selectedConversation?.participants, user?._id])
+  }, [socket, selectedConversation?._id])
 
   // List-level conversation/group events — always bound while Messages page is mounted
   // (must NOT require an open chat, or sidebar won't update for other users).

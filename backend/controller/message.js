@@ -990,9 +990,25 @@ export const toggleReaction = async (req, res) => {
     const { emoji } = req.body
     const userId = req.user._id
 
+    if (typeof emoji !== 'string' || !emoji.trim() || emoji.length > 16) {
+      return res.status(400).json({ error: 'Invalid reaction' })
+    }
+
     const message = await Message.findById(messageId)
     if (!message) {
       return res.status(404).json({ error: 'Message not found' })
+    }
+
+    // Authorize before mutating: only conversation participants may react.
+    const conversation = await Conversation.findById(message.conversationId)
+      .select('_id participants')
+      .lean()
+    if (!conversation) {
+      return res.status(404).json({ error: 'Conversation not found' })
+    }
+    const participantIds = (conversation.participants || []).map(idStr).filter(Boolean)
+    if (!participantIds.includes(idStr(userId))) {
+      return res.status(403).json({ error: 'Not authorized to react in this conversation' })
     }
 
     // Check if user already has ANY reaction on this message
@@ -1019,16 +1035,22 @@ export const toggleReaction = async (req, res) => {
     // Populate userId in reactions for response
     await message.populate('reactions.userId', 'username name profilePic')
 
-    // Emit only to participants in this conversation (not a global broadcast)
-    const conversation = await Conversation.findById(message.conversationId)
-    if (conversation) {
-      const io = getIO()
-      if (io) {
-        io.to(message.conversationId.toString()).emit("messageReactionUpdated", {
-          conversationId: message.conversationId.toString(),
-          messageId: message._id.toString(),
-        })
-      }
+    // One targeted union broadcast: active conversation room + participant
+    // self-rooms. Socket.IO de-duplicates sockets that belong to both rooms.
+    // The canonical reaction array lets clients update one message locally,
+    // without a chat-page refetch for every reaction.
+    const io = getIO()
+    if (io) {
+      const conversationId = idStr(message.conversationId)
+      const rooms = [
+        conversationId,
+        ...participantIds.map(getUserSelfRoomId).filter(Boolean),
+      ]
+      io.to(rooms).emit('messageReactionUpdated', {
+        conversationId,
+        messageId: idStr(message._id),
+        reactions: message.toObject().reactions || [],
+      })
     }
 
     res.status(200).json(message)
