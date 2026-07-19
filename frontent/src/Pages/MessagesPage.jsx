@@ -1640,6 +1640,13 @@ const MessagesPage = () => {
       setConversations((prev) => prev.filter((c) => !convIdEq(c._id, conversationId)))
       clearIfSelected(conversationId)
     }
+    // Deleted message was the sidebar preview — server sends the repaired lastMessage.
+    const handleMessageDeletedForList = ({ conversationId, lastMessage }) => {
+      if (conversationId == null || lastMessage === undefined) return
+      setConversations((prev) =>
+        prev.map((c) => (convIdEq(c._id, conversationId) ? { ...c, lastMessage } : c)),
+      )
+    }
 
     const removeLiveShareCards = (streamerId, conversationId) => {
       const sid = String(streamerId || '')
@@ -1682,6 +1689,7 @@ const MessagesPage = () => {
     socket.off('removedFromGroup', handleRemovedFromGroup)
     socket.off('groupDeleted', handleGroupDeleted)
     socket.off('conversationDeleted', handleConversationDeleted)
+    socket.off('messageDeleted', handleMessageDeletedForList)
     socket.off('liveShareExpired', handleLiveShareExpired)
     socket.off('livekit:streamEnded', handleLiveStreamEnded)
 
@@ -1693,6 +1701,7 @@ const MessagesPage = () => {
     socket.on('removedFromGroup', handleRemovedFromGroup)
     socket.on('groupDeleted', handleGroupDeleted)
     socket.on('conversationDeleted', handleConversationDeleted)
+    socket.on('messageDeleted', handleMessageDeletedForList)
     socket.on('liveShareExpired', handleLiveShareExpired)
     socket.on('livekit:streamEnded', handleLiveStreamEnded)
 
@@ -1705,6 +1714,7 @@ const MessagesPage = () => {
       socket.off('removedFromGroup', handleRemovedFromGroup)
       socket.off('groupDeleted', handleGroupDeleted)
       socket.off('conversationDeleted', handleConversationDeleted)
+      socket.off('messageDeleted', handleMessageDeletedForList)
       socket.off('liveShareExpired', handleLiveShareExpired)
       socket.off('livekit:streamEnded', handleLiveStreamEnded)
     }

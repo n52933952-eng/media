@@ -253,39 +253,51 @@ export async function deleteDirectConversationBetweenUsers(userIdA, userIdB) {
 async function broadcastToConversation(conversationId, event, payload, excludeSenderId, participantIds, senderPopulated, groupName) {
   const io = getIO()
   const roomId = idStr(conversationId)
+
+  // Cluster-wide snapshot of who is in the conversation room, keyed by their
+  // `userSelf:<id>` room. The old check used the LOCAL node's room map + the
+  // single tracked socket id per user — wrong with multiple servers/devices
+  // and stale right after reconnect (caused missed messages, duplicate
+  // self-room emits and spurious FCM pushes).
+  const selfRoomsInRoom = new Set()
+  if (io) {
+    try {
+      const socketsInRoom = await io.in(roomId).fetchSockets()
+      for (const s of socketsInRoom) {
+        for (const r of s.rooms) {
+          if (typeof r === 'string' && r.startsWith('userSelf:')) selfRoomsInRoom.add(r)
+        }
+      }
+    } catch (_) {
+      // fall through — everyone gets the self-room emit (harmless, clients dedupe)
+    }
+  }
+
   if (io) {
     io.to(roomId).emit(event, payload)
     // Also fan-out to each member's self room so they receive group events even if
     // they haven't joined the conversation room yet (lighter socket connect).
     if (event === 'newMessage') {
-      const { getUserSelfRoomId } = await import('../socket/socket.js')
-      const room = io?.sockets?.adapter?.rooms?.get(roomId)
-      const onlineSids = room ? [...room] : []
       for (const pid of participantIds) {
         const pidStr = idStr(pid)
         if (!pidStr || pidStr === idStr(excludeSenderId)) continue
-        const recipSocket = await getUserSocket(pidStr)
-        const inRoom = recipSocket?.socketId && onlineSids.includes(recipSocket.socketId)
-        if (!inRoom) {
-          const selfRoom = getUserSelfRoomId(pidStr)
-          if (selfRoom) io.to(selfRoom).emit(event, payload)
+        const selfRoom = getUserSelfRoomId(pidStr)
+        if (selfRoom && !selfRoomsInRoom.has(selfRoom)) {
+          io.to(selfRoom).emit(event, payload)
         }
       }
     }
   }
 
-  // Push to offline members (those not in the socket room)
+  // Push to offline members (those with no socket in the conversation room)
   try {
-    const room = io?.sockets?.adapter?.rooms?.get(roomId)
-    const onlineSids = room ? [...room] : []
     const { sendGroupMessageNotification, sendMessageNotification } = await import('../services/pushNotifications.js')
 
     for (const pid of participantIds) {
       const pidStr = idStr(pid)
       if (pidStr === idStr(excludeSenderId)) continue
-      // Check if this participant has a socket in the room
-      const recipSocket = await getUserSocket(pidStr)
-      const inRoom = recipSocket?.socketId && onlineSids.includes(recipSocket.socketId)
+      const selfRoom = getUserSelfRoomId(pidStr)
+      const inRoom = selfRoom ? selfRoomsInRoom.has(selfRoom) : false
       if (!inRoom) {
         if (groupName) {
           const sName = senderPopulated?.name || senderPopulated?.username || 'Someone'
@@ -307,35 +319,42 @@ async function broadcastToConversation(conversationId, event, payload, excludeSe
  * `delivered` stays false until the recipient app emits `ackMessageDelivered` (WhatsApp-style).
  */
 async function deliverOutboundMessage(newMessage, conversation, recipientId) {
-  const recipientSocketId = await getRecipientSockedId(recipientId)
   const io = getIO()
+  const recipientIdStr = idStr(recipientId)
+  const selfRoom = recipientIdStr ? getUserSelfRoomId(recipientIdStr) : null
 
-  // Important: only deliver via socket if connected AND client is effectively in-app (same idea as calls).
-  // Redis may still have stale socketId during disconnect/network flaps.
-  if (recipientSocketId && recipientId && io) {
-    const recipientSocket = io?.sockets?.sockets?.get?.(recipientSocketId)
-    const socketConnected = !!recipientSocket?.connected
-
-    if (socketConnected) {
-      const effectivelyOnline = await isUserEffectivelyOnline(recipientId)
-      if (effectivelyOnline) {
-        const messageWithTimestamp = {
-          ...newMessage.toObject(),
-          conversationUpdatedAt: conversation.updatedAt,
-          delivered: false,
-        }
-        io.to(recipientSocketId).emit('newMessage', messageWithTimestamp)
-        try {
-          await incrementUnread(recipientId, conversation._id)
-          await emitUnreadCountUpdate(io, recipientId, getUserSocket)
-        } catch (error) {
-          console.log('Error updating unread count:', error)
-        }
-        return false
-      }
-      // Socket still open in background but presence is offline — fall through to FCM
+  // Reachability via the recipient's self room, NOT the single tracked socket id.
+  // Every socket joins `userSelf:<id>` immediately on connect, so this survives
+  // reconnects (stale userSocket entry made delivery "sometimes" miss) and it
+  // reaches all of the recipient's devices/tabs. fetchSockets is cluster-wide.
+  let hasLiveSocket = false
+  if (io && selfRoom) {
+    try {
+      const sockets = await io.in(selfRoom).fetchSockets()
+      hasLiveSocket = Array.isArray(sockets) && sockets.length > 0
+    } catch (_) {
+      hasLiveSocket = false
     }
-    // Socket exists but isn't connected -> fall through to FCM
+  }
+
+  if (io && selfRoom && hasLiveSocket) {
+    const effectivelyOnline = await isUserEffectivelyOnline(recipientIdStr)
+    if (effectivelyOnline) {
+      const messageWithTimestamp = {
+        ...newMessage.toObject(),
+        conversationUpdatedAt: conversation.updatedAt,
+        delivered: false,
+      }
+      io.to(selfRoom).emit('newMessage', messageWithTimestamp)
+      try {
+        await incrementUnread(recipientIdStr, conversation._id)
+        await emitUnreadCountUpdate(io, recipientIdStr, getUserSocket)
+      } catch (error) {
+        console.log('Error updating unread count:', error)
+      }
+      return false
+    }
+    // Socket still open in background but presence is offline — fall through to FCM
   }
 
   if (recipientId) {
@@ -921,6 +940,22 @@ export const deleteMessage = async (req, res) => {
     // Delete the message
     await Message.findByIdAndDelete(messageId)
 
+    // If we deleted the conversation's last message, repair the denormalized
+    // preview from the newest remaining message (otherwise lists keep showing
+    // the deleted text forever).
+    let repairedLastMessage
+    if (idStr(conversation.lastMessage?.messageId) === idStr(messageId)) {
+      const latest = await Message.findOne({ conversationId: conversation._id })
+        .sort({ createdAt: -1 })
+        .select('text sender seen delivered createdAt img')
+        .lean()
+      repairedLastMessage = buildConversationLastMessageFromMessage(latest)
+      await Conversation.updateOne(
+        { _id: conversation._id },
+        { $set: { lastMessage: repairedLastMessage } },
+      )
+    }
+
     // Emit only to participants in this conversation (not a global broadcast).
     // Conversation room + each participant's self room: room membership can lag
     // right after reconnect, which made deletion "sometimes" miss the other user.
@@ -930,6 +965,8 @@ export const deleteMessage = async (req, res) => {
         const payload = {
           conversationId: message.conversationId.toString(),
           messageId: messageId,
+          // Present only when the deleted message was the conversation preview.
+          ...(repairedLastMessage !== undefined ? { lastMessage: repairedLastMessage } : {}),
         }
         io.to(message.conversationId.toString()).emit('messageDeleted', payload)
         for (const pid of conversation.participants || []) {
