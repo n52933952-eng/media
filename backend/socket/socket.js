@@ -1273,25 +1273,50 @@ export const initializeSocket = async (app) => {
                         clearTimeout(presenceAutoOnlineTimers.get(graceUid))
                         presenceAutoOnlineTimers.delete(graceUid)
                     }
-                    const t = setTimeout(async () => {
-                        presenceAutoOnlineTimers.delete(graceUid)
+                    const tryAutoOnline = async (label) => {
                         try {
-                            if (!socket.connected) return
                             const current = await getUserSocket(graceUid)
-                            if (!current?.socketId || current.socketId !== graceSocketId) return
+                            if (!current?.socketId || current.socketId !== graceSocketId) {
+                                console.log(`⏭️ [socket] Auto-online skip (${label}): socket replaced for ${graceUid}`)
+                                return false
+                            }
+                            // Prefer Redis mapping over local socket.connected (multi-node / adapter races).
                             const currentPresence = await getUserPresence(graceUid)
-                            if (currentPresence === 'online') return
+                            if (currentPresence === 'online') {
+                                // Ensure subscribers still get a delta (snapshot may have been taken while offline).
+                                io.to(`${PRESENCE_ROOM_PREFIX}${graceUid}`).emit('presenceUpdate', {
+                                    userId: graceUid,
+                                    online: true,
+                                    onlineAt: Date.now(),
+                                })
+                                console.log(`🟢 [socket] Auto-online refresh (${label}): already online ${graceUid}`)
+                                return true
+                            }
                             await setUserPresence(graceUid, 'online')
                             io.to(`${PRESENCE_ROOM_PREFIX}${graceUid}`).emit('presenceUpdate', {
                                 userId: graceUid,
                                 online: true,
                                 onlineAt: Date.now(),
                             })
-                            console.log(`🟢 [socket] Auto-online after connect grace for ${graceUid}`)
+                            console.log(`🟢 [socket] Auto-online after connect grace (${label}) for ${graceUid}`)
+                            return true
                         } catch (e) {
-                            console.error('❌ [socket] Auto-online grace failed:', e?.message || e)
+                            console.error(`❌ [socket] Auto-online grace failed (${label}):`, e?.message || e)
+                            return false
                         }
-                    }, 2200)
+                    }
+                    const t = setTimeout(async () => {
+                        presenceAutoOnlineTimers.delete(graceUid)
+                        const ok = await tryAutoOnline('1s')
+                        // One backup attempt if the first raced a brief flap.
+                        if (!ok) {
+                            const t2 = setTimeout(() => {
+                                presenceAutoOnlineTimers.delete(graceUid)
+                                void tryAutoOnline('3s')
+                            }, 2000)
+                            presenceAutoOnlineTimers.set(graceUid, t2)
+                        }
+                    }, 1000)
                     presenceAutoOnlineTimers.set(graceUid, t)
                 }
             }
