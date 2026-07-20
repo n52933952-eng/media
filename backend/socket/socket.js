@@ -1541,8 +1541,23 @@ export const initializeSocket = async (app) => {
 
                 // Snapshot: who is online among subscribed ids + full id list so clients set explicit offline
                 // (avoids "partner looks online" from global list while socket still open during app background).
-                const snapshot = await getOnlineSnapshotForUserIds(requested)
-                socket.emit('presenceSnapshot', { onlineUsers: snapshot, subscribedUserIds: requested })
+                const emitSnap = async (label) => {
+                    const snapshot = await getOnlineSnapshotForUserIds(requested)
+                    if (!socket.connected) return
+                    socket.emit('presenceSnapshot', { onlineUsers: snapshot, subscribedUserIds: requested })
+                    if (label) {
+                        console.log(
+                            `📸 [socket] presenceSnapshot (${label}) → ${socket.id}: ${snapshot.length}/${requested.length} online`,
+                        )
+                    }
+                }
+                await emitSnap('immediate')
+                // Friends often auto-online ~1s after their own connect. A second snapshot
+                // covers the race where the first snapshot was taken while they were still
+                // offline and a presenceUpdate delta was missed — no mobile app update needed.
+                setTimeout(() => {
+                    void emitSnap('delayed')
+                }, 1600)
             } catch (e) {
                 console.error('❌ [socket] presenceSubscribe error:', e.message)
             }
