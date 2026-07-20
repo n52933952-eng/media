@@ -1552,10 +1552,15 @@ export const initializeSocket = async (app) => {
                     }
                 }
                 await emitSnap('immediate')
-                // Friends often auto-online ~1s after their own connect. A second snapshot
-                // covers the race where the first snapshot was taken while they were still
-                // offline and a presenceUpdate delta was missed — no mobile app update needed.
-                setTimeout(() => {
+
+                // One delayed refresh only — cancel any previous timer so client re-subscribe
+                // spam (Messages list updates, reconnect) cannot stack many delayed snapshots.
+                if (socket.data.presenceSnapshotDelayTimer) {
+                    clearTimeout(socket.data.presenceSnapshotDelayTimer)
+                    socket.data.presenceSnapshotDelayTimer = null
+                }
+                socket.data.presenceSnapshotDelayTimer = setTimeout(() => {
+                    socket.data.presenceSnapshotDelayTimer = null
                     void emitSnap('delayed')
                 }, 1600)
             } catch (e) {
