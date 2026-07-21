@@ -56,6 +56,8 @@ const livekitGroupCallTimers = new Map()
 const livekitStreamTimers = new Map()
 /** Deferred auto-online after connect (covers push-open without a new mobile build). */
 const presenceAutoOnlineTimers = new Map()
+/** Extra online emits so friends who missed the first delta (reconnect races) still update. */
+const presenceOnlineReinforceTimers = new Map()
 
 const setUserPresence = async (userId, status) => {
     redisService.ensureRedis()
@@ -63,6 +65,44 @@ const setUserPresence = async (userId, status) => {
     if (!uid) return
     // Keep a TTL so stale presence can't live forever.
     await redisService.redisSet(`${PRESENCE_KEY_PREFIX}${uid}`, String(status), 3600)
+}
+
+/** Notify presence:<uid> subscribers; optionally reinforce online after short delays. */
+const emitPresenceUpdate = (uid, online, { reinforce = false } = {}) => {
+    const presenceUid = normalizeUserId(uid)
+    if (!presenceUid) return
+    const payload = {
+        userId: presenceUid,
+        online: !!online,
+        onlineAt: online ? Date.now() : undefined,
+    }
+    io.to(`${PRESENCE_ROOM_PREFIX}${presenceUid}`).emit('presenceUpdate', payload)
+
+    if (presenceOnlineReinforceTimers.has(presenceUid)) {
+        for (const t of presenceOnlineReinforceTimers.get(presenceUid)) clearTimeout(t)
+        presenceOnlineReinforceTimers.delete(presenceUid)
+    }
+    if (!online || !reinforce) return
+
+    const timers = []
+    for (const ms of [350, 1000]) {
+        timers.push(
+            setTimeout(async () => {
+                try {
+                    const still = await getUserPresence(presenceUid)
+                    if (still !== 'online') return
+                    io.to(`${PRESENCE_ROOM_PREFIX}${presenceUid}`).emit('presenceUpdate', {
+                        userId: presenceUid,
+                        online: true,
+                        onlineAt: Date.now(),
+                    })
+                } catch (_) {
+                    /* ignore */
+                }
+            }, ms),
+        )
+    }
+    presenceOnlineReinforceTimers.set(presenceUid, timers)
 }
 
 const getUserPresence = async (userId) => {
@@ -1231,20 +1271,11 @@ export const initializeSocket = async (app) => {
                 onlineAt: Date.now(),
                 clientType: clientType || undefined,
             }
-            // Start offline until the client emits `clientPresence: online` (foreground).
-            // Avoids false "online" from background socket reconnects / push wake-ups.
+            // Start Redis as offline until clientPresence / Auto-online. Do NOT broadcast
+            // offline to friends here — a reconnect would flip them grey, and if the later
+            // online emit is missed they stay stuck offline (A sees B grey after B returns).
+            // Friends learn offline only from real disconnect or clientPresence: offline.
             await setUserPresence(userId, 'offline')
-            // Tell subscribers immediately — otherwise friends keep a stale green dot
-            // (or never learn the reconnect→offline→online cycle after push open).
-            {
-                const presenceUid = normalizeUserId(userId)
-                if (presenceUid) {
-                    io.to(`${PRESENCE_ROOM_PREFIX}${presenceUid}`).emit('presenceUpdate', {
-                        userId: presenceUid,
-                        online: false,
-                    })
-                }
-            }
             await setUserSocket(userId, socketData)
             // Reverse mapping for O(1) disconnect handling
             await setSocketUser(socket.id, userId)
@@ -1284,20 +1315,12 @@ export const initializeSocket = async (app) => {
                             const currentPresence = await getUserPresence(graceUid)
                             if (currentPresence === 'online') {
                                 // Ensure subscribers still get a delta (snapshot may have been taken while offline).
-                                io.to(`${PRESENCE_ROOM_PREFIX}${graceUid}`).emit('presenceUpdate', {
-                                    userId: graceUid,
-                                    online: true,
-                                    onlineAt: Date.now(),
-                                })
+                                emitPresenceUpdate(graceUid, true, { reinforce: true })
                                 console.log(`🟢 [socket] Auto-online refresh (${label}): already online ${graceUid}`)
                                 return true
                             }
                             await setUserPresence(graceUid, 'online')
-                            io.to(`${PRESENCE_ROOM_PREFIX}${graceUid}`).emit('presenceUpdate', {
-                                userId: graceUid,
-                                online: true,
-                                onlineAt: Date.now(),
-                            })
+                            emitPresenceUpdate(graceUid, true, { reinforce: true })
                             console.log(`🟢 [socket] Auto-online after connect grace (${label}) for ${graceUid}`)
                             return true
                         } catch (e) {
@@ -1614,11 +1637,7 @@ export const initializeSocket = async (app) => {
                     presenceAutoOnlineTimers.delete(uid)
                 }
                 await setUserPresence(uid, status)
-                io.to(`${PRESENCE_ROOM_PREFIX}${uid}`).emit('presenceUpdate', {
-                    userId: uid,
-                    online: status === 'online',
-                    onlineAt: status === 'online' ? Date.now() : undefined,
-                })
+                emitPresenceUpdate(uid, status === 'online', { reinforce: status === 'online' })
                 console.log(
                     status === 'online'
                         ? `🟢 [socket] clientPresence online for ${uid}`
@@ -4329,6 +4348,11 @@ export const initializeSocket = async (app) => {
                         clearTimeout(presenceAutoOnlineTimers.get(mappedUserId))
                         presenceAutoOnlineTimers.delete(mappedUserId)
                     }
+                    const normDisc = normalizeUserId(mappedUserId)
+                    if (normDisc && presenceOnlineReinforceTimers.has(normDisc)) {
+                        for (const t of presenceOnlineReinforceTimers.get(normDisc)) clearTimeout(t)
+                        presenceOnlineReinforceTimers.delete(normDisc)
+                    }
                     await deleteUserSocket(mappedUserId) // Delete from both in-memory and Redis
                     await deleteUserPresence(mappedUserId).catch(() => {})
                 }
@@ -4348,10 +4372,7 @@ export const initializeSocket = async (app) => {
             try {
                 const normalized = normalizeUserId(disconnectedUserId)
                 if (normalized) {
-                    io.to(`${PRESENCE_ROOM_PREFIX}${normalized}`).emit('presenceUpdate', {
-                        userId: normalized,
-                        online: false,
-                    })
+                    emitPresenceUpdate(normalized, false)
                 }
             } catch (e) {
                 console.error('❌ [socket] Failed to emit presenceUpdate (offline):', e.message)
