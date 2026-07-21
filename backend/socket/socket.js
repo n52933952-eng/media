@@ -1606,7 +1606,10 @@ export const initializeSocket = async (app) => {
                 const status = statusRaw === 'offline' ? 'offline' : 'online'
                 const uid = normalizeUserId(userId)
                 if (!uid) return
-                if (presenceAutoOnlineTimers.has(uid)) {
+                // Only cancel Auto-online when client claims online (preferred path).
+                // An early offline must not kill the grace backup — Android can flap AppState
+                // on open and would otherwise leave the user stuck offline with no Auto-online log.
+                if (status === 'online' && presenceAutoOnlineTimers.has(uid)) {
                     clearTimeout(presenceAutoOnlineTimers.get(uid))
                     presenceAutoOnlineTimers.delete(uid)
                 }
@@ -1616,6 +1619,11 @@ export const initializeSocket = async (app) => {
                     online: status === 'online',
                     onlineAt: status === 'online' ? Date.now() : undefined,
                 })
+                console.log(
+                    status === 'online'
+                        ? `🟢 [socket] clientPresence online for ${uid}`
+                        : `📴 [socket] clientPresence offline for ${uid}`,
+                )
             } catch (e) {
                 console.error('❌ [socket] clientPresence error:', e?.message || e)
             }
