@@ -22,6 +22,7 @@ import {
 } from '../utils/gameFeedPostUtils.js'
 import { isFollowingUserId, mergePostUpdate } from '../utils/postUtils.js'
 import { applyPostEngagement } from '../hooks/usePostEngagementSubscription.js'
+import AdsterraFeedNative, { getAdsterraFeedEvery } from '../Components/ads/AdsterraFeedNative.jsx'
 
 
 
@@ -604,14 +605,28 @@ const HomePage = () => {
           </Flex>
         )}
 
-        {/* Posts list */}
+        {/* Posts list — Native Banner (Adsterra) every N posts when env is set */}
         {!loading && followPost.length > 0 && (
           <>
-            {followPost.filter(p => !isLive || !isOwnLivePost(p)).map((post) =>
-              post.isLive
-                ? <LivePostCard key={post._id} post={post} />
-                : <Post key={post._id} post={post} postedBy={post.postedBy} visibleVideoOnly showFeedExtras />
-            )}
+            {(() => {
+              const visible = followPost.filter((p) => !isLive || !isOwnLivePost(p))
+              const every = getAdsterraFeedEvery()
+              const nodes = []
+              visible.forEach((post, index) => {
+                nodes.push(
+                  post.isLive
+                    ? <LivePostCard key={post._id} post={post} />
+                    : <Post key={post._id} post={post} postedBy={post.postedBy} visibleVideoOnly showFeedExtras />,
+                )
+                // After every Nth post (default N=1 → post, ad, post, ad…)
+                if ((index + 1) % every === 0) {
+                  nodes.push(
+                    <AdsterraFeedNative key={`adsterra-native-${post._id || index}`} slotKey={`feed-${index}`} />,
+                  )
+                }
+              })
+              return nodes
+            })()}
             
             {/* Infinite scroll trigger element */}
             <Box ref={observerTarget} h="20px" />
