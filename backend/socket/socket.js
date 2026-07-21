@@ -85,23 +85,22 @@ const emitPresenceUpdate = (uid, online, { reinforce = false } = {}) => {
     if (!online || !reinforce) return
 
     const timers = []
-    for (const ms of [350, 1000]) {
-        timers.push(
-            setTimeout(async () => {
-                try {
-                    const still = await getUserPresence(presenceUid)
-                    if (still !== 'online') return
-                    io.to(`${PRESENCE_ROOM_PREFIX}${presenceUid}`).emit('presenceUpdate', {
-                        userId: presenceUid,
-                        online: true,
-                        onlineAt: Date.now(),
-                    })
-                } catch (_) {
-                    /* ignore */
-                }
-            }, ms),
-        )
-    }
+    // One reinforce only — enough to catch observers who missed the first delta.
+    timers.push(
+        setTimeout(async () => {
+            try {
+                const still = await getUserPresence(presenceUid)
+                if (still !== 'online') return
+                io.to(`${PRESENCE_ROOM_PREFIX}${presenceUid}`).emit('presenceUpdate', {
+                    userId: presenceUid,
+                    online: true,
+                    onlineAt: Date.now(),
+                })
+            } catch (_) {
+                /* ignore */
+            }
+        }, 400),
+    )
     presenceOnlineReinforceTimers.set(presenceUid, timers)
 }
 
@@ -1214,7 +1213,17 @@ export const initializeSocket = async (app) => {
             origin: process.env.FRONTEND_URL || "http://localhost:5173",
             credentials: true,
             methods: ["GET", "POST"]
-        }
+        },
+        // Faster hard-kill offline (~10–15s) vs engine defaults (~30s+). Env-overridable.
+        // Not ultra-aggressive — avoids false offline on brief Wi‑Fi blips / mid-call.
+        pingInterval: (() => {
+            const n = Number(process.env.SOCKET_PING_INTERVAL_MS || 10000)
+            return Number.isFinite(n) && n >= 5000 && n <= 30000 ? n : 10000
+        })(),
+        pingTimeout: (() => {
+            const n = Number(process.env.SOCKET_PING_TIMEOUT_MS || 10000)
+            return Number.isFinite(n) && n >= 5000 && n <= 30000 ? n : 10000
+        })(),
     })
 
     // Set up Redis adapter for Socket.IO (REQUIRED for multi-server scaling).

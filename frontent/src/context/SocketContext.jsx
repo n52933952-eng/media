@@ -59,7 +59,7 @@ export const SocketContextProvider = ({ children }) => {
   const lastPresenceSubscribeKeyRef = useRef('')
   const flushPresenceSubscribeRef = useRef(() => {})
 
-  const flushPresenceSubscribe = useCallback(() => {
+  const flushPresenceSubscribe = useCallback((opts = {}) => {
     const sock = socketRef.current
     if (!sock?.connected) return
     const merged = new Set()
@@ -73,7 +73,7 @@ export const SocketContextProvider = ({ children }) => {
     ;(user?.followers || []).forEach(addId)
     const list = Array.from(merged)
     const key = list.slice().sort().join('|')
-    if (key === lastPresenceSubscribeKeyRef.current) return
+    if (!opts.force && key === lastPresenceSubscribeKeyRef.current) return
     lastPresenceSubscribeKeyRef.current = key
     if (list.length === 0) return
     sock.emit('presenceSubscribe', { userIds: list })
@@ -514,17 +514,25 @@ export const SocketContextProvider = ({ children }) => {
       socket.emit('clientPresence', { status: 'online' })
     }
 
+    const onVisible = () => {
+      if (document.visibilityState !== 'visible') return
+      assertPresenceOnline()
+      // Force fresh snapshot so friends who came back while tab was hidden show online.
+      lastPresenceSubscribeKeyRef.current = ''
+      flushPresenceSubscribeRef.current({ force: true })
+    }
+
     assertPresenceOnline()
-    document.addEventListener('visibilitychange', assertPresenceOnline)
-    window.addEventListener('focus', assertPresenceOnline)
+    document.addEventListener('visibilitychange', onVisible)
+    window.addEventListener('focus', onVisible)
 
     const interval = window.setInterval(() => {
       assertPresenceOnline()
     }, 45_000)
 
     return () => {
-      document.removeEventListener('visibilitychange', assertPresenceOnline)
-      window.removeEventListener('focus', assertPresenceOnline)
+      document.removeEventListener('visibilitychange', onVisible)
+      window.removeEventListener('focus', onVisible)
       window.clearInterval(interval)
     }
   }, [socket])
