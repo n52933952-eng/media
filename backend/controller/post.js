@@ -3,6 +3,7 @@ import mongoose from 'mongoose'
 import User from '../models/user.js'
 import Post, { MAX_REPLIES_PER_POST } from '../models/post.js'
 import Like from '../models/like.js'
+import Comment from '../models/comment.js'
 import Follow from '../models/follow.js'
 import LiveStream from '../models/liveStream.js'
 import { deleteMediaAsset, deleteAllPostMedia } from '../services/mediaStorage.js'
@@ -96,7 +97,7 @@ function collectCreatePostMediaUrls(body = {}) {
  * buildLikedPostIdSet). We still fall back to the legacy `likes[]` for any un-backfilled docs.
  * Live pseudo-posts have no likes and pass through untouched.
  */
-function shapeFeedPostForViewer(post, viewerIdStr, likedSet, previewMap) {
+function shapeFeedPostForViewer(post, viewerIdStr, likedSet, previewMap, replyPreviewMap) {
     if (!post || post.isLive) return post
     const postIdStr = post._id != null ? String(post._id) : ''
     const likeCount =
@@ -109,8 +110,9 @@ function shapeFeedPostForViewer(post, viewerIdStr, likedSet, previewMap) {
         else if (Array.isArray(post.likes)) likedByMe = post.likes.some((id) => String(id) === viewerIdStr)
     }
     const likePreview = previewMap ? (previewMap.get(postIdStr) || null) : null
+    const replyPreview = replyPreviewMap ? (replyPreviewMap.get(postIdStr) || []) : (post.replyPreview || [])
     const { likes: _likes, ...rest } = post
-    return { ...rest, likeCount, likedByMe, likePreview }
+    return { ...rest, likeCount, likedByMe, likePreview, replyPreview }
 }
 
 /**
@@ -176,15 +178,82 @@ async function buildLikePreviewMap(posts) {
     return map
 }
 
+const REPLY_PREVIEW_LIMIT = 3
+
+/**
+ * Latest unique commenters per post (newest first), for feed "commented by [avatars]" UI.
+ * Uses Comment collection denormalized username/name/userProfilePic — no extra User query.
+ */
+async function buildReplyPreviewMap(posts, limit = REPLY_PREVIEW_LIMIT) {
+    if (!Array.isArray(posts) || posts.length === 0) return new Map()
+    const objectIds = posts
+        .filter(
+            (p) =>
+                p && !p.isLive && p._id != null && mongoose.Types.ObjectId.isValid(String(p._id)),
+        )
+        .map((p) => new mongoose.Types.ObjectId(String(p._id)))
+    if (objectIds.length === 0) return new Map()
+
+    const rows = await Comment.aggregate([
+        { $match: { postId: { $in: objectIds } } },
+        { $sort: { date: -1 } },
+        {
+            $group: {
+                _id: { postId: '$postId', userId: '$userId' },
+                date: { $first: '$date' },
+                username: { $first: '$username' },
+                name: { $first: '$name' },
+                userProfilePic: { $first: '$userProfilePic' },
+            },
+        },
+        { $sort: { date: -1 } },
+        {
+            $group: {
+                _id: '$_id.postId',
+                users: {
+                    $push: {
+                        _id: '$_id.userId',
+                        username: '$username',
+                        name: '$name',
+                        profilePic: '$userProfilePic',
+                    },
+                },
+            },
+        },
+        { $project: { users: { $slice: ['$users', limit] } } },
+    ])
+
+    const map = new Map()
+    for (const r of rows) {
+        map.set(
+            String(r._id),
+            (r.users || []).map((u) => ({
+                _id: u._id,
+                username: u.username || '',
+                name: u.name || u.username || '',
+                profilePic: u.profilePic || null,
+            })),
+        )
+    }
+    return map
+}
+
+async function getLatestReplyPreviewList(postId, limit = REPLY_PREVIEW_LIMIT) {
+    if (!postId || !mongoose.Types.ObjectId.isValid(String(postId))) return []
+    const map = await buildReplyPreviewMap([{ _id: postId }], limit)
+    return map.get(String(postId)) || []
+}
+
 /**
  * Strip the legacy `likes[]` and attach `likeCount` + `likedByMe` to profile posts,
  * using a single batched Like lookup for the whole page.
  */
 async function shapeProfilePostsForViewer(posts, viewerIdStr) {
     if (!Array.isArray(posts) || posts.length === 0) return []
-    const [likedSet, previewMap] = await Promise.all([
+    const [likedSet, previewMap, replyPreviewMap] = await Promise.all([
         buildLikedPostIdSet(viewerIdStr, posts),
         buildLikePreviewMap(posts),
+        buildReplyPreviewMap(posts),
     ])
     return posts.map((p) => {
         const obj = p?.toObject ? p.toObject() : p
@@ -199,6 +268,7 @@ async function shapeProfilePostsForViewer(posts, viewerIdStr) {
             likeCount,
             likedByMe: viewerIdStr ? likedSet.has(postIdStr) : false,
             likePreview: previewMap.get(postIdStr) || null,
+            replyPreview: replyPreviewMap.get(postIdStr) || [],
         }
     })
 }
@@ -538,6 +608,7 @@ export const getPost = async(req,res) => {
                   profilePic: previewLike.user.profilePic || null,
               }
             : null
+        withReplies.replyPreview = await getLatestReplyPreviewList(req.params.id)
         res.status(200).json(withReplies)
 
     }
@@ -1196,8 +1267,10 @@ export const ReplyPost = async(req,res) => {
         }
         
         const refreshed = await Post.findById(id).select('replyCount').lean()
+        const replyPreview = await getLatestReplyPreviewList(id)
         emitPostEngagementUpdate(id, {
             replyCount: Math.max(0, refreshed?.replyCount ?? 0),
+            replyPreview,
         })
 
         res.status(200).json(savedReply)
@@ -1295,12 +1368,13 @@ export const getFeedPost = async(req,res) => {
             const mixedNonLive = [...channelWithCounts, ...normalsSorted].sort(
                 (a, b) => feedSortTime(b) - feedSortTime(a),
             )
-            const [likedSet, previewMap] = await Promise.all([
+            const [likedSet, previewMap, replyPreviewMap] = await Promise.all([
                 buildLikedPostIdSet(viewerIdStr, mixedNonLive),
                 buildLikePreviewMap(mixedNonLive),
+                buildReplyPreviewMap(mixedNonLive),
             ])
             const combinedPosts = [...livePseudoPosts, ...mixedNonLive].map((p) =>
-                shapeFeedPostForViewer(p, viewerIdStr, likedSet, previewMap),
+                shapeFeedPostForViewer(p, viewerIdStr, likedSet, previewMap, replyPreviewMap),
             )
 
             const nextOffset = firstNormalIds.length
@@ -1325,12 +1399,13 @@ export const getFeedPost = async(req,res) => {
         const nextOffset = startIndex + paginatedNormal.length
         const hasMore = nextOffset < totalCount
         const lastPost = paginatedNormal[paginatedNormal.length - 1]
-        const [likedSet, previewMap] = await Promise.all([
+        const [likedSet, previewMap, replyPreviewMap] = await Promise.all([
             buildLikedPostIdSet(viewerIdStr, paginatedNormal),
             buildLikePreviewMap(paginatedNormal),
+            buildReplyPreviewMap(paginatedNormal),
         ])
         const shapedPaginatedNormal = paginatedNormal.map((p) =>
-            shapeFeedPostForViewer(p, viewerIdStr, likedSet, previewMap),
+            shapeFeedPostForViewer(p, viewerIdStr, likedSet, previewMap, replyPreviewMap),
         )
 
         console.log(
@@ -1567,8 +1642,10 @@ export const ReplyToComment = async(req, res) => {
         }
         
         const refreshedReply = await Post.findById(id).select('replyCount').lean()
+        const replyPreview = await getLatestReplyPreviewList(id)
         emitPostEngagementUpdate(id, {
             replyCount: Math.max(0, refreshedReply?.replyCount ?? 0),
+            replyPreview,
         })
 
         res.status(200).json(newReply)
@@ -2431,8 +2508,10 @@ export const deleteComment = async(req,res) => {
         await deleteCommentTree(postId, replyId)
 
         const refreshed = await Post.findById(postId).select('replyCount').lean()
+        const replyPreview = await getLatestReplyPreviewList(postId)
         emitPostEngagementUpdate(postId, {
             replyCount: Math.max(0, refreshed?.replyCount ?? 0),
+            replyPreview,
         })
 
         res.status(200).json({

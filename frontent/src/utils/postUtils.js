@@ -1,6 +1,40 @@
 /** Comment count: feed uses replyCount; post detail may use replies[]. */
 export const COMMENTS_PAGE_SIZE = 12
 
+/** Google Play listing for PlaySocial mobile app. */
+export const PLAY_STORE_URL = 'https://play.google.com/store/apps/details?id=com.playsocial'
+
+export function openPlayStore() {
+  if (typeof window === 'undefined') return
+  window.open(PLAY_STORE_URL, '_blank', 'noopener,noreferrer')
+}
+
+/**
+ * Latest unique commenters for the feed avatar stack.
+ * Prefers API `replyPreview`; falls back to embedded `replies[]` on post detail.
+ */
+export function getReplyPreviewUsers(post, max = 3) {
+  if (Array.isArray(post?.replyPreview) && post.replyPreview.length > 0) {
+    return post.replyPreview.slice(0, max)
+  }
+  const replies = Array.isArray(post?.replies) ? post.replies : []
+  const seen = new Set()
+  const out = []
+  for (let i = replies.length - 1; i >= 0 && out.length < max; i -= 1) {
+    const r = replies[i]
+    const id = String(r?.userId?._id || r?.userId || r?.username || '')
+    if (!id || seen.has(id)) continue
+    seen.add(id)
+    out.push({
+      _id: r.userId,
+      username: r.username,
+      name: r.name || r.username,
+      profilePic: r.userProfilePic || null,
+    })
+  }
+  return out
+}
+
 export const CHANNEL_USERNAMES = [
   'Football',
   'AlJazeera',

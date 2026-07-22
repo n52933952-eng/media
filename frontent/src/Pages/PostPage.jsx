@@ -26,6 +26,7 @@ import {
   postCommentsApiUrl,
   postDetailApiUrl,
   hideChannelPostComments,
+  openPlayStore,
 } from '../utils/postUtils.js'
 import PostMediaCarousel, { POST_DETAIL_CAROUSEL_FRAME_H } from '../Components/PostMediaCarousel'
 import { getPostCarouselSlides, getPostCarouselAudio, shouldShowPostCarousel, postHasDisplayableMedia } from '../utils/postCarousel.js'
@@ -1126,15 +1127,38 @@ if(!post) {
       <Divider my={4}/>
        
      
-     <Flex justifyContent="space-between">
+      <Flex
+        justifyContent="space-between"
+        alignItems="center"
+        gap={3}
+        cursor="pointer"
+        role="link"
+        tabIndex={0}
+        aria-label="Get the PlaySocial app on Google Play"
+        onClick={openPlayStore}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault()
+            openPlayStore()
+          }
+        }}
+        _hover={{ opacity: 0.92 }}
+      >
      
      <Flex alignItems="center" gap={2}>
       <Text fontSize="2xl">👏</Text>
-      <Text>Get the app to like ,reply and post</Text>
+      <Text>Get the app to like, reply and post</Text>
      </Flex>
 
    
-    <Button>Get</Button>
+    <Button
+      onClick={(e) => {
+        e.stopPropagation()
+        openPlayStore()
+      }}
+    >
+      Get
+    </Button>
 
      </Flex>
   

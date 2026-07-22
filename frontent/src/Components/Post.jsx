@@ -11,7 +11,7 @@ import{UserContext} from '../context/UserContext'
 import{PostContext} from '../context/PostContext'
 import { SocketContext } from '../context/SocketContext'
 import { FiMail } from 'react-icons/fi'
-import { followIdToString, mergePostUpdate } from '../utils/postUtils.js'
+import { followIdToString, mergePostUpdate, getReplyCount, getReplyPreviewUsers } from '../utils/postUtils.js'
 import { isUserInOnlineList } from '../utils/presenceUtils.js'
 import PostEditorMenu from './PostEditorMenu'
 import FootballIcon from './FootballIcon'
@@ -1162,31 +1162,56 @@ const showToast = useShowToast()
             <Box w="1px" h="full" bg="gray.light" my="2"></Box>
        
       
-       <Box position="relative" w="full">
-       
-      {(!post?.replies || post.replies.length === 0) && <Text textAlign="center">🥱</Text>}
-      
-       {post?.replies?.[0] && (
-          <Avatar 
-        src={post?.replies?.[0]?.userProfilePic}
-        size="sm" name={post?.replies?.[0]?.username} position="absolute" top="0px" left="15px" padding="2px"/>
-       )}
-      
-         
-         {post?.replies?.[1] && (
-          <Avatar 
-        src={post?.replies?.[1]?.userProfilePic}
-        size="sm" name={post?.replies?.[1]?.username} position="absolute" bottom="0px" right="-5px" padding="2px"/>
-         )}
-       
-       
-        {post?.replies?.[2] && (
-        <Avatar 
-        src={post?.replies?.[2]?.userProfilePic}
-        size="sm" name={post?.replies?.[2]?.username} bottom="0px" left="4px" padding="2px"/>
-        )}
-       
-        
+       <Box position="relative" w="full" minH="18px" display="flex" justifyContent="center" alignItems="center">
+      {(() => {
+        const replyCount = getReplyCount(post)
+        const previewUsers = getReplyPreviewUsers(post, 3)
+        if (replyCount <= 0) {
+          return <Text textAlign="center" fontSize="sm" lineHeight="18px">🥱</Text>
+        }
+        return (
+          <Flex alignItems="center" justifyContent="center">
+            {previewUsers.map((u, i) => {
+              const key = String(u?._id || u?.username || i)
+              const pic = u?.profilePic
+              return pic ? (
+                <Box
+                  key={key}
+                  as="img"
+                  src={pic}
+                  alt=""
+                  w="18px"
+                  h="18px"
+                  borderRadius="full"
+                  objectFit="cover"
+                  ml={i === 0 ? 0 : '-6px'}
+                  border="1.5px solid"
+                  borderColor={cardBg}
+                  zIndex={previewUsers.length - i}
+                />
+              ) : (
+                <Flex
+                  key={key}
+                  w="18px"
+                  h="18px"
+                  borderRadius="full"
+                  bg="gray.600"
+                  align="center"
+                  justify="center"
+                  ml={i === 0 ? 0 : '-6px'}
+                  border="1.5px solid"
+                  borderColor={cardBg}
+                  zIndex={previewUsers.length - i}
+                >
+                  <Text fontSize="9px" fontWeight="700" color="white" lineHeight="1">
+                    {(u?.name || u?.username || '?').charAt(0).toUpperCase()}
+                  </Text>
+                </Flex>
+              )
+            })}
+          </Flex>
+        )
+      })()}
        </Box>
        
         

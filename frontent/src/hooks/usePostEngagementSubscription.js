@@ -38,5 +38,6 @@ export function applyPostEngagement(post, data) {
   if (typeof data.likeCount === 'number') next.likeCount = data.likeCount
   if (data.likePreview !== undefined) next.likePreview = data.likePreview
   if (typeof data.replyCount === 'number') next.replyCount = data.replyCount
+  if (data.replyPreview !== undefined) next.replyPreview = data.replyPreview
   return next
 }
