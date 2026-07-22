@@ -38,6 +38,18 @@ dotenv.config()
 
 const app = express()
 
+/** AdMob / AdSense seller authorization — must stay reachable for crawlers (not SPA HTML). */
+const ADS_TXT_BODY = 'google.com, pub-4967868662952223, DIRECT, f08c47fec0942fa0\n'
+const sendAdsTxt = (_req, res) => {
+  res
+    .status(200)
+    .type('text/plain; charset=utf-8')
+    .set('Cache-Control', 'public, max-age=300')
+    .send(ADS_TXT_BODY)
+}
+app.get('/app-ads.txt', sendAdsTxt)
+app.get('/ads.txt', sendAdsTxt)
+
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ limit: "10mb", extended: true }));
 
@@ -260,7 +272,7 @@ app.get('*', (req, res) => {
     const p = req.path || ''
     if (
         p.startsWith('/assets/') ||
-        /\.(js|mjs|css|map|ico|png|jpe?g|gif|svg|webp|woff2?|ttf|eot|json|webmanifest)$/i.test(p)
+        /\.(js|mjs|css|map|ico|png|jpe?g|gif|svg|webp|woff2?|ttf|eot|json|webmanifest|txt)$/i.test(p)
     ) {
         return res.status(404).type('text/plain').send('Static file not found — run npm run build and redeploy frontent/dist')
     }

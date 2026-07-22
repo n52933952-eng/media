@@ -17,7 +17,6 @@ import {
 	VStack,
 	useDisclosure,
 	useToast,
-	useColorModeValue,
 } from "@chakra-ui/react";
 
 import{useState,useContext,useMemo,useEffect,useRef,useCallback} from 'react'
@@ -30,7 +29,7 @@ import PostLikesModal from './PostLikesModal.jsx'
 
 
 import { isChessFeedPost, isGoFishFeedPost } from '../utils/gameFeedPostUtils.js'
-import { getReplyCount, withReplyCountDelta, hideChannelPostComments, getReplyPreviewUsers, openPlayStore } from '../utils/postUtils.js'
+import { getReplyCount, withReplyCountDelta, hideChannelPostComments, openPlayStore } from '../utils/postUtils.js'
 
 const Actions = ({ post, showFeedExtras = true, onReplyAdded }) => {
 	const isEphemeralGamePost = isChessFeedPost(post) || isGoFishFeedPost(post)
@@ -42,7 +41,6 @@ const Actions = ({ post, showFeedExtras = true, onReplyAdded }) => {
 
 	const{user}=useContext(UserContext)
 	const ENABLE_POST_SHARE_TO_CHAT = (import.meta.env.VITE_ENABLE_POST_SHARE_TO_CHAT || 'true') !== 'false'
-	const avatarRingColor = useColorModeValue('white', 'gray.800')
 
 	const toast = useToast()
 	
@@ -658,60 +656,6 @@ return (
 			<Flex gap={2} alignItems="center" minH="18px">
 				{!hideComments && (
 				<>
-				{(() => {
-					const replyCount = getReplyCount(post)
-					const previewUsers = getReplyPreviewUsers(post, 3)
-					return (
-						<Flex alignItems="center" flexShrink={0} minW="18px" h="18px">
-							{replyCount <= 0 ? (
-								<Text fontSize="sm" lineHeight="18px" aria-hidden>
-									🥱
-								</Text>
-							) : (
-								<Flex alignItems="center">
-									{previewUsers.map((u, i) => {
-										const key = String(u?._id || u?.username || i)
-										const pic = u?.profilePic
-										return pic ? (
-											<Box
-												key={key}
-												as="img"
-												src={pic}
-												alt=""
-												w="18px"
-												h="18px"
-												borderRadius="full"
-												objectFit="cover"
-												ml={i === 0 ? 0 : '-6px'}
-												border="1.5px solid"
-												borderColor={avatarRingColor}
-												zIndex={previewUsers.length - i}
-											/>
-										) : (
-											<Flex
-												key={key}
-												w="18px"
-												h="18px"
-												borderRadius="full"
-												bg="gray.600"
-												align="center"
-												justify="center"
-												ml={i === 0 ? 0 : '-6px'}
-												border="1.5px solid"
-												borderColor={avatarRingColor}
-												zIndex={previewUsers.length - i}
-											>
-												<Text fontSize="9px" fontWeight="700" color="white" lineHeight="1">
-													{(u?.name || u?.username || '?').charAt(0).toUpperCase()}
-												</Text>
-											</Flex>
-										)
-									})}
-								</Flex>
-							)}
-						</Flex>
-					)
-				})()}
 				<Text color={"gray.light"} fontSize='sm'>
 				{getReplyCount(post)} Comment
 				</Text>
