@@ -14,9 +14,10 @@ export const createLiveStreamPost = async (req, res) => {
 
     const User = (await import('../models/user.js')).default
     const Post = (await import('../models/post.js')).default
-    const { getIO, getUserSocketMap } = await import('../socket/socket.js')
+    const { getIO } = await import('../socket/socket.js')
     const { getChannelById } = await import('../config/channels.js')
     const { invalidateUserFeedCache } = await import('../services/feedCache.js')
+    const { emitToUserIds } = await import('../services/postSocketEmit.js')
 
     const channelConfig = getChannelById(channelId)
 
@@ -59,30 +60,23 @@ export const createLiveStreamPost = async (req, res) => {
     if (existingPost) {
       console.log(`ℹ️ ${channelConfig.name} live stream post already exists for user`)
 
-      try {
-        existingPost.updatedAt = new Date()
-        await existingPost.save()
-      } catch (_) {}
-
-      // Re-adding bumps updatedAt → refresh page 1 so it isn't served from stale cache.
+      // Do NOT bump updatedAt — that pinned the channel above newer user posts on refresh.
+      // Client applies a short-lived viewer boost so the card is still easy to find.
       await invalidateUserFeedCache(req.user._id)
 
       await existingPost.populate('postedBy', 'username profilePic name')
+      const postObj = existingPost.toObject ? existingPost.toObject() : existingPost
 
       const io = getIO()
       if (io && req.user) {
-        const socketMap = getUserSocketMap()
-        const userSocketId = socketMap[req.user._id.toString()]?.socketId
-
-        if (userSocketId) {
-          io.to(userSocketId).emit('newPost', existingPost)
-          console.log('✅ Emitted existing post to user')
-        }
+        await emitToUserIds(io, [req.user._id], 'newPost', postObj)
+        console.log('✅ Emitted existing channel post to userSelf')
       }
 
       return res.status(200).json({
         message: `${channelConfig.name} live stream post already in feed`,
         postId: existingPost._id,
+        post: postObj,
         posted: false,
       })
     }
@@ -102,20 +96,18 @@ export const createLiveStreamPost = async (req, res) => {
 
     console.log(`✅ Created live stream post: ${liveStreamPost._id} for user: ${req.user._id}`)
 
+    const postObj = liveStreamPost.toObject ? liveStreamPost.toObject() : liveStreamPost
+
     const io = getIO()
     if (io && req.user) {
-      const socketMap = getUserSocketMap()
-      const userSocketId = socketMap[req.user._id.toString()]?.socketId
-
-      if (userSocketId) {
-        io.to(userSocketId).emit('newPost', liveStreamPost)
-        console.log('✅ Emitted new post to user')
-      }
+      await emitToUserIds(io, [req.user._id], 'newPost', postObj)
+      console.log('✅ Emitted new channel post to userSelf')
     }
 
     res.status(200).json({
       message: `${channelConfig.name} live stream post created successfully`,
       postId: liveStreamPost._id,
+      post: postObj,
       posted: true,
       channel: channelConfig.name,
       language: streamConfig.language,

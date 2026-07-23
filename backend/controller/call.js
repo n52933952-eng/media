@@ -209,6 +209,33 @@ export const ackCallRinging = async (req, res) => {
             return res.status(400).json({ success: false, error: 'Missing callerId or recipientUserId' })
         }
 
+        // Caller already hung up / showed offline — do not revive "ringing" on the caller UI.
+        const callerInCallKey = `inCall:${String(callerId).trim()}`
+        const calleeInCallKey = `inCall:${String(recipientUserId).trim()}`
+        let stillActive = false
+        try {
+            if (redisService.isRedisAvailable()) {
+                const [a, b] = await Promise.all([
+                    redisService.redisGet(callerInCallKey),
+                    redisService.redisGet(calleeInCallKey),
+                ])
+                stillActive = !!(a || b)
+            } else {
+                stillActive = true
+            }
+        } catch {
+            stillActive = true
+        }
+
+        if (!stillActive) {
+            console.log(`🔔 [ack-ringing] ignored — call already cleared caller:${callerId} callee:${recipientUserId}`)
+            try {
+                const { sendCallEndedNotificationToUser } = await import('../services/fcmNotifications.js')
+                await sendCallEndedNotificationToUser(String(recipientUserId), String(callerId))
+            } catch (_) {}
+            return res.status(200).json({ success: true, canceled: true })
+        }
+
         const io = getIO()
         const callerSocketId = await getRecipientSockedId(String(callerId))
         if (io && callerSocketId) {

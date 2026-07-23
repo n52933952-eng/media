@@ -1214,15 +1214,15 @@ export const initializeSocket = async (app) => {
             credentials: true,
             methods: ["GET", "POST"]
         },
-        // Faster hard-kill offline (~10–15s) vs engine defaults (~30s+). Env-overridable.
-        // Not ultra-aggressive — avoids false offline on brief Wi‑Fi blips / mid-call.
+        // Faster hard-kill offline (~5–10s) vs previous 10s/10s (~10–20s). Env-overridable.
+        // Floor 5s — avoids false offline on brief Wi‑Fi blips / mid-call.
         pingInterval: (() => {
-            const n = Number(process.env.SOCKET_PING_INTERVAL_MS || 10000)
-            return Number.isFinite(n) && n >= 5000 && n <= 30000 ? n : 10000
+            const n = Number(process.env.SOCKET_PING_INTERVAL_MS || 5000)
+            return Number.isFinite(n) && n >= 5000 && n <= 30000 ? n : 5000
         })(),
         pingTimeout: (() => {
-            const n = Number(process.env.SOCKET_PING_TIMEOUT_MS || 10000)
-            return Number.isFinite(n) && n >= 5000 && n <= 30000 ? n : 10000
+            const n = Number(process.env.SOCKET_PING_TIMEOUT_MS || 5000)
+            return Number.isFinite(n) && n >= 5000 && n <= 30000 ? n : 5000
         })(),
     })
 
@@ -1400,9 +1400,12 @@ export const initializeSocket = async (app) => {
                     console.log(`📴 [socket] Found pending cancel for ${userId}, will emit CallCanceled after short delay...`, pendingCancel)
                     await deletePendingCancel(userId)
                     const sid = socket.id
-                    // IMMEDIATE emit - no delay for faster cleanup
+                    const fromId = pendingCancel.from || null
+                    const roomName = pendingCancel.roomName || null
+                    // IMMEDIATE emit - no delay for faster cleanup (legacy WebRTC + LiveKit)
                     io.to(sid).emit("CallCanceled")
-                    console.log(`✅ [socket] Emitted CallCanceled to ${userId} (pending cancel on connect, IMMEDIATE)`)
+                    io.to(sid).emit('livekit:callCanceled', { from: fromId, roomName })
+                    console.log(`✅ [socket] Emitted CallCanceled + livekit:callCanceled to ${userId} (pending cancel on connect, IMMEDIATE)`)
                 }
             } catch (error) {
                 console.error(`❌ [socket] Error checking for pending cancels when ${userId} connected:`, error.message)
@@ -2456,6 +2459,16 @@ export const initializeSocket = async (app) => {
                 const receiverSocketId   = receiverSocketData?.socketId
                 const callerSocketData   = await getUserSocket(callerId)
                 const callerSocketId     = callerSocketData?.socketId
+
+                // Offline / killed callee: deliver cancel on next connect (LiveKit + legacy).
+                if (!receiverSocketId && receiverId) {
+                    await setPendingCancel(receiverId, {
+                        from: callerId,
+                        roomName: roomName || null,
+                        at: Date.now(),
+                        livekit: true,
+                    }).catch(() => {})
+                }
 
                 if (receiverSocketId) io.to(receiverSocketId).emit('livekit:callCanceled', { from: callerId, roomName })
                 if (callerSocketId)   io.to(callerSocketId).emit('livekit:callCanceled',   { from: callerId, roomName })
