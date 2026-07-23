@@ -81,6 +81,36 @@ export function isChannelPost(post) {
   return !!username && CHANNEL_USERNAMES.includes(username)
 }
 
+/** Matches backend FEED_FIRST_PAGE_NORMAL_COUNT. */
+export const FEED_FIRST_PAGE_NORMAL_COUNT = 12
+
+/**
+ * Keep viewer channel cards in the first-page block with the top 12 normals
+ * (same shape as server refresh). Live cards stay above; load-more normals below.
+ */
+export function reshapeFeedFirstPage(list, sortTimeFn) {
+  const safe = Array.isArray(list) ? list : []
+  const getT =
+    typeof sortTimeFn === 'function'
+      ? sortTimeFn
+      : (p) => new Date(p?.updatedAt || p?.createdAt || 0).getTime() || 0
+
+  const live = []
+  const channels = []
+  const normals = []
+  for (const p of safe) {
+    if (!p) continue
+    if (p.isLive) live.push(p)
+    else if (p.channelAddedBy != null && String(p.channelAddedBy).trim() !== '') channels.push(p)
+    else normals.push(p)
+  }
+  normals.sort((a, b) => getT(b) - getT(a))
+  const first = normals.slice(0, FEED_FIRST_PAGE_NORMAL_COUNT)
+  const rest = normals.slice(FEED_FIRST_PAGE_NORMAL_COUNT)
+  const mixed = [...channels, ...first].sort((a, b) => getT(b) - getT(a))
+  return [...live, ...mixed, ...rest]
+}
+
 /** News / YouTube channels: likes only at post level. Football keeps per-match comments. */
 export function hideChannelPostComments(post) {
   if (!isChannelPost(post)) return false

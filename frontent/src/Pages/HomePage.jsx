@@ -20,7 +20,7 @@ import {
   mergeGameFeedPostData,
   isChessFeedPost,
 } from '../utils/gameFeedPostUtils.js'
-import { isFollowingUserId, mergePostUpdate } from '../utils/postUtils.js'
+import { isFollowingUserId, mergePostUpdate, reshapeFeedFirstPage } from '../utils/postUtils.js'
 import { applyPostEngagement } from '../hooks/usePostEngagementSubscription.js'
 import AdsterraFeedNative, { getAdsterraFeedEvery } from '../Components/ads/AdsterraFeedNative.jsx'
 
@@ -126,7 +126,7 @@ const HomePage = () => {
     }
     
     try{
-      const limit = 10
+      const limit = 12
       let url = `${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/post/feed/feedpost?limit=${limit}`
 
       if (loadMore) {
@@ -233,7 +233,7 @@ const HomePage = () => {
               return dateB - dateA
             })
             const deduped = dedupeGamePostsForFeed(merged)
-            const filtered = filterFeedPosts(deduped)
+            const filtered = filterFeedPosts(reshapeFeedFirstPage(deduped))
             followPostCountRef.current = filtered.length
             return filtered
           })
@@ -246,7 +246,7 @@ const HomePage = () => {
           })
           const dedupedPosts = dedupeGamePostsForFeed(uniquePosts)
           console.log(`📥 [getFeedPost] Initial load: received ${batch.length} posts, ${dedupedPosts.length} after dedupe`)
-          setFollowPost(filterFeedPosts(dedupedPosts))
+          setFollowPost(filterFeedPosts(reshapeFeedFirstPage(dedupedPosts)))
           followPostCountRef.current = dedupedPosts.length
         }
         
@@ -450,7 +450,7 @@ const HomePage = () => {
         })
         
         const dedupedFeed = dedupeGamePostsForFeed(updatedFeed)
-        const filtered = filterFeedPosts(dedupedFeed)
+        const filtered = filterFeedPosts(reshapeFeedFirstPage(dedupedFeed))
         followPostCountRef.current = filtered.length
         
         console.log(`✅ [HomePage] Added new post to feed (maintained 3 newest per user rule):`, newPost._id)
