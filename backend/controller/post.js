@@ -283,6 +283,8 @@ async function emitNewPostToAuthorFollowers(io, authorId, post) {
     const postObj = post.toObject ? post.toObject() : JSON.parse(JSON.stringify(post))
     const recipientIds = [...new Set([...followerIds.map(String), String(authorId)])]
     await emitToUserIds(io, recipientIds, 'newPost', postObj)
+    // Bust Redis feed pages so focus/silent refresh cannot wipe the live socket insert with a stale list.
+    invalidateUserFeedCaches(recipientIds).catch(() => {})
 }
 
 /** Collaborative posts also appear on contributor profiles — notify them in real time. */

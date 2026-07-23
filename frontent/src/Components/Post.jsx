@@ -919,14 +919,9 @@ const showToast = useShowToast()
     const data = await res.json()
 
      if(res.ok){
-      // Remove post from the feed (normalize ids — ObjectId vs string)
+      // Tombstone first so silent feed refresh cannot revive from Redis cache
+      if (onDelete) onDelete(post._id)
       setFollowPost((prev) => prev.filter((p) => String(p._id) !== String(post._id)))
-      
-      // Call onDelete callback if provided (for UserPage to update local state)
-      if (onDelete) {
-        onDelete(post._id)
-      }
-      
       showToast("Success","POST deleted","success")
      } else {
       showToast("Error", data.error || "Failed to delete post", "error")
@@ -1246,7 +1241,12 @@ const showToast = useShowToast()
           const createdOk = createdAt && !Number.isNaN(createdAt.getTime())
           const updatedOk = updatedAt && !Number.isNaN(updatedAt.getTime())
           const fallbackOk = fallbackAt && !Number.isNaN(fallbackAt.getTime())
-          const displayDate = createdOk ? createdAt : (updatedOk ? updatedAt : (fallbackOk ? fallbackAt : null))
+          const rawDate = createdOk ? createdAt : (updatedOk ? updatedAt : (fallbackOk ? fallbackAt : null))
+          // Clamp future timestamps (clock skew) so we never show "in 8 minutes"
+          const displayDate =
+            rawDate && rawDate.getTime() > Date.now() + 60_000
+              ? new Date()
+              : rawDate
           const isEdited =
             createdOk &&
             updatedOk &&

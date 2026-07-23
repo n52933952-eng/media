@@ -53,6 +53,10 @@ const HomePage = () => {
   const hasLoadedRef = useRef(false) // Track if initial load happened
   const followPostCountRef = useRef(0) // Total posts in UI (socket / follow inserts)
   const feedCursorRef = useRef(null)
+  /** Posts removed via socket/UI — silent API refresh must not bring them back from Redis cache. */
+  const removedPostIdsRef = useRef(new Set())
+  /** Throttle visibility refetch so tab focus / ad clicks don't stomp the live feed. */
+  const lastSilentFeedAtRef = useRef(0)
   const footballUserIdRef = useRef(null)
 
 
@@ -169,7 +173,13 @@ const HomePage = () => {
         if (loadMore) {
           setFollowPost(prev => {
             const existingIds = new Set(prev.map(p => p._id?.toString()))
-            const newPosts = batch.filter(p => !existingIds.has(p._id?.toString()))
+            const removed = removedPostIdsRef.current
+            const newPosts = batch.filter(p => {
+              const id = p._id?.toString()
+              if (!id || existingIds.has(id)) return false
+              if (removed.has(id)) return false
+              return true
+            })
             
             console.log(`📥 [getFeedPost] LoadMore: received ${batch.length} posts, ${newPosts.length} new posts, current feed has ${prev.length} posts`)
             
@@ -184,10 +194,56 @@ const HomePage = () => {
             followPostCountRef.current = updated.length
             return filterFeedPosts(updated)
           })
+        } else if (silent) {
+          // Merge — never blank-replace live feed with a possibly stale Redis page.
+          setFollowPost((prev) => {
+            const removed = removedPostIdsRef.current
+            const fromApi = batch.filter((p) => {
+              const id = p._id?.toString()
+              return id && !removed.has(id)
+            })
+            const apiIds = new Set(fromApi.map((p) => p._id?.toString()).filter(Boolean))
+            const now = Date.now()
+            const keepLocal = prev.filter((p) => {
+              const id = p._id != null ? String(p._id) : ''
+              if (!id || removed.has(id)) return false
+              if (p?.isLive) return true
+              if (apiIds.has(id)) return false
+              // Socket-fresh posts not in cached API yet (or deleted ids already filtered).
+              const t = new Date(p.updatedAt || p.createdAt).getTime()
+              if (!Number.isFinite(t)) return false
+              return now - t < 3 * 60 * 1000
+            })
+            const byId = new Map()
+            for (const p of [...fromApi, ...keepLocal]) {
+              const id = p._id?.toString()
+              if (!id || removed.has(id)) continue
+              const prevP = byId.get(id)
+              if (!prevP) {
+                byId.set(id, p)
+                continue
+              }
+              const pt = new Date(prevP.updatedAt || prevP.createdAt).getTime()
+              const nt = new Date(p.updatedAt || p.createdAt).getTime()
+              if (nt >= pt) byId.set(id, p)
+            }
+            const merged = Array.from(byId.values()).sort((a, b) => {
+              const dateA = new Date(a.updatedAt || a.createdAt).getTime()
+              const dateB = new Date(b.updatedAt || b.createdAt).getTime()
+              return dateB - dateA
+            })
+            const deduped = dedupeGamePostsForFeed(merged)
+            const filtered = filterFeedPosts(deduped)
+            followPostCountRef.current = filtered.length
+            return filtered
+          })
         } else {
-          const uniquePosts = batch.filter((post, index, self) => 
-            index === self.findIndex(p => p._id?.toString() === post._id?.toString())
-          )
+          const removed = removedPostIdsRef.current
+          const uniquePosts = batch.filter((post, index, self) => {
+            const id = post._id?.toString()
+            if (!id || removed.has(id)) return false
+            return index === self.findIndex((p) => p._id?.toString() === id)
+          })
           const dedupedPosts = dedupeGamePostsForFeed(uniquePosts)
           console.log(`📥 [getFeedPost] Initial load: received ${batch.length} posts, ${dedupedPosts.length} after dedupe`)
           setFollowPost(filterFeedPosts(dedupedPosts))
@@ -216,6 +272,9 @@ const HomePage = () => {
       if (document.visibilityState !== 'visible') return
       if (location.pathname !== '/home') return
       if (isLoadingRef.current) return
+      const now = Date.now()
+      if (now - lastSilentFeedAtRef.current < 45_000) return
+      lastSilentFeedAtRef.current = now
       getFeedPost(false, { silent: true })
     }
     document.addEventListener('visibilitychange', onVisible)
@@ -299,6 +358,12 @@ const HomePage = () => {
 
     const handleNewPost = (newPost) => {
       console.log('📨 New post received via socket:', newPost._id)
+      const newIdStr = newPost?._id != null ? String(newPost._id) : ''
+      if (newIdStr && removedPostIdsRef.current.has(newIdStr)) {
+        // Genuine create after a mistaken tombstone, or re-emit of deleted id — keep deleted out
+        console.log('⚠️ [HomePage] Ignoring newPost for tombstoned id:', newIdStr)
+        return
+      }
       // Add new post to the top of the feed, maintaining "3 newest posts per user" rule
       setFollowPost(prev => {
         // Check if post already exists (prevent duplicates) - compare by _id string
@@ -395,9 +460,12 @@ const HomePage = () => {
 
     const handlePostDeleted = ({ postId }) => {
       console.log('🗑️ Post deleted via socket:', postId)
+      const idStr = postId != null ? String(postId) : ''
+      if (idStr) removedPostIdsRef.current.add(idStr)
+
       setFollowPost(prev => {
         // Check if this is a Football post
-        const postToDelete = prev.find(p => p._id?.toString() === postId?.toString())
+        const postToDelete = prev.find(p => p._id?.toString() === idStr)
         const isFootballPost = postToDelete?.postedBy?.username === 'Football' || postToDelete?.footballData || postToDelete?.text?.includes('Football Live')
         
         if (isFootballPost) {
@@ -415,17 +483,19 @@ const HomePage = () => {
           // Only remove if user doesn't follow Football (unfollow action)
           if (!followsFootball) {
             console.log('✅ [handlePostDeleted] Removing Football post - user unfollowed Football')
-            const updated = prev.filter(p => p._id?.toString() !== postId?.toString())
+            const updated = prev.filter(p => p._id?.toString() !== idStr)
             followPostCountRef.current = updated.length
             return updated
           } else {
+            // Cron may replace Football cards — allow them back on next sync.
+            if (idStr) removedPostIdsRef.current.delete(idStr)
             console.log('⚠️ [handlePostDeleted] Ignoring Football post deletion - user still follows Football')
             return prev
           }
         }
         
         // For non-Football posts, always remove
-        const updated = prev.filter(p => p._id?.toString() !== postId?.toString())
+        const updated = prev.filter(p => p._id?.toString() !== idStr)
         followPostCountRef.current = updated.length
         console.log(`🗑️ [handlePostDeleted] Removed post ${postId}, feed now has ${updated.length} posts`)
         return updated
@@ -467,10 +537,16 @@ const HomePage = () => {
     // Same as mobile FeedScreen: full feed refetch on Football/Weather socket events (live matches + cron page updates)
     const handleFootballFeedSync = () => {
       console.log('⚽ [HomePage] Football socket — silent feed refresh (matches mobile)')
+      const now = Date.now()
+      if (now - lastSilentFeedAtRef.current < 8_000) return
+      lastSilentFeedAtRef.current = now
       getFeedPost(false, { silent: true })
     }
     const handleWeatherFeedSync = () => {
       console.log('🌤️ [HomePage] Weather socket — silent feed refresh (matches mobile)')
+      const now = Date.now()
+      if (now - lastSilentFeedAtRef.current < 8_000) return
+      lastSilentFeedAtRef.current = now
       getFeedPost(false, { silent: true })
     }
 
@@ -616,7 +692,19 @@ const HomePage = () => {
                 nodes.push(
                   post.isLive
                     ? <LivePostCard key={post._id} post={post} />
-                    : <Post key={post._id} post={post} postedBy={post.postedBy} visibleVideoOnly showFeedExtras />,
+                    : (
+                      <Post
+                        key={post._id}
+                        post={post}
+                        postedBy={post.postedBy}
+                        visibleVideoOnly
+                        showFeedExtras
+                        onDelete={(id) => {
+                          const s = id != null ? String(id) : ''
+                          if (s) removedPostIdsRef.current.add(s)
+                        }}
+                      />
+                    ),
                 )
                 // After every Nth post (default N=1 → post, ad, post, ad…)
                 if ((index + 1) % every === 0) {
