@@ -47,3 +47,23 @@ export async function invalidateUserFeedCache(userId) {
     /* best-effort */
   }
 }
+
+/** Batch cache bust — one Redis pipeline, O(n) INCR but not O(n) round-trips. */
+export async function invalidateUserFeedCaches(userIds) {
+  const unique = [
+    ...new Set(
+      (userIds || [])
+        .map((id) => (id != null ? String(id) : ''))
+        .filter(Boolean),
+    ),
+  ]
+  if (!unique.length) return
+  try {
+    const client = getRedis()
+    const pipeline = client.pipeline()
+    for (const uid of unique) pipeline.incr(versionKey(uid))
+    await pipeline.exec()
+  } catch {
+    /* best-effort */
+  }
+}

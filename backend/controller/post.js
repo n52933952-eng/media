@@ -19,7 +19,7 @@ import {
     getHiddenFeedPostIdStrings,
     hiddenPostQueryFilter,
 } from '../services/feedHiddenPosts.js'
-import { getCachedFeed, setCachedFeed, invalidateUserFeedCache } from '../services/feedCache.js'
+import { getCachedFeed, setCachedFeed, invalidateUserFeedCache, invalidateUserFeedCaches } from '../services/feedCache.js'
 import {
     encodeFeedCursor,
     decodeFeedCursor,
@@ -297,14 +297,24 @@ async function emitNewPostToCollaborators(io, post, posterId) {
     return emitToUserIds(io, ids, 'newPost', postObj)
 }
 
-async function emitPostDeletedToAuthorFollowers(io, authorId, postId) {
+async function emitPostDeletedToAuthorFollowers(io, authorId, postId, extraRecipientIds = []) {
     if (!io || !authorId) return
     const followerDocs = await Follow.find({ followeeId: authorId })
         .select('followerId')
         .limit(10000)
         .lean()
     const followerIds = followerDocs.map((d) => d.followerId).filter(Boolean)
-    await emitToUserIds(io, followerIds, 'postDeleted', { postId: String(postId) })
+    const recipientIds = [
+        ...new Set([
+            ...followerIds.map(String),
+            String(authorId),
+            ...(extraRecipientIds || []).map(String).filter(Boolean),
+        ]),
+    ]
+    // Rooms fan-out via Socket.IO Redis adapter — no per-user socket lookup.
+    await emitToUserIds(io, recipientIds, 'postDeleted', { postId: String(postId) })
+    // One Redis pipeline for all feed version bumps (non-blocking for HTTP if caller doesn't await extras).
+    invalidateUserFeedCaches(recipientIds).catch(() => {})
 }
 
 async function collectPostUpdateRecipientIds(post, postOwnerId) {
@@ -923,9 +933,26 @@ export const deletePost = async(req,res) => {
         console.error('Error deleting post likes:', e),
       )
 
+      const collaboratorIds = Array.isArray(post.contributors)
+        ? post.contributors.map((c) => (c._id || c)?.toString?.() ?? String(c)).filter(Boolean)
+        : []
+
       const io = getIO()
       if (io) {
-        await emitPostDeletedToAuthorFollowers(io, postAuthorId, req.params.id)
+        await emitPostDeletedToAuthorFollowers(io, postAuthorId, req.params.id, collaboratorIds)
+      } else {
+        const followerDocs = await Follow.find({ followeeId: postAuthorId })
+          .select('followerId')
+          .limit(10000)
+          .lean()
+        const bustIds = [
+          ...new Set([
+            postAuthorId,
+            ...collaboratorIds,
+            ...followerDocs.map((d) => String(d.followerId)).filter(Boolean),
+          ]),
+        ]
+        invalidateUserFeedCaches(bustIds).catch(() => {})
       }
 
       res.status(200).json({message:"post has deleted sucsfully"})

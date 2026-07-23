@@ -34,11 +34,18 @@ export async function collectSocketIdsForUserIds(userIds) {
   return socketIds
 }
 
+/** Emit to every connected tab/device for each user via `userSelf:<id>` rooms (not a single Redis socket id). */
 export async function emitToUserIds(io, userIds, event, payload) {
   if (!io || !userIds?.length) return 0
-  const socketIds = await collectSocketIdsForUserIds(userIds)
-  for (const socketId of socketIds) {
-    io.to(socketId).emit(event, payload)
+  const unique = [
+    ...new Set(
+      (userIds || [])
+        .map((id) => id?.toString?.() ?? (id != null ? String(id) : ''))
+        .filter(Boolean),
+    ),
+  ]
+  for (const uid of unique) {
+    io.to(`userSelf:${uid}`).emit(event, payload)
   }
-  return socketIds.size
+  return unique.length
 }

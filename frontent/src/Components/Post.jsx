@@ -919,8 +919,8 @@ const showToast = useShowToast()
     const data = await res.json()
 
      if(res.ok){
-      // Remove post from the feed
-      setFollowPost(followPost.filter((p) => p._id !== post._id))
+      // Remove post from the feed (normalize ids — ObjectId vs string)
+      setFollowPost((prev) => prev.filter((p) => String(p._id) !== String(post._id)))
       
       // Call onDelete callback if provided (for UserPage to update local state)
       if (onDelete) {
