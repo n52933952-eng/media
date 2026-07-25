@@ -413,6 +413,23 @@ const clearChessDisconnectGraceTimer = (userId) => {
     }
 }
 
+// Card (Go Fish): same idea as chess — brief flaps must not forfeit.
+const CARD_DISCONNECT_GRACE_MS = (() => {
+    const n = Number(process.env.CARD_DISCONNECT_GRACE_MS || 25000)
+    return Number.isFinite(n) && n >= 5000 && n <= 120000 ? n : 25000
+})()
+const cardDisconnectGraceTimers = new Map()
+
+const clearCardDisconnectGraceTimer = (userId) => {
+    const uid = normalizeUserId(userId)
+    if (!uid) return
+    const t = cardDisconnectGraceTimers.get(uid)
+    if (t) {
+        clearTimeout(t)
+        cardDisconnectGraceTimers.delete(uid)
+    }
+}
+
 /** callId format `${callerId}-${receiverId}`; Mongo ObjectIds contain no '-'. */
 const getPeerUserIdFromCompositeCallId = (callId, uid) => {
     if (!callId || !uid) return null
@@ -1404,6 +1421,7 @@ export const initializeSocket = async (app) => {
                 if (normConn) {
                     clearCallDisconnectGraceTimer(normConn)
                     clearChessDisconnectGraceTimer(normConn)
+                    clearCardDisconnectGraceTimer(normConn)
                 }
             } catch (_) {}
 
@@ -4069,6 +4087,39 @@ export const initializeSocket = async (app) => {
             }
         })
 
+        // Game never reached a playable board — clear both players.
+        socket.on('cancelCardGameStart', async ({ roomId, reason }) => {
+            try {
+                if (!roomId || typeof roomId !== 'string' || !roomId.startsWith('card_')) return
+                const parts = roomId.split('_')
+                const player1 = parts.length >= 3 ? (normalizeUserId(parts[1]) || parts[1]) : null
+                const player2 = parts.length >= 3 ? (normalizeUserId(parts[2]) || parts[2]) : null
+                const endReason = reason === 'start_timeout' ? 'start_timeout' : 'never_started'
+                const endPayload = { roomId, reason: endReason, message: 'Game could not start' }
+
+                if (player1) {
+                    const s1 = await getUserSocket(player1)
+                    if (s1?.socketId) io.to(s1.socketId).emit('cardGameEnded', endPayload)
+                    await deleteActiveCardGame(player1)
+                    await deletePendingCardAcceptForUser(player1).catch(() => {})
+                    void emitStatusToFollowersOf([player1], 'userAvailableCard', { userId: player1 })
+                }
+                if (player2) {
+                    const s2 = await getUserSocket(player2)
+                    if (s2?.socketId) io.to(s2.socketId).emit('cardGameEnded', endPayload)
+                    await deleteActiveCardGame(player2)
+                    await deletePendingCardAcceptForUser(player2).catch(() => {})
+                    void emitStatusToFollowersOf([player2], 'userAvailableCard', { userId: player2 })
+                }
+                io.to(roomId).emit('cardGameEnded', endPayload)
+                deleteCardGamePost(roomId).catch(() => {})
+                await deleteCardGameState(roomId)
+                console.log(`🃏 [cancelCardGameStart] Cleared room ${roomId} (${endReason})`)
+            } catch (e) {
+                console.error('❌ [cancelCardGameStart]', e?.message || e)
+            }
+        })
+
         // Join card room for spectators
         socket.on("joinCardRoom", async ({ roomId, userId }) => {
             if (roomId) {
@@ -4508,6 +4559,22 @@ export const initializeSocket = async (app) => {
                     }
                 } else {
                     console.log(`⚠️ [requestCardGameState] No game state found for room ${roomId}`)
+                    // Reconnect after cleanup — tell client to leave (skip brand-new accept race).
+                    const parts = String(roomId).split('_')
+                    const p1 = parts.length >= 3 ? (normalizeUserId(parts[1]) || parts[1]) : null
+                    const p2 = parts.length >= 3 ? (normalizeUserId(parts[2]) || parts[2]) : null
+                    const p1Room = p1 ? await getActiveCardGame(p1) : null
+                    const p2Room = p2 ? await getActiveCardGame(p2) : null
+                    if (p1Room !== roomId && p2Room !== roomId) {
+                        const ts = Number(parts[parts.length - 1])
+                        const ageMs = Number.isFinite(ts) ? Date.now() - ts : Infinity
+                        if (ageMs < 20000) return
+                        io.to(socket.id).emit('cardGameEnded', {
+                            roomId,
+                            reason: 'player_disconnected',
+                            message: 'Game ended',
+                        })
+                    }
                 }
             }
         })
@@ -4850,9 +4917,8 @@ export const initializeSocket = async (app) => {
             if (disconnectedUserId && await hasActiveCardGame(disconnectedUserId)) {
                 const gameRoomId = await getActiveCardGame(disconnectedUserId)
                 console.log(`🃏 User ${disconnectedUserId} disconnected while in card game: ${gameRoomId}`)
-                console.log(`⏳ Waiting 10 seconds to see if user reconnects (page refresh)...`)
-                
-                // Find the other player — primary: parse roomId (multi-server safe)
+                console.log(`⏳ Waiting ${CARD_DISCONNECT_GRACE_MS}ms to see if user reconnects...`)
+
                 let otherPlayerId = null
                 const cardRoomMatch = gameRoomId && gameRoomId.match(/^card_(.+?)_(.+?)_\d+$/)
                 if (cardRoomMatch) {
@@ -4860,7 +4926,6 @@ export const initializeSocket = async (app) => {
                     const p2 = normalizeUserId(cardRoomMatch[2]) || cardRoomMatch[2]
                     otherPlayerId = p1 === disconnectedUserId ? p2 : p1
                 }
-                // Fallback: use Redis game state (in case room ID format ever changes)
                 if (!otherPlayerId) {
                     const gameState = await getCardGameState(gameRoomId).catch(() => null)
                     if (gameState && gameState.players) {
@@ -4868,63 +4933,56 @@ export const initializeSocket = async (app) => {
                         if (otherPlayer) otherPlayerId = otherPlayer.userId
                     }
                 }
-                
-                // Wait 10 seconds before ending the game (allows time for page refresh reconnect)
-                setTimeout(async () => {
-                    // Check if user reconnected
-                    const stillInGame = await hasActiveCardGame(disconnectedUserId)
-                    const reconnectedSocket = await getUserSocket(disconnectedUserId)
-                    
-                    if (stillInGame && reconnectedSocket) {
-                        console.log(`✅ User ${disconnectedUserId} reconnected - card game continues!`)
-                        return // User reconnected, don't end the game
-                    }
-                    
-                    // User didn't reconnect - end the game
-                    console.log(`❌ User ${disconnectedUserId} did not reconnect - ending card game`)
-                    
-                    // Notify the other player
-                    if (otherPlayerId) {
-                        const otherPlayerData = await getUserSocket(otherPlayerId)
-                        const otherPlayerSocketId = otherPlayerData?.socketId
-                        if (otherPlayerSocketId) {
-                            io.to(otherPlayerSocketId).emit("opponentLeftGame")
-                            io.to(otherPlayerSocketId).emit("cardGameCleanup")
+
+                clearCardDisconnectGraceTimer(disconnectedUserId)
+                cardDisconnectGraceTimers.set(
+                    normalizeUserId(disconnectedUserId) || String(disconnectedUserId),
+                    setTimeout(async () => {
+                        cardDisconnectGraceTimers.delete(normalizeUserId(disconnectedUserId) || String(disconnectedUserId))
+                        const stillInGame = await hasActiveCardGame(disconnectedUserId)
+                        const reconnectedSocket = await getUserSocket(disconnectedUserId)
+
+                        if (stillInGame && reconnectedSocket) {
+                            console.log(`✅ User ${disconnectedUserId} reconnected - card game continues!`)
+                            return
                         }
-                    }
-                    
-                    // Notify all spectators in the room
-                    if (gameRoomId) {
-                        const room = io.sockets.adapter.rooms.get(gameRoomId)
-                        if (room && room.size > 0) {
-                            console.log(`👁️ Notifying ${room.size} spectators that card game ended (player disconnected)`)
-                            io.to(gameRoomId).emit("cardGameEnded", { reason: 'player_disconnected' })
+
+                        console.log(`❌ User ${disconnectedUserId} did not reconnect - ending card game`)
+                        const endPayload = { roomId: gameRoomId, reason: 'player_disconnected', message: 'Opponent disconnected' }
+
+                        if (otherPlayerId) {
+                            const otherPlayerData = await getUserSocket(otherPlayerId)
+                            const otherPlayerSocketId = otherPlayerData?.socketId
+                            if (otherPlayerSocketId) {
+                                io.to(otherPlayerSocketId).emit('opponentLeftGame')
+                                io.to(otherPlayerSocketId).emit('cardGameCleanup')
+                                io.to(otherPlayerSocketId).emit('cardGameEnded', endPayload)
+                            }
                         }
-                    }
-                    
-                    // Delete card game post
-                    deleteCardGamePost(gameRoomId).catch(err => {
-                        console.error('❌ Error deleting card game post on disconnect:', err)
-                    })
-                    
-                    // Remove from active games tracking (Redis)
-                    await deleteActiveCardGame(disconnectedUserId)
-                    if (otherPlayerId) {
-                        await deleteActiveCardGame(otherPlayerId)
-                    }
-                    await deletePendingCardAcceptForUser(disconnectedUserId).catch(() => {})
-                    if (otherPlayerId) await deletePendingCardAcceptForUser(otherPlayerId).catch(() => {})
-                    
-                    // Clean up game state (Redis)
-                    await deleteCardGameState(gameRoomId)
-                    console.log(`🗑️ Cleaned up card game state for room ${gameRoomId}`)
-                    
-                    // Make users available again
-                    void emitStatusToFollowersOf([disconnectedUserId], 'userAvailableCard', { userId: disconnectedUserId })
-                    if (otherPlayerId) {
-                        void emitStatusToFollowersOf([otherPlayerId], 'userAvailableCard', { userId: otherPlayerId })
-                    }
-                }, 10000) // Wait 10 seconds before ending game
+                        if (gameRoomId) {
+                            io.to(gameRoomId).emit('cardGameEnded', endPayload)
+                        }
+
+                        deleteCardGamePost(gameRoomId).catch(err => {
+                            console.error('❌ Error deleting card game post on disconnect:', err)
+                        })
+
+                        await deleteActiveCardGame(disconnectedUserId)
+                        if (otherPlayerId) {
+                            await deleteActiveCardGame(otherPlayerId)
+                        }
+                        await deletePendingCardAcceptForUser(disconnectedUserId).catch(() => {})
+                        if (otherPlayerId) await deletePendingCardAcceptForUser(otherPlayerId).catch(() => {})
+
+                        await deleteCardGameState(gameRoomId)
+                        console.log(`🗑️ Cleaned up card game state for room ${gameRoomId}`)
+
+                        void emitStatusToFollowersOf([disconnectedUserId], 'userAvailableCard', { userId: disconnectedUserId })
+                        if (otherPlayerId) {
+                            void emitStatusToFollowersOf([otherPlayerId], 'userAvailableCard', { userId: otherPlayerId })
+                        }
+                    }, CARD_DISCONNECT_GRACE_MS)
+                )
             }
             
             // Remove socket from chess rooms (only rooms this socket joined — no full Redis SCAN)
