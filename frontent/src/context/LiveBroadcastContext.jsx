@@ -51,6 +51,7 @@ export const LiveBroadcastProvider = ({ children }) => {
   const roomNameRef = useRef('');
   const liveEndedRef = useRef(false);
   const endLiveRef = useRef(async () => {});
+  const reconnectWatchdogRef = useRef(null);
   const onChatRef = useRef(null);
   const isSharingRef = useRef(false);
   const isMinimizedRef = useRef(false);
@@ -59,6 +60,13 @@ export const LiveBroadcastProvider = ({ children }) => {
   const lastChatSendAtRef = useRef(0);
   const flushIncomingChatRef = useRef(() => {});
   const incomingChatBatchRef = useRef(createLiveChatBatchSink((items) => flushIncomingChatRef.current(items)));
+
+  const clearReconnectWatchdog = useCallback(() => {
+    if (reconnectWatchdogRef.current) {
+      clearTimeout(reconnectWatchdogRef.current);
+      reconnectWatchdogRef.current = null;
+    }
+  }, []);
 
   const addLiveChatMessage = useCallback((sender, text) => {
     const trimmed = String(text || '').trim();
@@ -142,6 +150,7 @@ export const LiveBroadcastProvider = ({ children }) => {
   }, []);
 
   const disconnect = useCallback(async () => {
+    clearReconnectWatchdog();
     await stopAllPublishedTracks();
     try { await roomRef.current?.disconnect(); } catch (_) {}
     roomRef.current = null;
@@ -155,7 +164,7 @@ export const LiveBroadcastProvider = ({ children }) => {
     setIsLiveControlsFocused(false);
     setViewerCount(0);
     clearLiveChatMessages();
-  }, [stopAllPublishedTracks, clearLiveChatMessages]);
+  }, [stopAllPublishedTracks, clearLiveChatMessages, clearReconnectWatchdog]);
 
   const ensureScreenShare = useCallback(async ({ preferCurrentTab = false } = {}) => {
     const room = roomRef.current;
@@ -376,11 +385,31 @@ export const LiveBroadcastProvider = ({ children }) => {
       room.on(RoomEvent.ParticipantDisconnected, () => setViewerCount(c => Math.max(0, c - 1)));
       room.on(RoomEvent.Reconnecting, () => {
         console.warn('[LiveBroadcast] LiveKit reconnecting…');
+        // Cap stuck reconnect — don't leave host UI "live" forever.
+        clearReconnectWatchdog();
+        reconnectWatchdogRef.current = setTimeout(() => {
+          reconnectWatchdogRef.current = null;
+          if (liveEndedRef.current) return;
+          if (!roomRef.current || roomRef.current.state !== ConnectionState.Reconnecting) return;
+          console.warn('[LiveBroadcast] Reconnect watchdog — ending live session');
+          void endLiveRef.current?.().then(() => {
+            toast({
+              title: 'Live ended',
+              description: 'Your livestream stopped because the connection was lost.',
+              status: 'warning',
+              duration: 5000,
+              isClosable: true,
+              position: 'top',
+            });
+          });
+        }, 18_000);
       });
       room.on(RoomEvent.Reconnected, () => {
+        clearReconnectWatchdog();
         syncLocalTrack();
       });
       room.on(RoomEvent.Disconnected, () => {
+        clearReconnectWatchdog();
         roomRef.current = null;
         setLocalTrack(null);
         setLocalScreenTrack(null);
@@ -422,7 +451,25 @@ export const LiveBroadcastProvider = ({ children }) => {
     } finally {
       setStartingLive(false);
     }
-  }, [user, socket, startingLive, isLive, syncLocalTrack, toast]);
+  }, [user, socket, startingLive, isLive, syncLocalTrack, toast, clearReconnectWatchdog]);
+
+  /** After socket flap: re-announce goLive so Mongo live row + feed card recover if grace wiped them. */
+  useEffect(() => {
+    if (!socket || !isLive || !user?._id || !roomNameRef.current) return undefined;
+    const onConnect = () => {
+      if (liveEndedRef.current || !roomNameRef.current) return;
+      console.log('[LiveBroadcast] Socket reconnected while live — re-announce goLive');
+      socket.emit('livekit:joinLiveWatch', { streamerId: String(user._id) });
+      socket.emit('livekit:goLive', {
+        streamerId: String(user._id),
+        streamerName: user.name || user.username,
+        streamerProfilePic: user.profilePic,
+        roomName: roomNameRef.current,
+      });
+    };
+    socket.on('connect', onConnect);
+    return () => socket.off('connect', onConnect);
+  }, [socket, isLive, user?._id, user?.name, user?.username, user?.profilePic]);
 
   const sendChat = useCallback(async (text, senderName) => {
     const trimmed = String(text || '').trim();
@@ -455,20 +502,36 @@ export const LiveBroadcastProvider = ({ children }) => {
     if (!socket || !isLive || !user?._id) return;
     const onStreamEnded = async (payload) => {
       if (String(payload?.streamerId || '') !== String(user._id)) return;
+      if (liveEndedRef.current) return;
+
+      const reason = String(payload?.reason || '');
       const room = roomRef.current;
-      if (
-        room
-        && (room.state === ConnectionState.Connected || room.state === ConnectionState.Reconnecting)
-      ) {
-        console.warn('[LiveBroadcast] Ignoring streamEnded — LiveKit session still active');
+      const lkStillUp =
+        !!room
+        && (room.state === ConnectionState.Connected || room.state === ConnectionState.Reconnecting);
+
+      // Server is source of truth after disconnect grace — never ignore `disconnect` cleanup.
+      if (lkStillUp && reason !== 'disconnect') {
+        console.warn('[LiveBroadcast] Ignoring streamEnded — LiveKit session still active', reason);
         return;
       }
-      if (liveEndedRef.current) return;
+
+      console.warn('[LiveBroadcast] streamEnded for host — tearing down', { reason });
       await endLiveRef.current?.();
+      if (reason === 'disconnect') {
+        toast({
+          title: 'Live ended',
+          description: 'Your livestream stopped because the connection was lost.',
+          status: 'warning',
+          duration: 5000,
+          isClosable: true,
+          position: 'top',
+        });
+      }
     };
     socket.on('livekit:streamEnded', onStreamEnded);
     return () => socket.off('livekit:streamEnded', onStreamEnded);
-  }, [socket, isLive, user?._id]);
+  }, [socket, isLive, user?._id, toast]);
 
   useEffect(() => {
     if (!user && isLive) void endLiveRef.current?.();

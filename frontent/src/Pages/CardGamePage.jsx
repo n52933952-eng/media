@@ -127,10 +127,15 @@ const CardGamePage = () => {
 
     const handInitRef = useRef(false)
     const currentRoomRef = useRef(roomId)
+    const gameLiveRef = useRef(false)
     const prevScoreRef = useRef(0)
     const prevBooksRef = useRef(0)
     const previousPathRef = useRef(null)
     const cardExitHandledRef = useRef(false)
+
+    useEffect(() => {
+        gameLiveRef.current = gameLive
+    }, [gameLive])
 
     // Recover active card room after refresh/reconnect (matches Chess behavior).
     // Also handles the case where roomId is already set but we switched browsers
@@ -287,6 +292,24 @@ const CardGamePage = () => {
 
         const handleGameEnded = (data) => {
             if (data?.roomId && data.roomId !== currentRoomRef.current) return
+            const reason = String(data?.reason || '')
+            if (
+                reason === 'never_started'
+                || reason === 'start_timeout'
+                || reason === 'player_disconnected'
+            ) {
+                removeOwnCardPost()
+                endCardGameOnce()
+                toast({
+                    title: 'Go Fish',
+                    description: reason === 'player_disconnected' ? 'Opponent disconnected' : 'Game could not start',
+                    status: 'info',
+                    duration: 3000,
+                    position: 'top',
+                })
+                navigate('/home')
+                return
+            }
             setGameOver(true)
             setGameResult(data.message || 'Game Over')
             toast({ title: 'Game Over 🃏', description: data.message, status: 'info', duration: 4000, position: 'top' })
@@ -307,7 +330,9 @@ const CardGamePage = () => {
 
         socket.emit('joinCardRoom', { roomId, userId: user?._id })
         // Fallback state request if joinCardRoom doesn't reply quickly
-        const fallback = setTimeout(() => { if (!gameLive) socket.emit('requestCardGameState', { roomId }) }, 1500)
+        const fallback = setTimeout(() => {
+            if (!gameLiveRef.current) socket.emit('requestCardGameState', { roomId })
+        }, 1500)
 
         return () => {
             clearTimeout(fallback)
@@ -316,7 +341,19 @@ const CardGamePage = () => {
             socket.off('cardGameEnded', handleGameEnded)
             socket.off('cardGameCleanup', handleCleanup)
         }
-    }, [socket, roomId])
+    }, [socket, roomId, navigate, toast, endCardGameOnce])
+
+    // Back online after server already ended the game — catch up and leave.
+    useEffect(() => {
+        if (!socket || !roomId) return undefined
+        const onReconnect = () => {
+            if (gameOver) return
+            socket.emit('joinCardRoom', { roomId, userId: user?._id })
+            socket.emit('requestCardGameState', { roomId })
+        }
+        socket.on('connect', onReconnect)
+        return () => socket.off('connect', onReconnect)
+    }, [socket, roomId, gameOver, user?._id])
 
     const removeOwnCardPost = () => {
         if (!roomId) return
@@ -331,8 +368,33 @@ const CardGamePage = () => {
 
     const availableRanks = [...new Set(myHand.map(c => c.value))].sort((a, b) => a - b)
 
+    const abortUnstartedGame = useCallback((reason = 'never_started') => {
+        const rid = roomId || localStorage.getItem('cardRoomId')
+        if (socket && rid) {
+            socket.emit('cancelCardGameStart', { roomId: rid, reason })
+        }
+        removeOwnCardPost()
+        endCardGameOnce()
+        toast({ title: 'Go Fish', description: 'Game could not start', status: 'info', duration: 3000, position: 'top' })
+        navigate('/home')
+    }, [socket, roomId, endCardGameOnce, toast, navigate])
+
+    // If the game never goes live, don't leave either player stuck on the spinner.
+    useEffect(() => {
+        if (gameLive || gameOver || !roomId) return undefined
+        const timer = setTimeout(() => {
+            if (gameLiveRef.current) return
+            abortUnstartedGame('start_timeout')
+        }, 15000)
+        return () => clearTimeout(timer)
+    }, [gameLive, gameOver, roomId, abortUnstartedGame])
+
     const handleAsk = useCallback((rank) => {
         if (!socket || !roomId || !opponentId || !isMyTurn || gameOver) return
+        if (!socket.connected) {
+            toast({ title: 'Offline', description: 'Reconnect to make a move', status: 'info', duration: 2500, position: 'top' })
+            return
+        }
         if (!myHand.some(c => c.value === rank)) {
             toast({ title: 'Invalid move', description: 'You must hold at least one card of that rank', status: 'error', duration: 2500, position: 'top' })
             return
@@ -340,7 +402,7 @@ const CardGamePage = () => {
         closeRankModal()
         setIsMyTurn(false)
         socket.emit('cardMove', { roomId, move: { action: 'ask', rank }, to: opponentId })
-    }, [socket, roomId, opponentId, isMyTurn, gameOver, myHand])
+    }, [socket, roomId, opponentId, isMyTurn, gameOver, myHand, toast, closeRankModal])
 
     const handleResign = () => {
         if (socket && roomId && opponentId) socket.emit('resignCard', { roomId, to: opponentId })
@@ -366,7 +428,7 @@ const CardGamePage = () => {
                 <Text fontSize="4xl" mb={4}>🃏</Text>
                 <Spinner size="xl" color="purple.500" mb={4} />
                 <Text fontSize="lg" color={mutedCol}>Waiting for the game to start…</Text>
-                <Button mt={6} size="sm" variant="outline" colorScheme="red" onClick={() => { endCardGameOnce(); navigate('/home') }}>Cancel</Button>
+                <Button mt={6} size="sm" variant="outline" colorScheme="red" onClick={() => abortUnstartedGame('never_started')}>Cancel</Button>
             </Box>
         )
     }

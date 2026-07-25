@@ -553,10 +553,14 @@ const LiveStreamPage = () => {
       const sid = payload?.streamerId != null ? String(payload.streamerId) : '';
       if (!sid || sid !== String(streamerId) || closingRef.current) return;
       const room = roomRef.current;
-      if (
-        room
-        && (room.state === ConnectionState.Connected || room.state === ConnectionState.Reconnecting)
-      ) {
+      const lkAlive =
+        !!room
+        && (room.state === ConnectionState.Connected || room.state === ConnectionState.Reconnecting);
+      // Host app-socket flap can emit streamEnded while LiveKit media is still fine.
+      if (lkAlive && String(payload?.reason || '') === 'disconnect') {
+        return;
+      }
+      if (lkAlive) {
         const stillActive = await verifyStreamStillActive();
         if (stillActive) return;
       }

@@ -20,6 +20,7 @@ import {
     ModalCloseButton,
     SimpleGrid,
     Grid,
+    Spinner,
     useBreakpointValue,
 } from '@chakra-ui/react'
 import { useParams, useNavigate, useSearchParams, useLocation } from 'react-router-dom'
@@ -106,6 +107,12 @@ const ChessGamePage = () => {
     const [gameLive, setGameLive] = useState(() => {
         return localStorage.getItem("gameLive") === "true"
     })
+    /** True once server confirms the room (accept / chessGameState) — avoids stuck “Waiting…”. */
+    const [gameReady, setGameReady] = useState(false)
+    const gameReadyRef = useRef(false)
+    useEffect(() => {
+        gameReadyRef.current = gameReady
+    }, [gameReady])
     const [showGameOverBox, setShowGameOverBox] = useState(false)
     /** After delay — same pattern as mobile (`gameOver` + overlay visibility). */
     const [gameOverOverlayVisible, setGameOverOverlayVisible] = useState(false)
@@ -418,6 +425,7 @@ const ChessGamePage = () => {
                     }
                     
                     pendingGameStateRef.current = null
+                    setGameReady(true)
                     console.log('✅ [ChessGamePage] Applied pending game state')
                 } catch (error) {
                     console.error('❌ [ChessGamePage] Error applying pending game state:', error)
@@ -427,13 +435,17 @@ const ChessGamePage = () => {
             
             // Always emit joinChessRoom to request game state (even if rejoining)
             // Backend will always send current game state from Redis (source of truth)
+            const joinAndSync = () => {
+                socket.emit('joinChessRoom', { roomId })
+                socket.emit('requestChessGameState', { roomId })
+            }
             if (socket.connected) {
                 if (isSpectator) {
                     console.log('👁️ [ChessGamePage] Spectator joining room via useEffect (already connected):', roomId)
                 } else {
                     console.log('♟️ [ChessGamePage] Player rejoining room after refresh (already connected):', roomId)
                 }
-                socket.emit('joinChessRoom', { roomId })
+                joinAndSync()
             } else {
                 console.log('⏳ [ChessGamePage] Socket not connected yet, waiting...')
                 // Wait for connection
@@ -443,7 +455,7 @@ const ChessGamePage = () => {
                     } else {
                         console.log('♟️ [ChessGamePage] Socket connected, player rejoining room:', roomId)
                     }
-                    socket.emit('joinChessRoom', { roomId })
+                    joinAndSync()
                     socket.off('connect', onConnect)
                 }
                 socket.on('connect', onConnect)
@@ -681,6 +693,7 @@ const ChessGamePage = () => {
                     console.log('♟️ [ChessGamePage] Player rejoining room on connect (page refresh):', roomToJoin)
                 }
                 socket.emit('joinChessRoom', { roomId: roomToJoin })
+                socket.emit('requestChessGameState', { roomId: roomToJoin })
             }
         })
 
@@ -745,6 +758,7 @@ const ChessGamePage = () => {
             
             // Start game
             setGameLive(true)
+            setGameReady(true)
             localStorage.setItem('gameLive', 'true')
             playSound('gameStart')
             
@@ -927,9 +941,10 @@ const ChessGamePage = () => {
             // Apply state if: roomId matches (from URL or state)
             // Apply for both spectators AND players (players need it after page refresh)
             if (data && data.roomId && (data.roomId === urlRoomId || data.roomId === roomId)) {
-                // Apply if we're a spectator OR if we're a player with an active game (page refresh scenario)
-                const isPlayerRejoining = gameLive && roomId === data.roomId && !isSpectatorMode && !isSpectator
-                if (isSpectatorMode || isSpectator || isPlayerRejoining) {
+                // Spectators + any player in this room (start sync, refresh, reconnect)
+                const isPlayerInRoom = !isSpectatorMode && !isSpectator && roomId === data.roomId
+                const isPlayerRejoining = gameLive && isPlayerInRoom
+                if (isSpectatorMode || isSpectator || isPlayerInRoom) {
                     console.log('📥 [ChessGamePage] Received game state for catch-up:', {
                         roomId: data.roomId,
                         fen: data.fen?.substring(0, 50) + '...',
@@ -1029,6 +1044,7 @@ const ChessGamePage = () => {
                             fetchPlayer(data.player2Id, false) // BLACK player
                         }
                         
+                        setGameReady(true)
                         if (isPlayerRejoining) {
                             console.log('✅ [ChessGamePage] Game state applied - player reconnected and caught up!')
                         } else {
@@ -1051,21 +1067,46 @@ const ChessGamePage = () => {
             }
         })
 
-        // Listen for game ended event (for spectators)
+        // Listen for game ended event (players + spectators)
         socket.on('chessGameEnded', (data) => {
+            if (data?.roomId && roomId && data.roomId !== roomId) return
             const reason = data?.reason || 'ended'
+
+            if (
+                reason === 'never_started'
+                || reason === 'start_timeout'
+                || reason === 'player_disconnected'
+            ) {
+                localStorage.removeItem('chessOrientation')
+                localStorage.removeItem('gameLive')
+                localStorage.removeItem('chessRoomId')
+                localStorage.removeItem('chessFEN')
+                localStorage.removeItem('capturedWhite')
+                localStorage.removeItem('capturedBlack')
+                setGameLive(false)
+                setGameReady(false)
+                setOrientation(null)
+                if (roomId && !isSpectator) {
+                    const s = String(roomId).trim()
+                    if (s) window.dispatchEvent(new CustomEvent('chessGameFeedUiEnded', { detail: { roomId: s } }))
+                }
+                showToast(
+                    'Chess',
+                    reason === 'player_disconnected' ? 'Opponent disconnected' : 'Game could not start',
+                    'info',
+                )
+                navigate('/home')
+                return
+            }
+
             let message = 'The game has ended.'
-            
             if (reason === 'resigned') {
                 message = 'One of the players resigned. The game has ended.'
             } else if (reason === 'player_left') {
                 message = 'One of the players left. The game has ended.'
-            } else if (reason === 'player_disconnected') {
-                message = 'One of the players disconnected. The game has ended.'
             }
-            
+
             // Match mobile: keep final position and moveHistory so spectators can use “Review game”.
-            
             showToast('Game Ended', message, 'info')
             setIsGameOver(true)
             setOver(message)
@@ -1148,8 +1189,9 @@ const ChessGamePage = () => {
             return false
         }
         
-        if (!socket) {
+        if (!socket || !socket.connected) {
             console.log('❌ Socket not connected!')
+            showToast('Offline', 'Reconnect to make a move', 'info')
             return false
         }
         
@@ -1258,7 +1300,45 @@ const ChessGamePage = () => {
 
         // Navigate to home
         navigate('/home')
-    }, [chess, navigate, socket, roomId, opponentId, user?._id, gameLive, clearGameOverOverlayDelay, isSpectator])
+    }, [chess, navigate, socket, roomId, opponentId, user?._id, gameLive, clearGameOverOverlayDelay, isSpectator, setOrientation])
+
+    /** Stuck on "Waiting…" — cancel for both players and go home (matches mobile). */
+    const abortUnstartedGame = useCallback((reason = 'never_started') => {
+        const rid = roomId || localStorage.getItem('chessRoomId')
+        if (!rid || isSpectator) {
+            localStorage.removeItem('chessOrientation')
+            localStorage.removeItem('gameLive')
+            localStorage.removeItem('chessRoomId')
+            navigate('/home')
+            return
+        }
+        if (socket) {
+            socket.emit('cancelChessGameStart', { roomId: rid, reason })
+        }
+        localStorage.removeItem('chessOrientation')
+        localStorage.removeItem('gameLive')
+        localStorage.removeItem('chessRoomId')
+        localStorage.removeItem('chessFEN')
+        localStorage.removeItem('capturedWhite')
+        localStorage.removeItem('capturedBlack')
+        setGameLive(false)
+        setGameReady(false)
+        setOrientation(null)
+        const s = String(rid).trim()
+        if (s) window.dispatchEvent(new CustomEvent('chessGameFeedUiEnded', { detail: { roomId: s } }))
+        showToast('Chess', 'Game could not start', 'info')
+        navigate('/home')
+    }, [socket, roomId, isSpectator, navigate, showToast, setOrientation])
+
+    // If the board never syncs from the server, don't leave either player stuck.
+    useEffect(() => {
+        if (gameReady || isGameOver || isSpectator || !roomId) return undefined
+        const timer = setTimeout(() => {
+            if (gameReadyRef.current) return
+            abortUnstartedGame('start_timeout')
+        }, 15000)
+        return () => clearTimeout(timer)
+    }, [gameReady, isGameOver, isSpectator, roomId, abortUnstartedGame])
 
     const handleResign = () => {
         if (!socket) return
@@ -1654,6 +1734,24 @@ const ChessGamePage = () => {
           : storedOrientation
             ? `Waiting to start — ${storedOrientation === 'white' ? '⚪ White' : '⚫ Black'}`
             : 'Waiting for opponent…'
+
+    if (!gameReady && !isGameOver) {
+        return (
+            <Box bg={bgColor} minH="100vh" display="flex" flexDirection="column" alignItems="center" justifyContent="center" px={4}>
+                <Spinner size="xl" color="yellow.500" mb={4} />
+                <Text fontSize="lg" color={textColor} mb={2}>Waiting for the game to start…</Text>
+                <Button
+                    mt={4}
+                    size="sm"
+                    variant="outline"
+                    colorScheme="red"
+                    onClick={() => abortUnstartedGame('never_started')}
+                >
+                    Cancel
+                </Button>
+            </Box>
+        )
+    }
 
     return (
         <Box bg={bgColor} minH="100vh" py={2}>
