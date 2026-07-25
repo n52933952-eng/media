@@ -1257,9 +1257,9 @@ export const initializeSocket = async (app) => {
 
     /** Broadcaster refresh/kill-tab without `livekit:endLive` — clean Mongo + notify after grace; reconnect cancels. */
     const LIVE_STREAM_DISCONNECT_GRACE_MS = (() => {
-        // Broadcaster killed app / lost socket without livekit:endLive — clear stale feed row after grace.
-        const n = Number(process.env.LIVE_STREAM_DISCONNECT_GRACE_MS || 15000)
-        return Number.isFinite(n) && n >= 2000 && n <= 120000 ? n : 15000
+        // Longer grace for mobile Wi‑Fi/4G flaps during LiveKit — short blips must not wipe the feed card.
+        const n = Number(process.env.LIVE_STREAM_DISCONNECT_GRACE_MS || 45000)
+        return Number.isFinite(n) && n >= 2000 && n <= 120000 ? n : 45000
     })()
     const liveStreamDisconnectTimers = new Map()
 
@@ -2523,7 +2523,23 @@ export const initializeSocket = async (app) => {
                 }
                 const existingLive = await LiveStream.findOne({ streamer: streamerId, active: true }).lean()
                 if (existingLive?.roomName === roomName) {
-                    // Ignore duplicate emits from double-click/retry to avoid noisy feed updates.
+                    // Same live still active — re-broadcast streamStarted so feed cards recover after socket flaps
+                    // without creating a new session or spamming FCM.
+                    const streamerNorm = normalizeUserId(streamerId) || String(streamerId)
+                    socket.join(`livewatch:${streamerNorm}`)
+                    const { getFollowerIdsForUser } = await import('../services/followGraph.js')
+                    const followerList = await getFollowerIdsForUser(streamerId)
+                    const livePayload = {
+                        streamerId: streamerNorm,
+                        streamerName,
+                        streamerProfilePic,
+                        roomName,
+                    }
+                    for (const followerId of followerList) {
+                        const fid = normalizeUserId(followerId) || String(followerId)
+                        if (!fid || fid === streamerNorm) continue
+                        emitToUserSelf(fid, 'livekit:streamStarted', livePayload)
+                    }
                     return
                 }
                 const streamerNorm = normalizeUserId(streamerId) || String(streamerId)
