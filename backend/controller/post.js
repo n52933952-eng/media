@@ -1381,15 +1381,20 @@ export const getFeedPost = async(req,res) => {
             .sort({ startedAt: -1 })
             .lean()
 
-            const livePseudoPosts = activeStreams.map((s) => ({
-                _id: `live_${s._id}`,
-                isLive: true,
-                liveStreamId: String(s._id),
-                roomName: s.roomName,
-                postedBy: s.streamer,
-                createdAt: s.startedAt,
-                updatedAt: s.startedAt,
-            }))
+            const livePseudoPosts = activeStreams.map((s) => {
+                const streamerId =
+                    s.streamer?._id != null ? String(s.streamer._id) : String(s.streamer || '')
+                return {
+                    // Must match socket streamStarted/Ended ids (`live_<streamerId>`), not LiveStream doc _id.
+                    _id: `live_${streamerId}`,
+                    isLive: true,
+                    liveStreamId: streamerId,
+                    roomName: s.roomName,
+                    postedBy: s.streamer,
+                    createdAt: s.startedAt,
+                    updatedAt: s.startedAt,
+                }
+            })
 
             const channelWithCounts = await attachReplyCountsToPosts([...channelPosts])
             const normalsSorted = [...topNormalPosts].sort((a, b) => feedSortTime(b) - feedSortTime(a))
