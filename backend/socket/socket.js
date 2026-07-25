@@ -3232,17 +3232,75 @@ export const initializeSocket = async (app) => {
                         player2Id  // BLACK player (accepter)
                     })
                 } else {
-                    console.log(`⚠️ No game state found for room ${roomId} - game may not have started yet`)
-                    // Send empty state (starting position)
-                    io.to(socket.id).emit("chessGameState", {
-                        roomId,
-                        fen: "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
-                        capturedWhite: [],
-                        capturedBlack: [],
-                        player1Id, // WHITE player (challenger)
-                        player2Id  // BLACK player (accepter)
-                    })
+                    // No Redis state: either not started yet, or ended (disconnect cleanup deleted it).
+                    // Scalable truth: if neither player still tracks this room as active → game is over.
+                    const p1Room = player1Id ? await getActiveChessGame(player1Id) : null
+                    const p2Room = player2Id ? await getActiveChessGame(player2Id) : null
+                    const stillActive = p1Room === roomId || p2Room === roomId
+                    if (!stillActive) {
+                        console.log(`📴 [joinChessRoom] Room ${roomId} has no state and is not active — emit ended`)
+                        io.to(socket.id).emit('chessGameEnded', {
+                            roomId,
+                            reason: 'player_disconnected',
+                        })
+                    } else {
+                        console.log(`⚠️ No game state found for room ${roomId} - game may not have started yet`)
+                        io.to(socket.id).emit("chessGameState", {
+                            roomId,
+                            fen: "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+                            capturedWhite: [],
+                            capturedBlack: [],
+                            player1Id,
+                            player2Id
+                        })
+                    }
                 }
+            }
+        })
+
+        // Explicit catch-up after reconnect (same truth as joinChessRoom — no duplicate Redis writes).
+        socket.on('requestChessGameState', async ({ roomId }) => {
+            if (!roomId || typeof roomId !== 'string' || !roomId.startsWith('chess_')) return
+            try {
+                socket.join(roomId)
+                const gameState = await getChessGameState(roomId)
+                let player1Id = null
+                let player2Id = null
+                const roomIdParts = roomId.split('_')
+                if (roomIdParts.length >= 3) {
+                    player1Id = roomIdParts[1]
+                    player2Id = roomIdParts[2]
+                }
+                if (gameState) {
+                    io.to(socket.id).emit('chessGameState', {
+                        roomId,
+                        fen: gameState.fen,
+                        capturedWhite: gameState.capturedWhite || [],
+                        capturedBlack: gameState.capturedBlack || [],
+                        player1Id,
+                        player2Id,
+                    })
+                    return
+                }
+                const p1Room = player1Id ? await getActiveChessGame(player1Id) : null
+                const p2Room = player2Id ? await getActiveChessGame(player2Id) : null
+                if (p1Room !== roomId && p2Room !== roomId) {
+                    io.to(socket.id).emit('chessGameEnded', {
+                        roomId,
+                        reason: 'player_disconnected',
+                    })
+                    return
+                }
+                io.to(socket.id).emit('chessGameState', {
+                    roomId,
+                    fen: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1',
+                    capturedWhite: [],
+                    capturedBlack: [],
+                    player1Id,
+                    player2Id,
+                })
+            } catch (e) {
+                console.error('❌ [requestChessGameState]', e?.message || e)
             }
         })
 
