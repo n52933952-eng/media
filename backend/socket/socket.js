@@ -3203,6 +3203,37 @@ export const initializeSocket = async (app) => {
             }
         })
 
+        // Game never reached a playable board — clear both players and feed posts.
+        socket.on('cancelChessGameStart', async ({ roomId, reason }) => {
+            try {
+                if (!roomId || typeof roomId !== 'string' || !roomId.startsWith('chess_')) return
+                const parts = roomId.split('_')
+                const player1 = parts.length >= 3 ? (normalizeUserId(parts[1]) || parts[1]) : null
+                const player2 = parts.length >= 3 ? (normalizeUserId(parts[2]) || parts[2]) : null
+                const endReason = reason === 'start_timeout' ? 'start_timeout' : 'never_started'
+                const endPayload = { roomId, reason: endReason }
+
+                if (player1) {
+                    const s1 = await getUserSocket(player1)
+                    if (s1?.socketId) io.to(s1.socketId).emit('chessGameEnded', endPayload)
+                    await deleteActiveChessGame(player1)
+                    await deletePendingChessAcceptForUser(player1).catch(() => {})
+                }
+                if (player2) {
+                    const s2 = await getUserSocket(player2)
+                    if (s2?.socketId) io.to(s2.socketId).emit('chessGameEnded', endPayload)
+                    await deleteActiveChessGame(player2)
+                    await deletePendingChessAcceptForUser(player2).catch(() => {})
+                }
+                io.to(roomId).emit('chessGameEnded', endPayload)
+                deleteChessGamePost(roomId).catch(() => {})
+                await deleteChessGameState(roomId)
+                console.log(`♟️ [cancelChessGameStart] Cleared room ${roomId} (${endReason})`)
+            } catch (e) {
+                console.error('❌ [cancelChessGameStart]', e?.message || e)
+            }
+        })
+
         // Join chess room for spectators
         socket.on("joinChessRoom", async ({ roomId }) => {
             if (roomId) {
