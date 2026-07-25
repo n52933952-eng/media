@@ -3165,10 +3165,18 @@ export const initializeSocket = async (app) => {
                     lastUpdated: Date.now()
                 })
                 console.log(`💾 Initialized game state for room ${roomId} in Redis`)
-                // Pending accept is only for late joiners — clear once the game exists so
-                // every socket reconnect does not re-fire acceptChessChallenge.
                 await deletePendingChessAcceptForUser(toId).catch(() => {})
                 await deletePendingChessAcceptForUser(fromId).catch(() => {})
+                // One state push so anyone who joined early gets the board without waiting forever.
+                const startPayload = {
+                    roomId,
+                    fen: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1',
+                    capturedWhite: [],
+                    capturedBlack: [],
+                    player1Id: toId,
+                    player2Id: fromId,
+                }
+                io.to(roomId).emit('chessGameState', startPayload)
             }
             
             // Create chess game post in feed for followers
@@ -3278,12 +3286,20 @@ export const initializeSocket = async (app) => {
                     const p2Room = player2Id ? await getActiveChessGame(player2Id) : null
                     const stillActive = p1Room === roomId || p2Room === roomId
                     if (!stillActive) {
-                        // Accept race: client joins before acceptChessChallenge registers active rooms.
-                        // Don't emit "ended" for brand-new room ids — client will retry.
+                        // Accept race: client often joins before accept finishes.
+                        // Send starting fen so the board opens; real state follows when accept completes.
                         const ts = Number(roomIdParts[roomIdParts.length - 1])
                         const ageMs = Number.isFinite(ts) ? Date.now() - ts : Infinity
                         if (ageMs < 20000) {
-                            console.log(`♟️ [joinChessRoom] Room ${roomId} pending start (age ${ageMs}ms) — skip ended`)
+                            console.log(`♟️ [joinChessRoom] Room ${roomId} pending start (age ${ageMs}ms) — send starting fen`)
+                            io.to(socket.id).emit('chessGameState', {
+                                roomId,
+                                fen: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1',
+                                capturedWhite: [],
+                                capturedBlack: [],
+                                player1Id,
+                                player2Id,
+                            })
                             return
                         }
                         console.log(`📴 [joinChessRoom] Room ${roomId} has no state and is not active — emit ended`)
@@ -3333,10 +3349,20 @@ export const initializeSocket = async (app) => {
                 const p1Room = player1Id ? await getActiveChessGame(player1Id) : null
                 const p2Room = player2Id ? await getActiveChessGame(player2Id) : null
                 if (p1Room !== roomId && p2Room !== roomId) {
-                    // Same accept race as joinChessRoom — don't kill a brand-new room.
+                    // Accept race — send starting fen for brand-new rooms (don't leave client spinning).
                     const ts = Number(roomIdParts[roomIdParts.length - 1])
                     const ageMs = Number.isFinite(ts) ? Date.now() - ts : Infinity
-                    if (ageMs < 20000) return
+                    if (ageMs < 20000) {
+                        io.to(socket.id).emit('chessGameState', {
+                            roomId,
+                            fen: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1',
+                            capturedWhite: [],
+                            capturedBlack: [],
+                            player1Id,
+                            player2Id,
+                        })
+                        return
+                    }
                     io.to(socket.id).emit('chessGameEnded', {
                         roomId,
                         reason: 'player_disconnected',
