@@ -396,6 +396,23 @@ const clearCallDisconnectGraceTimer = (userId) => {
     }
 }
 
+// Chess: brief transport flaps must not forfeit (ping is 5s/5s — allow enough reconnect time).
+const CHESS_DISCONNECT_GRACE_MS = (() => {
+    const n = Number(process.env.CHESS_DISCONNECT_GRACE_MS || 25000)
+    return Number.isFinite(n) && n >= 5000 && n <= 120000 ? n : 25000
+})()
+const chessDisconnectGraceTimers = new Map()
+
+const clearChessDisconnectGraceTimer = (userId) => {
+    const uid = normalizeUserId(userId)
+    if (!uid) return
+    const t = chessDisconnectGraceTimers.get(uid)
+    if (t) {
+        clearTimeout(t)
+        chessDisconnectGraceTimers.delete(uid)
+    }
+}
+
 /** callId format `${callerId}-${receiverId}`; Mongo ObjectIds contain no '-'. */
 const getPeerUserIdFromCompositeCallId = (callId, uid) => {
     if (!callId || !uid) return null
@@ -1384,7 +1401,10 @@ export const initializeSocket = async (app) => {
             // Reconnect cancels delayed call teardown scheduled on disconnect (avoids false "call ended" FCM).
             try {
                 const normConn = normalizeUserId(userId)
-                if (normConn) clearCallDisconnectGraceTimer(normConn)
+                if (normConn) {
+                    clearCallDisconnectGraceTimer(normConn)
+                    clearChessDisconnectGraceTimer(normConn)
+                }
             } catch (_) {}
 
             // Do NOT broadcast online here — wait for `clientPresence` from a foreground client.
@@ -3145,18 +3165,10 @@ export const initializeSocket = async (app) => {
                     lastUpdated: Date.now()
                 })
                 console.log(`💾 Initialized game state for room ${roomId} in Redis`)
-                // Push state immediately — accepter often joins/requests before this handler finishes.
-                const startPayload = {
-                    roomId,
-                    fen: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1',
-                    capturedWhite: [],
-                    capturedBlack: [],
-                    player1Id: toId,
-                    player2Id: fromId,
-                }
-                io.to(roomId).emit('chessGameState', startPayload)
-                if (challengerSocketId) io.to(challengerSocketId).emit('chessGameState', startPayload)
-                if (accepterSocketId) io.to(accepterSocketId).emit('chessGameState', startPayload)
+                // Pending accept is only for late joiners — clear once the game exists so
+                // every socket reconnect does not re-fire acceptChessChallenge.
+                await deletePendingChessAcceptForUser(toId).catch(() => {})
+                await deletePendingChessAcceptForUser(fromId).catch(() => {})
             }
             
             // Create chess game post in feed for followers
@@ -4601,11 +4613,10 @@ export const initializeSocket = async (app) => {
 
             // Check if disconnected user was in an active chess game
             // IMPORTANT: Don't end game immediately - wait to see if user reconnects (page refresh scenario)
-            // Only end game if user doesn't reconnect within 10 seconds
             if (disconnectedUserId && await hasActiveChessGame(disconnectedUserId)) {
                 const gameRoomId = await getActiveChessGame(disconnectedUserId)
                 console.log(`♟️ User ${disconnectedUserId} disconnected while in game: ${gameRoomId}`)
-                console.log(`⏳ Waiting 10 seconds to see if user reconnects (page refresh)...`)
+                console.log(`⏳ Waiting ${CHESS_DISCONNECT_GRACE_MS}ms to see if user reconnects...`)
 
                 // Parse other player directly from roomId (chess_p1_p2_ts) — works on any server instance
                 let otherPlayerId = null
@@ -4617,64 +4628,68 @@ export const initializeSocket = async (app) => {
                 }
                 // Fallback: search in-memory cache (single-server only)
                 if (!otherPlayerId) {
-                    for (const [userId, roomId] of activeChessGames.entries()) {
-                        if (roomId === gameRoomId && userId !== disconnectedUserId) {
-                            otherPlayerId = userId
+                    for (const [uid, roomId] of activeChessGames.entries()) {
+                        if (roomId === gameRoomId && uid !== disconnectedUserId) {
+                            otherPlayerId = uid
                             break
                         }
                     }
                 }
-                
-                // Wait 10 seconds before ending the game (allows time for page refresh reconnect)
-                setTimeout(async () => {
-                    // Check if user reconnected (has active game and socket)
-                    const stillInGame = await hasActiveChessGame(disconnectedUserId)
-                    const reconnectedSocket = await getUserSocket(disconnectedUserId)
-                    
-                    if (stillInGame && reconnectedSocket) {
-                        console.log(`✅ User ${disconnectedUserId} reconnected - game continues!`)
-                        return // User reconnected, don't end the game
-                    }
-                    
-                    // User didn't reconnect - end the game
-                    console.log(`❌ User ${disconnectedUserId} did not reconnect - ending game`)
-                    
-                    // Notify the other player
-                    if (otherPlayerId) {
-                        const otherPlayerData = await getUserSocket(otherPlayerId)
-                        const otherPlayerSocketId = otherPlayerData?.socketId
-                        if (otherPlayerSocketId) {
-                            io.to(otherPlayerSocketId).emit("opponentLeftGame")
-                            io.to(otherPlayerSocketId).emit("chessGameCleanup")
+
+                clearChessDisconnectGraceTimer(disconnectedUserId)
+                chessDisconnectGraceTimers.set(
+                    normalizeUserId(disconnectedUserId) || String(disconnectedUserId),
+                    setTimeout(async () => {
+                        chessDisconnectGraceTimers.delete(normalizeUserId(disconnectedUserId) || String(disconnectedUserId))
+                        // Check if user reconnected (has active game and socket)
+                        const stillInGame = await hasActiveChessGame(disconnectedUserId)
+                        const reconnectedSocket = await getUserSocket(disconnectedUserId)
+
+                        if (stillInGame && reconnectedSocket) {
+                            console.log(`✅ User ${disconnectedUserId} reconnected - game continues!`)
+                            return // User reconnected, don't end the game
                         }
-                    }
-                    
-                    // Notify all spectators in the room
-                    if (gameRoomId) {
-                        const room = io.sockets.adapter.rooms.get(gameRoomId)
-                        if (room && room.size > 0) {
-                            console.log(`👁️ Notifying ${room.size} spectators that game ended (player disconnected)`)
-                            io.to(gameRoomId).emit("chessGameEnded", { roomId: gameRoomId, reason: 'player_disconnected' })
+
+                        // User didn't reconnect - end the game
+                        console.log(`❌ User ${disconnectedUserId} did not reconnect - ending game`)
+
+                        // Notify the other player
+                        if (otherPlayerId) {
+                            const otherPlayerData = await getUserSocket(otherPlayerId)
+                            const otherPlayerSocketId = otherPlayerData?.socketId
+                            if (otherPlayerSocketId) {
+                                io.to(otherPlayerSocketId).emit("opponentLeftGame")
+                                io.to(otherPlayerSocketId).emit("chessGameCleanup")
+                            }
                         }
-                    }
-                    
-                    // Delete chess game post
-                    deleteChessGamePost(gameRoomId).catch(err => {
-                        console.error('❌ Error deleting chess game post on disconnect:', err)
-                    })
-                    
-                    // Remove from active games tracking (Redis)
-                    await deleteActiveChessGame(disconnectedUserId)
-                    if (otherPlayerId) {
-                        await deleteActiveChessGame(otherPlayerId)
-                    }
-                    await deletePendingChessAcceptForUser(disconnectedUserId).catch(() => {})
-                    if (otherPlayerId) await deletePendingChessAcceptForUser(otherPlayerId).catch(() => {})
-                    
-                    // Clean up game state (Redis)
-                    await deleteChessGameState(gameRoomId)
-                    console.log(`🗑️ Cleaned up game state for room ${gameRoomId}`)
-                }, 10000) // Wait 10 seconds before ending game
+
+                        // Notify all spectators in the room
+                        if (gameRoomId) {
+                            const room = io.sockets.adapter.rooms.get(gameRoomId)
+                            if (room && room.size > 0) {
+                                console.log(`👁️ Notifying ${room.size} spectators that game ended (player disconnected)`)
+                                io.to(gameRoomId).emit("chessGameEnded", { roomId: gameRoomId, reason: 'player_disconnected' })
+                            }
+                        }
+
+                        // Delete chess game post
+                        deleteChessGamePost(gameRoomId).catch(err => {
+                            console.error('❌ Error deleting chess game post on disconnect:', err)
+                        })
+
+                        // Remove from active games tracking (Redis)
+                        await deleteActiveChessGame(disconnectedUserId)
+                        if (otherPlayerId) {
+                            await deleteActiveChessGame(otherPlayerId)
+                        }
+                        await deletePendingChessAcceptForUser(disconnectedUserId).catch(() => {})
+                        if (otherPlayerId) await deletePendingChessAcceptForUser(otherPlayerId).catch(() => {})
+
+                        // Clean up game state (Redis)
+                        await deleteChessGameState(gameRoomId)
+                        console.log(`🗑️ Cleaned up game state for room ${gameRoomId}`)
+                    }, CHESS_DISCONNECT_GRACE_MS)
+                )
             }
 
             // ── 🏎️ Handle racing game disconnection ────────────────────────────────────
