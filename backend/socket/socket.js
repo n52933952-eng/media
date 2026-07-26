@@ -2552,7 +2552,8 @@ export const initializeSocket = async (app) => {
         })
 
         // Live stream: notify all followers that a user went live
-        socket.on("livekit:goLive", async ({ streamerId, streamerName, streamerProfilePic, roomName }) => {
+        // `resume: true` = socket flap re-announce only — never recreate Mongo after grace cleanup.
+        socket.on("livekit:goLive", async ({ streamerId, streamerName, streamerProfilePic, roomName, resume }) => {
             try {
                 const socketUserId = String(socket.handshake?.query?.userId || '')
                 if (!socketUserId || String(streamerId) !== socketUserId) {
@@ -2578,6 +2579,11 @@ export const initializeSocket = async (app) => {
                         if (!fid || fid === streamerNorm) continue
                         emitToUserSelf(fid, 'livekit:streamStarted', livePayload)
                     }
+                    return
+                }
+                // After LiveKit died + 45s grace wiped Mongo, a zombie reconnect must NOT recreate the card.
+                if (resume) {
+                    console.log(`⬛ [livekit:goLive] resume ignored — no active live for ${streamerId} room:${roomName}`)
                     return
                 }
                 const streamerNorm = normalizeUserId(streamerId) || String(streamerId)

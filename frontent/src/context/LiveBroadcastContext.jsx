@@ -410,6 +410,11 @@ export const LiveBroadcastProvider = ({ children }) => {
       });
       room.on(RoomEvent.Disconnected, () => {
         clearReconnectWatchdog();
+        // Match mobile: tear down server live + feed card when LiveKit dies (don't leave a zombie card).
+        if (!liveEndedRef.current) {
+          void endLiveRef.current?.();
+          return;
+        }
         roomRef.current = null;
         setLocalTrack(null);
         setLocalScreenTrack(null);
@@ -453,18 +458,27 @@ export const LiveBroadcastProvider = ({ children }) => {
     }
   }, [user, socket, startingLive, isLive, syncLocalTrack, toast, clearReconnectWatchdog]);
 
-  /** After socket flap: re-announce goLive so Mongo live row + feed card recover if grace wiped them. */
+  /** Socket flap: resume goLive only while LiveKit is still up — never recreate after grace cleanup. */
   useEffect(() => {
-    if (!socket || !isLive || !user?._id || !roomNameRef.current) return undefined;
+    if (!socket || !isLive || !user?._id) return undefined;
     const onConnect = () => {
       if (liveEndedRef.current || !roomNameRef.current) return;
-      console.log('[LiveBroadcast] Socket reconnected while live — re-announce goLive');
+      const room = roomRef.current;
+      const lkAlive =
+        !!room
+        && (room.state === ConnectionState.Connected || room.state === ConnectionState.Reconnecting);
+      if (!lkAlive) {
+        console.warn('[LiveBroadcast] Skip goLive re-announce — LiveKit not alive');
+        return;
+      }
+      console.log('[LiveBroadcast] Socket reconnected while live — re-announce goLive (resume)');
       socket.emit('livekit:joinLiveWatch', { streamerId: String(user._id) });
       socket.emit('livekit:goLive', {
         streamerId: String(user._id),
         streamerName: user.name || user.username,
         streamerProfilePic: user.profilePic,
         roomName: roomNameRef.current,
+        resume: true,
       });
     };
     socket.on('connect', onConnect);
