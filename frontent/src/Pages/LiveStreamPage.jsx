@@ -193,6 +193,10 @@ const LiveStreamPage = () => {
     if (track?.setVolume) {
       try { track.setVolume(viewerMuted ? 0 : 1); } catch (_) {}
     }
+    // Unmute often unlocks browser autoplay — retry play on the attached element.
+    if (!viewerMuted && audioElRef.current) {
+      void audioElRef.current.play()?.catch?.(() => {});
+    }
   }, [viewerMuted]);
 
   useEffect(() => {
@@ -376,16 +380,21 @@ const LiveStreamPage = () => {
           }
           const audioEl = track.attach();
           audioEl.autoplay = true;
+          audioEl.playsInline = true;
+          audioEl.setAttribute('playsinline', 'true');
           audioEl.style.display = 'none';
           document.body.appendChild(audioEl);
           if (audioElRef.current) try { audioElRef.current.remove(); } catch (_) {}
           audioElRef.current = audioEl;
+          // Browsers often block muted-less autoplay until play() is attempted.
+          void audioEl.play()?.catch?.(() => {});
         } catch (_) {}
       }
     };
 
     const onRemotePublication = async (pub) => {
-      if (!mounted || !isVideoPublication(pub)) return;
+      if (!mounted || !pub) return;
+      // Ensure both video and host mic are subscribed (audio was previously skipped here).
       if (!pub.isSubscribed) {
         try { await pub.setSubscribed(true); } catch (_) {}
       }
@@ -493,6 +502,12 @@ const LiveStreamPage = () => {
 
         await room.connect(livekitUrl, token);
         const { screen, camera } = await collectRemoteVideoTracks(room);
+        // Attach host mic if TrackSubscribed already fired / was missed on connect.
+        for (const participant of room.remoteParticipants.values()) {
+          participant.audioTrackPublications?.forEach?.((pub) => {
+            if (pub?.track) attachRemoteTrack(pub.track, pub);
+          });
+        }
         if (mounted) {
           if (screen) setRemoteScreenTrack(screen);
           if (camera) setRemoteCameraTrack(camera);
