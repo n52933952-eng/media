@@ -1267,7 +1267,7 @@ export const initializeSocket = async (app) => {
             const { createAdapter } = await import('@socket.io/redis-adapter')
             const { getRedisPubSub } = await import('../services/redis.js')
             const pubSub = getRedisPubSub()
-
+            
             if (pubSub && pubSub.pubClient && pubSub.subClient) {
                 io.adapter(createAdapter(pubSub.pubClient, pubSub.subClient))
                 console.log('✅ Socket.IO Redis adapter configured - ready for multi-server scaling!')
@@ -1615,9 +1615,9 @@ export const initializeSocket = async (app) => {
                 // Snapshot: who is online among subscribed ids + full id list so clients set explicit offline
                 // (avoids "partner looks online" from global list while socket still open during app background).
                 const emitSnap = async (label) => {
-                    const snapshot = await getOnlineSnapshotForUserIds(requested)
+                const snapshot = await getOnlineSnapshotForUserIds(requested)
                     if (!socket.connected) return
-                    socket.emit('presenceSnapshot', { onlineUsers: snapshot, subscribedUserIds: requested })
+                socket.emit('presenceSnapshot', { onlineUsers: snapshot, subscribedUserIds: requested })
                     if (label) {
                         console.log(
                             `📸 [socket] presenceSnapshot (${label}) → ${socket.id}: ${snapshot.length}/${requested.length} online`,
@@ -2898,7 +2898,7 @@ export const initializeSocket = async (app) => {
                 const messageIds = unseenToMark.map((d) => String(d._id))
 
                 if (messageIds.length > 0) {
-                    await Message.updateMany(seenFilter, { $set: { seen: true } })
+                await Message.updateMany(seenFilter, { $set: { seen: true } })
                 }
 
                 const readerId = currentUserId != null ? String(currentUserId) : ''
@@ -2913,8 +2913,8 @@ export const initializeSocket = async (app) => {
                 // lastMessage.seen on the conversation is for the *latest* message only.
                 // If I sent the last message, opening chat must NOT flip seen (blue ticks = recipient read).
                 if (messageIds.length > 0 && lastSenderId && readerId && lastSenderId !== readerId) {
-                    await Conversation.updateOne(
-                        { _id: conversationId },
+                await Conversation.updateOne(
+                    { _id: conversationId },
                         { $set: { 'lastMessage.seen': true, 'lastMessage.delivered': true } },
                     )
                 } else if (lastSenderId && readerId && lastSenderId === readerId) {
@@ -2932,29 +2932,29 @@ export const initializeSocket = async (app) => {
                 
                 // Emit read receipts only when messages were actually marked seen.
                 if (messageIds.length > 0) {
-                    if (userId) {
-                        const senderData = await getUserSocket(userId)
-                        const senderSocketId = senderData?.socketId
-                        if (senderSocketId) {
+                if (userId) {
+                    const senderData = await getUserSocket(userId)
+                    const senderSocketId = senderData?.socketId
+                    if (senderSocketId) {
                             io.to(senderSocketId).emit('messagesSeen', { conversationId, messageIds })
-                        }
-                    } else {
-                        const conversation = await Conversation.findById(conversationId).select('participants')
-                        const participantIds = (conversation?.participants || [])
-                            .map((p) => p?.toString?.())
-                            .filter((pid) => pid && pid !== currentUserId)
+                    }
+                } else {
+                    const conversation = await Conversation.findById(conversationId).select('participants')
+                    const participantIds = (conversation?.participants || [])
+                        .map((p) => p?.toString?.())
+                        .filter((pid) => pid && pid !== currentUserId)
 
-                        await Promise.all(
-                            participantIds.map(async (pid) => {
-                                const participantSocket = await getUserSocket(pid)
-                                if (participantSocket?.socketId) {
+                    await Promise.all(
+                        participantIds.map(async (pid) => {
+                            const participantSocket = await getUserSocket(pid)
+                            if (participantSocket?.socketId) {
                                     io.to(participantSocket.socketId).emit('messagesSeen', {
                                         conversationId,
                                         messageIds,
                                     })
-                                }
-                            })
-                        )
+                            }
+                        })
+                    )
                     }
                 }
                 
@@ -3361,14 +3361,14 @@ export const initializeSocket = async (app) => {
                         io.to(socket.id).emit('chessGameEnded', {
                             roomId,
                             reason: 'player_disconnected',
-                        })
-                    } else {
-                        console.log(`⚠️ No game state found for room ${roomId} - game may not have started yet`)
-                        io.to(socket.id).emit("chessGameState", {
-                            roomId,
-                            fen: "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
-                            capturedWhite: [],
-                            capturedBlack: [],
+                    })
+                } else {
+                    console.log(`⚠️ No game state found for room ${roomId} - game may not have started yet`)
+                    io.to(socket.id).emit("chessGameState", {
+                        roomId,
+                        fen: "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+                        capturedWhite: [],
+                        capturedBlack: [],
                             player1Id,
                             player2Id
                         })
@@ -4765,59 +4765,59 @@ export const initializeSocket = async (app) => {
                         }
                     }
                 }
-
+                
                 clearChessDisconnectGraceTimer(disconnectedUserId)
                 chessDisconnectGraceTimers.set(
                     normalizeUserId(disconnectedUserId) || String(disconnectedUserId),
-                    setTimeout(async () => {
+                setTimeout(async () => {
                         chessDisconnectGraceTimers.delete(normalizeUserId(disconnectedUserId) || String(disconnectedUserId))
-                        // Check if user reconnected (has active game and socket)
-                        const stillInGame = await hasActiveChessGame(disconnectedUserId)
-                        const reconnectedSocket = await getUserSocket(disconnectedUserId)
-
-                        if (stillInGame && reconnectedSocket) {
-                            console.log(`✅ User ${disconnectedUserId} reconnected - game continues!`)
-                            return // User reconnected, don't end the game
+                    // Check if user reconnected (has active game and socket)
+                    const stillInGame = await hasActiveChessGame(disconnectedUserId)
+                    const reconnectedSocket = await getUserSocket(disconnectedUserId)
+                    
+                    if (stillInGame && reconnectedSocket) {
+                        console.log(`✅ User ${disconnectedUserId} reconnected - game continues!`)
+                        return // User reconnected, don't end the game
+                    }
+                    
+                    // User didn't reconnect - end the game
+                    console.log(`❌ User ${disconnectedUserId} did not reconnect - ending game`)
+                    
+                    // Notify the other player
+                    if (otherPlayerId) {
+                        const otherPlayerData = await getUserSocket(otherPlayerId)
+                        const otherPlayerSocketId = otherPlayerData?.socketId
+                        if (otherPlayerSocketId) {
+                            io.to(otherPlayerSocketId).emit("opponentLeftGame")
+                            io.to(otherPlayerSocketId).emit("chessGameCleanup")
                         }
-
-                        // User didn't reconnect - end the game
-                        console.log(`❌ User ${disconnectedUserId} did not reconnect - ending game`)
-
-                        // Notify the other player
-                        if (otherPlayerId) {
-                            const otherPlayerData = await getUserSocket(otherPlayerId)
-                            const otherPlayerSocketId = otherPlayerData?.socketId
-                            if (otherPlayerSocketId) {
-                                io.to(otherPlayerSocketId).emit("opponentLeftGame")
-                                io.to(otherPlayerSocketId).emit("chessGameCleanup")
-                            }
+                    }
+                    
+                    // Notify all spectators in the room
+                    if (gameRoomId) {
+                        const room = io.sockets.adapter.rooms.get(gameRoomId)
+                        if (room && room.size > 0) {
+                            console.log(`👁️ Notifying ${room.size} spectators that game ended (player disconnected)`)
+                            io.to(gameRoomId).emit("chessGameEnded", { roomId: gameRoomId, reason: 'player_disconnected' })
                         }
-
-                        // Notify all spectators in the room
-                        if (gameRoomId) {
-                            const room = io.sockets.adapter.rooms.get(gameRoomId)
-                            if (room && room.size > 0) {
-                                console.log(`👁️ Notifying ${room.size} spectators that game ended (player disconnected)`)
-                                io.to(gameRoomId).emit("chessGameEnded", { roomId: gameRoomId, reason: 'player_disconnected' })
-                            }
-                        }
-
-                        // Delete chess game post
-                        deleteChessGamePost(gameRoomId).catch(err => {
-                            console.error('❌ Error deleting chess game post on disconnect:', err)
-                        })
-
-                        // Remove from active games tracking (Redis)
-                        await deleteActiveChessGame(disconnectedUserId)
-                        if (otherPlayerId) {
-                            await deleteActiveChessGame(otherPlayerId)
-                        }
-                        await deletePendingChessAcceptForUser(disconnectedUserId).catch(() => {})
-                        if (otherPlayerId) await deletePendingChessAcceptForUser(otherPlayerId).catch(() => {})
-
-                        // Clean up game state (Redis)
-                        await deleteChessGameState(gameRoomId)
-                        console.log(`🗑️ Cleaned up game state for room ${gameRoomId}`)
+                    }
+                    
+                    // Delete chess game post
+                    deleteChessGamePost(gameRoomId).catch(err => {
+                        console.error('❌ Error deleting chess game post on disconnect:', err)
+                    })
+                    
+                    // Remove from active games tracking (Redis)
+                    await deleteActiveChessGame(disconnectedUserId)
+                    if (otherPlayerId) {
+                        await deleteActiveChessGame(otherPlayerId)
+                    }
+                    await deletePendingChessAcceptForUser(disconnectedUserId).catch(() => {})
+                    if (otherPlayerId) await deletePendingChessAcceptForUser(otherPlayerId).catch(() => {})
+                    
+                    // Clean up game state (Redis)
+                    await deleteChessGameState(gameRoomId)
+                    console.log(`🗑️ Cleaned up game state for room ${gameRoomId}`)
                     }, CHESS_DISCONNECT_GRACE_MS)
                 )
             }
@@ -4924,7 +4924,7 @@ export const initializeSocket = async (app) => {
                 const gameRoomId = await getActiveCardGame(disconnectedUserId)
                 console.log(`🃏 User ${disconnectedUserId} disconnected while in card game: ${gameRoomId}`)
                 console.log(`⏳ Waiting ${CARD_DISCONNECT_GRACE_MS}ms to see if user reconnects...`)
-
+                
                 let otherPlayerId = null
                 const cardRoomMatch = gameRoomId && gameRoomId.match(/^card_(.+?)_(.+?)_\d+$/)
                 if (cardRoomMatch) {
@@ -4939,54 +4939,54 @@ export const initializeSocket = async (app) => {
                         if (otherPlayer) otherPlayerId = otherPlayer.userId
                     }
                 }
-
+                
                 clearCardDisconnectGraceTimer(disconnectedUserId)
                 cardDisconnectGraceTimers.set(
                     normalizeUserId(disconnectedUserId) || String(disconnectedUserId),
-                    setTimeout(async () => {
+                setTimeout(async () => {
                         cardDisconnectGraceTimers.delete(normalizeUserId(disconnectedUserId) || String(disconnectedUserId))
-                        const stillInGame = await hasActiveCardGame(disconnectedUserId)
-                        const reconnectedSocket = await getUserSocket(disconnectedUserId)
-
-                        if (stillInGame && reconnectedSocket) {
-                            console.log(`✅ User ${disconnectedUserId} reconnected - card game continues!`)
+                    const stillInGame = await hasActiveCardGame(disconnectedUserId)
+                    const reconnectedSocket = await getUserSocket(disconnectedUserId)
+                    
+                    if (stillInGame && reconnectedSocket) {
+                        console.log(`✅ User ${disconnectedUserId} reconnected - card game continues!`)
                             return
-                        }
-
-                        console.log(`❌ User ${disconnectedUserId} did not reconnect - ending card game`)
+                    }
+                    
+                    console.log(`❌ User ${disconnectedUserId} did not reconnect - ending card game`)
                         const endPayload = { roomId: gameRoomId, reason: 'player_disconnected', message: 'Opponent disconnected' }
-
-                        if (otherPlayerId) {
-                            const otherPlayerData = await getUserSocket(otherPlayerId)
-                            const otherPlayerSocketId = otherPlayerData?.socketId
-                            if (otherPlayerSocketId) {
+                    
+                    if (otherPlayerId) {
+                        const otherPlayerData = await getUserSocket(otherPlayerId)
+                        const otherPlayerSocketId = otherPlayerData?.socketId
+                        if (otherPlayerSocketId) {
                                 io.to(otherPlayerSocketId).emit('opponentLeftGame')
                                 io.to(otherPlayerSocketId).emit('cardGameCleanup')
                                 io.to(otherPlayerSocketId).emit('cardGameEnded', endPayload)
-                            }
                         }
-                        if (gameRoomId) {
+                    }
+                    if (gameRoomId) {
                             io.to(gameRoomId).emit('cardGameEnded', endPayload)
                         }
 
-                        deleteCardGamePost(gameRoomId).catch(err => {
-                            console.error('❌ Error deleting card game post on disconnect:', err)
-                        })
-
-                        await deleteActiveCardGame(disconnectedUserId)
-                        if (otherPlayerId) {
-                            await deleteActiveCardGame(otherPlayerId)
-                        }
-                        await deletePendingCardAcceptForUser(disconnectedUserId).catch(() => {})
-                        if (otherPlayerId) await deletePendingCardAcceptForUser(otherPlayerId).catch(() => {})
-
-                        await deleteCardGameState(gameRoomId)
-                        console.log(`🗑️ Cleaned up card game state for room ${gameRoomId}`)
-
+                    deleteCardGamePost(gameRoomId).catch(err => {
+                        console.error('❌ Error deleting card game post on disconnect:', err)
+                    })
+                    
+                    await deleteActiveCardGame(disconnectedUserId)
+                    if (otherPlayerId) {
+                        await deleteActiveCardGame(otherPlayerId)
+                    }
+                    await deletePendingCardAcceptForUser(disconnectedUserId).catch(() => {})
+                    if (otherPlayerId) await deletePendingCardAcceptForUser(otherPlayerId).catch(() => {})
+                    
+                    await deleteCardGameState(gameRoomId)
+                    console.log(`🗑️ Cleaned up card game state for room ${gameRoomId}`)
+                    
                         void emitStatusToFollowersOf([disconnectedUserId], 'userAvailableCard', { userId: disconnectedUserId })
-                        if (otherPlayerId) {
+                    if (otherPlayerId) {
                             void emitStatusToFollowersOf([otherPlayerId], 'userAvailableCard', { userId: otherPlayerId })
-                        }
+                    }
                     }, CARD_DISCONNECT_GRACE_MS)
                 )
             }

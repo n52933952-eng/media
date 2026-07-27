@@ -180,7 +180,7 @@ const PostPage = () => {
     )
     
     const showToast = useShowToast()
-    
+
     const navigate = useNavigate()
 
     const applyPostUpdate = useCallback(
@@ -700,22 +700,22 @@ const PostPage = () => {
             if (window.history.length > 1) navigate(-1)
             else navigate('/notifications')
           }
-        }
+      }
       }
 
-      getpost()
-
-      // Refresh post when page becomes visible (in case profile was updated)
-      const handleVisibilityChange = () => {
-        if (document.visibilityState === 'visible') {
+   getpost()
+   
+   // Refresh post when page becomes visible (in case profile was updated)
+   const handleVisibilityChange = () => {
+     if (document.visibilityState === 'visible') {
           getpost({ silent: true })
-        }
-      }
-      document.addEventListener('visibilitychange', handleVisibilityChange)
-
-      return () => {
-        document.removeEventListener('visibilitychange', handleVisibilityChange)
-      }
+     }
+   }
+   document.addEventListener('visibilitychange', handleVisibilityChange)
+   
+   return () => {
+     document.removeEventListener('visibilitychange', handleVisibilityChange)
+   }
     }, [id, setFollowPost, footballMatchId, showToast, navigate])
 
   useEffect(() => {
@@ -1040,55 +1040,55 @@ if(!post) {
           <PostMediaCarousel slides={carouselSlides} audioUrl={carouselAudio} frameHeight={POST_DETAIL_CAROUSEL_FRAME_H} />
         ) : post?.img && (post.img.includes('youtube.com/embed') || post.img.includes('youtu.be') || post.img.includes('youtube.com/watch')) ? (
           (() => {
-            const isYouTubeEmbed = post.img.includes('youtube.com/embed')
-            if (isYouTubeEmbed) {
-              return (
+        const isYouTubeEmbed = post.img.includes('youtube.com/embed')
+        if (isYouTubeEmbed) {
+          return (
                 <Box position="relative" w="full" h="0" paddingBottom="56.25%" bg="black">
-                  <iframe
+              <iframe
                     src={post.img}
-                    title="Live Stream"
-                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-                    allowFullScreen
+                title="Live Stream"
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                allowFullScreen
                     style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', border: 'none' }}
-                  />
-                </Box>
-              )
-            }
-            let videoId = ''
-            if (post.img.includes('youtu.be/')) {
-              videoId = post.img.split('youtu.be/')[1]?.split('?')[0] || ''
-            } else if (post.img.includes('youtube.com/watch?v=')) {
-              videoId = post.img.split('v=')[1]?.split('&')[0] || ''
-            }
-            if (videoId) {
-              return (
+              />
+            </Box>
+          )
+        }
+          let videoId = ''
+          if (post.img.includes('youtu.be/')) {
+            videoId = post.img.split('youtu.be/')[1]?.split('?')[0] || ''
+          } else if (post.img.includes('youtube.com/watch?v=')) {
+            videoId = post.img.split('v=')[1]?.split('&')[0] || ''
+          }
+          if (videoId) {
+            return (
                 <Box position="relative" w="full" h="0" paddingBottom="56.25%" bg="black">
-                  <iframe
-                    src={`https://www.youtube.com/embed/${videoId}?autoplay=1&rel=0`}
-                    title="Live Stream"
-                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                    allowFullScreen
+                <iframe
+                  src={`https://www.youtube.com/embed/${videoId}?autoplay=1&rel=0`}
+                  title="Live Stream"
+                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                  allowFullScreen
                     style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', border: 'none' }}
-                  />
-                </Box>
-              )
-            }
+                />
+              </Box>
+            )
+          }
             return null
           })()
         ) : post?.img && (post.img.match(/\.(mp4|webm|ogg|mov)$/i) || post.img.includes('/video/upload/')) ? (
-          <Box
-            as="video"
-            src={post.img}
-            controls
-            autoPlay
-            playsInline
-            muted={false}
-            w="full"
-            maxH="500px"
-            onLoadedMetadata={(e) => {
-              e.currentTarget.play?.().catch(() => {})
-            }}
-          />
+        <Box
+          as="video"
+          src={post.img}
+          controls
+          autoPlay
+          playsInline
+          muted={false}
+          w="full"
+          maxH="500px"
+          onLoadedMetadata={(e) => {
+            e.currentTarget.play?.().catch(() => {})
+          }}
+        />
         ) : post?.img ? (
           <Box
             h={POST_DETAIL_CAROUSEL_FRAME_H}
@@ -1178,15 +1178,15 @@ if(!post) {
       ) : (
         topLevelReplies.map((reply) => (
           <Box key={reply._id} data-comment-id={reply._id}>
-            <Comment
-              reply={reply}
-              postId={post._id}
+          <Comment 
+            reply={reply} 
+            postId={post._id}
               allReplies={scopedReplies}
               postedBy={post.postedBy}
               onRepliesChange={setPostReplies}
               onReplyCountDelta={bumpReplyCount}
-            />
-          </Box>
+          />
+        </Box>
         ))
       )}
 
@@ -1199,7 +1199,7 @@ if(!post) {
       {commentsHasMore && <Box ref={loadMoreRef} h="1px" aria-hidden />}
     </Box>
     )}
-   
+     
     </Box>
   )
 }

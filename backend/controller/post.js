@@ -497,7 +497,7 @@ export const createPost = async(req,res) => {
              postData.contributors = contribList
              if (imageUrls.length && !singleVideo) {
                postData.collaboratorImages = [{ userId: postedBy, img: imageUrls[0] }]
-             }
+           }
            }
 
            const newPost = new Post(postData)
@@ -716,7 +716,7 @@ export const updatePost = async(req,res) => {
         if(text && text.length > MaxLength){
             return res.status(400).json({error:"Post text must be 500 characters or less"})
         }
-
+        
         const imgRaw = req.body.img != null ? String(req.body.img).trim() : ''
         if (imgRaw) {
             try {
@@ -742,56 +742,56 @@ export const updatePost = async(req,res) => {
             }
         }
         
-        post.text = text !== undefined && text !== null ? text : post.text
-        post.editedAt = new Date()
-        await post.save()
-        
-        // Populate for response
-        await post.populate("postedBy", "username profilePic name")
-        await post.populate("contributors", "username profilePic name")
-        
-        // Notify post owner if a contributor edited the post
-        const isContributorEdit = !isOwner && isContributor
-        if (isContributorEdit) {
-            try {
-                const { createNotification } = await import('./notification.js')
-                // Use postOwnerId we got earlier (before populate)
-                await createNotification(postOwnerId, 'post_edit', userId.toString(), {
-                    postId: post._id.toString(),
-                    postText: post.text?.substring(0, 50) || 'your collaborative post'
-                })
-                console.log(`📬 [updatePost] Created edit notification for post owner ${postOwnerId}`)
-            } catch (err) {
-                console.error('❌ [updatePost] Error creating edit notification:', err)
-            }
-        }
-        
-        // Notify all contributors if the owner edited the post
-        const isOwnerEdit = isOwner && post.isCollaborative && post.contributors && post.contributors.length > 0
-        if (isOwnerEdit) {
-            try {
-                const { createNotification } = await import('./notification.js')
-                // Notify each contributor
-                for (const contributor of post.contributors) {
-                    const contributorId = (contributor._id || contributor).toString()
-                    if (contributorId !== userId.toString()) { // Don't notify yourself
-                        await createNotification(contributorId, 'post_edit', userId.toString(), {
-                            postId: post._id.toString(),
-                            postText: post.text?.substring(0, 50) || 'your collaborative post'
-                        })
-                        console.log(`📬 [updatePost] Created edit notification for contributor ${contributorId}`)
-                    }
-                }
-            } catch (err) {
-                console.error('❌ [updatePost] Error creating contributor edit notifications:', err)
-            }
-        }
-        
-        const io = getIO()
-        if (io) {
-            const sent = await emitPostUpdatedToRecipients(io, post, postOwnerId)
-            if (sent > 0) {
-                console.log(`📤 [updatePost] Emitted postUpdated to ${sent} recipient socket(s)`)
+                        post.text = text !== undefined && text !== null ? text : post.text
+                        post.editedAt = new Date()
+                        await post.save()
+                        
+                        // Populate for response
+                        await post.populate("postedBy", "username profilePic name")
+                        await post.populate("contributors", "username profilePic name")
+                        
+                        // Notify post owner if a contributor edited the post
+                        const isContributorEdit = !isOwner && isContributor
+                        if (isContributorEdit) {
+                            try {
+                                const { createNotification } = await import('./notification.js')
+                                // Use postOwnerId we got earlier (before populate)
+                                await createNotification(postOwnerId, 'post_edit', userId.toString(), {
+                                    postId: post._id.toString(),
+                                    postText: post.text?.substring(0, 50) || 'your collaborative post'
+                                })
+                                console.log(`📬 [updatePost] Created edit notification for post owner ${postOwnerId}`)
+                            } catch (err) {
+                                console.error('❌ [updatePost] Error creating edit notification:', err)
+                            }
+                        }
+                        
+                        // Notify all contributors if the owner edited the post
+                        const isOwnerEdit = isOwner && post.isCollaborative && post.contributors && post.contributors.length > 0
+                        if (isOwnerEdit) {
+                            try {
+                                const { createNotification } = await import('./notification.js')
+                                // Notify each contributor
+                                for (const contributor of post.contributors) {
+                                    const contributorId = (contributor._id || contributor).toString()
+                                    if (contributorId !== userId.toString()) { // Don't notify yourself
+                                        await createNotification(contributorId, 'post_edit', userId.toString(), {
+                                            postId: post._id.toString(),
+                                            postText: post.text?.substring(0, 50) || 'your collaborative post'
+                                        })
+                                        console.log(`📬 [updatePost] Created edit notification for contributor ${contributorId}`)
+                                    }
+                                }
+                            } catch (err) {
+                                console.error('❌ [updatePost] Error creating contributor edit notifications:', err)
+                            }
+                        }
+                        
+                        const io = getIO()
+                        if (io) {
+                            const sent = await emitPostUpdatedToRecipients(io, post, postOwnerId)
+                            if (sent > 0) {
+                                console.log(`📤 [updatePost] Emitted postUpdated to ${sent} recipient socket(s)`)
             }
         }
         
@@ -892,7 +892,7 @@ export const updateCarouselPostImages = async (req, res) => {
 
         await post.populate('postedBy', 'username profilePic name')
         await post.populate('contributors', 'username profilePic name')
-
+        
         const io = getIO()
         if (io) {
             await emitPostUpdatedToRecipients(io, post, postOwnerId)
@@ -1121,7 +1121,7 @@ export const LikePost = async(req,res) => {
         likeCount,
         likePreview,
     })
-  }
+    }
     catch(error){
         console.log(error)
         res.status(500).json({ error: error.message })
@@ -1301,7 +1301,7 @@ export const ReplyPost = async(req,res) => {
             replyCount: Math.max(0, refreshed?.replyCount ?? 0),
             replyPreview,
         })
-
+        
         res.status(200).json(savedReply)
 
     }
@@ -1389,10 +1389,10 @@ export const getFeedPost = async(req,res) => {
                     _id: `live_${streamerId}`,
                     isLive: true,
                     liveStreamId: streamerId,
-                    roomName: s.roomName,
-                    postedBy: s.streamer,
-                    createdAt: s.startedAt,
-                    updatedAt: s.startedAt,
+                roomName: s.roomName,
+                postedBy: s.streamer,
+                createdAt: s.startedAt,
+                updatedAt: s.startedAt,
                 }
             })
 
@@ -1681,7 +1681,7 @@ export const ReplyToComment = async(req, res) => {
             replyCount: Math.max(0, refreshedReply?.replyCount ?? 0),
             replyPreview,
         })
-
+        
         res.status(200).json(newReply)
     }
     catch(error) {
