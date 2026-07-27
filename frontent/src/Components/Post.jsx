@@ -1129,11 +1129,11 @@ const showToast = useShowToast()
               </Box>
             ) : (
             <Box position="relative" display="inline-block">
-              <Avatar 
-                size="md" 
-                src={postedBy?.profilePic} 
-                name={postedBy?.name}
-                loading="lazy"
+            <Avatar 
+              size="md" 
+              src={postedBy?.profilePic} 
+              name={postedBy?.name}
+              loading="lazy"
                 cursor="pointer"
                 onClick={handleAvatarOrNameClick}
               />
@@ -1376,15 +1376,15 @@ const showToast = useShowToast()
         if (displayContributors.length === 0) return null
 
         return (
-          <Flex
+      <Flex 
             direction="column"
             gap={1.5}
-            mb={2}
-            onClick={(e) => {
-              e.preventDefault()
-              e.stopPropagation()
-            }}
-          >
+        mb={2} 
+        onClick={(e) => {
+          e.preventDefault()
+          e.stopPropagation()
+        }}
+      >
             <Text
               fontSize="13px"
               fontWeight="600"
@@ -1392,7 +1392,7 @@ const showToast = useShowToast()
               letterSpacing="0.01em"
             >
               Contributors
-            </Text>
+        </Text>
             <Flex align="center" gap={2} overflowX="auto" pb={0.5} sx={{ scrollbarWidth: 'none' }}>
               {displayContributors.map((contributor, idx) => {
                 const contributorId = (contributor?._id || contributor)?.toString()
@@ -1405,9 +1405,9 @@ const showToast = useShowToast()
                 const contributorUsername = cObj?.username || null
                 const contributorProfilePic = cObj?.profilePic || null
                 const label = contributorName || contributorUsername || '?'
-
+                
                 return (
-                  <Tooltip
+                  <Tooltip 
                     key={contributorId || idx}
                     label={label !== '?' ? label : 'Contributor'}
                   >
@@ -1417,9 +1417,9 @@ const showToast = useShowToast()
                       gap={1}
                       minW="40px"
                       cursor={contributorUsername ? 'pointer' : 'default'}
-                      onClick={(e) => {
-                        e.preventDefault()
-                        e.stopPropagation()
+                        onClick={(e) => {
+                          e.preventDefault()
+                          e.stopPropagation()
                         if (contributorUsername) navigate(`/${contributorUsername}`)
                       }}
                       _hover={contributorUsername ? { opacity: 0.85 } : undefined}
@@ -1461,9 +1461,9 @@ const showToast = useShowToast()
                 </Text>
               )}
             </Flex>
-          </Flex>
-        )
-      })()}
+            </Flex>
+          )
+        })()}
     
      {/* Post text — hide for Football: copy is often stale (“no live matches”) while live cards come from API */}
      <Box>
@@ -1804,18 +1804,18 @@ const showToast = useShowToast()
           overflow="hidden"
           cursor="pointer"
         >
-          <Image
+        <Image 
             key={`feed-img-${post._id}-${mediaUrl}`}
-            src={mediaUrl}
+          src={mediaUrl} 
             maxH="100%"
             maxW="100%"
             w="auto"
             h="auto"
-            objectFit="contain"
-            loading="lazy"
-            alt="Post image"
+          objectFit="contain" 
+          loading="lazy"
+          alt="Post image"
             style={{ cursor: 'pointer' }}
-          />
+        />
         </Box>
       ) : showCarousel && carouselSlides.length > 0 ? (
         <PostMediaCarousel slides={carouselSlides} audioUrl={carouselAudio} frameHeight={FEED_CAROUSEL_FRAME_H} />
@@ -1828,10 +1828,10 @@ const showToast = useShowToast()
     {!isChessPost && !isCardPost && (
       <Actions post={post} showFeedExtras={showFeedExtras} />
     )}
-
+    
     <Box mt={2} flexShrink={0} alignSelf="flex-start">
       <PostEditorMenu
-        post={post}
+      post={post}
         onPostUpdated={applyPostUpdate}
         showFeedExtras={showFeedExtras}
         isOwnProfile={isOwnProfile}
