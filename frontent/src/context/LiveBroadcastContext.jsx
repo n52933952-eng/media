@@ -275,6 +275,10 @@ export const LiveBroadcastProvider = ({ children }) => {
     const shouldNotifyServer = !!streamerId && !liveEndedRef.current;
     // Mark ended FIRST so reconnect cannot resume goLive / recreate the card.
     liveEndedRef.current = true;
+    setIsLive(false);
+    setIsMinimized(false);
+    isMinimizedRef.current = false;
+    setIsLiveControlsFocused(false);
     if (shouldNotifyServer) {
       try {
         window.dispatchEvent(new CustomEvent('liveLocalHostEnded', { detail: { streamerId } }));
@@ -293,10 +297,6 @@ export const LiveBroadcastProvider = ({ children }) => {
     setLiveRoomName('');
     setIsMicMuted(false);
     await disconnect();
-    setIsLive(false);
-    setIsMinimized(false);
-    isMinimizedRef.current = false;
-    setIsLiveControlsFocused(false);
   }, [socket, user, disconnect]);
 
   /** End live for viewers without extra navigation (call / game interrupt). */
@@ -309,7 +309,10 @@ export const LiveBroadcastProvider = ({ children }) => {
    * Keep live only for intentional share+minimize (same rule as the Answer warning).
    */
   const endNormalLiveBeforeInterrupt = useCallback(async () => {
-    if (isLive && !(isMinimized && isSharing)) {
+    const keepShareMinimized = isMinimized && isSharing;
+    if (keepShareMinimized) return;
+    // Use roomRef too — React isLive can lag one frame after navigate/accept.
+    if (isLive || roomRef.current) {
       await endLiveForCall();
       // Brief settle so the live PeerConnection/camera releases before call connect.
       await new Promise((r) => setTimeout(r, 200));

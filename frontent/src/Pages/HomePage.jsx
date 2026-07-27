@@ -7,7 +7,6 @@ import LivePostCard from '../Components/LivePostCard'
 import {PostContext} from '../context/PostContext'
 import {SocketContext} from '../context/SocketContext'
 import {UserContext} from '../context/UserContext'
-import { useLiveBroadcast } from '../context/LiveBroadcastContext'
 import SuggestedUsers from '../Components/SuggestedUsers'
 import SuggestedChannels from '../Components/SuggestedChannels'
 import ActivityFeed from '../Components/ActivityFeed'
@@ -32,7 +31,6 @@ const HomePage = () => {
   const filterFeedPosts = useContext(PostContext)?.filterFeedPosts ?? ((list) => list)
   const {socket, liveStreams} = useContext(SocketContext) || {}
   const {user} = useContext(UserContext) || {}
-  const { isLive } = useLiveBroadcast()
   const myUserId = user?._id != null ? String(user._id) : ''
 
   const isOwnLivePost = useCallback((post) => {
@@ -308,8 +306,10 @@ const HomePage = () => {
     if (!Array.isArray(liveStreams)) return
     setFollowPost(prev => {
       const withoutOldLive = prev.filter(p => !p?.isLive)
+      // Never inject your own live card — after End/Accept, isLive is false but a stale
+      // liveStreams entry would otherwise resurrect the card.
       const livePseudo = liveStreams
-        .filter(s => !(isLive && myUserId && String(s.streamerId) === myUserId))
+        .filter(s => !(myUserId && String(s.streamerId) === myUserId))
         .map(s => ({
         _id: `live_${s.streamerId}`,
         isLive: true,
@@ -327,7 +327,7 @@ const HomePage = () => {
       // which guarantees stale live cards are removed.
       return [...livePseudo, ...withoutOldLive]
     })
-  }, [liveStreams, setFollowPost, isLive, myUserId])
+  }, [liveStreams, setFollowPost, myUserId])
 
   // Infinite scroll with Intersection Observer
   useEffect(() => {
@@ -563,7 +563,8 @@ const HomePage = () => {
     const handleStreamStarted = (data) => {
       const sid = normalizeStreamerId(data?.streamerId)
       if (!sid) return
-      if (myUserId && sid === myUserId && isLive) return
+      // Host never sees their own live card on the feed (while live or after end).
+      if (myUserId && sid === myUserId) return
       const pseudo = {
         _id:           `live_${sid}`,
         isLive:        true,
@@ -582,7 +583,16 @@ const HomePage = () => {
       const sid = normalizeStreamerId(payload?.streamerId)
       if (!sid) return
       const liveId = `live_${sid}`
-      setFollowPost(prev => prev.filter(p => String(p._id) !== liveId))
+      setFollowPost(prev => prev.filter(p => {
+        if (String(p._id) === liveId) return false
+        if (p?.isLive && String(p?.postedBy?._id || p?.liveStreamId || '') === sid) return false
+        return true
+      }))
+    }
+    const handleLocalHostEnded = (ev) => {
+      const sid = normalizeStreamerId(ev?.detail?.streamerId)
+      if (!sid) return
+      handleStreamEnded({ streamerId: sid })
     }
 
     const handlePostEngagement = (data) => {
@@ -602,6 +612,7 @@ const HomePage = () => {
     socket.on('weatherUpdate', handleWeatherFeedSync)
     socket.on('livekit:streamStarted', handleStreamStarted)
     socket.on('livekit:streamEnded',   handleStreamEnded)
+    window.addEventListener('liveLocalHostEnded', handleLocalHostEnded)
 
     return () => {
       socket.off('newPost', handleNewPost)
@@ -613,8 +624,9 @@ const HomePage = () => {
       socket.off('weatherUpdate', handleWeatherFeedSync)
       socket.off('livekit:streamStarted', handleStreamStarted)
       socket.off('livekit:streamEnded',   handleStreamEnded)
+      window.removeEventListener('liveLocalHostEnded', handleLocalHostEnded)
     }
-  }, [socket, setFollowPost, getFeedPost, user, myUserId, isLive, filterFeedPosts])
+  }, [socket, setFollowPost, getFeedPost, user, myUserId, filterFeedPosts])
 
  
 
@@ -685,7 +697,7 @@ const HomePage = () => {
         {!loading && followPost.length > 0 && (
           <>
             {(() => {
-              const visible = followPost.filter((p) => !isLive || !isOwnLivePost(p))
+              const visible = followPost.filter((p) => !isOwnLivePost(p))
               const every = getAdsterraFeedEvery()
               const nodes = []
               visible.forEach((post, index) => {

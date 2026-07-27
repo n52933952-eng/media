@@ -1521,9 +1521,11 @@ export const SocketContextProvider = ({ children }) => {
   useEffect(() => {
     if (!socket) return;
     const onStreamStarted = (data) => {
+      const sid = data?.streamerId != null ? String(data.streamerId) : '';
+      if (!sid) return;
       setLiveStreams(prev => {
-        if (prev.some(s => s.streamerId === data.streamerId)) return prev;
-        return [...prev, data];
+        if (prev.some(s => String(s.streamerId) === sid)) return prev;
+        return [...prev, { ...data, streamerId: sid }];
       });
       toast({
         title: `${data.streamerName} is live!`,
@@ -1535,7 +1537,9 @@ export const SocketContextProvider = ({ children }) => {
       });
     };
     const onStreamEnded = ({ streamerId }) => {
-      setLiveStreams(prev => prev.filter(s => s.streamerId !== streamerId));
+      const sid = streamerId != null ? String(streamerId) : '';
+      if (!sid) return;
+      setLiveStreams(prev => prev.filter(s => String(s.streamerId) !== sid));
     };
     socket.on('livekit:streamStarted', onStreamStarted);
     socket.on('livekit:streamEnded',   onStreamEnded);
