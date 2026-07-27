@@ -50,6 +50,7 @@ export const LiveBroadcastProvider = ({ children }) => {
   const roomRef = useRef(null);
   const roomNameRef = useRef('');
   const liveEndedRef = useRef(false);
+  const pendingEndLiveRef = useRef(null);
   const endLiveRef = useRef(async () => {});
   const reconnectWatchdogRef = useRef(null);
   const onChatRef = useRef(null);
@@ -269,13 +270,24 @@ export const LiveBroadcastProvider = ({ children }) => {
 
   const endLive = useCallback(async () => {
     resignActiveGames(socket, user);
-    if (socket && user?._id && roomNameRef.current && !liveEndedRef.current) {
-      liveEndedRef.current = true;
-      socket.emit('livekit:leaveLiveWatch', { streamerId: String(user._id) });
-      socket.emit('livekit:endLive', {
-        streamerId: String(user._id),
-        roomName: roomNameRef.current,
-      });
+    const streamerId = user?._id != null ? String(user._id) : '';
+    const endedRoomName = roomNameRef.current || '';
+    const shouldNotifyServer = !!streamerId && !liveEndedRef.current;
+    // Mark ended FIRST so reconnect cannot resume goLive / recreate the card.
+    liveEndedRef.current = true;
+    if (shouldNotifyServer) {
+      try {
+        window.dispatchEvent(new CustomEvent('liveLocalHostEnded', { detail: { streamerId } }));
+      } catch (_) { /* ignore */ }
+      const endPayload = { streamerId, roomName: endedRoomName };
+      if (socket?.connected) {
+        pendingEndLiveRef.current = null;
+        socket.emit('livekit:leaveLiveWatch', { streamerId });
+        socket.emit('livekit:endLive', endPayload);
+      } else if (socket) {
+        pendingEndLiveRef.current = endPayload;
+        console.warn('[LiveBroadcast] endLive queued — socket not connected yet');
+      }
     }
     roomNameRef.current = '';
     setLiveRoomName('');
@@ -356,6 +368,7 @@ export const LiveBroadcastProvider = ({ children }) => {
 
     setStartingLive(true);
     liveEndedRef.current = false;
+    pendingEndLiveRef.current = null;
     try {
       const res = await fetch(`${API_BASE}/api/call/token`, {
         method: 'POST',
@@ -458,11 +471,23 @@ export const LiveBroadcastProvider = ({ children }) => {
     }
   }, [user, socket, startingLive, isLive, syncLocalTrack, toast, clearReconnectWatchdog]);
 
-  /** Socket flap: resume goLive only while LiveKit is still up — never recreate after grace cleanup. */
+  /** Flush queued endLive + never resume after user already ended (reconnect race). */
   useEffect(() => {
-    if (!socket || !isLive || !user?._id) return undefined;
+    if (!socket || !user?._id) return undefined;
     const onConnect = () => {
-      if (liveEndedRef.current || !roomNameRef.current) return;
+      const pending = pendingEndLiveRef.current;
+      if (pending) {
+        console.log('[LiveBroadcast] Flushing queued endLive after reconnect');
+        pendingEndLiveRef.current = null;
+        liveEndedRef.current = true;
+        socket.emit('livekit:leaveLiveWatch', { streamerId: pending.streamerId });
+        socket.emit('livekit:endLive', pending);
+        try {
+          window.dispatchEvent(new CustomEvent('liveLocalHostEnded', { detail: { streamerId: pending.streamerId } }));
+        } catch (_) { /* ignore */ }
+        return;
+      }
+      if (liveEndedRef.current || !isLive || !roomNameRef.current) return;
       const room = roomRef.current;
       const lkAlive =
         !!room

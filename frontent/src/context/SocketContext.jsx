@@ -1539,9 +1539,16 @@ export const SocketContextProvider = ({ children }) => {
     };
     socket.on('livekit:streamStarted', onStreamStarted);
     socket.on('livekit:streamEnded',   onStreamEnded);
+    const onLocalHostEnded = (ev) => {
+      const sid = ev?.detail?.streamerId != null ? String(ev.detail.streamerId) : '';
+      if (!sid) return;
+      setLiveStreams(prev => prev.filter(s => String(s.streamerId) !== sid));
+    };
+    window.addEventListener('liveLocalHostEnded', onLocalHostEnded);
     return () => {
       socket.off('livekit:streamStarted', onStreamStarted);
       socket.off('livekit:streamEnded',   onStreamEnded);
+      window.removeEventListener('liveLocalHostEnded', onLocalHostEnded);
     };
   }, [socket, toast]);
 
