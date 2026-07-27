@@ -304,10 +304,15 @@ export const LiveBroadcastProvider = ({ children }) => {
     await endLive();
   }, [endLive]);
 
-  /** Normal camera live (not share+minimize) — end stream before call / game. */
+  /**
+   * Normal camera live — end before call / game.
+   * Keep live only for intentional share+minimize (same rule as the Answer warning).
+   */
   const endNormalLiveBeforeInterrupt = useCallback(async () => {
-    if (isLive && !isMinimized && !isSharing) {
+    if (isLive && !(isMinimized && isSharing)) {
       await endLiveForCall();
+      // Brief settle so the live PeerConnection/camera releases before call connect.
+      await new Promise((r) => setTimeout(r, 200));
     }
   }, [isLive, isMinimized, isSharing, endLiveForCall]);
 
