@@ -41,6 +41,8 @@ const HomePage = () => {
   }, [myUserId])
   
   const[loading,setLoading]=useState(true)
+  const loadingRef = useRef(true)
+  loadingRef.current = loading
   const[loadingMore,setLoadingMore]=useState(false)
   const[hasMore,setHasMore]=useState(true)
   const[error,setError]=useState(null)
@@ -287,6 +289,15 @@ const HomePage = () => {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []) // Only run once on mount
+
+  // Same idea as mobile FeedScreen: if we already have posts but loading is stuck true
+  // (e.g. remount / return from game), clear spinner so the feed shows.
+  useEffect(() => {
+    if (location.pathname !== '/home') return
+    if (loadingRef.current && followPost.length > 0 && !isLoadingRef.current) {
+      setLoading(false)
+    }
+  }, [location.pathname, followPost.length, loading])
 
   // Cache Football account id for follow checks (following[] is id list, not { username })
   useEffect(() => {

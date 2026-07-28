@@ -132,6 +132,8 @@ const CardGamePage = () => {
     const prevBooksRef = useRef(0)
     const previousPathRef = useRef(null)
     const cardExitHandledRef = useRef(false)
+    /** I resigned / left — no Back to Home modal for me; only opponent end shows it. */
+    const selfEndedRef = useRef(false)
 
     useEffect(() => {
         gameLiveRef.current = gameLive
@@ -282,7 +284,13 @@ const CardGamePage = () => {
             }
 
             if (data.gameStatus === 'playing') setGameLive(true)
-            else if (data.gameStatus === 'finished') { setGameLive(false); setGameOver(true) }
+            else if (data.gameStatus === 'finished') {
+                setGameLive(false)
+                if (!selfEndedRef.current) {
+                    setGameOver(true)
+                    setGameResult((prev) => prev || 'Game Over')
+                }
+            }
         }
 
         const handleOpponentMove = (data) => {
@@ -292,17 +300,16 @@ const CardGamePage = () => {
 
         const handleGameEnded = (data) => {
             if (data?.roomId && data.roomId !== currentRoomRef.current) return
+            if (selfEndedRef.current) return
+
             const reason = String(data?.reason || '')
-            if (
-                reason === 'never_started'
-                || reason === 'start_timeout'
-                || reason === 'player_disconnected'
-            ) {
+            // Waiting cancel — leave immediately (no lobby modal).
+            if (reason === 'never_started' || reason === 'start_timeout') {
                 removeOwnCardPost()
                 endCardGameOnce()
                 toast({
                     title: 'Go Fish',
-                    description: reason === 'player_disconnected' ? 'Opponent disconnected' : 'Game could not start',
+                    description: 'Game could not start',
                     status: 'info',
                     duration: 3000,
                     position: 'top',
@@ -310,17 +317,38 @@ const CardGamePage = () => {
                 navigate('/home')
                 return
             }
+
+            // Opponent ended / disconnect / resign — show Back to Home (matches mobile).
             setGameOver(true)
-            setGameResult(data.message || 'Game Over')
-            toast({ title: 'Game Over 🃏', description: data.message, status: 'info', duration: 4000, position: 'top' })
+            const message =
+                data?.message
+                || (reason === 'player_disconnected'
+                    ? 'Opponent disconnected'
+                    : reason === 'resigned'
+                        ? 'Opponent resigned'
+                        : 'Game Over')
+            setGameResult(message)
+            toast({ title: 'Game Over 🃏', description: message, status: 'info', duration: 4000, position: 'top' })
             removeOwnCardPost()
         }
 
         const handleCleanup = () => {
-            setGameOver(true); setGameLive(false)
+            if (selfEndedRef.current) return
+
+            // Still waiting — leave (no board).
+            if (!gameLiveRef.current) {
+                removeOwnCardPost()
+                endCardGameOnce()
+                navigate('/home')
+                return
+            }
+
+            // Opponent ended while I was in game — show Back to Home (do not auto-leave).
+            setGameOver(true)
+            setGameLive(false)
+            setGameResult((prev) => prev || 'Game ended')
             removeOwnCardPost()
             toast({ title: 'Game Ended', description: 'The game was canceled', status: 'warning', duration: 3000, position: 'top' })
-            setTimeout(() => navigate('/home'), 1200)
         }
 
         socket.on('cardGameState', handleGameState)
@@ -405,6 +433,8 @@ const CardGamePage = () => {
     }, [socket, roomId, opponentId, isMyTurn, gameOver, myHand, toast, closeRankModal])
 
     const handleResign = () => {
+        // I resigned — leave immediately; opponent still gets Back to Home.
+        selfEndedRef.current = true
         if (socket && roomId && opponentId) socket.emit('resignCard', { roomId, to: opponentId })
         endCardGameOnce()
         removeOwnCardPost()
