@@ -4398,21 +4398,18 @@ export const initializeSocket = async (app) => {
                 io.to(recipientSocketId).emit("opponentResigned")
             }
             
-            // Emit cleanup event to both players
+            // Emit cleanup + ended to both players (room-only emit was easy to miss).
+            const endPayload = { roomId, reason: 'resigned', message: 'Opponent resigned' }
             if (resignerSocketId) {
                 io.to(resignerSocketId).emit("cardGameCleanup")
+                io.to(resignerSocketId).emit("cardGameEnded", endPayload)
             }
             if (recipientSocketId) {
                 io.to(recipientSocketId).emit("cardGameCleanup")
+                io.to(recipientSocketId).emit("cardGameEnded", endPayload)
             }
-            
-            // Notify all spectators in the room that game ended
             if (roomId) {
-                const room = io.sockets.adapter.rooms.get(roomId)
-                if (room && room.size > 0) {
-                    console.log(`👁️ Notifying ${room.size} spectators that game ended (resign)`)
-                    io.to(roomId).emit("cardGameEnded", { reason: 'resigned' })
-                }
+                io.to(roomId).emit("cardGameEnded", endPayload)
             }
             
             // Delete card game post immediately
