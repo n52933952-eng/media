@@ -51,7 +51,20 @@ const LIVEKIT_MAX_SESSION_MS = (() => {
     if (Number.isFinite(n) && n > 0) return n
     return 0
 })()
+/**
+ * Unanswered ring window (LiveKit direct). Slightly after mobile's 60s caller timeout.
+ * If caller cancel never reaches the server (socket drop), this still sends FCM stop_ringtone.
+ * Cleared when callee answers (token fetch) or on cancel/decline.
+ */
+const LIVEKIT_RING_TIMEOUT_MS = (() => {
+    const raw = process.env.LIVEKIT_RING_TIMEOUT_MS
+    if (raw === undefined || raw === null || raw === '') return 65_000
+    const n = Number(raw)
+    if (!Number.isFinite(n) || n <= 0) return 65_000
+    return n
+})()
 const livekitDirectCallTimers = new Map()
+const livekitRingTimers = new Map()
 const livekitGroupCallTimers = new Map()
 const livekitStreamTimers = new Map()
 /** Deferred auto-online after connect (covers push-open without a new mobile build). */
@@ -234,6 +247,133 @@ const directCallTimerKey = ({ roomName, callerId, receiverId }) => {
     const b = normalizeUserId(receiverId)
     if (a && b) return `pair:${[a, b].sort().join(':')}`
     return null
+}
+
+const CALL_RINGING_PREFIX = 'callRinging:'
+const ringingRedisKeyForPair = (userA, userB) => {
+    const a = normalizeUserId(userA)
+    const b = normalizeUserId(userB)
+    if (!a || !b) return null
+    return `${CALL_RINGING_PREFIX}${[a, b].sort().join(':')}`
+}
+
+const setCallRinging = async (callerId, receiverId, roomName) => {
+    const key = ringingRedisKeyForPair(callerId, receiverId)
+    if (!key) return
+    redisService.ensureRedis()
+    const ttlSec = Math.max(75, Math.ceil(LIVEKIT_RING_TIMEOUT_MS / 1000) + 15)
+    await redisService.redisSet(
+        key,
+        {
+            callerId: normalizeUserId(callerId),
+            receiverId: normalizeUserId(receiverId),
+            roomName: roomName || null,
+            at: Date.now(),
+        },
+        ttlSec,
+    ).catch(() => {})
+}
+
+const getCallRinging = async (userA, userB) => {
+    const key = ringingRedisKeyForPair(userA, userB)
+    if (!key) return null
+    redisService.ensureRedis()
+    try {
+        return await redisService.redisGet(key)
+    } catch {
+        return null
+    }
+}
+
+const clearCallRinging = async (userA, userB) => {
+    const key = ringingRedisKeyForPair(userA, userB)
+    if (!key) return
+    redisService.ensureRedis()
+    await redisService.redisDel(key).catch(() => {})
+}
+
+const clearLiveKitRingTimeout = (callerId, receiverId, roomName) => {
+    safeClearTimer(
+        livekitRingTimers,
+        directCallTimerKey({ roomName, callerId, receiverId }),
+    )
+}
+
+/** Clear ring timer + Redis ringing row for a pair (cancel / HTTP cancel). */
+export const clearLiveKitRingForPair = async (userA, userB, roomName = null) => {
+    const ringing = await getCallRinging(userA, userB)
+    const callerId = ringing?.callerId || userA
+    const receiverId = ringing?.receiverId || userB
+    clearLiveKitRingTimeout(callerId, receiverId, ringing?.roomName || roomName)
+    await clearCallRinging(userA, userB)
+}
+
+/**
+ * Callee accepted (fetched LiveKit token). Stop unanswered-ring timer so an active call
+ * is not torn down at ~65s. Safe no-op if this user is the caller (caller also fetches token while ringing).
+ */
+export const markLiveKitDirectCallAnswered = async (userId, targetId) => {
+    const uid = normalizeUserId(userId)
+    const tid = normalizeUserId(targetId)
+    if (!uid || !tid) return false
+    const ringing = await getCallRinging(uid, tid)
+    if (!ringing) return false
+    const receiverId = normalizeUserId(ringing.receiverId)
+    if (receiverId !== uid) return false
+    clearLiveKitRingTimeout(ringing.callerId, ringing.receiverId, ringing.roomName)
+    await clearCallRinging(ringing.callerId, ringing.receiverId)
+    console.log(`✅ [LiveKit] Ring answered — cleared ring timeout caller:${ringing.callerId} callee:${uid}`)
+    return true
+}
+
+const endUnansweredLiveKitRing = async ({ callerId, receiverId, roomName }) => {
+    const ringing = await getCallRinging(callerId, receiverId)
+    if (!ringing) return // already answered / canceled
+
+    const c = normalizeUserId(ringing.callerId || callerId)
+    const r = normalizeUserId(ringing.receiverId || receiverId)
+    const room = ringing.roomName || roomName || null
+
+    await clearCallRinging(c, r)
+    await clearCallStateForPair(c, r)
+    User.findByIdAndUpdate(c, { inCall: false }).catch(() => {})
+    User.findByIdAndUpdate(r, { inCall: false }).catch(() => {})
+    void emitStatusToFollowersOf([r, c], 'cancleCall', { userToCall: r, from: c })
+
+    try {
+        const { sendCallEndedNotificationToUser } = await import('../services/fcmNotifications.js')
+        await sendCallEndedNotificationToUser(r, c)
+    } catch (fcmErr) {
+        console.error('❌ [LiveKit] ring-timeout FCM stop failed:', fcmErr?.message || fcmErr)
+    }
+
+    const timeoutPayload = { from: c, roomName: room, reason: 'ring_timeout' }
+    try {
+        const callerLiveSocketId = await resolveLiveSocketIdForUser(c)
+        const receiverLiveSocketId = await resolveLiveSocketIdForUser(r)
+        if (callerLiveSocketId) io.to(callerLiveSocketId).emit('livekit:callCanceled', timeoutPayload)
+        if (receiverLiveSocketId) io.to(receiverLiveSocketId).emit('livekit:callCanceled', timeoutPayload)
+    } catch (_) {}
+
+    console.log(`⏱️ [LiveKit] Unanswered ring timeout — stopped push/ring caller:${c} receiver:${r}`)
+}
+
+const scheduleLiveKitRingTimeout = (callerId, receiverId, roomName) => {
+    const key = directCallTimerKey({ roomName, callerId, receiverId })
+    if (!key) return
+    safeClearTimer(livekitRingTimers, key)
+    livekitRingTimers.set(
+        key,
+        setTimeout(async () => {
+            try {
+                await endUnansweredLiveKitRing({ callerId, receiverId, roomName })
+            } catch (err) {
+                console.error('❌ [LiveKit] ring timeout cleanup failed:', err?.message || err)
+            } finally {
+                safeClearTimer(livekitRingTimers, key)
+            }
+        }, LIVEKIT_RING_TIMEOUT_MS),
+    )
 }
 
 const groupCallTimerKey = ({ roomName, conversationId }) => {
@@ -2441,6 +2581,10 @@ export const initializeSocket = async (app) => {
                 const calleeReachable = !!deliverSocketId || fcmSent
                 socket.emit('livekit:callTarget', { roomName, receiverId, reachable: calleeReachable })
 
+                // Unanswered ring safety net (server-only): stop FCM ringtone if caller cancel never arrives.
+                await setCallRinging(callerId, receiverId, roomName)
+                scheduleLiveKitRingTimeout(callerId, receiverId, roomName)
+
                 const directTimerKey = directCallTimerKey({ roomName, callerId, receiverId })
                 if (directTimerKey && LIVEKIT_MAX_SESSION_MS > 0) {
                     safeClearTimer(livekitDirectCallTimers, directTimerKey)
@@ -2482,6 +2626,8 @@ export const initializeSocket = async (app) => {
                     livekitDirectCallTimers,
                     directCallTimerKey({ roomName, callerId, receiverId })
                 )
+                clearLiveKitRingTimeout(callerId, receiverId, roomName)
+                await clearCallRinging(callerId, receiverId)
 
                 // Clear busy state
                 await clearCallStateForPair(callerId, receiverId)
@@ -2531,6 +2677,8 @@ export const initializeSocket = async (app) => {
                     livekitDirectCallTimers,
                     directCallTimerKey({ roomName, callerId, receiverId })
                 )
+                clearLiveKitRingTimeout(callerId, receiverId, roomName)
+                await clearCallRinging(callerId, receiverId)
 
                 await clearCallStateForPair(callerId, receiverId)
                 User.findByIdAndUpdate(callerId,  { inCall: false }).catch(() => {})

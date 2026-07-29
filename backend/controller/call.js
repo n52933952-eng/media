@@ -1,7 +1,7 @@
 import User from '../models/user.js'
 import Conversation from '../models/conversation.js'
 import LiveStream from '../models/liveStream.js'
-import { getIO, getRecipientSockedId, emitStatusToFollowersOf } from '../socket/socket.js'
+import { getIO, getRecipientSockedId, emitStatusToFollowersOf, markLiveKitDirectCallAnswered } from '../socket/socket.js'
 import * as redisService from '../services/redis.js'
 import { AccessToken } from 'livekit-server-sdk'
 
@@ -86,6 +86,12 @@ export const getLiveKitToken = async (req, res) => {
         }
 
         const roomName = buildRoomName({ type, userId, targetId, conversationId })
+
+        // Direct call: callee fetching a token means they answered — clear unanswered-ring timer
+        // so an active call is not torn down by the ~65s server ring safety net.
+        if (type === 'direct' && targetId) {
+            markLiveKitDirectCallAnswered(userId, targetId).catch(() => {})
+        }
 
         const canPublish   = type !== 'viewer'   // viewers only watch
         const canSubscribe = true                 // everyone can receive streams
@@ -283,6 +289,11 @@ export const cancelCall = async (req, res) => {
         if (call2) await deleteActiveCall(callId2)
         await Promise.all([deletePendingCall(sender), deletePendingCall(conversationId)])
         await Promise.all([clearInCall(sender), clearInCall(conversationId)])
+
+        try {
+            const { clearLiveKitRingForPair } = await import('../socket/socket.js')
+            await clearLiveKitRingForPair(sender, conversationId)
+        } catch (_) {}
 
         // Update MongoDB (fire-and-forget)
         Promise.all([
