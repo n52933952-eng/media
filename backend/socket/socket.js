@@ -65,8 +65,20 @@ const LIVEKIT_RING_TIMEOUT_MS = (() => {
 })()
 const livekitDirectCallTimers = new Map()
 const livekitRingTimers = new Map()
+/** After callee answers: if the other party never joins the LiveKit room, end for both. */
+const livekitPairConnectTimers = new Map()
 const livekitGroupCallTimers = new Map()
 const livekitStreamTimers = new Map()
+
+/** Grace after call start before checking both users are in the LiveKit room (orphan / failed join). */
+const LIVEKIT_PAIR_CONNECT_GRACE_MS = (() => {
+    const raw = process.env.LIVEKIT_PAIR_CONNECT_GRACE_MS
+    // After ring window (~65s) so we never kill a still-ringing call; catches alone-in-room leftovers.
+    if (raw === undefined || raw === null || raw === '') return 80_000
+    const n = Number(raw)
+    if (!Number.isFinite(n) || n <= 0) return 80_000
+    return n
+})()
 /** Deferred auto-online after connect (covers push-open without a new mobile build). */
 const presenceAutoOnlineTimers = new Map()
 /** Extra online emits so friends who missed the first delta (reconnect races) still update. */
@@ -304,7 +316,9 @@ export const clearLiveKitRingForPair = async (userA, userB, roomName = null) => 
     const ringing = await getCallRinging(userA, userB)
     const callerId = ringing?.callerId || userA
     const receiverId = ringing?.receiverId || userB
-    clearLiveKitRingTimeout(callerId, receiverId, ringing?.roomName || roomName)
+    const room = ringing?.roomName || roomName
+    clearLiveKitRingTimeout(callerId, receiverId, room)
+    clearLiveKitPairConnectTimeout(callerId, receiverId, room)
     await clearCallRinging(userA, userB)
 }
 
@@ -320,10 +334,198 @@ export const markLiveKitDirectCallAnswered = async (userId, targetId) => {
     if (!ringing) return false
     const receiverId = normalizeUserId(ringing.receiverId)
     if (receiverId !== uid) return false
-    clearLiveKitRingTimeout(ringing.callerId, ringing.receiverId, ringing.roomName)
-    await clearCallRinging(ringing.callerId, ringing.receiverId)
-    console.log(`✅ [LiveKit] Ring answered — cleared ring timeout caller:${ringing.callerId} callee:${uid}`)
+    const callerId = normalizeUserId(ringing.callerId)
+    clearLiveKitRingTimeout(callerId, receiverId, ringing.roomName)
+    await clearCallRinging(callerId, receiverId)
+    console.log(`✅ [LiveKit] Ring answered — cleared ring timeout caller:${callerId} callee:${uid}`)
     return true
+}
+
+const livekitCallEndedRedisKey = (userA, userB) => {
+    const a = normalizeUserId(userA)
+    const b = normalizeUserId(userB)
+    if (!a || !b || a === b) return null
+    return `livekitCallEnded:${[a, b].sort().join('-')}`
+}
+
+/** Set when a direct call fully ends — token gate rejects late Answer / rejoin. */
+const markLiveKitDirectCallEnded = async (userA, userB) => {
+    const key = livekitCallEndedRedisKey(userA, userB)
+    if (!key) return
+    redisService.ensureRedis()
+    await redisService.redisSet(key, { at: Date.now() }, 180).catch(() => {})
+}
+
+/** Cleared at the start of a new livekit:callUser so a fresh call can mint tokens. */
+const clearLiveKitDirectCallEnded = async (userA, userB) => {
+    const key = livekitCallEndedRedisKey(userA, userB)
+    if (!key) return
+    redisService.ensureRedis()
+    await redisService.redisDel(key).catch(() => {})
+}
+
+/**
+ * Direct 1:1 only. Blocks Answer-after-hangup without breaking the caller's first
+ * token (socket callUser vs HTTP /token race). Group/livestream unchanged.
+ */
+export const assertDirectCallJoinAllowed = async (userId, targetId) => {
+    const a = normalizeUserId(userId)
+    const b = normalizeUserId(targetId)
+    if (!a || !b || a === b) return { ok: false, reason: 'call_ended' }
+    const expectedCallId = [a, b].sort().join('-')
+    try {
+        // Explicit cancel queued for this user about this pair (offline / reconnect path).
+        try {
+            const pending = await getPendingCancel(a)
+            if (pending) {
+                const from = normalizeUserId(pending.from)
+                const pendingCallId = pending.callId != null ? String(pending.callId) : null
+                if (from === b || pendingCallId === expectedCallId) {
+                    console.log('⛔ [LiveKit] Token denied — pendingCancel for pair', { userId: a, targetId: b })
+                    return { ok: false, reason: 'call_ended' }
+                }
+            }
+        } catch (_) {}
+
+        const endedKey = livekitCallEndedRedisKey(a, b)
+        const [inA, inB, ringing, ended] = await Promise.all([
+            getInCall(a),
+            getInCall(b),
+            getCallRinging(a, b),
+            endedKey ? redisService.redisGet(endedKey).catch(() => null) : Promise.resolve(null),
+        ])
+
+        // Still ringing — allow Answer / caller token.
+        if (ringing) {
+            return { ok: true }
+        }
+
+        const inCallThisPair = (entry) => {
+            if (!entry) return false
+            const cid = String(entry.callId || '')
+            return cid === expectedCallId || (cid.includes(a) && cid.includes(b))
+        }
+        // Active / starting call — allow even if only one side written yet.
+        if (inCallThisPair(inA) || inCallThisPair(inB)) {
+            return { ok: true }
+        }
+
+        // Call was cleared (cancel / decline / ring timeout / orphan) — block late Answer.
+        if (ended) {
+            console.log('⛔ [LiveKit] Token denied — call ended flag for pair', { userId: a, targetId: b })
+            return { ok: false, reason: 'call_ended' }
+        }
+
+        // No ended flag + no inCall yet: caller's first token racing callUser — allow.
+        return { ok: true }
+    } catch (e) {
+        console.warn('⚠️ [LiveKit] assertDirectCallJoinAllowed failed open:', e?.message || e)
+        return { ok: true }
+    }
+}
+
+const livekitHttpHost = () => {
+    const raw = process.env.LIVEKIT_URL || ''
+    if (!raw) return ''
+    return String(raw).replace(/^ws/i, 'http').replace(/\/$/, '')
+}
+
+const deleteLiveKitRoomQuiet = async (roomName) => {
+    const host = livekitHttpHost()
+    const key = process.env.LIVEKIT_API_KEY
+    const secret = process.env.LIVEKIT_API_SECRET
+    if (!host || !key || !secret || !roomName) return
+    try {
+        const { RoomServiceClient } = await import('livekit-server-sdk')
+        const svc = new RoomServiceClient(host, key, secret)
+        await svc.deleteRoom(roomName)
+        console.log(`🗑️ [LiveKit] Deleted room ${roomName}`)
+    } catch (e) {
+        // Room may already be gone — fine.
+        if (String(e?.message || e).includes('not found')) return
+        console.warn('⚠️ [LiveKit] deleteRoom:', e?.message || e)
+    }
+}
+
+const listLiveKitParticipants = async (roomName) => {
+    const host = livekitHttpHost()
+    const key = process.env.LIVEKIT_API_KEY
+    const secret = process.env.LIVEKIT_API_SECRET
+    if (!host || !key || !secret || !roomName) return null
+    try {
+        const { RoomServiceClient } = await import('livekit-server-sdk')
+        const svc = new RoomServiceClient(host, key, secret)
+        const parts = await svc.listParticipants(roomName)
+        return Array.isArray(parts) ? parts : []
+    } catch (e) {
+        console.warn('⚠️ [LiveKit] listParticipants:', e?.message || e)
+        return null
+    }
+}
+
+const clearLiveKitPairConnectTimeout = (callerId, receiverId, roomName) => {
+    safeClearTimer(
+        livekitPairConnectTimers,
+        directCallTimerKey({ roomName, callerId, receiverId }),
+    )
+}
+
+const endLoneDirectCallPair = async ({ callerId, receiverId, roomName }) => {
+    const c = normalizeUserId(callerId)
+    const r = normalizeUserId(receiverId)
+    if (!c || !r) return
+
+    const [inC, inR] = await Promise.all([getInCall(c), getInCall(r)])
+    if (!inC && !inR) return
+
+    const parts = await listLiveKitParticipants(roomName)
+    // null = LiveKit API unavailable — do not kill a possibly good call
+    if (parts === null) return
+    if (parts.length >= 2) return
+
+    console.log(`📴 [LiveKit] Pair never fully connected (${parts.length} in room) — ending caller:${c} receiver:${r}`)
+    clearLiveKitPairConnectTimeout(c, r, roomName)
+    await clearCallRinging(c, r)
+    await clearCallStateForPair(c, r)
+    User.findByIdAndUpdate(c, { inCall: false }).catch(() => {})
+    User.findByIdAndUpdate(r, { inCall: false }).catch(() => {})
+    void emitStatusToFollowersOf([r, c], 'cancleCall', { userToCall: r, from: c })
+
+    try {
+        const { sendCallEndedNotificationToUser } = await import('../services/fcmNotifications.js')
+        await Promise.all([
+            sendCallEndedNotificationToUser(r, c).catch(() => {}),
+            sendCallEndedNotificationToUser(c, r).catch(() => {}),
+        ])
+    } catch (_) {}
+
+    const payload = { from: c, roomName: roomName || null, reason: 'pair_incomplete' }
+    try {
+        const callerLiveSocketId = await resolveLiveSocketIdForUser(c)
+        const receiverLiveSocketId = await resolveLiveSocketIdForUser(r)
+        if (callerLiveSocketId) io.to(callerLiveSocketId).emit('livekit:callCanceled', payload)
+        if (receiverLiveSocketId) io.to(receiverLiveSocketId).emit('livekit:callCanceled', payload)
+    } catch (_) {}
+
+    await deleteLiveKitRoomQuiet(roomName)
+}
+
+const scheduleLiveKitPairConnectCheck = (callerId, receiverId, roomName) => {
+    const key = directCallTimerKey({ roomName, callerId, receiverId })
+    if (!key) return
+    safeClearTimer(livekitPairConnectTimers, key)
+    livekitPairConnectTimers.set(
+        key,
+        setTimeout(async () => {
+            try {
+                await endLoneDirectCallPair({ callerId, receiverId, roomName })
+            } catch (err) {
+                console.error('❌ [LiveKit] pair-connect check failed:', err?.message || err)
+            } finally {
+                safeClearTimer(livekitPairConnectTimers, key)
+            }
+        }, LIVEKIT_PAIR_CONNECT_GRACE_MS),
+    )
 }
 
 const endUnansweredLiveKitRing = async ({ callerId, receiverId, roomName }) => {
@@ -335,6 +537,7 @@ const endUnansweredLiveKitRing = async ({ callerId, receiverId, roomName }) => {
     const room = ringing.roomName || roomName || null
 
     await clearCallRinging(c, r)
+    clearLiveKitPairConnectTimeout(c, r, room)
     await clearCallStateForPair(c, r)
     User.findByIdAndUpdate(c, { inCall: false }).catch(() => {})
     User.findByIdAndUpdate(r, { inCall: false }).catch(() => {})
@@ -355,6 +558,7 @@ const endUnansweredLiveKitRing = async ({ callerId, receiverId, roomName }) => {
         if (receiverLiveSocketId) io.to(receiverLiveSocketId).emit('livekit:callCanceled', timeoutPayload)
     } catch (_) {}
 
+    await deleteLiveKitRoomQuiet(room)
     console.log(`⏱️ [LiveKit] Unanswered ring timeout — stopped push/ring caller:${c} receiver:${r}`)
 }
 
@@ -603,6 +807,8 @@ const clearCallStateForPair = async (userA, userB) => {
         redisService.redisDel(`${IN_CALL_PREFIX}${a}`),
         redisService.redisDel(`${IN_CALL_PREFIX}${b}`),
     ].map(p => p.catch(() => {})))
+    // Direct LiveKit token gate: reject Answer/rejoin after this pair is cleared.
+    await markLiveKitDirectCallEnded(a, b)
     User.findByIdAndUpdate(a, { inCall: false }).catch(() => {})
     User.findByIdAndUpdate(b, { inCall: false }).catch(() => {})
     clearCallDisconnectGraceTimer(a)
@@ -2503,6 +2709,9 @@ export const initializeSocket = async (app) => {
 
                 // Mark both as inCall (Redis + MongoDB)
                 const callId = [String(callerId), receiverId].sort().join('-')
+                // Fresh call — clear prior ended / pending-cancel so /token works after a re-dial.
+                await clearLiveKitDirectCallEnded(callerId, receiverId)
+                await deletePendingCancel(receiverId).catch(() => {})
                 await Promise.all([
                     setInCall(callerId,  callId).catch(() => {}),
                     setInCall(receiverId, callId).catch(() => {}),
@@ -2584,6 +2793,8 @@ export const initializeSocket = async (app) => {
                 // Unanswered ring safety net (server-only): stop FCM ringtone if caller cancel never arrives.
                 await setCallRinging(callerId, receiverId, roomName)
                 scheduleLiveKitRingTimeout(callerId, receiverId, roomName)
+                // After ring window: if still marked in-call but LiveKit never has both users, end for both.
+                scheduleLiveKitPairConnectCheck(callerId, receiverId, roomName)
 
                 const directTimerKey = directCallTimerKey({ roomName, callerId, receiverId })
                 if (directTimerKey && LIVEKIT_MAX_SESSION_MS > 0) {
@@ -2627,6 +2838,7 @@ export const initializeSocket = async (app) => {
                     directCallTimerKey({ roomName, callerId, receiverId })
                 )
                 clearLiveKitRingTimeout(callerId, receiverId, roomName)
+                clearLiveKitPairConnectTimeout(callerId, receiverId, roomName)
                 await clearCallRinging(callerId, receiverId)
 
                 // Clear busy state
@@ -2646,9 +2858,11 @@ export const initializeSocket = async (app) => {
 
                 // Offline / killed callee: deliver cancel on next connect (LiveKit + legacy).
                 if (!receiverSocketId && receiverId) {
+                    const cancelCallId = [String(callerId), String(receiverId)].sort().join('-')
                     await setPendingCancel(receiverId, {
                         from: callerId,
                         roomName: roomName || null,
+                        callId: cancelCallId,
                         at: Date.now(),
                         livekit: true,
                     }).catch(() => {})
@@ -2663,6 +2877,7 @@ export const initializeSocket = async (app) => {
                     await sendCallEndedNotificationToUser(receiverId, callerId)
                 } catch (_) {}
 
+                await deleteLiveKitRoomQuiet(roomName)
                 console.log(`📴 [LiveKit] cancelCall — caller:${callerId} receiver:${receiverId}`)
             } catch (err) {
                 console.error('❌ [livekit:cancelCall]', err.message)
@@ -2678,6 +2893,7 @@ export const initializeSocket = async (app) => {
                     directCallTimerKey({ roomName, callerId, receiverId })
                 )
                 clearLiveKitRingTimeout(callerId, receiverId, roomName)
+                clearLiveKitPairConnectTimeout(callerId, receiverId, roomName)
                 await clearCallRinging(callerId, receiverId)
 
                 await clearCallStateForPair(callerId, receiverId)
@@ -2693,6 +2909,7 @@ export const initializeSocket = async (app) => {
                 const callerSocketId   = callerSocketData?.socketId
                 if (callerSocketId) io.to(callerSocketId).emit('livekit:callDeclined', { by: receiverId, roomName })
 
+                await deleteLiveKitRoomQuiet(roomName)
                 console.log(`📴 [LiveKit] declineCall — receiver:${receiverId} declined caller:${callerId}`)
             } catch (err) {
                 console.error('❌ [livekit:declineCall]', err.message)

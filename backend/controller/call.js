@@ -1,7 +1,7 @@
 import User from '../models/user.js'
 import Conversation from '../models/conversation.js'
 import LiveStream from '../models/liveStream.js'
-import { getIO, getRecipientSockedId, emitStatusToFollowersOf, markLiveKitDirectCallAnswered } from '../socket/socket.js'
+import { getIO, getRecipientSockedId, emitStatusToFollowersOf, markLiveKitDirectCallAnswered, assertDirectCallJoinAllowed } from '../socket/socket.js'
 import * as redisService from '../services/redis.js'
 import { AccessToken } from 'livekit-server-sdk'
 
@@ -87,9 +87,17 @@ export const getLiveKitToken = async (req, res) => {
 
         const roomName = buildRoomName({ type, userId, targetId, conversationId })
 
-        // Direct call: callee fetching a token means they answered — clear unanswered-ring timer
-        // so an active call is not torn down by the ~65s server ring safety net.
+        // Direct 1:1 only: refuse join if call already ended (Answer on dead push / late join).
         if (type === 'direct' && targetId) {
+            const gate = await assertDirectCallJoinAllowed(userId, targetId)
+            if (!gate.ok) {
+                console.log(`🚫 [LiveKit] Token denied — call already ended user:${userId} target:${targetId}`)
+                return res.status(409).json({
+                    error: 'Call already ended',
+                    code: 'CALL_ENDED',
+                })
+            }
+            // Callee token while ringing/answered — clear unanswered-ring timer.
             markLiveKitDirectCallAnswered(userId, targetId).catch(() => {})
         }
 
