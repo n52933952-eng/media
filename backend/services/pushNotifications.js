@@ -1,6 +1,8 @@
 // Push notifications for PlaySocial — FCM (social / messages / missed call tray).
 // Incoming call ringing uses ./fcmNotifications.js directly (data-only); do not change that path here.
 
+import { debugLog } from '../utils/debugLog.js';
+
 /**
  * Send a push notification to a specific user (FCM).
  * @param {string} userId - MongoDB user ID
@@ -14,7 +16,7 @@ async function sendNotificationToUser(userId, title, message, data = {}, images 
     const { sendGeneralPushNotificationToUser } = await import('./fcmNotifications.js');
     const result = await sendGeneralPushNotificationToUser(userId, title, message, data, images);
     if (result.success) {
-      console.log('✅ [Push/FCM] Sent to user:', userId);
+      debugLog('✅ [Push/FCM] Sent to user:', userId);
     } else {
       console.warn('⚠️ [Push/FCM] Not sent:', userId, result.error);
     }
@@ -104,7 +106,7 @@ async function sendMessageNotification(recipientUserId, senderUser, conversation
       { profilePic: senderUser?.profilePic }
     );
     if (result.success) {
-      console.log('✅ [Push/FCM] Message data-only push sent to user:', recipientUserId);
+      debugLog('✅ [Push/FCM] Message data-only push sent to user:', recipientUserId);
     } else {
       console.warn('⚠️ [Push/FCM] Message push not sent:', recipientUserId, result.error);
     }
@@ -184,7 +186,7 @@ async function sendCallNotification(userId, callerName, callerId, callType = 'vi
     const fcmResult = await sendCallNotificationToUser(userId, callerName, callerId, callType);
 
     if (fcmResult.success) {
-      console.log('✅ [CallNotification] Sent via FCM (automatic ringing enabled)');
+      debugLog('✅ [CallNotification] Sent via FCM (automatic ringing enabled)');
       return fcmResult;
     }
     console.error('❌ [CallNotification] FCM failed:', fcmResult.error);

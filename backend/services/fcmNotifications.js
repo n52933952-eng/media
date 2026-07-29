@@ -1,12 +1,11 @@
 // Firebase Cloud Messaging Service for Call Notifications
 // Sends FCM push notifications for incoming calls (WhatsApp-like)
 
-console.log('🔥 [FCM] Module loaded - fcmNotifications.js');
-
 import admin from 'firebase-admin';
 import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
+import { debugLog } from '../utils/debugLog.js';
 
 // Firebase Admin SDK will be initialized here
 let isInitialized = false;
@@ -19,19 +18,19 @@ const __dirname = dirname(__filename);
 // Initialize Firebase Admin (will be called from index.js)
 export function initializeFCM() {
   initializationAttempted = true;
-  console.log('🔥 [FCM] ========== INITIALIZATION START ==========');
-  console.log('🔥 [FCM] initializeFCM() called');
+  debugLog('🔥 [FCM] ========== INITIALIZATION START ==========');
+  debugLog('🔥 [FCM] initializeFCM() called');
   
   try {
-    console.log('🔥 [FCM] Step 1: Starting initialization...');
+    debugLog('🔥 [FCM] Step 1: Starting initialization...');
     
     let serviceAccount;
     
     // Try environment variable first (for cloud deployments like Render)
     if (process.env.FIREBASE_SERVICE_ACCOUNT) {
-      console.log('🔥 [FCM] Step 2: Using FIREBASE_SERVICE_ACCOUNT environment variable...');
-      console.log('🔥 [FCM] Step 2: Env var length:', process.env.FIREBASE_SERVICE_ACCOUNT.length);
-      console.log('🔥 [FCM] Step 2: Env var first 100 chars:', process.env.FIREBASE_SERVICE_ACCOUNT.substring(0, 100));
+      debugLog('🔥 [FCM] Step 2: Using FIREBASE_SERVICE_ACCOUNT environment variable...');
+      debugLog('🔥 [FCM] Step 2: Env var length:', process.env.FIREBASE_SERVICE_ACCOUNT.length);
+      debugLog('🔥 [FCM] Step 2: Env var first 100 chars:', process.env.FIREBASE_SERVICE_ACCOUNT.substring(0, 100));
       try {
         // Try to parse the JSON string
         let envVarValue = process.env.FIREBASE_SERVICE_ACCOUNT.trim();
@@ -42,8 +41,8 @@ export function initializeFCM() {
           serviceAccount = JSON.parse(envVarValue);
         } catch (firstParseError) {
           // If parsing fails, the private_key might have actual newlines instead of \n
-          console.log('🔥 [FCM] Step 2: First parse failed, attempting to fix private key format...');
-          console.log('🔥 [FCM] Step 2: Parse error:', firstParseError.message);
+          debugLog('🔥 [FCM] Step 2: First parse failed, attempting to fix private key format...');
+          debugLog('🔥 [FCM] Step 2: Parse error:', firstParseError.message);
           
           // Try to fix: Find the private_key field and replace actual newlines with \n
           // This regex handles multi-line private keys
@@ -64,7 +63,7 @@ export function initializeFCM() {
             
             try {
               serviceAccount = JSON.parse(envVarValue);
-              console.log('✅ [FCM] Step 2: Fixed private key newlines and parsed successfully');
+              debugLog('✅ [FCM] Step 2: Fixed private key newlines and parsed successfully');
             } catch (secondParseError) {
               console.error('❌ [FCM] Step 2: Still failed after fixing newlines:', secondParseError.message);
               throw firstParseError; // Throw original error
@@ -78,17 +77,17 @@ export function initializeFCM() {
         if (serviceAccount.private_key) {
           // If private_key has literal \n (backslash-n), convert to actual newlines
           if (serviceAccount.private_key.includes('\\n')) {
-            console.log('🔥 [FCM] Step 2: Converting \\n to actual newlines in private_key');
+            debugLog('🔥 [FCM] Step 2: Converting \\n to actual newlines in private_key');
             serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, '\n');
           }
           // Ensure no carriage returns
           serviceAccount.private_key = serviceAccount.private_key.replace(/\r/g, '');
         }
         
-        console.log('✅ [FCM] Step 2: Environment variable parsed successfully');
-        console.log('✅ [FCM] Step 2: project_id:', serviceAccount.project_id);
-        console.log('✅ [FCM] Step 2: private_key length:', serviceAccount.private_key?.length || 0);
-        console.log('✅ [FCM] Step 2: private_key starts with:', serviceAccount.private_key?.substring(0, 50) || 'N/A');
+        debugLog('✅ [FCM] Step 2: Environment variable parsed successfully');
+        debugLog('✅ [FCM] Step 2: project_id:', serviceAccount.project_id);
+        debugLog('✅ [FCM] Step 2: private_key length:', serviceAccount.private_key?.length || 0);
+        debugLog('✅ [FCM] Step 2: private_key starts with:', serviceAccount.private_key?.substring(0, 50) || 'N/A');
       } catch (parseError) {
         console.error('❌ [FCM] Step 2: Failed to parse environment variable');
         console.error('❌ [FCM] Step 2: Parse error:', parseError.message);
@@ -97,42 +96,43 @@ export function initializeFCM() {
       }
     } else {
       // Fallback to file (for local development)
-      console.log('🔥 [FCM] Step 2: Using firebase-service-account.json file...');
+      debugLog('🔥 [FCM] Step 2: Using firebase-service-account.json file...');
       const serviceAccountPath = join(__dirname, '../firebase-service-account.json');
-      console.log('🔥 [FCM] Step 2: Service account path:', serviceAccountPath);
+      debugLog('🔥 [FCM] Step 2: Service account path:', serviceAccountPath);
       
       try {
         const fileContent = readFileSync(serviceAccountPath, 'utf8');
-        console.log('🔥 [FCM] Step 3: File read successfully, length:', fileContent.length);
+        debugLog('🔥 [FCM] Step 3: File read successfully, length:', fileContent.length);
         
         if (!fileContent || fileContent.trim().length === 0) {
           throw new Error('Service account file is empty');
         }
         
         serviceAccount = JSON.parse(fileContent);
-        console.log('✅ [FCM] Step 3: JSON parsed, project_id:', serviceAccount.project_id);
+        debugLog('✅ [FCM] Step 3: JSON parsed, project_id:', serviceAccount.project_id);
       } catch (fileError) {
         throw new Error('Failed to read service account file: ' + fileError.message);
       }
     }
     
-    console.log('🔥 [FCM] Step 4: Checking admin apps...');
-    console.log('🔥 [FCM] Step 4: admin.apps.length:', admin.apps.length);
+    debugLog('🔥 [FCM] Step 4: Checking admin apps...');
+    debugLog('🔥 [FCM] Step 4: admin.apps.length:', admin.apps.length);
     
     if (!admin.apps.length) {
-      console.log('🔥 [FCM] Step 5: Initializing Firebase Admin...');
+      debugLog('🔥 [FCM] Step 5: Initializing Firebase Admin...');
       admin.initializeApp({
         credential: admin.credential.cert(serviceAccount)
       });
       isInitialized = true;
-      console.log('✅ [FCM] Step 5: Firebase Admin initialized successfully');
-      console.log('✅ [FCM] Admin apps count:', admin.apps.length);
+      debugLog('✅ [FCM] Step 5: Firebase Admin initialized successfully');
+      debugLog('✅ [FCM] Admin apps count:', admin.apps.length);
     } else {
       isInitialized = true;
-      console.log('✅ [FCM] Firebase Admin already initialized');
+      debugLog('✅ [FCM] Firebase Admin already initialized');
     }
     
-    console.log('✅ [FCM] ========== INITIALIZATION SUCCESS ==========');
+    console.log('✅ [FCM] initialized');
+    debugLog('✅ [FCM] ========== INITIALIZATION SUCCESS ==========');
   } catch (error) {
     console.error('❌ [FCM] ========== INITIALIZATION FAILED ==========');
     console.error('❌ [FCM] Error type:', error.constructor.name);
@@ -157,10 +157,10 @@ export function initializeFCM() {
  * @param {string} callId - Unique call ID
  */
 export async function sendCallNotification(fcmToken, callerName, callerId, callType = 'video', callId = null) {
-  console.log('🔥 [FCM] sendCallNotification called');
-  console.log('🔥 [FCM] initializationAttempted:', initializationAttempted);
-  console.log('🔥 [FCM] isInitialized:', isInitialized);
-  console.log('🔥 [FCM] admin.apps.length:', admin.apps.length);
+  debugLog('🔥 [FCM] sendCallNotification called');
+  debugLog('🔥 [FCM] initializationAttempted:', initializationAttempted);
+  debugLog('🔥 [FCM] isInitialized:', isInitialized);
+  debugLog('🔥 [FCM] admin.apps.length:', admin.apps.length);
   
   if (!initializationAttempted) {
     console.error('❌ [FCM] initializeFCM() was never called!');
@@ -212,12 +212,12 @@ export async function sendCallNotification(fcmToken, callerName, callerId, callT
       },
     };
 
-    console.log('🔥 [FCM] Sending call notification...');
-    console.log('🔥 [FCM] To:', fcmToken.substring(0, 20) + '...');
-    console.log('🔥 [FCM] Caller:', callerName);
+    debugLog('🔥 [FCM] Sending call notification...');
+    debugLog('🔥 [FCM] To:', fcmToken.substring(0, 20) + '...');
+    debugLog('🔥 [FCM] Caller:', callerName);
 
     const response = await admin.messaging().send(message);
-    console.log('✅ [FCM] Call notification sent successfully:', response);
+    debugLog('✅ [FCM] Call notification sent successfully:', response);
     
     return { success: true, messageId: response };
   } catch (error) {
@@ -264,7 +264,7 @@ export async function sendCallNotificationToUser(userId, callerName, callerId, c
       return { success: false, error: 'User not found or no FCM token' };
     }
 
-    console.log('📱 [FCM] CALLBACK_FCM: Sending incoming call push to user (phone will ring)', {
+    debugLog('📱 [FCM] CALLBACK_FCM: Sending incoming call push to user (phone will ring)', {
       receiver: userId,
       caller: callerId,
       callerName,
@@ -294,7 +294,7 @@ export async function sendCallEndedNotificationToUser(userId, senderId = null) {
     const user = await User.findById(userId);
     
     if (!user || !user.fcmToken) {
-      console.log('⚠️ [FCM] User not found or no FCM token for call ended notification:', userId);
+      debugLog('⚠️ [FCM] User not found or no FCM token for call ended notification:', userId);
       return { success: false, error: 'User not found or no FCM token' };
     }
 
@@ -325,11 +325,11 @@ export async function sendCallEndedNotificationToUser(userId, senderId = null) {
       },
     };
 
-    console.log('🔕 [FCM] Sending call ended notification to stop ringtone...');
-    console.log('🔕 [FCM] To user:', userId);
+    debugLog('🔕 [FCM] Sending call ended notification to stop ringtone...');
+    debugLog('🔕 [FCM] To user:', userId);
 
     const response = await admin.messaging().send(message);
-    console.log('✅ [FCM] Call ended notification sent successfully:', response);
+    debugLog('✅ [FCM] Call ended notification sent successfully:', response);
     
     return { success: true, messageId: response };
   } catch (error) {

@@ -13,6 +13,7 @@ import { emitToUserIds, collectSocketIdsForUserIds, emitPostEngagement } from '.
 import { dedupeGamePostsForFeed } from '../utils/dedupeGameFeedPosts.js'
 import { enrichGoFishPostsForFeed } from '../utils/enrichGoFishFeedPosts.js'
 import { normalizeGamePlayers } from '../utils/gameFeedPostUtils.js'
+import { debugLog } from '../utils/debugLog.js'
 import {
     addHiddenFeedPostForUser,
     getHiddenFeedPostObjectIds,
@@ -1755,12 +1756,12 @@ export const createChessGamePost = async (player1Id, player2Id, roomId) => {
             posts.push(post2)
         }
         
-        console.log('✅ [createChessGamePost] Created chess game posts:', posts.map(p => p._id))
+        debugLog('✅ [createChessGamePost] Created chess game posts:', posts.map(p => p._id))
         
         // Emit newPost event to online followers of each post's author (not both players)
         // Each post should only go to followers of that specific post's author
         const io = getIO()
-        console.log('🔍 [createChessGamePost] Checking IO instance:', !!io)
+        debugLog('🔍 [createChessGamePost] Checking IO instance:', !!io)
         
         const p1Str = player1Id?.toString?.() ?? String(player1Id)
         const p2Str = player2Id?.toString?.() ?? String(player2Id)
@@ -1860,7 +1861,7 @@ export const createCardGamePost = async (player1Id, player2Id, roomId) => {
             posts.push(post2)
         }
         
-        console.log('✅ [createCardGamePost] Created card game posts:', posts.map(p => p._id))
+        debugLog('✅ [createCardGamePost] Created card game posts:', posts.map(p => p._id))
 
         const cardP1 = player1Id?.toString?.() ?? String(player1Id)
         const cardP2 = player2Id?.toString?.() ?? String(player2Id)

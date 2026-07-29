@@ -4,6 +4,7 @@ import LiveStream from '../models/liveStream.js'
 import { getIO, getRecipientSockedId, emitStatusToFollowersOf, markLiveKitDirectCallAnswered, assertDirectCallJoinAllowed } from '../socket/socket.js'
 import * as redisService from '../services/redis.js'
 import { AccessToken } from 'livekit-server-sdk'
+import { debugLog } from '../utils/debugLog.js'
 
 /** Same idea as socket `normalizeUserId` — compare participant ids reliably. */
 const sameId = (a, b) => String(a ?? '').trim() === String(b ?? '').trim()
@@ -91,7 +92,7 @@ export const getLiveKitToken = async (req, res) => {
         if (type === 'direct' && targetId) {
             const gate = await assertDirectCallJoinAllowed(userId, targetId)
             if (!gate.ok) {
-                console.log(`🚫 [LiveKit] Token denied — call already ended user:${userId} target:${targetId}`)
+                debugLog(`🚫 [LiveKit] Token denied — call already ended user:${userId} target:${targetId}`)
                 return res.status(409).json({
                     error: 'Call already ended',
                     code: 'CALL_ENDED',
@@ -123,7 +124,7 @@ export const getLiveKitToken = async (req, res) => {
 
         const token = await at.toJwt()
 
-        console.log(`✅ [LiveKit] Token issued — user:${userId} room:${roomName} type:${type}`)
+        debugLog(`✅ [LiveKit] Token issued — user:${userId} room:${roomName} type:${type}`)
 
         return res.status(200).json({ token, roomName, livekitUrl: LIVEKIT_URL })
     } catch (error) {
@@ -242,7 +243,7 @@ export const ackCallRinging = async (req, res) => {
         }
 
         if (!stillActive) {
-            console.log(`🔔 [ack-ringing] ignored — call already cleared caller:${callerId} callee:${recipientUserId}`)
+            debugLog(`🔔 [ack-ringing] ignored — call already cleared caller:${callerId} callee:${recipientUserId}`)
             try {
                 const { sendCallEndedNotificationToUser } = await import('../services/fcmNotifications.js')
                 await sendCallEndedNotificationToUser(String(recipientUserId), String(callerId))
@@ -258,9 +259,9 @@ export const ackCallRinging = async (req, res) => {
                 callId: callId || null,
                 via: 'fcm',
             })
-            console.log(`🔔 [ack-ringing] callee ${recipientUserId} online → notified caller ${callerId}`)
+            debugLog(`🔔 [ack-ringing] callee ${recipientUserId} online → notified caller ${callerId}`)
         } else {
-            console.log(`🔔 [ack-ringing] callee ${recipientUserId} online but caller ${callerId} has no live socket`)
+            debugLog(`🔔 [ack-ringing] callee ${recipientUserId} online but caller ${callerId} has no live socket`)
         }
 
         return res.status(200).json({ success: true })
@@ -284,7 +285,7 @@ export const cancelCall = async (req, res) => {
             return res.status(400).json({ success: false, error: 'Missing conversationId or sender' })
         }
 
-        console.log(`📴 [HTTP cancelCall] Canceling call`, { conversationId, sender })
+        debugLog(`📴 [HTTP cancelCall] Canceling call`, { conversationId, sender })
 
         const callerSocketId   = await getRecipientSockedId(conversationId)
         const receiverSocketId = await getRecipientSockedId(sender)
@@ -313,7 +314,7 @@ export const cancelCall = async (req, res) => {
         try {
             const { sendCallEndedNotificationToUser } = await import('../services/fcmNotifications.js')
             await sendCallEndedNotificationToUser(conversationId, sender)
-            console.log('✅ [HTTP cancelCall] FCM call-ended sent')
+            debugLog('✅ [HTTP cancelCall] FCM call-ended sent')
         } catch (fcmErr) {
             console.error('❌ [HTTP cancelCall] FCM error:', fcmErr.message)
         }

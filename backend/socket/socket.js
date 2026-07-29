@@ -10,6 +10,7 @@ import { createChessGamePost, deleteChessGamePost, createCardGamePost, deleteCar
 import LiveStream from '../models/liveStream.js'
 import * as redisService from '../services/redis.js'
 import { sendCallNotification, sendMissedCallNotification } from '../services/pushNotifications.js'
+import { debugLog } from '../utils/debugLog.js'
 // Use redisService namespace for all Redis functions to avoid import issues
 const { getRedis, isRedisAvailable } = redisService
 
@@ -337,7 +338,7 @@ export const markLiveKitDirectCallAnswered = async (userId, targetId) => {
     const callerId = normalizeUserId(ringing.callerId)
     clearLiveKitRingTimeout(callerId, receiverId, ringing.roomName)
     await clearCallRinging(callerId, receiverId)
-    console.log(`✅ [LiveKit] Ring answered — cleared ring timeout caller:${callerId} callee:${uid}`)
+    debugLog(`✅ [LiveKit] Ring answered — cleared ring timeout caller:${callerId} callee:${uid}`)
     return true
 }
 
@@ -381,7 +382,7 @@ export const assertDirectCallJoinAllowed = async (userId, targetId) => {
                 const from = normalizeUserId(pending.from)
                 const pendingCallId = pending.callId != null ? String(pending.callId) : null
                 if (from === b || pendingCallId === expectedCallId) {
-                    console.log('⛔ [LiveKit] Token denied — pendingCancel for pair', { userId: a, targetId: b })
+                    debugLog('⛔ [LiveKit] Token denied — pendingCancel for pair', { userId: a, targetId: b })
                     return { ok: false, reason: 'call_ended' }
                 }
             }
@@ -412,7 +413,7 @@ export const assertDirectCallJoinAllowed = async (userId, targetId) => {
 
         // Call was cleared (cancel / decline / ring timeout / orphan) — block late Answer.
         if (ended) {
-            console.log('⛔ [LiveKit] Token denied — call ended flag for pair', { userId: a, targetId: b })
+            debugLog('⛔ [LiveKit] Token denied — call ended flag for pair', { userId: a, targetId: b })
             return { ok: false, reason: 'call_ended' }
         }
 
@@ -439,7 +440,7 @@ const deleteLiveKitRoomQuiet = async (roomName) => {
         const { RoomServiceClient } = await import('livekit-server-sdk')
         const svc = new RoomServiceClient(host, key, secret)
         await svc.deleteRoom(roomName)
-        console.log(`🗑️ [LiveKit] Deleted room ${roomName}`)
+        debugLog(`🗑️ [LiveKit] Deleted room ${roomName}`)
     } catch (e) {
         // Room may already be gone — fine.
         if (String(e?.message || e).includes('not found')) return
@@ -483,7 +484,7 @@ const endLoneDirectCallPair = async ({ callerId, receiverId, roomName }) => {
     if (parts === null) return
     if (parts.length >= 2) return
 
-    console.log(`📴 [LiveKit] Pair never fully connected (${parts.length} in room) — ending caller:${c} receiver:${r}`)
+    debugLog(`📴 [LiveKit] Pair never fully connected (${parts.length} in room) — ending caller:${c} receiver:${r}`)
     clearLiveKitPairConnectTimeout(c, r, roomName)
     await clearCallRinging(c, r)
     await clearCallStateForPair(c, r)
@@ -559,7 +560,7 @@ const endUnansweredLiveKitRing = async ({ callerId, receiverId, roomName }) => {
     } catch (_) {}
 
     await deleteLiveKitRoomQuiet(room)
-    console.log(`⏱️ [LiveKit] Unanswered ring timeout — stopped push/ring caller:${c} receiver:${r}`)
+    debugLog(`⏱️ [LiveKit] Unanswered ring timeout — stopped push/ring caller:${c} receiver:${r}`)
 }
 
 const scheduleLiveKitRingTimeout = (callerId, receiverId, roomName) => {
@@ -1789,7 +1790,7 @@ export const initializeSocket = async (app) => {
                     // IMMEDIATE emit - no delay for faster cleanup (legacy WebRTC + LiveKit)
                     io.to(sid).emit("CallCanceled")
                     io.to(sid).emit('livekit:callCanceled', { from: fromId, roomName })
-                    console.log(`✅ [socket] Emitted CallCanceled + livekit:callCanceled to ${userId} (pending cancel on connect, IMMEDIATE)`)
+                    debugLog(`✅ [socket] Emitted CallCanceled + livekit:callCanceled to ${userId} (pending cancel on connect, IMMEDIATE)`)
                 }
             } catch (error) {
                 console.error(`❌ [socket] Error checking for pending cancels when ${userId} connected:`, error.message)
@@ -1806,9 +1807,9 @@ export const initializeSocket = async (app) => {
                     if (pendingChess?.roomId && pendingChess.yourColor && pendingChess.opponentId) {
                         const stillValid = await isPendingChessAcceptStillValid(connectUserId, pendingChess)
                         if (!stillValid) {
-                            console.log(`♟️ [socket] Skipping stale pending chess accept for ${connectUserId} (room ${pendingChess.roomId})`)
+                            debugLog(`♟️ [socket] Skipping stale pending chess accept for ${connectUserId} (room ${pendingChess.roomId})`)
                         } else {
-                            console.log(`♟️ [socket] Delivering pending acceptChessChallenge to ${connectUserId}`, pendingChess)
+                            debugLog(`♟️ [socket] Delivering pending acceptChessChallenge to ${connectUserId}`, pendingChess)
                             io.to(connectSid).emit('acceptChessChallenge', {
                                 roomId: pendingChess.roomId,
                                 yourColor: pendingChess.yourColor,
@@ -1825,9 +1826,9 @@ export const initializeSocket = async (app) => {
                     if (pendingCard?.roomId && pendingCard.opponentId != null) {
                         const stillValid = await isPendingCardAcceptStillValid(connectUserId, pendingCard)
                         if (!stillValid) {
-                            console.log(`🃏 [socket] Skipping stale pending card accept for ${connectUserId} (room ${pendingCard.roomId})`)
+                            debugLog(`🃏 [socket] Skipping stale pending card accept for ${connectUserId} (room ${pendingCard.roomId})`)
                         } else {
-                            console.log(`🃏 [socket] Delivering pending acceptCardChallenge to ${connectUserId}`, pendingCard)
+                            debugLog(`🃏 [socket] Delivering pending acceptCardChallenge to ${connectUserId}`, pendingCard)
                             io.to(connectSid).emit('acceptCardChallenge', {
                                 roomId: pendingCard.roomId,
                                 opponentId: pendingCard.opponentId,
@@ -1919,7 +1920,7 @@ export const initializeSocket = async (app) => {
                                     opponentId: cOpponentId,
                                 })
                                 io.to(connectSid).emit('cardGameState', cardPayload)
-                                console.log(`🃏 [socket] Auto-delivered card recovery to ${connectUserId} for room ${activeCardRoom}`)
+                                debugLog(`🃏 [socket] Auto-delivered card recovery to ${connectUserId} for room ${activeCardRoom}`)
                             }
                         } else {
                             // Card state gone — orphaned pointer; clean up.
@@ -1965,7 +1966,7 @@ export const initializeSocket = async (app) => {
                     if (!socket.connected) return
                 socket.emit('presenceSnapshot', { onlineUsers: snapshot, subscribedUserIds: requested })
                     if (label) {
-                        console.log(
+                        debugLog(
                             `📸 [socket] presenceSnapshot (${label}) → ${socket.id}: ${snapshot.length}/${requested.length} online`,
                         )
                     }
@@ -2169,7 +2170,7 @@ export const initializeSocket = async (app) => {
                 if (cardState) return true
                 // Stale pointer — clean up so the user can be challenged again
                 await deleteActiveCardGame(uid).catch(() => {})
-                console.log(`🧹 [gameChallenge] Cleaned orphan card game for ${uid}`)
+                debugLog(`🧹 [gameChallenge] Cleaned orphan card game for ${uid}`)
             }
 
             // Race: same orphan-cleanup pattern.
@@ -2178,7 +2179,7 @@ export const initializeSocket = async (app) => {
                 const raceState = await getRaceGameState(raceRoom).catch(() => null)
                 if (raceState) return true
                 await deleteActiveRaceGame(uid).catch(() => {})
-                console.log(`🧹 [gameChallenge] Cleaned orphan race game for ${uid}`)
+                debugLog(`🧹 [gameChallenge] Cleaned orphan race game for ${uid}`)
             }
 
             return false
@@ -2250,7 +2251,7 @@ export const initializeSocket = async (app) => {
                         reason: gamePolicy.reason,
                     })
                 }
-                console.log(`🚫 [callUser] Blocked by game policy (${gamePolicy.reason}) caller:${callerId} receiver:${receiverId}`)
+                debugLog(`🚫 [callUser] Blocked by game policy (${gamePolicy.reason}) caller:${callerId} receiver:${receiverId}`)
                 return
             }
             // Check if either user is already in a call
@@ -2275,13 +2276,13 @@ export const initializeSocket = async (app) => {
 
             // Self-heal: receiver is offline AND their inCall references only this pair (stale from a previous call)
             if (userToCallBusy && receiverOffline && (await inCallInvolvesThisPair(receiverId))) {
-                console.log('📞 [callUser] CALLBACK_SELFHEAL: Receiver offline + stale inCall for this pair – clearing so callback can proceed')
+                debugLog('📞 [callUser] CALLBACK_SELFHEAL: Receiver offline + stale inCall for this pair – clearing so callback can proceed')
                 await clearInCall(receiverId).catch(() => {})
                 userToCallBusy = await isUserBusy(receiverId)
             }
             // Self-heal: caller is marked busy, receiver is offline, and the caller's inCall references only this pair
             if (fromBusy && receiverOffline && (await inCallInvolvesThisPair(callerId))) {
-                console.log('📞 [callUser] CALLBACK_SELFHEAL: Caller stale inCall for this pair – clearing so they can call back')
+                debugLog('📞 [callUser] CALLBACK_SELFHEAL: Caller stale inCall for this pair – clearing so they can call back')
                 await clearInCall(callerId).catch(() => {})
                 fromBusy = await isUserBusy(callerId)
             }
@@ -2297,7 +2298,7 @@ export const initializeSocket = async (app) => {
                     const receiverStale = userToCallBusy && (await inCallInvolvesThisPair(receiverId))
                     const callerStale   = fromBusy      && (await inCallInvolvesThisPair(callerId))
                     if (receiverStale || callerStale) {
-                        console.log('📞 [callUser] CALLBACK_SELFHEAL: No active call between this pair + stale inCall – clearing so callback can proceed', { from: callerId, userToCall: receiverId })
+                        debugLog('📞 [callUser] CALLBACK_SELFHEAL: No active call between this pair + stale inCall – clearing so callback can proceed', { from: callerId, userToCall: receiverId })
                         if (receiverStale) await clearInCall(receiverId).catch(() => {})
                         if (callerStale)   await clearInCall(callerId).catch(() => {})
                         // Also clean up pendingCall / pendingAnswer for this pair
@@ -2312,7 +2313,7 @@ export const initializeSocket = async (app) => {
                     }
                 }
             }
-            console.log('📞 [callUser] CALLBACK_CHECK: Busy status', {
+            debugLog('📞 [callUser] CALLBACK_CHECK: Busy status', {
                 receiver: receiverId,
                 receiverBusy: userToCallBusy,
                 caller: callerId,
@@ -2321,7 +2322,7 @@ export const initializeSocket = async (app) => {
             })
             if (userToCallBusy || fromBusy) {
                 const busyUserId = userToCallBusy ? receiverId : callerId
-                console.log('❌ [callUser] CALLBACK_BLOCKED: Rejecting call - user is busy', {
+                debugLog('❌ [callUser] CALLBACK_BLOCKED: Rejecting call - user is busy', {
                     busyUserId,
                     scenario: 'B_calls_A_after_cancel',
                     receiver: receiverId,
@@ -2359,24 +2360,24 @@ export const initializeSocket = async (app) => {
             const payload = { signal: signalPayload, from: callerId, name, userToCall: receiverId, callType }
             if (clientCallId) payload.callId = clientCallId
 
-            console.log(`📞 [callUser] Caller: ${name} (${callerId})`)
-            console.log(
+            debugLog(`📞 [callUser] Caller: ${name} (${callerId})`)
+            debugLog(
                 `📞 [callUser] Receiver: ${receiverId} (liveSocket: ${liveReceiverSocketId || 'none'}, presenceOffline: ${clientMarkedOffline}, deliverSocket: ${!!receiverSocketId})`
             )
-            console.log(`📞 [callUser] Receiver socket data:`, receiverData)
+            debugLog(`📞 [callUser] Receiver socket data:`, receiverData)
 
             if (allowLiveSocketForWeb) {
-                console.log(`🌐 [callUser] Receiver marked offline but live WEB socket found — delivering in-app callUser`)
+                debugLog(`🌐 [callUser] Receiver marked offline but live WEB socket found — delivering in-app callUser`)
             } else if (clientMarkedOffline && liveReceiverSocketId) {
-                console.log(`📱 [callUser] Receiver marked offline — FCM ring even though socket still connected`)
+                debugLog(`📱 [callUser] Receiver marked offline — FCM ring even though socket still connected`)
             }
 
             if (receiverSocketId) {
-                console.log(`✅ [callUser] User ${receiverId} reachable in-app, sending callUser to socket ${receiverSocketId}`)
+                debugLog(`✅ [callUser] User ${receiverId} reachable in-app, sending callUser to socket ${receiverSocketId}`)
                 io.to(receiverSocketId).emit("callUser", payload)
             } else {
-                console.log(`📱 [callUser] User ${receiverId} needs push ring (no live in-app delivery path)`)
-                console.log('📱 [callUser] CALLBACK_FCM: Sending FCM to receiver', {
+                debugLog(`📱 [callUser] User ${receiverId} needs push ring (no live in-app delivery path)`)
+                debugLog('📱 [callUser] CALLBACK_FCM: Sending FCM to receiver', {
                     receiver: receiverId,
                     caller: callerId,
                     callerName: name,
@@ -2384,9 +2385,9 @@ export const initializeSocket = async (app) => {
                     callId: clientCallId,
                 })
                 try {
-                    console.log(`📤 [callUser] Calling sendCallNotification(${receiverId}, ${name}, ${callerId}, ${callType}, ${clientCallId || 'auto'})`)
+                    debugLog(`📤 [callUser] Calling sendCallNotification(${receiverId}, ${name}, ${callerId}, ${callType}, ${clientCallId || 'auto'})`)
                     const result = await sendCallNotification(receiverId, name, callerId, callType, clientCallId || null)
-                    console.log('✅ [callUser] Push notification result:', result)
+                    debugLog('✅ [callUser] Push notification result:', result)
 
                     await setPendingCall(receiverId, {
                         callerId: callerId,
@@ -2396,7 +2397,7 @@ export const initializeSocket = async (app) => {
                         callId: clientCallId || null,
                         at: Date.now(),
                     })
-                    console.log(`✅ [callUser] Stored pending call for ${receiverId} (indexed for fast lookup)`)
+                    debugLog(`✅ [callUser] Stored pending call for ${receiverId} (indexed for fast lookup)`)
                 } catch (error) {
                     console.error('❌ [callUser] Error sending call push notification:', error)
                     console.error('❌ [callUser] Error stack:', error.stack)
@@ -2616,13 +2617,13 @@ export const initializeSocket = async (app) => {
             const dedupeKey = `${sender}:${conversationId}`
             const now = Date.now()
             if (cancelProcessedKeys.has(dedupeKey)) {
-                console.log('📴 [cancelCall] Duplicate ignored (same cancel recently)', { conversationId, sender })
+                debugLog('📴 [cancelCall] Duplicate ignored (same cancel recently)', { conversationId, sender })
                 return
             }
             cancelProcessedKeys.add(dedupeKey)
             setTimeout(() => cancelProcessedKeys.delete(dedupeKey), CANCEL_DEDUPE_TTL_MS)
 
-            console.log('📴 [cancelCall] CALLBACK_FLOW: Cancel received', {
+            debugLog('📴 [cancelCall] CALLBACK_FLOW: Cancel received', {
                 conversationId,
                 sender,
                 note: 'conversationId=callee(gets call), sender=who cancelled',
@@ -2660,9 +2661,9 @@ export const initializeSocket = async (app) => {
                     const { sendCallEndedNotificationToUser } = await import('../services/fcmNotifications.js')
                     const fcmResult = await sendCallEndedNotificationToUser(conversationId, sender)
                     if (fcmResult.success) {
-                        console.log('✅ [cancelCall] Sent call ended FCM notification to receiver (stop ringtone)')
+                        debugLog('✅ [cancelCall] Sent call ended FCM notification to receiver (stop ringtone)')
                     } else {
-                        console.log('⚠️ [cancelCall] FCM call ended notification failed:', fcmResult.error)
+                        debugLog('⚠️ [cancelCall] FCM call ended notification failed:', fcmResult.error)
                     }
                 } catch (fcmError) {
                     console.error('❌ [cancelCall] Error sending FCM call ended notification:', fcmError)
@@ -2703,7 +2704,7 @@ export const initializeSocket = async (app) => {
                             reason: gamePolicy.reason,
                         })
                     }
-                    console.log(`🚫 [livekit:callUser] Blocked by game policy (${gamePolicy.reason}) caller:${callerId} receiver:${receiverId}`)
+                    debugLog(`🚫 [livekit:callUser] Blocked by game policy (${gamePolicy.reason}) caller:${callerId} receiver:${receiverId}`)
                     return
                 }
 
@@ -2748,7 +2749,7 @@ export const initializeSocket = async (app) => {
 
                 if (deliverSocketId) {
                     emitIncomingTo(deliverSocketId)
-                    console.log(`📞 [LiveKit] incomingCall sent to ${receiverId} (live socket ${deliverSocketId})`)
+                    debugLog(`📞 [LiveKit] incomingCall sent to ${receiverId} (live socket ${deliverSocketId})`)
                     ;[350, 1200].forEach((ms) => {
                         setTimeout(async () => {
                             try {
@@ -2758,7 +2759,7 @@ export const initializeSocket = async (app) => {
                         }, ms)
                     })
                 } else {
-                    console.log(`📞 [LiveKit] No live in-app socket for ${receiverId} (stale map or presence offline) — will use FCM`)
+                    debugLog(`📞 [LiveKit] No live in-app socket for ${receiverId} (stale map or presence offline) — will use FCM`)
                 }
 
                 // FCM: truly offline OR mobile background (presence offline) — same idea as WebRTC callUser
@@ -2769,7 +2770,7 @@ export const initializeSocket = async (app) => {
                         const { sendCallNotification } = await import('../services/pushNotifications.js')
                         const fcmResult = await sendCallNotification(receiverId, callerName, callerId, callType || 'video')
                         fcmSent = !!fcmResult?.success
-                        console.log(`📬 [LiveKit] FCM call notification → ${receiverId} (needsFcm=${needsFcm}, sent=${fcmSent})`)
+                        debugLog(`📬 [LiveKit] FCM call notification → ${receiverId} (needsFcm=${needsFcm}, sent=${fcmSent})`)
                     } catch (fcmErr) {
                         console.error('❌ [LiveKit] FCM push failed:', fcmErr.message)
                     }
@@ -2815,7 +2816,7 @@ export const initializeSocket = async (app) => {
                             const receiverLiveSocketId = await resolveLiveSocketIdForUser(receiverId)
                             if (callerLiveSocketId) io.to(callerLiveSocketId).emit('livekit:callCanceled', timeoutPayload)
                             if (receiverLiveSocketId) io.to(receiverLiveSocketId).emit('livekit:callCanceled', timeoutPayload)
-                            console.log(`⏱️ [LiveKit] Direct call timed out (25m) caller:${callerId} receiver:${receiverId} room:${roomName || '-'}`)
+                            debugLog(`⏱️ [LiveKit] Direct call timed out (25m) caller:${callerId} receiver:${receiverId} room:${roomName || '-'}`)
                         } catch (timeoutErr) {
                             console.error('❌ [LiveKit] direct timeout cleanup failed:', timeoutErr.message)
                         } finally {
@@ -2878,7 +2879,7 @@ export const initializeSocket = async (app) => {
                 } catch (_) {}
 
                 await deleteLiveKitRoomQuiet(roomName)
-                console.log(`📴 [LiveKit] cancelCall — caller:${callerId} receiver:${receiverId}`)
+                debugLog(`📴 [LiveKit] cancelCall — caller:${callerId} receiver:${receiverId}`)
             } catch (err) {
                 console.error('❌ [livekit:cancelCall]', err.message)
             }
@@ -2910,7 +2911,7 @@ export const initializeSocket = async (app) => {
                 if (callerSocketId) io.to(callerSocketId).emit('livekit:callDeclined', { by: receiverId, roomName })
 
                 await deleteLiveKitRoomQuiet(roomName)
-                console.log(`📴 [LiveKit] declineCall — receiver:${receiverId} declined caller:${callerId}`)
+                debugLog(`📴 [LiveKit] declineCall — receiver:${receiverId} declined caller:${callerId}`)
             } catch (err) {
                 console.error('❌ [livekit:declineCall]', err.message)
             }
@@ -2948,7 +2949,7 @@ export const initializeSocket = async (app) => {
                 }
                 // After LiveKit died + 45s grace wiped Mongo, a zombie reconnect must NOT recreate the card.
                 if (resume) {
-                    console.log(`⬛ [livekit:goLive] resume ignored — no active live for ${streamerId} room:${roomName}`)
+                    debugLog(`⬛ [livekit:goLive] resume ignored — no active live for ${streamerId} room:${roomName}`)
                     return
                 }
                 const streamerNorm = normalizeUserId(streamerId) || String(streamerId)
@@ -3004,7 +3005,7 @@ export const initializeSocket = async (app) => {
                                 }
                             }
                             emitToUserSelf(streamerNorm, 'livekit:streamEnded', endPayload)
-                            console.log(`⏱️ [LiveKit] Stream timed out (25m) streamer:${streamerId}`)
+                            debugLog(`⏱️ [LiveKit] Stream timed out (25m) streamer:${streamerId}`)
                         } catch (timeoutErr) {
                             console.error('❌ [LiveKit] stream timeout cleanup failed:', timeoutErr.message)
                         } finally {
@@ -3012,7 +3013,7 @@ export const initializeSocket = async (app) => {
                         }
                     }, LIVEKIT_MAX_SESSION_MS))
                 }
-                console.log(`🔴 [LiveKit] ${streamerName} went live — room:${roomName}`)
+                debugLog(`🔴 [LiveKit] ${streamerName} went live — room:${roomName}`)
             } catch (err) {
                 console.error('❌ [livekit:goLive]', err.message)
             }
@@ -3041,7 +3042,7 @@ export const initializeSocket = async (app) => {
                     }
                 }
                 emitToUserSelf(streamerNorm, 'livekit:streamEnded', endPayload)
-                console.log(`⬛ [LiveKit] Stream ended — streamer:${streamerId}`)
+                debugLog(`⬛ [LiveKit] Stream ended — streamer:${streamerId}`)
             } catch (err) {
                 console.error('❌ [livekit:endLive]', err.message)
             }
@@ -3109,7 +3110,7 @@ export const initializeSocket = async (app) => {
                     // ── Skip members who are busy in a game or another call ──────────────
                     if (await isUserBusyNow(uid)) {
                         busyMemberIds.push(uid)
-                        console.log(`📞 [livekit:startGroupCall] Skipping busy member ${uid}`)
+                        debugLog(`📞 [livekit:startGroupCall] Skipping busy member ${uid}`)
                         continue
                     }
 
@@ -3130,7 +3131,7 @@ export const initializeSocket = async (app) => {
 
                     if (deliverSocketId) {
                         emitIncomingTo(deliverSocketId)
-                        console.log(`📞 [livekit:startGroupCall] incomingGroupCall → ${uid} socket ${deliverSocketId}`)
+                        debugLog(`📞 [livekit:startGroupCall] incomingGroupCall → ${uid} socket ${deliverSocketId}`)
                         ;[350, 1200].forEach((ms) => {
                             setTimeout(async () => {
                                 try {
@@ -3140,7 +3141,7 @@ export const initializeSocket = async (app) => {
                             }, ms)
                         })
                     } else {
-                        console.log(`📞 [livekit:startGroupCall] No live in-app socket for ${uid} — will use FCM if token present`)
+                        debugLog(`📞 [livekit:startGroupCall] No live in-app socket for ${uid} — will use FCM if token present`)
                     }
 
                     const needsFcm = !deliverSocketId || (clientMarkedOffline && receiverClientType !== 'web')
@@ -3192,7 +3193,7 @@ export const initializeSocket = async (app) => {
                                     })
                                 }
                             }
-                            console.log(`⏱️ [LiveKit] Group call timed out (25m) room:${roomName || '-'} conversation:${conversationId}`)
+                            debugLog(`⏱️ [LiveKit] Group call timed out (25m) room:${roomName || '-'} conversation:${conversationId}`)
                         } catch (timeoutErr) {
                             console.error('❌ [LiveKit] group timeout cleanup failed:', timeoutErr.message)
                         } finally {
@@ -3200,7 +3201,7 @@ export const initializeSocket = async (app) => {
                         }
                     }, LIVEKIT_MAX_SESSION_MS))
                 }
-                console.log(`📞 [LiveKit] Group call started — room:${roomName} members:${otherIds.length}`)
+                debugLog(`📞 [LiveKit] Group call started — room:${roomName} members:${otherIds.length}`)
             } catch (err) {
                 console.error('❌ [livekit:startGroupCall]', err.message)
             }
@@ -3456,7 +3457,7 @@ export const initializeSocket = async (app) => {
         socket.on("chessChallenge", async ({ from, to, fromName, fromUsername, fromProfilePic }) => {
             const fromId = normalizeUserId(from) || from
             const toId = normalizeUserId(to) || to
-            console.log(`♟️ Chess challenge from ${fromId} to ${toId}`)
+            debugLog(`♟️ Chess challenge from ${fromId} to ${toId}`)
             if (await isBlockedForGameChallenge(fromId) || await isBlockedForGameChallenge(toId)) {
                 const senderSock = await getUserSocket(fromId)
                 if (senderSock?.socketId) {
@@ -3483,9 +3484,9 @@ export const initializeSocket = async (app) => {
         socket.on("acceptChessChallenge", async ({ from, to, roomId }) => {
             const fromId = normalizeUserId(from) || from
             const toId = normalizeUserId(to) || to
-            console.log(`♟️ Chess challenge accepted: ${roomId}`)
-            console.log(`♟️ Challenger (to): ${toId} → WHITE`)
-            console.log(`♟️ Accepter (from): ${fromId} → BLACK`)
+            debugLog(`♟️ Chess challenge accepted: ${roomId}`)
+            debugLog(`♟️ Challenger (to): ${toId} → WHITE`)
+            debugLog(`♟️ Accepter (from): ${fromId} → BLACK`)
 
             const challengerSock = await getUserSocket(toId)
             const challengerSocketId = challengerSock?.socketId
@@ -3501,17 +3502,17 @@ export const initializeSocket = async (app) => {
                     const challengerSocket = io.sockets.sockets.get(challengerSocketId)
                     if (challengerSocket) {
                         challengerSocket.join(roomId)
-                        console.log(`♟️ Challenger ${toId} joined room: ${roomId}`)
+                        debugLog(`♟️ Challenger ${toId} joined room: ${roomId}`)
                     }
                 }
                 if (accepterSocketId) {
                     const accepterSocket = io.sockets.sockets.get(accepterSocketId)
                     if (accepterSocket) {
                         accepterSocket.join(roomId)
-                        console.log(`♟️ Accepter ${fromId} joined room: ${roomId}`)
+                        debugLog(`♟️ Accepter ${fromId} joined room: ${roomId}`)
                     }
                 }
-                console.log(`♟️ Created chess room: ${roomId} with both players`)
+                debugLog(`♟️ Created chess room: ${roomId} with both players`)
             }
 
             const challengerPayload = {
@@ -3553,7 +3554,7 @@ export const initializeSocket = async (app) => {
                     capturedBlack: [],
                     lastUpdated: Date.now()
                 })
-                console.log(`💾 Initialized game state for room ${roomId} in Redis`)
+                debugLog(`💾 Initialized game state for room ${roomId} in Redis`)
                 await deletePendingChessAcceptForUser(toId).catch(() => {})
                 await deletePendingChessAcceptForUser(fromId).catch(() => {})
                 // One state push so anyone who joined early gets the board without waiting forever.
@@ -3582,7 +3583,7 @@ export const initializeSocket = async (app) => {
         socket.on("declineChessChallenge", async ({ from, to }) => {
             const fromId = normalizeUserId(from) || from
             const toId = normalizeUserId(to) || to
-            console.log(`♟️ Chess challenge declined by ${fromId}`)
+            debugLog(`♟️ Chess challenge declined by ${fromId}`)
             await deletePendingChessAcceptForUser(fromId).catch(() => {})
             await deletePendingChessAcceptForUser(toId).catch(() => {})
             const challengerData = await getUserSocket(toId)
@@ -3617,7 +3618,7 @@ export const initializeSocket = async (app) => {
                 io.to(roomId).emit('chessGameEnded', endPayload)
                 deleteChessGamePost(roomId).catch(() => {})
                 await deleteChessGameState(roomId)
-                console.log(`♟️ [cancelChessGameStart] Cleared room ${roomId} (${endReason})`)
+                debugLog(`♟️ [cancelChessGameStart] Cleared room ${roomId} (${endReason})`)
             } catch (e) {
                 console.error('❌ [cancelChessGameStart]', e?.message || e)
             }
@@ -3632,7 +3633,7 @@ export const initializeSocket = async (app) => {
                 for (const currentRoom of socketRooms) {
                     // Only leave chess rooms (format: chess_player1_player2_timestamp)
                     if (currentRoom.startsWith('chess_') && currentRoom !== roomId) {
-                        console.log(`♟️ [joinChessRoom] Leaving old chess room: ${currentRoom} (socket: ${socket.id})`)
+                        debugLog(`♟️ [joinChessRoom] Leaving old chess room: ${currentRoom} (socket: ${socket.id})`)
                         socket.leave(currentRoom)
                         // Also remove from Redis tracking
                         const oldRoom = await getChessRoom(currentRoom)
@@ -3660,9 +3661,9 @@ export const initializeSocket = async (app) => {
                 socket.join(roomId)
                 
                 if (!wasAlreadyInRoom) {
-                    console.log(`👁️ Spectator joined chess room: ${roomId} (socket: ${socket.id})`)
+                    debugLog(`👁️ Spectator joined chess room: ${roomId} (socket: ${socket.id})`)
                 } else {
-                    console.log(`👁️ Spectator rejoined chess room: ${roomId} (socket: ${socket.id})`)
+                    debugLog(`👁️ Spectator rejoined chess room: ${roomId} (socket: ${socket.id})`)
                 }
                 
                 // ALWAYS send current game state when joining/rejoining (for catch-up)
@@ -3680,7 +3681,7 @@ export const initializeSocket = async (app) => {
                 }
                 
                 if (gameState) {
-                    console.log(`📤 Sending game state to spectator for catch-up:`, {
+                    debugLog(`📤 Sending game state to spectator for catch-up:`, {
                         roomId,
                         fen: gameState.fen,
                         capturedWhite: gameState.capturedWhite?.length || 0,
@@ -3711,7 +3712,7 @@ export const initializeSocket = async (app) => {
                         const ts = Number(roomIdParts[roomIdParts.length - 1])
                         const ageMs = Number.isFinite(ts) ? Date.now() - ts : Infinity
                         if (ageMs < 20000) {
-                            console.log(`♟️ [joinChessRoom] Room ${roomId} pending start (age ${ageMs}ms) — send starting fen`)
+                            debugLog(`♟️ [joinChessRoom] Room ${roomId} pending start (age ${ageMs}ms) — send starting fen`)
                             io.to(socket.id).emit('chessGameState', {
                                 roomId,
                                 fen: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1',
@@ -3722,13 +3723,13 @@ export const initializeSocket = async (app) => {
                             })
                             return
                         }
-                        console.log(`📴 [joinChessRoom] Room ${roomId} has no state and is not active — emit ended`)
+                        debugLog(`📴 [joinChessRoom] Room ${roomId} has no state and is not active — emit ended`)
                         io.to(socket.id).emit('chessGameEnded', {
                             roomId,
                             reason: 'player_disconnected',
                     })
                 } else {
-                    console.log(`⚠️ No game state found for room ${roomId} - game may not have started yet`)
+                    debugLog(`⚠️ No game state found for room ${roomId} - game may not have started yet`)
                     io.to(socket.id).emit("chessGameState", {
                         roomId,
                         fen: "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
@@ -3803,8 +3804,8 @@ export const initializeSocket = async (app) => {
         })
 
         socket.on("chessMove", async ({ roomId, move, to, fen, capturedWhite, capturedBlack }) => {
-            console.log(`♟️ Chess move received from ${socket.handshake.query.userId} to ${to}`)
-            console.log(`♟️ Move data:`, move)
+            debugLog(`♟️ Chess move received from ${socket.handshake.query.userId} to ${to}`)
+            debugLog(`♟️ Move data:`, move)
             
             // Update game state in backend (for spectator catch-up) - Redis
             if (roomId && fen) {
@@ -3814,7 +3815,7 @@ export const initializeSocket = async (app) => {
                     capturedBlack: capturedBlack || [],
                     lastUpdated: Date.now()
                 })
-                console.log(`💾 Updated game state for room ${roomId}:`, {
+                debugLog(`💾 Updated game state for room ${roomId}:`, {
                     fen: fen.substring(0, 50) + '...',
                     capturedWhite: capturedWhite?.length || 0,
                     capturedBlack: capturedBlack?.length || 0
@@ -3827,7 +3828,7 @@ export const initializeSocket = async (app) => {
             const recipientData = await getUserSocket(to)
             const recipientSocketId = recipientData?.socketId
             if (recipientSocketId) {
-                console.log(`♟️ Forwarding move to ${to} (socket: ${recipientSocketId})`)
+                debugLog(`♟️ Forwarding move to ${to} (socket: ${recipientSocketId})`)
                 // Send move in same format as madechess: { move: moveObject }
                 // Include roomId so client can verify they're viewing the correct game
                 io.to(recipientSocketId).emit("opponentMove", { move, roomId })
@@ -3841,7 +3842,7 @@ export const initializeSocket = async (app) => {
                 // Check if room exists (has at least one socket joined)
                 const room = io.sockets.adapter.rooms.get(roomId)
                 if (room && room.size > 0) {
-                    console.log(`👁️ Broadcasting move to ${room.size} sockets in room ${roomId}`)
+                    debugLog(`👁️ Broadcasting move to ${room.size} sockets in room ${roomId}`)
                     // Emit to all sockets in the room (including players and spectators)
                     // Include roomId in data so clients can verify they're viewing the correct game
                     io.to(roomId).emit("opponentMove", { move, roomId })
@@ -3874,7 +3875,7 @@ export const initializeSocket = async (app) => {
             if (roomId) {
                 const room = io.sockets.adapter.rooms.get(roomId)
                 if (room && room.size > 0) {
-                    console.log(`👁️ Notifying ${room.size} spectators that game ended (resign)`)
+                    debugLog(`👁️ Notifying ${room.size} spectators that game ended (resign)`)
                     io.to(roomId).emit("chessGameEnded", { roomId, reason: 'resigned' })
                 }
             }
@@ -3943,7 +3944,7 @@ export const initializeSocket = async (app) => {
                 const room = io.sockets.adapter.rooms.get(roomId)
                 if (room && room.size > 0) {
                     const endReason = reason || 'player_left'
-                    console.log(`👁️ Notifying ${room.size} spectators that game ended (${endReason})`)
+                    debugLog(`👁️ Notifying ${room.size} spectators that game ended (${endReason})`)
                     io.to(roomId).emit("chessGameEnded", { roomId, reason: endReason })
                 }
             }
@@ -4322,7 +4323,7 @@ export const initializeSocket = async (app) => {
         socket.on("cardChallenge", async ({ from, to, fromName, fromUsername, fromProfilePic }) => {
             const fromId = normalizeUserId(from) || from
             const toId = normalizeUserId(to) || to
-            console.log(`🃏 Card challenge from ${fromId} to ${toId}`)
+            debugLog(`🃏 Card challenge from ${fromId} to ${toId}`)
             if (await isBlockedForGameChallenge(fromId) || await isBlockedForGameChallenge(toId)) {
                 const senderSock = await getUserSocket(fromId)
                 if (senderSock?.socketId) {
@@ -4349,9 +4350,9 @@ export const initializeSocket = async (app) => {
         socket.on("acceptCardChallenge", async ({ from, to, roomId }) => {
             const fromId = normalizeUserId(from) || from
             const toId = normalizeUserId(to) || to
-            console.log(`🃏 Card challenge accepted: ${roomId}`)
-            console.log(`🃏 Challenger (to): ${toId}`)
-            console.log(`🃏 Accepter (from): ${fromId}`)
+            debugLog(`🃏 Card challenge accepted: ${roomId}`)
+            debugLog(`🃏 Challenger (to): ${toId}`)
+            debugLog(`🃏 Accepter (from): ${fromId}`)
 
             const challengerSock = await getUserSocket(toId)
             const challengerSocketId = challengerSock?.socketId
@@ -4366,17 +4367,17 @@ export const initializeSocket = async (app) => {
                     const challengerSocket = io.sockets.sockets.get(challengerSocketId)
                     if (challengerSocket) {
                         challengerSocket.join(roomId)
-                        console.log(`🃏 Challenger ${toId} joined room: ${roomId}`)
+                        debugLog(`🃏 Challenger ${toId} joined room: ${roomId}`)
                     }
                 }
                 if (accepterSocketId) {
                     const accepterSocket = io.sockets.sockets.get(accepterSocketId)
                     if (accepterSocket) {
                         accepterSocket.join(roomId)
-                        console.log(`🃏 Accepter ${fromId} joined room: ${roomId}`)
+                        debugLog(`🃏 Accepter ${fromId} joined room: ${roomId}`)
                     }
                 }
-                console.log(`🃏 Created card game room: ${roomId} with both players`)
+                debugLog(`🃏 Created card game room: ${roomId} with both players`)
             }
 
             // Same reasoning as chess: don't use io.sockets.sockets.get() to decide whether to emit.
@@ -4405,8 +4406,8 @@ export const initializeSocket = async (app) => {
                 gameState = initializeGoFishGame(toId, fromId)
 
                 await setCardGameState(roomId, gameState)
-                console.log(`💾 Initialized Go Fish game state for room ${roomId} in Redis`)
-                console.log(
+                debugLog(`💾 Initialized Go Fish game state for room ${roomId} in Redis`)
+                debugLog(
                     `🃏 Player 1 (${toId}) score: ${gameState.players[0].score}, Player 2 (${fromId}) score: ${gameState.players[1].score}`
                 )
             }
@@ -4415,7 +4416,7 @@ export const initializeSocket = async (app) => {
             void emitStatusToFollowersOf([toId], 'userBusyCard', { userId: toId })
 
             if (roomId && gameState) {
-                console.log(`🃏 [acceptCardChallenge] Game state initialized:`, {
+                debugLog(`🃏 [acceptCardChallenge] Game state initialized:`, {
                     player1Id: gameState.players[0]?.userId,
                     player1HandLength: gameState.players[0]?.hand?.length || 0,
                     player2Id: gameState.players[1]?.userId,
@@ -4448,7 +4449,7 @@ export const initializeSocket = async (app) => {
         socket.on("declineCardChallenge", async ({ from, to }) => {
             const fromId = normalizeUserId(from) || from
             const toId = normalizeUserId(to) || to
-            console.log(`🃏 Card challenge declined by ${fromId}`)
+            debugLog(`🃏 Card challenge declined by ${fromId}`)
             await deletePendingCardAcceptForUser(fromId).catch(() => {})
             await deletePendingCardAcceptForUser(toId).catch(() => {})
             const challengerData = await getUserSocket(toId)
@@ -4485,7 +4486,7 @@ export const initializeSocket = async (app) => {
                 io.to(roomId).emit('cardGameEnded', endPayload)
                 deleteCardGamePost(roomId).catch(() => {})
                 await deleteCardGameState(roomId)
-                console.log(`🃏 [cancelCardGameStart] Cleared room ${roomId} (${endReason})`)
+                debugLog(`🃏 [cancelCardGameStart] Cleared room ${roomId} (${endReason})`)
             } catch (e) {
                 console.error('❌ [cancelCardGameStart]', e?.message || e)
             }
@@ -4498,14 +4499,14 @@ export const initializeSocket = async (app) => {
                 const socketRooms = Array.from(socket.rooms)
                 for (const currentRoom of socketRooms) {
                     if (currentRoom.startsWith('card_') && currentRoom !== roomId) {
-                        console.log(`🃏 [joinCardRoom] Leaving old card room: ${currentRoom} (socket: ${socket.id})`)
+                        debugLog(`🃏 [joinCardRoom] Leaving old card room: ${currentRoom} (socket: ${socket.id})`)
                         socket.leave(currentRoom)
                     }
                 }
                 
                 // Join the Socket.IO room
                 socket.join(roomId)
-                console.log(`🃏 User joined card room: ${roomId} (socket: ${socket.id})`)
+                debugLog(`🃏 User joined card room: ${roomId} (socket: ${socket.id})`)
                 
                 // Send current game state when joining (for catch-up)
                 const gameState = await getCardGameState(roomId)
@@ -4514,7 +4515,7 @@ export const initializeSocket = async (app) => {
                     const userId = socket.handshake.query.userId
                     const playerIndex = gameState.players.findIndex((p) => p.userId === userId)
                     
-                    console.log(`📤 Sending card game state to user for catch-up:`, {
+                    debugLog(`📤 Sending card game state to user for catch-up:`, {
                         roomId,
                         gameStatus: gameState.gameStatus,
                         turn: gameState.turn,
@@ -4553,7 +4554,7 @@ export const initializeSocket = async (app) => {
                     }
                     io.to(socket.id).emit("cardGameState", publicState)
                 } else {
-                    console.log(`⚠️ No game state found for room ${roomId}`)
+                    debugLog(`⚠️ No game state found for room ${roomId}`)
                 }
             }
         })
@@ -4594,8 +4595,8 @@ export const initializeSocket = async (app) => {
         })
 
         socket.on("cardMove", async ({ roomId, move, to }) => {
-            console.log(`🃏 Card move received from ${socket.handshake.query.userId} to ${to}`)
-            console.log(`🃏 Move data:`, move)
+            debugLog(`🃏 Card move received from ${socket.handshake.query.userId} to ${to}`)
+            debugLog(`🃏 Move data:`, move)
             
             // Update game state in backend (for spectator catch-up) - Redis
             if (roomId) {
@@ -4644,8 +4645,8 @@ export const initializeSocket = async (app) => {
                             currentState.lastUpdated = Date.now()
                             
                             await setCardGameState(roomId, currentState)
-                            console.log(`💾 Updated Go Fish game state for room ${roomId}`)
-                            console.log(`🃏 Scores: P1=${currentState.players[0].score}, P2=${currentState.players[1].score}`)
+                            debugLog(`💾 Updated Go Fish game state for room ${roomId}`)
+                            debugLog(`🃏 Scores: P1=${currentState.players[0].score}, P2=${currentState.players[1].score}`)
                             
                             // If game over, emit game end event
                             if (gameOverCheck.gameOver) {
@@ -4725,7 +4726,7 @@ export const initializeSocket = async (app) => {
             const recipientData = await getUserSocket(to)
             const recipientSocketId = recipientData?.socketId
             if (recipientSocketId) {
-                console.log(`🃏 Forwarding move to ${to} (socket: ${recipientSocketId})`)
+                debugLog(`🃏 Forwarding move to ${to} (socket: ${recipientSocketId})`)
                 io.to(recipientSocketId).emit("opponentMove", { move, roomId })
             } else {
                 console.log(`⚠️ Recipient ${to} not found in socket map`)
@@ -4735,7 +4736,7 @@ export const initializeSocket = async (app) => {
             if (roomId) {
                 const room = io.sockets.adapter.rooms.get(roomId)
                 if (room && room.size > 0) {
-                    console.log(`👁️ Broadcasting move to ${room.size} sockets in room ${roomId}`)
+                    debugLog(`👁️ Broadcasting move to ${room.size} sockets in room ${roomId}`)
                     io.to(roomId).emit("opponentMove", { move, roomId })
                 }
             }
@@ -4791,7 +4792,7 @@ export const initializeSocket = async (app) => {
                 if (opponentId) await deletePendingCardAcceptForUser(opponentId).catch(() => {})
                 // Clean up game state (Redis)
                 await deleteCardGameState(roomId)
-                console.log(`🗑️ Cleaned up card game state for room ${roomId}`)
+                debugLog(`🗑️ Cleaned up card game state for room ${roomId}`)
             }
             
             // Make users available again (always emit, even if resigner disconnected)
@@ -4835,7 +4836,7 @@ export const initializeSocket = async (app) => {
                 const room = io.sockets.adapter.rooms.get(roomId)
                 if (room && room.size > 0) {
                     const endReason = reason || 'player_left'
-                    console.log(`👁️ Notifying ${room.size} spectators that game ended (${endReason})`)
+                    debugLog(`👁️ Notifying ${room.size} spectators that game ended (${endReason})`)
                     io.to(roomId).emit("cardGameEnded", { reason: endReason })
                 }
             }
@@ -4852,7 +4853,7 @@ export const initializeSocket = async (app) => {
                 await deletePendingCardAcceptForUser(player2).catch(() => {})
                 // Clean up game state (Redis)
                 await deleteCardGameState(roomId)
-                console.log(`🗑️ Cleaned up card game state for room ${roomId}`)
+                debugLog(`🗑️ Cleaned up card game state for room ${roomId}`)
             }
             
             // Make users available again
@@ -4873,7 +4874,7 @@ export const initializeSocket = async (app) => {
                         return pId === uId
                     })
                     
-                    console.log(`📤 [requestCardGameState] Processing request for ${userId}`, {
+                    debugLog(`📤 [requestCardGameState] Processing request for ${userId}`, {
                         roomId,
                         playerIndex,
                         gameStatePlayers: gameState.players.map((p, idx) => ({
@@ -4914,7 +4915,7 @@ export const initializeSocket = async (app) => {
                             lastMove: gameState.lastMove
                         }
                         io.to(socket.id).emit("cardGameState", publicState)
-                        console.log(`📤 [requestCardGameState] Sent game state to ${userId}`, {
+                        debugLog(`📤 [requestCardGameState] Sent game state to ${userId}`, {
                             playerIndex,
                             handLength: gameState.players[playerIndex]?.hand?.length || 0,
                             sentHandLength: publicState.players[playerIndex]?.hand?.length || 0
@@ -4926,7 +4927,7 @@ export const initializeSocket = async (app) => {
                         })
                     }
                 } else {
-                    console.log(`⚠️ [requestCardGameState] No game state found for room ${roomId}`)
+                    debugLog(`⚠️ [requestCardGameState] No game state found for room ${roomId}`)
                     // Reconnect after cleanup — tell client to leave (skip brand-new accept race).
                     const parts = String(roomId).split('_')
                     const p1 = parts.length >= 3 ? (normalizeUserId(parts[1]) || parts[1]) : null
@@ -5032,7 +5033,7 @@ export const initializeSocket = async (app) => {
                                     }
                                 }
                                 emitToUserSelf(streamerNorm, 'livekit:streamEnded', endPayload)
-                                console.log(
+                                debugLog(
                                     `⬛ [LiveKit] Live stream cleaned up after socket loss (${LIVE_STREAM_DISCONNECT_GRACE_MS}ms) — streamer:${lsUid}`
                                 )
                             } catch (e) {
@@ -5090,7 +5091,7 @@ export const initializeSocket = async (app) => {
                                     try {
                                         const { sendCallEndedNotificationToUser } = await import('../services/fcmNotifications.js')
                                         const fcmResult = await sendCallEndedNotificationToUser(otherUserId, uid)
-                                        if (fcmResult.success) console.log('✅ [disconnect-call] Sent call ended FCM to:', otherUserId)
+                                        if (fcmResult.success) debugLog('✅ [disconnect-call] Sent call ended FCM to:', otherUserId)
                                     } catch (fcmErr) {
                                         console.error('❌ [disconnect-call] FCM call ended:', fcmErr?.message)
                                     }
@@ -5107,7 +5108,7 @@ export const initializeSocket = async (app) => {
             // IMPORTANT: Don't end game immediately - wait to see if user reconnects (page refresh scenario)
             if (disconnectedUserId && await hasActiveChessGame(disconnectedUserId)) {
                 const gameRoomId = await getActiveChessGame(disconnectedUserId)
-                console.log(`♟️ User ${disconnectedUserId} disconnected while in game: ${gameRoomId}`)
+                debugLog(`♟️ User ${disconnectedUserId} disconnected while in game: ${gameRoomId}`)
                 console.log(`⏳ Waiting ${CHESS_DISCONNECT_GRACE_MS}ms to see if user reconnects...`)
 
                 // Parse other player directly from roomId (chess_p1_p2_ts) — works on any server instance
@@ -5159,7 +5160,7 @@ export const initializeSocket = async (app) => {
                     if (gameRoomId) {
                         const room = io.sockets.adapter.rooms.get(gameRoomId)
                         if (room && room.size > 0) {
-                            console.log(`👁️ Notifying ${room.size} spectators that game ended (player disconnected)`)
+                            debugLog(`👁️ Notifying ${room.size} spectators that game ended (player disconnected)`)
                             io.to(gameRoomId).emit("chessGameEnded", { roomId: gameRoomId, reason: 'player_disconnected' })
                         }
                     }
@@ -5284,7 +5285,7 @@ export const initializeSocket = async (app) => {
             // Handle card game disconnection (same pattern as chess)
             if (disconnectedUserId && await hasActiveCardGame(disconnectedUserId)) {
                 const gameRoomId = await getActiveCardGame(disconnectedUserId)
-                console.log(`🃏 User ${disconnectedUserId} disconnected while in card game: ${gameRoomId}`)
+                debugLog(`🃏 User ${disconnectedUserId} disconnected while in card game: ${gameRoomId}`)
                 console.log(`⏳ Waiting ${CARD_DISCONNECT_GRACE_MS}ms to see if user reconnects...`)
                 
                 let otherPlayerId = null
@@ -5343,7 +5344,7 @@ export const initializeSocket = async (app) => {
                     if (otherPlayerId) await deletePendingCardAcceptForUser(otherPlayerId).catch(() => {})
                     
                     await deleteCardGameState(gameRoomId)
-                    console.log(`🗑️ Cleaned up card game state for room ${gameRoomId}`)
+                    debugLog(`🗑️ Cleaned up card game state for room ${gameRoomId}`)
                     
                         void emitStatusToFollowersOf([disconnectedUserId], 'userAvailableCard', { userId: disconnectedUserId })
                     if (otherPlayerId) {
@@ -5361,7 +5362,7 @@ export const initializeSocket = async (app) => {
                 const index = room.indexOf(socket.id)
                 if (index === -1) continue
                 room.splice(index, 1)
-                console.log(`👁️ Removed socket ${socket.id} from chess room ${roomId}`)
+                debugLog(`👁️ Removed socket ${socket.id} from chess room ${roomId}`)
                 if (room.length === 0) {
                     await deleteChessRoom(roomId)
                     console.log(`🗑️ Deleted empty chess room: ${roomId}`)
