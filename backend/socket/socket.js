@@ -822,7 +822,7 @@ const logInCallStatus = async (label, userIdA, userIdB) => {
     try {
         const a = await redisService.redisGet(`${IN_CALL_PREFIX}${String(userIdA || '').trim()}`)
         const b = await redisService.redisGet(`${IN_CALL_PREFIX}${String(userIdB || '').trim()}`)
-        console.log(`📴 [inCall] ${label}`, { userA: !!a, userB: !!b, userAVal: a, userBVal: b })
+        debugLog(`📴 [inCall] ${label}`, { userA: !!a, userB: !!b, userAVal: a, userBVal: b })
     } catch (e) {
         console.error('❌ [inCall] logInCallStatus failed:', e.message)
     }
@@ -880,7 +880,7 @@ const setUserSocket = async (userId, socketData) => {
         if (!success) {
             console.error(`❌ [socket] Failed to write user socket to Redis for ${userId}`)
         } else {
-            console.log(`✅ [socket] User socket written to Redis for ${userId}`)
+            debugLog(`✅ [socket] User socket written to Redis for ${userId}`)
         }
         
         // Also keep in-memory for fast local access (but Redis is source of truth)
@@ -1645,13 +1645,13 @@ export const initializeSocket = async (app) => {
     const liveStreamDisconnectTimers = new Map()
 
     io.on("connection", async (socket) => {
-        console.log("user connected", socket.id)
+        debugLog("user connected", socket.id)
         
         const userIdRaw = socket.handshake.query.userId
         const clientTypeRaw = socket.handshake.query.clientType
         const clientType = typeof clientTypeRaw === 'string' ? clientTypeRaw.trim().toLowerCase() : ''
         const userId = normalizeUserId(userIdRaw) || userIdRaw
-        console.log("🔌 [socket] User connecting with userId:", userId, userIdRaw !== userId ? `(normalized from ${userIdRaw})` : '')
+        debugLog("🔌 [socket] User connecting with userId:", userId, userIdRaw !== userId ? `(normalized from ${userIdRaw})` : '')
         // Presence subscription support (clients can subscribe to specific userIds)
         socket.data.presenceSubscriptions = []
         // Store socket info as object like madechess (dual-write: in-memory + Redis). Use normalized id so callUser lookup finds receiver.
@@ -1680,7 +1680,7 @@ export const initializeSocket = async (app) => {
                     liveStreamDisconnectTimers.delete(lsUid)
                 }
             }
-            console.log(`✅ [socket] User ${userId} added to socket map (socket: ${socket.id})`)
+            debugLog(`✅ [socket] User ${userId} added to socket map (socket: ${socket.id})`)
 
             // If this socket is still the live one after a short grace, mark online.
             // Mobile backgrounds disconnect within ~500ms, so a socket that survives
@@ -1698,7 +1698,7 @@ export const initializeSocket = async (app) => {
                         try {
                             const current = await getUserSocket(graceUid)
                             if (!current?.socketId || current.socketId !== graceSocketId) {
-                                console.log(`⏭️ [socket] Auto-online skip (${label}): socket replaced for ${graceUid}`)
+                                debugLog(`⏭️ [socket] Auto-online skip (${label}): socket replaced for ${graceUid}`)
                                 return false
                             }
                             // Prefer Redis mapping over local socket.connected (multi-node / adapter races).
@@ -1706,12 +1706,12 @@ export const initializeSocket = async (app) => {
                             if (currentPresence === 'online') {
                                 // Ensure subscribers still get a delta (snapshot may have been taken while offline).
                                 emitPresenceUpdate(graceUid, true, { reinforce: true })
-                                console.log(`🟢 [socket] Auto-online refresh (${label}): already online ${graceUid}`)
+                                debugLog(`🟢 [socket] Auto-online refresh (${label}): already online ${graceUid}`)
                                 return true
                             }
                             await setUserPresence(graceUid, 'online')
                             emitPresenceUpdate(graceUid, true, { reinforce: true })
-                            console.log(`🟢 [socket] Auto-online after connect grace (${label}) for ${graceUid}`)
+                            debugLog(`🟢 [socket] Auto-online after connect grace (${label}) for ${graceUid}`)
                             return true
                         } catch (e) {
                             console.error(`❌ [socket] Auto-online grace failed (${label}):`, e?.message || e)
@@ -1756,7 +1756,7 @@ export const initializeSocket = async (app) => {
                     socket.join(roomId)
                 }
                 if (roomIds.size) {
-                    console.log(`📬 [socket] ${userId} joined ${roomIds.size} conversation room(s)`)
+                    debugLog(`📬 [socket] ${userId} joined ${roomIds.size} conversation room(s)`)
                 }
             } catch (e) {
                 console.error('❌ [socket] Failed to join conversation rooms:', e.message)
@@ -1782,7 +1782,7 @@ export const initializeSocket = async (app) => {
             try {
                 const pendingCancel = await getPendingCancel(userId)
                 if (pendingCancel) {
-                    console.log(`📴 [socket] Found pending cancel for ${userId}, will emit CallCanceled after short delay...`, pendingCancel)
+                    debugLog(`📴 [socket] Found pending cancel for ${userId}, will emit CallCanceled after short delay...`, pendingCancel)
                     await deletePendingCancel(userId)
                     const sid = socket.id
                     const fromId = pendingCancel.from || null
@@ -1852,7 +1852,7 @@ export const initializeSocket = async (app) => {
                         const out = { signal: pendingAns.signal }
                         if (pendingAns.callId) out.callId = pendingAns.callId
                         io.to(connectSid).emit('callAccepted', out)
-                        console.log(`✅ [socket] Delivered queued WebRTC answer to caller ${connectUserId} (reconnect after callee answered)`)
+                        debugLog(`✅ [socket] Delivered queued WebRTC answer to caller ${connectUserId} (reconnect after callee answered)`)
                     }
                 } catch (e) {
                     console.error(`❌ [socket] Error delivering pending answer for ${connectUserId}:`, e.message)
@@ -2035,7 +2035,7 @@ export const initializeSocket = async (app) => {
                 }
                 await setUserPresence(uid, status)
                 emitPresenceUpdate(uid, status === 'online', { reinforce: status === 'online' })
-                console.log(
+                debugLog(
                     status === 'online'
                         ? `🟢 [socket] clientPresence online for ${uid}`
                         : `📴 [socket] clientPresence offline for ${uid}`,
@@ -3833,7 +3833,7 @@ export const initializeSocket = async (app) => {
                 // Include roomId so client can verify they're viewing the correct game
                 io.to(recipientSocketId).emit("opponentMove", { move, roomId })
             } else {
-                console.log(`⚠️ Recipient ${to} not found in socket map`)
+                debugLog(`⚠️ Recipient ${to} not found in socket map`)
             }
             
             // ALSO emit to all spectators in the room (if roomId exists)
@@ -4047,7 +4047,7 @@ export const initializeSocket = async (app) => {
         socket.on('joinRaceRoom', async ({ roomId }) => {
             if (!roomId) return
             socket.join(roomId)
-            console.log(`🏎️ Socket ${socket.id} joined race room ${roomId}`)
+            debugLog(`🏎️ Socket ${socket.id} joined race room ${roomId}`)
             // Count live sockets in this room
             const roomSockets = io.sockets.adapter.rooms.get(roomId)
             const count = roomSockets ? roomSockets.size : 0
@@ -4949,7 +4949,7 @@ export const initializeSocket = async (app) => {
         })
 
         socket.on("disconnect", async () => {
-            console.log("user disconnected", socket.id)
+            debugLog("user disconnected", socket.id)
             
             let disconnectedUserId = null
             
