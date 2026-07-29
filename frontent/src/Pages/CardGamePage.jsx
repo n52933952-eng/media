@@ -132,14 +132,13 @@ const CardGamePage = () => {
     const prevBooksRef = useRef(0)
     const previousPathRef = useRef(null)
     const cardExitHandledRef = useRef(false)
-    /** I resigned / left — no Back to Home modal for me; only opponent end shows it. */
+    /** I resigned / left — no Game Over overlay for me; only opponent end shows it. */
     const selfEndedRef = useRef(false)
 
-    /** Opponent ended — show Back to Home (do not auto-jump to feed). */
-    const showOpponentEndedLobby = useCallback((message) => {
+    /** Mid-game end — original board overlay (Game Over + Back to Home). */
+    const showGameOverOverlay = useCallback((message) => {
         if (selfEndedRef.current) return
         setGameOver(true)
-        setGameLive(false)
         setGameResult(message || 'Game Over')
     }, [])
 
@@ -295,7 +294,7 @@ const CardGamePage = () => {
 
             if (data.gameStatus === 'playing') setGameLive(true)
             else if (data.gameStatus === 'finished') {
-                setGameLive(false)
+                // Keep board up — original overlay sits on top (do not flip to waiting spinner).
                 if (!selfEndedRef.current) {
                     setGameOver(true)
                     setGameResult((prev) => prev || 'Game Over')
@@ -313,14 +312,21 @@ const CardGamePage = () => {
             if (selfEndedRef.current) return
 
             const reason = String(data?.reason || '')
-            // I cancelled waiting — already leaving. Opponent cancel → show Back to Home.
+            // Waiting cancel / never started — leave (original). Overlay is for real games.
             if (reason === 'never_started' || reason === 'start_timeout') {
-                showOpponentEndedLobby('Game could not start')
                 removeOwnCardPost()
+                endCardGameOnce()
+                toast({
+                    title: 'Go Fish',
+                    description: 'Game could not start',
+                    status: 'info',
+                    duration: 3000,
+                    position: 'top',
+                })
+                navigate('/home')
                 return
             }
 
-            // Opponent ended / disconnect / resign — show Back to Home (matches mobile).
             const message =
                 data?.message
                 || (reason === 'player_disconnected'
@@ -328,24 +334,27 @@ const CardGamePage = () => {
                     : reason === 'resigned'
                         ? 'Opponent resigned'
                         : 'Game Over')
-            showOpponentEndedLobby(message)
+            showGameOverOverlay(message)
             toast({ title: 'Game Over 🃏', description: message, status: 'info', duration: 4000, position: 'top' })
             removeOwnCardPost()
         }
 
-        // Same as chess: direct event to the player who did NOT resign.
         const handleOpponentResigned = () => {
             if (selfEndedRef.current) return
-            showOpponentEndedLobby('Your opponent resigned. You win!')
+            showGameOverOverlay('Your opponent resigned. You win!')
             removeOwnCardPost()
         }
 
         const handleCleanup = () => {
             if (selfEndedRef.current) return
-            // Never auto-jump to feed for the other player — always show Back to Home.
-            showOpponentEndedLobby('Game ended')
             removeOwnCardPost()
-            toast({ title: 'Game Ended', description: 'The game was canceled', status: 'warning', duration: 3000, position: 'top' })
+            if (gameLiveRef.current) {
+                showGameOverOverlay('Game ended')
+                toast({ title: 'Game Ended', description: 'The game was canceled', status: 'warning', duration: 3000, position: 'top' })
+                return
+            }
+            endCardGameOnce()
+            navigate('/home')
         }
 
         socket.on('cardGameState', handleGameState)
@@ -368,7 +377,7 @@ const CardGamePage = () => {
             socket.off('opponentResigned', handleOpponentResigned)
             socket.off('cardGameCleanup', handleCleanup)
         }
-    }, [socket, roomId, toast, showOpponentEndedLobby])
+    }, [socket, roomId, toast, showGameOverOverlay, endCardGameOnce, navigate])
 
     // Back online after server already ended the game — catch up and leave.
     useEffect(() => {
@@ -455,30 +464,11 @@ const CardGamePage = () => {
     // ── Loading screen ──────────────────────────────────────────────────────────
     if (!gameLive) {
         return (
-            <Box minH="100vh" bg={bgPage} display="flex" flexDirection="column" alignItems="center" justifyContent="center" position="relative">
+            <Box minH="100vh" bg={bgPage} display="flex" flexDirection="column" alignItems="center" justifyContent="center">
                 <Text fontSize="4xl" mb={4}>🃏</Text>
                 <Spinner size="xl" color="purple.500" mb={4} />
                 <Text fontSize="lg" color={mutedCol}>Waiting for the game to start…</Text>
-                {!gameOver && (
-                    <Button mt={6} size="sm" variant="outline" colorScheme="red" onClick={() => abortUnstartedGame('never_started')}>Cancel</Button>
-                )}
-                {gameOver && (
-                    <Box
-                        position="fixed" inset={0}
-                        bg="rgba(0,0,0,0.75)"
-                        display="flex" alignItems="center" justifyContent="center"
-                        zIndex={100}
-                    >
-                        <Box bg={bgCard} borderRadius="2xl" p={8} textAlign="center" minW="280px" boxShadow="2xl">
-                            <Text fontSize="3xl" mb={2}>🃏</Text>
-                            <Text fontSize="2xl" fontWeight="bold" color={textCol} mb={3}>Game Over</Text>
-                            <Text color={mutedCol} mb={6}>{gameResult}</Text>
-                            <Button colorScheme="purple" onClick={() => { endCardGameOnce(); navigate('/home') }}>
-                                Back to Home
-                            </Button>
-                        </Box>
-                    </Box>
-                )}
+                <Button mt={6} size="sm" variant="outline" colorScheme="red" onClick={() => abortUnstartedGame('never_started')}>Cancel</Button>
             </Box>
         )
     }
