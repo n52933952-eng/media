@@ -135,6 +135,14 @@ const CardGamePage = () => {
     /** I resigned / left — no Back to Home modal for me; only opponent end shows it. */
     const selfEndedRef = useRef(false)
 
+    /** Opponent ended — show Back to Home (do not auto-jump to feed). */
+    const showOpponentEndedLobby = useCallback((message) => {
+        if (selfEndedRef.current) return
+        setGameOver(true)
+        setGameLive(false)
+        setGameResult(message || 'Game Over')
+    }, [])
+
     useEffect(() => {
         gameLiveRef.current = gameLive
     }, [gameLive])
@@ -226,6 +234,8 @@ const CardGamePage = () => {
 
         currentRoomRef.current = roomId
         handInitRef.current = false
+        selfEndedRef.current = false
+        cardExitHandledRef.current = false
 
         // Reset state
         setGameLive(false); setGameOver(false); setGameResult('')
@@ -303,23 +313,14 @@ const CardGamePage = () => {
             if (selfEndedRef.current) return
 
             const reason = String(data?.reason || '')
-            // Waiting cancel — leave immediately (no lobby modal).
+            // I cancelled waiting — already leaving. Opponent cancel → show Back to Home.
             if (reason === 'never_started' || reason === 'start_timeout') {
+                showOpponentEndedLobby('Game could not start')
                 removeOwnCardPost()
-                endCardGameOnce()
-                toast({
-                    title: 'Go Fish',
-                    description: 'Game could not start',
-                    status: 'info',
-                    duration: 3000,
-                    position: 'top',
-                })
-                navigate('/home')
                 return
             }
 
             // Opponent ended / disconnect / resign — show Back to Home (matches mobile).
-            setGameOver(true)
             const message =
                 data?.message
                 || (reason === 'player_disconnected'
@@ -327,26 +328,22 @@ const CardGamePage = () => {
                     : reason === 'resigned'
                         ? 'Opponent resigned'
                         : 'Game Over')
-            setGameResult(message)
+            showOpponentEndedLobby(message)
             toast({ title: 'Game Over 🃏', description: message, status: 'info', duration: 4000, position: 'top' })
+            removeOwnCardPost()
+        }
+
+        // Same as chess: direct event to the player who did NOT resign.
+        const handleOpponentResigned = () => {
+            if (selfEndedRef.current) return
+            showOpponentEndedLobby('Your opponent resigned. You win!')
             removeOwnCardPost()
         }
 
         const handleCleanup = () => {
             if (selfEndedRef.current) return
-
-            // Still waiting — leave (no board).
-            if (!gameLiveRef.current) {
-                removeOwnCardPost()
-                endCardGameOnce()
-                navigate('/home')
-                return
-            }
-
-            // Opponent ended while I was in game — show Back to Home (do not auto-leave).
-            setGameOver(true)
-            setGameLive(false)
-            setGameResult((prev) => prev || 'Game ended')
+            // Never auto-jump to feed for the other player — always show Back to Home.
+            showOpponentEndedLobby('Game ended')
             removeOwnCardPost()
             toast({ title: 'Game Ended', description: 'The game was canceled', status: 'warning', duration: 3000, position: 'top' })
         }
@@ -354,6 +351,7 @@ const CardGamePage = () => {
         socket.on('cardGameState', handleGameState)
         socket.on('opponentMove', handleOpponentMove)
         socket.on('cardGameEnded', handleGameEnded)
+        socket.on('opponentResigned', handleOpponentResigned)
         socket.on('cardGameCleanup', handleCleanup)
 
         socket.emit('joinCardRoom', { roomId, userId: user?._id })
@@ -367,9 +365,10 @@ const CardGamePage = () => {
             socket.off('cardGameState', handleGameState)
             socket.off('opponentMove', handleOpponentMove)
             socket.off('cardGameEnded', handleGameEnded)
+            socket.off('opponentResigned', handleOpponentResigned)
             socket.off('cardGameCleanup', handleCleanup)
         }
-    }, [socket, roomId, navigate, toast, endCardGameOnce])
+    }, [socket, roomId, toast, showOpponentEndedLobby])
 
     // Back online after server already ended the game — catch up and leave.
     useEffect(() => {
@@ -397,6 +396,8 @@ const CardGamePage = () => {
     const availableRanks = [...new Set(myHand.map(c => c.value))].sort((a, b) => a - b)
 
     const abortUnstartedGame = useCallback((reason = 'never_started') => {
+        if (selfEndedRef.current) return
+        selfEndedRef.current = true
         const rid = roomId || localStorage.getItem('cardRoomId')
         if (socket && rid) {
             socket.emit('cancelCardGameStart', { roomId: rid, reason })
@@ -454,11 +455,30 @@ const CardGamePage = () => {
     // ── Loading screen ──────────────────────────────────────────────────────────
     if (!gameLive) {
         return (
-            <Box minH="100vh" bg={bgPage} display="flex" flexDirection="column" alignItems="center" justifyContent="center">
+            <Box minH="100vh" bg={bgPage} display="flex" flexDirection="column" alignItems="center" justifyContent="center" position="relative">
                 <Text fontSize="4xl" mb={4}>🃏</Text>
                 <Spinner size="xl" color="purple.500" mb={4} />
                 <Text fontSize="lg" color={mutedCol}>Waiting for the game to start…</Text>
-                <Button mt={6} size="sm" variant="outline" colorScheme="red" onClick={() => abortUnstartedGame('never_started')}>Cancel</Button>
+                {!gameOver && (
+                    <Button mt={6} size="sm" variant="outline" colorScheme="red" onClick={() => abortUnstartedGame('never_started')}>Cancel</Button>
+                )}
+                {gameOver && (
+                    <Box
+                        position="fixed" inset={0}
+                        bg="rgba(0,0,0,0.75)"
+                        display="flex" alignItems="center" justifyContent="center"
+                        zIndex={100}
+                    >
+                        <Box bg={bgCard} borderRadius="2xl" p={8} textAlign="center" minW="280px" boxShadow="2xl">
+                            <Text fontSize="3xl" mb={2}>🃏</Text>
+                            <Text fontSize="2xl" fontWeight="bold" color={textCol} mb={3}>Game Over</Text>
+                            <Text color={mutedCol} mb={6}>{gameResult}</Text>
+                            <Button colorScheme="purple" onClick={() => { endCardGameOnce(); navigate('/home') }}>
+                                Back to Home
+                            </Button>
+                        </Box>
+                    </Box>
+                )}
             </Box>
         )
     }

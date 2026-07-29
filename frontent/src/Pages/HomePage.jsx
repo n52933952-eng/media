@@ -19,6 +19,7 @@ import {
   mergeGameFeedPostData,
   isChessFeedPost,
 } from '../utils/gameFeedPostUtils.js'
+import { pruneStaleGameFeedPosts } from '../utils/pruneStaleGameFeedPosts.js'
 import { isFollowingUserId, mergePostUpdate, reshapeFeedFirstPage } from '../utils/postUtils.js'
 import { applyPostEngagement } from '../hooks/usePostEngagementSubscription.js'
 import AdsterraFeedNative, { getAdsterraFeedEvery } from '../Components/ads/AdsterraFeedNative.jsx'
@@ -58,6 +59,20 @@ const HomePage = () => {
   /** Throttle visibility refetch so tab focus / ad clicks don't stomp the live feed. */
   const lastSilentFeedAtRef = useRef(0)
   const footballUserIdRef = useRef(null)
+  const followPostRef = useRef(followPost)
+  followPostRef.current = followPost
+  const hasGameFeedCards = followPost.some((p) => isChessFeedPost(p) || isGoFishFeedPost(p))
+
+  const applyPrunedGameFeed = useCallback(async (posts) => {
+    const pruned = await pruneStaleGameFeedPosts(posts)
+    if (pruned === posts) return posts
+    const prunedIds = new Set(pruned.map((p) => (p?._id != null ? String(p._id) : '')).filter(Boolean))
+    for (const p of posts) {
+      const id = p?._id != null ? String(p._id) : ''
+      if (id && !prunedIds.has(id)) removedPostIdsRef.current.add(id)
+    }
+    return pruned
+  }, [])
 
 
 
@@ -235,6 +250,12 @@ const HomePage = () => {
             const deduped = dedupeGamePostsForFeed(merged)
             const filtered = filterFeedPosts(reshapeFeedFirstPage(deduped))
             followPostCountRef.current = filtered.length
+            // Async prune ghosts after merge (missed *GameEnded on disconnect).
+            applyPrunedGameFeed(filtered).then((pruned) => {
+              if (pruned === filtered) return
+              followPostCountRef.current = pruned.length
+              setFollowPost(filterFeedPosts(pruned))
+            })
             return filtered
           })
         } else {
@@ -246,8 +267,14 @@ const HomePage = () => {
           })
           const dedupedPosts = dedupeGamePostsForFeed(uniquePosts)
           console.log(`📥 [getFeedPost] Initial load: received ${batch.length} posts, ${dedupedPosts.length} after dedupe`)
-          setFollowPost(filterFeedPosts(reshapeFeedFirstPage(dedupedPosts)))
-          followPostCountRef.current = dedupedPosts.length
+          const filtered = filterFeedPosts(reshapeFeedFirstPage(dedupedPosts))
+          setFollowPost(filtered)
+          followPostCountRef.current = filtered.length
+          applyPrunedGameFeed(filtered).then((pruned) => {
+            if (pruned === filtered) return
+            followPostCountRef.current = pruned.length
+            setFollowPost(filterFeedPosts(pruned))
+          })
         }
         
         console.log(`📥 [getFeedPost] Setting hasMore to: ${responseHasMore}, cursor: ${feedCursorRef.current || 'none'}`)
@@ -264,7 +291,7 @@ const HomePage = () => {
       setLoadingMore(false)
       isLoadingRef.current = false
     }
-  }, [showToast, setFollowPost, filterFeedPosts])
+  }, [showToast, setFollowPost, filterFeedPosts, applyPrunedGameFeed])
 
   // Same as mobile FeedScreen: when user returns to the tab, refresh feed for latest Football/Weather posts
   useEffect(() => {
@@ -276,10 +303,16 @@ const HomePage = () => {
       if (now - lastSilentFeedAtRef.current < 45_000) return
       lastSilentFeedAtRef.current = now
       getFeedPost(false, { silent: true })
+      // Also prune ghosts immediately (don't wait for interval).
+      applyPrunedGameFeed(followPostRef.current).then((pruned) => {
+        if (pruned === followPostRef.current) return
+        followPostCountRef.current = pruned.length
+        setFollowPost(filterFeedPosts(pruned))
+      })
     }
     document.addEventListener('visibilitychange', onVisible)
     return () => document.removeEventListener('visibilitychange', onVisible)
-  }, [location.pathname, getFeedPost])
+  }, [location.pathname, getFeedPost, applyPrunedGameFeed, setFollowPost, filterFeedPosts])
   
   // Initial load - use ref to track if already loaded
   useEffect(() => {
@@ -298,6 +331,28 @@ const HomePage = () => {
       setLoading(false)
     }
   }, [location.pathname, followPost.length, loading])
+
+  // Backup: drop ghost chess/Go Fish cards if end/cancel was missed (socket drop).
+  useEffect(() => {
+    if (location.pathname !== '/home' || !hasGameFeedCards) return undefined
+
+    let cancelled = false
+    const syncStaleGameCards = async () => {
+      const prev = followPostRef.current
+      const pruned = await applyPrunedGameFeed(prev)
+      if (cancelled || pruned === prev) return
+      followPostCountRef.current = pruned.length
+      setFollowPost(filterFeedPosts(pruned))
+    }
+
+    const initial = setTimeout(syncStaleGameCards, 2000)
+    const timer = setInterval(syncStaleGameCards, 8000)
+    return () => {
+      cancelled = true
+      clearTimeout(initial)
+      clearInterval(timer)
+    }
+  }, [location.pathname, hasGameFeedCards, applyPrunedGameFeed, setFollowPost, filterFeedPosts])
 
   // Cache Football account id for follow checks (following[] is id list, not { username })
   useEffect(() => {
