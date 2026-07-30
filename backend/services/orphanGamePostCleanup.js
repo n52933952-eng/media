@@ -1,13 +1,12 @@
 /**
  * Delete stuck chess/card game posts from Mongo when the live game is already gone.
- * Triggered (throttled) from busyChessUsers / busyCardUsers — same path the feed prune uses.
- * No new mobile build required.
+ * Runs on a cron (not on feed/busy API requests) so app open stays light.
  */
+import cron from 'node-cron'
 import Post from '../models/post.js'
 import * as redisService from './redis.js'
 import { debugLog } from '../utils/debugLog.js'
 
-const THROTTLE_SEC = 60
 const MIN_AGE_MS = 90_000
 const MAX_ROOMS_PER_RUN = 25
 const SCAN_LIMIT = 200
@@ -37,26 +36,52 @@ const isStillLiveLooking = (raw) => {
     }
 }
 
+const scanBusyUserIds = async (client, matchPattern, keyPrefix) => {
+    const busy = new Set()
+    if (!client) return busy
+    let cursor = '0'
+    let scanCount = 0
+    const maxIterations = 100
+    do {
+        scanCount++
+        if (scanCount > maxIterations) break
+        const result = await client.scan(cursor, { MATCH: matchPattern, COUNT: 100 })
+        let nextCursor
+        let keys
+        if (Array.isArray(result)) {
+            nextCursor = result[0]
+            keys = result[1] || []
+        } else if (result && typeof result === 'object') {
+            nextCursor = result.cursor
+            keys = result.keys || []
+        } else {
+            break
+        }
+        cursor = nextCursor.toString()
+        for (const key of keys) {
+            const userId = String(key).replace(keyPrefix, '')
+            if (userId) busy.add(userId)
+        }
+    } while (cursor !== '0')
+    return busy
+}
+
 /**
  * @param {'chess'|'card'} kind
- * @param {string[]} busyUserIds
  */
-export const maybeCleanupOrphanGamePosts = async (kind, busyUserIds = []) => {
+export const maybeCleanupOrphanGamePosts = async (kind) => {
     if (kind !== 'chess' && kind !== 'card') return
     try {
         redisService.ensureRedis()
         const client = redisService.getRedis()
         if (!client) return
 
-        const throttleKey = `orphanGamePostCleanup:${kind}`
-        // Only one cleanup pass per kind per minute across the fleet.
-        const locked = await client.set(throttleKey, '1', { NX: true, EX: THROTTLE_SEC })
-        if (locked !== 'OK' && locked !== true) return
-
         const prefix = kind === 'chess' ? 'chess_' : 'card_'
         const dataField = kind === 'chess' ? 'chessGameData' : 'cardGameData'
         const statePrefix = kind === 'chess' ? 'chessGameState:' : 'cardGameState:'
-        const busy = new Set((busyUserIds || []).map((id) => String(id || '').trim()).filter(Boolean))
+        const busyMatch = kind === 'chess' ? 'activeChessGame:*' : 'activeCardGame:*'
+        const busyPrefix = kind === 'chess' ? 'activeChessGame:' : 'activeCardGame:'
+        const busy = await scanBusyUserIds(client, busyMatch, busyPrefix)
         const cutoff = new Date(Date.now() - MIN_AGE_MS)
 
         const posts = await Post.find({
@@ -87,12 +112,11 @@ export const maybeCleanupOrphanGamePosts = async (kind, busyUserIds = []) => {
             const players = parsePlayers(sample[dataField])
             if (players.some((id) => busy.has(id))) continue
 
-            // Still has Redis game state → treat as live (busy keys may have flapped).
             let hasState = false
             try {
                 hasState = !!(await client.get(`${statePrefix}${roomId}`))
             } catch {
-                hasState = true // fail closed
+                hasState = true
             }
             if (hasState) continue
 
@@ -111,4 +135,21 @@ export const maybeCleanupOrphanGamePosts = async (kind, busyUserIds = []) => {
     } catch (err) {
         console.error(`❌ [orphanGamePosts] ${kind} cleanup failed:`, err?.message || err)
     }
+}
+
+const runOrphanGamePostCleanup = async () => {
+    await maybeCleanupOrphanGamePosts('chess')
+    await maybeCleanupOrphanGamePosts('card')
+}
+
+/** Every 2 minutes — independent of feed opens. */
+export const initializeOrphanGamePostCleanup = () => {
+    cron.schedule('*/2 * * * *', () => {
+        void runOrphanGamePostCleanup()
+    })
+    // Soft delay after boot so startup traffic isn't competing with first cleanup.
+    setTimeout(() => {
+        void runOrphanGamePostCleanup()
+    }, 60_000)
+    console.log('✅ [orphanGamePosts] Cleanup cron initialized (every 2 minutes)')
 }

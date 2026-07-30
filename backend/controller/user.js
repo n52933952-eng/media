@@ -22,7 +22,6 @@ import { getFollowGraphIdsForUser, attachFollowGraphToUser, isViewerFollowingFol
 import { invalidateUserAuthCache } from '../services/userAuthCache.js'
 import { invalidateUserFeedCache } from '../services/feedCache.js'
 import { updateCommentDenormForUser, deleteCommentsByUser } from '../services/commentService.js'
-import { maybeCleanupOrphanGamePosts } from '../services/orphanGamePostCleanup.js'
 
 
 export const SignUp = async(req,res) => {
@@ -1111,8 +1110,6 @@ export const getBusyChessUsers = async (req, res) => {
             'getBusyChessUsers',
         )
         res.status(200).json({ busyUserIds })
-        // Backup: remove stuck chess Live posts from DB when nobody is in that game anymore.
-        void maybeCleanupOrphanGamePosts('chess', busyUserIds)
     } catch (error) {
         console.error('Error in getBusyChessUsers:', error)
         res.status(500).json({ error: error.message || "Failed to get busy chess users" })
@@ -1129,8 +1126,6 @@ export const getBusyCardUsers = async (req, res) => {
             'getBusyCardUsers',
         )
         res.status(200).json({ busyUserIds })
-        // Backup: remove stuck Go Fish Live posts from DB when nobody is in that game anymore.
-        void maybeCleanupOrphanGamePosts('card', busyUserIds)
     } catch (error) {
         console.error('Error in getBusyCardUsers:', error)
         res.status(500).json({ error: error.message || "Failed to get busy card users" })

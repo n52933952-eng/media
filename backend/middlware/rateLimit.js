@@ -6,7 +6,18 @@ const AUTH_MAX_PER_WINDOW = Number(process.env.API_AUTH_RATE_LIMIT_MAX || 30)
 
 const shouldSkip = (req) => {
   const p = req.path || ''
-  return p === '/health' || p.startsWith('/api/football')
+  if (p === '/health' || p.startsWith('/api/football')) return true
+  // Feed prune / opponent busy checks — polled often on app open; must not burn the global budget.
+  if (
+    p === '/api/user/busyChessUsers' ||
+    p === '/api/user/busyCardUsers' ||
+    p === '/api/user/busyGameUsers'
+  ) {
+    return true
+  }
+  // Live card prune: one status call per live streamer on the feed.
+  if (/^\/api\/call\/livestream\/[^/]+\/status$/.test(p)) return true
+  return false
 }
 
 const clientKey = (req) => {

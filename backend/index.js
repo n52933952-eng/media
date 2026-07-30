@@ -20,6 +20,7 @@ import { initializeSocket } from './socket/socket.js'
 import { initializeFootballCron } from './services/footballCron.js'
 import { initializeWeatherCron } from './services/weatherCron.js'
 import { initializeChessPostCleanup } from './services/chessPostCleanup.js'
+import { initializeOrphanGamePostCleanup } from './services/orphanGamePostCleanup.js'
 import { initializeActivityCleanup } from './services/activityCleanup.js'
 import { initializeStoryCleanup } from './services/storyCleanup.js'
 import { initializeDataRetentionCleanup } from './services/dataRetentionCleanup.js'
@@ -159,6 +160,8 @@ async function startServer() {
 
             // Initialize Chess Post Cleanup Cron Job
             initializeChessPostCleanup()
+            // Stuck Live chess/card posts (missed end/cancel) — DB cleanup off the feed path
+            initializeOrphanGamePostCleanup()
             //
             // Initialize Activity Cleanup Cron Job
             initializeActivityCleanup()
