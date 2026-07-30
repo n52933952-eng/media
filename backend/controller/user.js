@@ -22,6 +22,7 @@ import { getFollowGraphIdsForUser, attachFollowGraphToUser, isViewerFollowingFol
 import { invalidateUserAuthCache } from '../services/userAuthCache.js'
 import { invalidateUserFeedCache } from '../services/feedCache.js'
 import { updateCommentDenormForUser, deleteCommentsByUser } from '../services/commentService.js'
+import { maybeCleanupOrphanGamePosts } from '../services/orphanGamePostCleanup.js'
 
 
 export const SignUp = async(req,res) => {
@@ -1049,52 +1050,69 @@ export const getSuggestedUsers = async(req, res) => {
     }
 }
 
+// Short cache so many concurrent feed prunes (1M-user scale) don't Redis-SCAN every hit.
+const BUSY_GAME_LIST_CACHE_TTL_SEC = 5
+
+const readBusyUserIdsWithCache = async (cacheKey, matchPattern, keyPrefix, logLabel) => {
+    redisService.ensureRedis()
+    try {
+        const cached = await redisService.redisGet(cacheKey)
+        if (cached && Array.isArray(cached.busyUserIds)) {
+            return cached.busyUserIds
+        }
+    } catch (_) {}
+
+    const client = redisService.getRedis()
+    const busyUserIds = []
+    if (!client) return busyUserIds
+
+    let cursor = '0'
+    let scanCount = 0
+    const maxIterations = 100
+    do {
+        scanCount++
+        if (scanCount > maxIterations) {
+            console.error(`❌ [${logLabel}] Max iterations reached, breaking loop`)
+            break
+        }
+        const result = await client.scan(cursor, {
+            MATCH: matchPattern,
+            COUNT: 100,
+        })
+        let nextCursor
+        let keys
+        if (Array.isArray(result)) {
+            nextCursor = result[0]
+            keys = result[1] || []
+        } else if (result && typeof result === 'object') {
+            nextCursor = result.cursor
+            keys = result.keys || []
+        } else {
+            break
+        }
+        cursor = nextCursor.toString()
+        keys.forEach((key) => {
+            const userId = String(key).replace(keyPrefix, '')
+            if (userId) busyUserIds.push(userId)
+        })
+    } while (cursor !== '0')
+
+    void redisService.redisSet(cacheKey, { busyUserIds }, BUSY_GAME_LIST_CACHE_TTL_SEC)
+    return busyUserIds
+}
+
 // Get all users who are currently in active chess games
 export const getBusyChessUsers = async (req, res) => {
     try {
-        redisService.ensureRedis()
-        const client = redisService.getRedis()
-        const busyUserIds = []
-        let cursor = '0'
-        let scanCount = 0
-        const maxIterations = 100
-        
-        do {
-            scanCount++
-            if (scanCount > maxIterations) {
-                console.error('❌ [getBusyChessUsers] Max iterations reached, breaking loop')
-                break
-            }
-            
-            const result = await client.scan(cursor, {
-                MATCH: 'activeChessGame:*',
-                COUNT: 100
-            })
-            
-            // Handle both array [cursor, keys] and object {cursor, keys} formats
-            let nextCursor, keys
-            if (Array.isArray(result)) {
-                nextCursor = result[0]
-                keys = result[1] || []
-            } else if (result && typeof result === 'object') {
-                nextCursor = result.cursor
-                keys = result.keys || []
-            } else {
-                break
-            }
-            
-            cursor = nextCursor.toString()
-            
-            // Extract user IDs from keys (format: activeChessGame:userId)
-            keys.forEach(key => {
-                const userId = key.replace('activeChessGame:', '')
-                if (userId) {
-                    busyUserIds.push(userId)
-                }
-            })
-        } while (cursor !== '0')
-        
+        const busyUserIds = await readBusyUserIdsWithCache(
+            'cache:busyChessUsers',
+            'activeChessGame:*',
+            'activeChessGame:',
+            'getBusyChessUsers',
+        )
         res.status(200).json({ busyUserIds })
+        // Backup: remove stuck chess Live posts from DB when nobody is in that game anymore.
+        void maybeCleanupOrphanGamePosts('chess', busyUserIds)
     } catch (error) {
         console.error('Error in getBusyChessUsers:', error)
         res.status(500).json({ error: error.message || "Failed to get busy chess users" })
@@ -1104,49 +1122,15 @@ export const getBusyChessUsers = async (req, res) => {
 // Get all users who are currently in active card games
 export const getBusyCardUsers = async (req, res) => {
     try {
-        redisService.ensureRedis()
-        const client = redisService.getRedis()
-        const busyUserIds = []
-        let cursor = '0'
-        let scanCount = 0
-        const maxIterations = 100
-        
-        do {
-            scanCount++
-            if (scanCount > maxIterations) {
-                console.error('❌ [getBusyCardUsers] Max iterations reached, breaking loop')
-                break
-            }
-            
-            const result = await client.scan(cursor, {
-                MATCH: 'activeCardGame:*',
-                COUNT: 100
-            })
-            
-            // Handle both array [cursor, keys] and object {cursor, keys} formats
-            let nextCursor, keys
-            if (Array.isArray(result)) {
-                nextCursor = result[0]
-                keys = result[1] || []
-            } else if (result && typeof result === 'object') {
-                nextCursor = result.cursor
-                keys = result.keys || []
-            } else {
-                break
-            }
-            
-            cursor = nextCursor.toString()
-            
-            // Extract user IDs from keys (format: activeCardGame:userId)
-            keys.forEach(key => {
-                const userId = key.replace('activeCardGame:', '')
-                if (userId) {
-                    busyUserIds.push(userId)
-                }
-            })
-        } while (cursor !== '0')
-        
+        const busyUserIds = await readBusyUserIdsWithCache(
+            'cache:busyCardUsers',
+            'activeCardGame:*',
+            'activeCardGame:',
+            'getBusyCardUsers',
+        )
         res.status(200).json({ busyUserIds })
+        // Backup: remove stuck Go Fish Live posts from DB when nobody is in that game anymore.
+        void maybeCleanupOrphanGamePosts('card', busyUserIds)
     } catch (error) {
         console.error('Error in getBusyCardUsers:', error)
         res.status(500).json({ error: error.message || "Failed to get busy card users" })
