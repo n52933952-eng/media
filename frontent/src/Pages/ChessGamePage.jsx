@@ -1740,15 +1740,33 @@ const ChessGamePage = () => {
             <Box bg={bgColor} minH="100vh" display="flex" flexDirection="column" alignItems="center" justifyContent="center" px={4}>
                 <Spinner size="xl" color="yellow.500" mb={4} />
                 <Text fontSize="lg" color={textColor} mb={2}>Waiting for the game to start…</Text>
-                <Button
-                    mt={4}
-                    size="sm"
-                    variant="outline"
-                    colorScheme="red"
-                    onClick={() => abortUnstartedGame('never_started')}
-                >
-                    Cancel
-                </Button>
+                {isSpectator ? (
+                    <Button
+                        mt={4}
+                        size="sm"
+                        variant="outline"
+                        colorScheme="gray"
+                        onClick={() => {
+                            // Spectators only leave — never cancel the match for the two players.
+                            localStorage.removeItem('chessOrientation')
+                            localStorage.removeItem('gameLive')
+                            localStorage.removeItem('chessRoomId')
+                            navigate('/home')
+                        }}
+                    >
+                        Leave
+                    </Button>
+                ) : (
+                    <Button
+                        mt={4}
+                        size="sm"
+                        variant="outline"
+                        colorScheme="red"
+                        onClick={() => abortUnstartedGame('never_started')}
+                    >
+                        Cancel
+                    </Button>
+                )}
             </Box>
         )
     }

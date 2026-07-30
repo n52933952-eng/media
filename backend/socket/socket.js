@@ -3594,12 +3594,25 @@ export const initializeSocket = async (app) => {
         })
 
         // Game never reached a playable board — clear both players and feed posts.
+        // Only a real player may cancel — spectators must not end the match for others.
         socket.on('cancelChessGameStart', async ({ roomId, reason }) => {
             try {
                 if (!roomId || typeof roomId !== 'string' || !roomId.startsWith('chess_')) return
                 const parts = roomId.split('_')
                 const player1 = parts.length >= 3 ? (normalizeUserId(parts[1]) || parts[1]) : null
                 const player2 = parts.length >= 3 ? (normalizeUserId(parts[2]) || parts[2]) : null
+                const requesterId = normalizeUserId(socket.handshake?.query?.userId)
+                if (
+                    !requesterId ||
+                    !player1 ||
+                    !player2 ||
+                    (requesterId !== player1 && requesterId !== player2)
+                ) {
+                    console.warn(
+                        `⚠️ [cancelChessGameStart] Ignored — requester not a player room:${roomId} user:${requesterId || '-'}`,
+                    )
+                    return
+                }
                 const endReason = reason === 'start_timeout' ? 'start_timeout' : 'never_started'
                 const endPayload = { roomId, reason: endReason }
 
@@ -4460,12 +4473,25 @@ export const initializeSocket = async (app) => {
         })
 
         // Game never reached a playable board — clear both players.
+        // Only a real player may cancel — spectators must not end the match for others.
         socket.on('cancelCardGameStart', async ({ roomId, reason }) => {
             try {
                 if (!roomId || typeof roomId !== 'string' || !roomId.startsWith('card_')) return
                 const parts = roomId.split('_')
                 const player1 = parts.length >= 3 ? (normalizeUserId(parts[1]) || parts[1]) : null
                 const player2 = parts.length >= 3 ? (normalizeUserId(parts[2]) || parts[2]) : null
+                const requesterId = normalizeUserId(socket.handshake?.query?.userId)
+                if (
+                    !requesterId ||
+                    !player1 ||
+                    !player2 ||
+                    (requesterId !== player1 && requesterId !== player2)
+                ) {
+                    console.warn(
+                        `⚠️ [cancelCardGameStart] Ignored — requester not a player room:${roomId} user:${requesterId || '-'}`,
+                    )
+                    return
+                }
                 const endReason = reason === 'start_timeout' ? 'start_timeout' : 'never_started'
                 const endPayload = { roomId, reason: endReason, message: 'Game could not start' }
 
