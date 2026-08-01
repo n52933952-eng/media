@@ -1802,6 +1802,7 @@ export const initializeSocket = async (app) => {
             setTimeout(async () => {
                 const sock = io.sockets.sockets.get(connectSid)
                 if (!sock) return
+                let deliveredChessAccept = false
                 try {
                     const pendingChess = await takePendingChessAcceptForUser(connectUserId)
                     if (pendingChess?.roomId && pendingChess.yourColor && pendingChess.opponentId) {
@@ -1816,10 +1817,78 @@ export const initializeSocket = async (app) => {
                                 opponentId: pendingChess.opponentId,
                             })
                             sock.join(pendingChess.roomId)
+                            deliveredChessAccept = true
+                            // Same as card: push board state so reconnect isn't stuck on Waiting…
+                            try {
+                                const gs = await getChessGameState(pendingChess.roomId)
+                                if (gs) {
+                                    io.to(connectSid).emit('chessGameState', {
+                                        roomId: pendingChess.roomId,
+                                        fen: gs.fen,
+                                        capturedWhite: gs.capturedWhite || [],
+                                        capturedBlack: gs.capturedBlack || [],
+                                        player1Id: pendingChess.yourColor === 'white'
+                                            ? connectUserId
+                                            : pendingChess.opponentId,
+                                        player2Id: pendingChess.yourColor === 'white'
+                                            ? pendingChess.opponentId
+                                            : connectUserId,
+                                    })
+                                }
+                            } catch (_) {}
                         }
                     }
                 } catch (e) {
                     console.error(`❌ [socket] Error delivering pending chess accept for ${connectUserId}:`, e.message)
+                }
+                // Backup (like cardGameRecovery): pending may be gone after TTL, but activeChessGame remains.
+                // Reuse acceptChessChallenge so mobile/web need no new listeners.
+                if (!deliveredChessAccept) {
+                    try {
+                        const activeChessRoom = await getActiveChessGame(connectUserId)
+                        if (activeChessRoom) {
+                            const chessState = await getChessGameState(activeChessRoom).catch(() => null)
+                            if (chessState) {
+                                const roomMatch = String(activeChessRoom).match(/^chess_(.+?)_(.+?)_\d+$/)
+                                const p1 = roomMatch
+                                    ? (normalizeUserId(roomMatch[1]) || roomMatch[1])
+                                    : null
+                                const p2 = roomMatch
+                                    ? (normalizeUserId(roomMatch[2]) || roomMatch[2])
+                                    : null
+                                const uid = normalizeUserId(connectUserId) || connectUserId
+                                if (p1 && p2 && (uid === p1 || uid === p2)) {
+                                    const yourColor = uid === p1 ? 'white' : 'black'
+                                    const opponentId = uid === p1 ? p2 : p1
+                                    const sockNow = io.sockets.sockets.get(connectSid)
+                                    if (sockNow) {
+                                        sockNow.join(activeChessRoom)
+                                        io.to(connectSid).emit('acceptChessChallenge', {
+                                            roomId: activeChessRoom,
+                                            yourColor,
+                                            opponentId,
+                                        })
+                                        io.to(connectSid).emit('chessGameState', {
+                                            roomId: activeChessRoom,
+                                            fen: chessState.fen,
+                                            capturedWhite: chessState.capturedWhite || [],
+                                            capturedBlack: chessState.capturedBlack || [],
+                                            player1Id: p1,
+                                            player2Id: p2,
+                                        })
+                                        debugLog(
+                                            `♟️ [socket] Auto-delivered chess recovery accept to ${connectUserId} for room ${activeChessRoom}`,
+                                        )
+                                    }
+                                }
+                            } else {
+                                await deleteActiveChessGame(connectUserId).catch(() => {})
+                                debugLog(`🧹 [socket] Cleaned orphan activeChessGame for ${connectUserId}`)
+                            }
+                        }
+                    } catch (e) {
+                        console.error(`❌ [socket] Error auto-recovering chess for ${connectUserId}:`, e.message)
+                    }
                 }
                 try {
                     const pendingCard = await takePendingCardAcceptForUser(connectUserId)
@@ -3555,8 +3624,9 @@ export const initializeSocket = async (app) => {
                     lastUpdated: Date.now()
                 })
                 debugLog(`💾 Initialized game state for room ${roomId} in Redis`)
-                await deletePendingChessAcceptForUser(toId).catch(() => {})
-                await deletePendingChessAcceptForUser(fromId).catch(() => {})
+                // Keep pendingChessAccept (TTL ~120s) so an offline challenger/accepter
+                // still gets acceptChessChallenge on reconnect — same idea as card.
+                // Do NOT clear pending here.
                 // One state push so anyone who joined early gets the board without waiting forever.
                 const startPayload = {
                     roomId,
