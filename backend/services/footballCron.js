@@ -901,31 +901,25 @@ export const initializeFootballCron = () => {
     // - Weekdays: 18:00-22:00 UTC (evening matches)
     // - Off-hours: Don't poll (or very rarely)
     
-    // OPTIMIZED FOR FOOTBALL-DATA.ORG FREE TIER (10 requests/minute = 600/hour = 14,400/day max)
-    // Strategy: Longer cache (60s) + Smart polling = Maximum API savings
-    // Cache TTL (60s) means cache refreshes every minute
-    // Weekend matches (Saturday & Sunday): Poll every 2 minutes during 12:00-22:00 UTC
-    // With cache: ~10 hours × 30 calls/hour = 300 calls for 2 days = ~150 calls/day average
-    // BUT: Cache serves all users, so actual API usage = ~150 calls/day (well under limit!)
-    // Only log detailed debug info in development
+    // Free tier: 10 req/min. Live cron every 1 min + ~50s cache = ~1 LIVE API call/min in peak windows.
     const isDev = process.env.NODE_ENV !== 'production'
     
     // IMPORTANT: football-data.org free tier = 10 requests/minute
-    // So we can poll every 6 seconds maximum, but we'll be more conservative
-    // Poll every 2 minutes during match hours (30 requests/hour = safe)
-    cron.schedule('*/2 12-22 * * 6,0', async () => {
+    // Live poll every 1 minute during match hours (~1 LIVE request/min — well under limit).
+    // Weekend matches (Saturday & Sunday): Poll every 1 minute during 12:00-22:00 UTC
+    cron.schedule('*/1 12-22 * * 6,0', async () => {
         if (isDev) {
             const timestamp = new Date().toLocaleString('en-US', { timeZone: 'UTC' })
-            console.log(`⚽ [CRON] Running live match update (weekend: every 2 min) - ${timestamp} UTC`)
+            console.log(`⚽ [CRON] Running live match update (weekend: every 1 min) - ${timestamp} UTC`)
         }
         await fetchAndUpdateLiveMatches()
     })
     
-    // Weekday evening matches (Mon-Fri): Poll every 2 minutes during 18:00-22:00 UTC
-    cron.schedule('*/2 18-22 * * 1-5', async () => {
+    // Weekday evening matches (Mon-Fri): Poll every 1 minute during 18:00-22:00 UTC
+    cron.schedule('*/1 18-22 * * 1-5', async () => {
         if (isDev) {
             const timestamp = new Date().toLocaleString('en-US', { timeZone: 'UTC' })
-            console.log(`⚽ [CRON] Running live match update (weekday: every 2 min) - ${timestamp} UTC`)
+            console.log(`⚽ [CRON] Running live match update (weekday: every 1 min) - ${timestamp} UTC`)
         }
         await fetchAndUpdateLiveMatches()
     })
@@ -939,9 +933,7 @@ export const initializeFootballCron = () => {
         await fetchAndUpdateLiveMatches()
     })
     
-    // Total: ~150 (weekends) + ~30 (weekdays) + ~144 (off-hours) = ~324 calls/day
-    // Plus daily fixtures (~6 leagues × 1 call) = ~330 calls/day total
-    // This is well under the 14,400/day free tier limit! ✅
+    // Peak ~1 LIVE call/min in windows above; off-hours */10. Still well under free-tier limits.
     
     // Job 2: Fetch today's fixtures once at 6 AM UTC
     cron.schedule('0 6 * * *', async () => {
