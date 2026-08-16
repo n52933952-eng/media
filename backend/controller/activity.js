@@ -3,7 +3,7 @@ import { getIO, getUserSelfRoomId } from '../socket/socket.js'
 import Follow from '../models/follow.js'
 
 // How long an activity stays visible/stored. Keep server + clients in sync.
-export const ACTIVITY_RETENTION_HOURS = 12
+export const ACTIVITY_RETENTION_HOURS = 24 * 7
 const ACTIVITY_RETENTION_MS = ACTIVITY_RETENTION_HOURS * 60 * 60 * 1000
 
 // Max activities kept per creator. Keep server + clients in sync.
