@@ -7,7 +7,7 @@ export const ACTIVITY_RETENTION_HOURS = 24 * 7
 const ACTIVITY_RETENTION_MS = ACTIVITY_RETENTION_HOURS * 60 * 60 * 1000
 
 // Max activities kept per creator. Keep server + clients in sync.
-export const ACTIVITY_MAX_PER_USER = 40
+export const ACTIVITY_MAX_PER_USER = 200
 
 /** Fan-out newActivity to followers' self-rooms in the background (non-blocking). */
 function emitActivityToFollowersInBackground(userId, activityPayload) {
