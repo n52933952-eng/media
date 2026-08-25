@@ -234,7 +234,19 @@ const UserHeader = ({ users, activeTab, setActiveTab, onUserFollowed, postsCount
        </Flex>
     
     
-    <Text>{users?.bio}</Text>
+    {users?.bio ? (
+      <Box
+        w="full"
+        pb={3}
+        mb={1}
+        borderBottomWidth="1px"
+        borderColor={statBorder}
+      >
+        <Text wordBreak="break-word" whiteSpace="pre-wrap">
+          {users.bio}
+        </Text>
+      </Box>
+    ) : null}
    
     {currentUser?._id === users?._id && (
       <Flex gap={2} flexWrap="wrap">

@@ -337,7 +337,10 @@ export const markLiveKitDirectCallAnswered = async (userId, targetId) => {
     if (receiverId !== uid) return false
     const callerId = normalizeUserId(ringing.callerId)
     clearLiveKitRingTimeout(callerId, receiverId, ringing.roomName)
+    clearLiveKitPairConnectTimeout(callerId, receiverId, ringing.roomName)
     await clearCallRinging(callerId, receiverId)
+    // Fresh grace from answer — caller may still be joining LiveKit on weak WiFi.
+    scheduleLiveKitPairConnectCheck(callerId, receiverId, ringing.roomName)
     debugLog(`✅ [LiveKit] Ring answered — cleared ring timeout caller:${callerId} callee:${uid}`)
     return true
 }
