@@ -59,13 +59,28 @@ function refreshLiveElapsedMinute(matchLike) {
 
     const wallMin = Math.floor((Date.now() - kick.getTime()) / (1000 * 60))
 
-    if (short === 'HT' || short === 'PAUSED') return null
+    if (short === 'HT' || short === 'PAUSED') {
+        if (wallMin >= 95) {
+            const approx = 90 + Math.max(0, wallMin - 105)
+            return Math.min(Math.max(approx, 90), 120)
+        }
+        return null
+    }
+
+    if (short === 'BT') {
+        const approx = 90 + Math.max(0, wallMin - 105)
+        return Math.min(Math.max(approx, 90), 120)
+    }
 
     if (short === '1H' || short === 'LIVE') {
         return Math.min(Math.max(wallMin, 0), 54)
     }
 
     if (short === '2H' || short === 'IN_PLAY') {
+        if (wallMin >= 115) {
+            const approx = 90 + Math.max(0, wallMin - 105)
+            return Math.min(Math.max(approx, 90), 120)
+        }
         const approx = 45 + Math.max(0, wallMin - 60)
         return Math.min(Math.max(approx, 45), 95)
     }
@@ -75,7 +90,7 @@ function refreshLiveElapsedMinute(matchLike) {
         return Math.min(Math.max(approx, 90), 120)
     }
 
-    if (short === 'P') return 90
+    if (short === 'P') return 120
 
     return matchLike?.fixture?.status?.elapsed ?? null
 }

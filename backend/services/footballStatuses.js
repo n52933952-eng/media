@@ -27,39 +27,49 @@ export const FINISHED_STATUS_SHORT = [
     'WO',
 ]
 
-/** Still in play — do not treat minute 90+ as full time. */
-export const EXTRA_TIME_LIVE_SHORT = ['ET', 'P']
+/**
+ * Still in play — do not treat minute 90+ as full time.
+ * 'BT' is the break inside overtime (before ET, or between ET halves).
+ * 'HT' after ~95m from kickoff is the extra-time break, not first-half pause.
+ */
+export const EXTRA_TIME_LIVE_SHORT = ['ET', 'P', 'BT']
 
-/** Minutes after kickoff before Mongo row is forced to FT (cron). */
+/** Kickoff age where a PAUSED/'HT' row is the extra-time break, not half time. */
+export const OVERTIME_BREAK_AFTER_KICKOFF_MINUTES = 95
+
+/**
+ * Last-resort clock: only force FT after extra time + penalties could have ended.
+ * Real full-time comes from the API (`?ids=` verify). 110m was killing knockout extra time.
+ */
 export const STALE_LIVE_AFTER_KICKOFF_MINUTES = (() => {
     const raw = Number(process.env.FOOTBALL_STALE_LIVE_MINUTES)
-    return Number.isFinite(raw) && raw >= 105 ? raw : 110
+    return Number.isFinite(raw) && raw >= 150 ? raw : 200
 })()
 
 const STALE_ET_KICKOFF_MINUTES = (() => {
     const raw = Number(process.env.FOOTBALL_STALE_ET_MINUTES)
-    return Number.isFinite(raw) && raw >= 120 ? raw : 150
+    return Number.isFinite(raw) && raw >= 160 ? raw : 200
 })()
 
 const STALE_PEN_KICKOFF_MINUTES = (() => {
     const raw = Number(process.env.FOOTBALL_STALE_PEN_MINUTES)
-    return Number.isFinite(raw) && raw >= 140 ? raw : 175
+    return Number.isFinite(raw) && raw >= 180 ? raw : 225
 })()
 
-/** UI: Finished badge (normal regulation, no ET). */
+/** UI: Finished badge for regulation (2H stoppage can run past 108m). */
 export const DISPLAY_FINISHED_AFTER_KICKOFF_MINUTES = (() => {
     const raw = Number(process.env.FOOTBALL_DISPLAY_FINISHED_MINUTES)
-    return Number.isFinite(raw) && raw >= 95 ? raw : 108
+    return Number.isFinite(raw) && raw >= 115 ? raw : 125
 })()
 
 const DISPLAY_ET_KICKOFF_MINUTES = (() => {
     const raw = Number(process.env.FOOTBALL_DISPLAY_ET_FINISHED_MINUTES)
-    return Number.isFinite(raw) && raw >= 120 ? raw : 138
+    return Number.isFinite(raw) && raw >= 160 ? raw : 185
 })()
 
 const DISPLAY_PEN_KICKOFF_MINUTES = (() => {
     const raw = Number(process.env.FOOTBALL_DISPLAY_PEN_FINISHED_MINUTES)
-    return Number.isFinite(raw) && raw >= 150 ? raw : 168
+    return Number.isFinite(raw) && raw >= 180 ? raw : 210
 })()
 
 function kickoffAgeMinutes(match) {
@@ -68,15 +78,28 @@ function kickoffAgeMinutes(match) {
     return (Date.now() - kickoff) / (60 * 1000)
 }
 
-function staleKickoffThresholdMinutes(short) {
+/** True when this live row is (or is about to be) extra time / penalties. */
+export function isOvertimePhase(short, ageMin) {
+    if (EXTRA_TIME_LIVE_SHORT.includes(short)) return true
+    if ((short === 'HT' || short === 'PAUSED') && ageMin >= OVERTIME_BREAK_AFTER_KICKOFF_MINUTES) {
+        return true
+    }
+    // 2H stored past ~115m is almost always extra time the API has not labelled yet.
+    if ((short === '2H' || short === 'IN_PLAY' || short === 'LIVE') && ageMin >= 115) {
+        return true
+    }
+    return false
+}
+
+function staleKickoffThresholdMinutes(short, ageMin) {
     if (short === 'P') return STALE_PEN_KICKOFF_MINUTES
-    if (short === 'ET') return STALE_ET_KICKOFF_MINUTES
+    if (isOvertimePhase(short, ageMin)) return STALE_ET_KICKOFF_MINUTES
     return STALE_LIVE_AFTER_KICKOFF_MINUTES
 }
 
-function displayFinishedKickoffThresholdMinutes(short) {
+function displayFinishedKickoffThresholdMinutes(short, ageMin) {
     if (short === 'P') return DISPLAY_PEN_KICKOFF_MINUTES
-    if (short === 'ET') return DISPLAY_ET_KICKOFF_MINUTES
+    if (isOvertimePhase(short, ageMin)) return DISPLAY_ET_KICKOFF_MINUTES
     return DISPLAY_FINISHED_AFTER_KICKOFF_MINUTES
 }
 
@@ -93,15 +116,10 @@ export function isStaleLiveMatchRow(match) {
     if (!Number.isFinite(kickoff)) return false
 
     const ageMin = kickoffAgeMinutes(match)
-    if (ageMin >= staleKickoffThresholdMinutes(short)) return true
-
-    // Regulation only: 90'+ with kickoff past ~105m (injury time), never while ET/P
-    if (!EXTRA_TIME_LIVE_SHORT.includes(short)) {
-        const elapsed = match.fixture?.status?.elapsed
-        if (typeof elapsed === 'number' && elapsed >= 90 && ageMin >= 105) {
-            return true
-        }
+    if (isOvertimePhase(short, ageMin)) {
+        return ageMin >= staleKickoffThresholdMinutes(short, ageMin)
     }
+    if (ageMin >= staleKickoffThresholdMinutes(short, ageMin)) return true
 
     return false
 }
@@ -117,17 +135,9 @@ export function isEffectivelyFinishedForDisplay(match) {
     if (!short || !LIVE_STATUS_SHORT.includes(short)) return false
 
     const ageMin = kickoffAgeMinutes(match)
-    if (ageMin >= displayFinishedKickoffThresholdMinutes(short)) return true
+    if (ageMin >= displayFinishedKickoffThresholdMinutes(short, ageMin)) return true
 
-    // Normal match: 90'+ only after regulation window (~105m from kickoff), not at HT→ET break
-    if (!EXTRA_TIME_LIVE_SHORT.includes(short)) {
-        const elapsed = match.fixture?.status?.elapsed
-        if (typeof elapsed === 'number' && elapsed >= 90 && ageMin >= 105) {
-            return true
-        }
-    }
-
-    return isStaleLiveMatchRow(match)
+    return false
 }
 
 /**
@@ -149,10 +159,24 @@ export function getMatchDisplayStatus(match) {
     if (isEffectivelyFinishedForDisplay(match)) {
         return { kind: 'finished', label: 'FINISHED', elapsed: elapsed ?? 90 }
     }
+    const ageMin = match?.fixture?.date ? kickoffAgeMinutes(match) : 0
+    if (short === 'HT' && ageMin >= OVERTIME_BREAK_AFTER_KICKOFF_MINUTES) {
+        return { kind: 'extratime', label: 'EXTRA TIME', elapsed }
+    }
     if (short === 'HT') {
         return { kind: 'halftime', label: 'HALF TIME', elapsed: elapsed ?? 45 }
     }
     if (short === 'ET') {
+        return {
+            kind: 'extratime',
+            label: elapsed != null && elapsed > 90 ? `ET ${elapsed}'` : 'ET',
+            elapsed,
+        }
+    }
+    if (short === 'BT') {
+        return { kind: 'extratime', label: 'EXTRA TIME', elapsed }
+    }
+    if ((short === '2H' || short === 'IN_PLAY' || short === 'LIVE') && ageMin >= 115) {
         return {
             kind: 'extratime',
             label: elapsed != null && elapsed > 90 ? `ET ${elapsed}'` : 'ET',

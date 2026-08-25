@@ -98,16 +98,78 @@ const getCompetitionCode = (matchData) => {
     return null
 }
 
-// Status code mapping
+// Status code mapping — covers every value in the football-data.org v4 status enum.
+// EXTRA_TIME / PENALTY_SHOOTOUT are NOT part of their `?status=LIVE` filter, so they must be
+// mapped explicitly or a knockout match looks finished the moment extra time begins.
 const STATUS_MAP = {
     'SCHEDULED': { short: 'NS', long: 'Not Started' },
+    'TIMED': { short: 'NS', long: 'Not Started' },
     'LIVE': { short: '1H', long: 'First Half' },
     'IN_PLAY': { short: '2H', long: 'Second Half' },
     'PAUSED': { short: 'HT', long: 'Half Time' },
+    'EXTRA_TIME': { short: 'ET', long: 'Extra Time' },
+    'PENALTY_SHOOTOUT': { short: 'P', long: 'Penalty Shootout' },
     'FINISHED': { short: 'FT', long: 'Full Time' },
     'POSTPONED': { short: 'POSTP', long: 'Postponed' },
     'SUSPENDED': { short: 'SUSP', long: 'Suspended' },
-    'CANCELLED': { short: 'CANC', long: 'Cancelled' }
+    'CANCELLED': { short: 'CANC', long: 'Cancelled' },
+    'AWARDED': { short: 'AWD', long: 'Awarded' }
+}
+
+/** football-data.org `score.duration`: REGULAR | EXTRA_TIME | PENALTY_SHOOTOUT */
+const scoreDurationOf = (matchData) => String(matchData?.score?.duration || 'REGULAR').toUpperCase()
+
+/**
+ * Resolve the stored status code. `status` is authoritative, but `score.duration` is used as a
+ * second signal so a match sitting in IN_PLAY/PAUSED during overtime is not mistaken for
+ * regulation play, and a finished knockout is recorded as AET / PEN rather than plain FT.
+ */
+const resolveStatusCodes = (apiStatus, matchData) => {
+    const duration = scoreDurationOf(matchData)
+    const inOvertime = duration === 'EXTRA_TIME' || duration === 'PENALTY_SHOOTOUT'
+    const kickoff = new Date(matchData?.utcDate || matchData?.date || 0).getTime()
+    const ageMin =
+        Number.isFinite(kickoff) && kickoff > 0 ? (Date.now() - kickoff) / (60 * 1000) : 0
+    // After 90'+ the API often stays on PAUSED/IN_PLAY with duration still REGULAR.
+    const latePause = apiStatus === 'PAUSED' && ageMin >= 95
+    const latePlay = (apiStatus === 'IN_PLAY' || apiStatus === 'LIVE') && ageMin >= 115
+
+    if (apiStatus === 'FINISHED') {
+        if (duration === 'PENALTY_SHOOTOUT') return { short: 'PEN', long: 'Finished After Penalties' }
+        if (duration === 'EXTRA_TIME') return { short: 'AET', long: 'Finished After Extra Time' }
+        return STATUS_MAP.FINISHED
+    }
+    if ((apiStatus === 'IN_PLAY' || apiStatus === 'LIVE') && (inOvertime || latePlay)) {
+        return duration === 'PENALTY_SHOOTOUT' ? STATUS_MAP.PENALTY_SHOOTOUT : STATUS_MAP.EXTRA_TIME
+    }
+    // A break during overtime is not half time — 'BT' keeps it live without the 45' regulation rules.
+    if (apiStatus === 'PAUSED' && (inOvertime || latePause)) {
+        return { short: 'BT', long: 'Break Time' }
+    }
+
+    const mapped = STATUS_MAP[apiStatus]
+    if (!mapped) {
+        console.warn(`⚠️ [convertMatchFormat] Unknown football-data.org status "${apiStatus}" — treating as scheduled`)
+        return STATUS_MAP.SCHEDULED
+    }
+    return mapped
+}
+
+/** Rough minute for the badge. Overtime is allowed past 90; the API gives us no live clock. */
+const estimateElapsed = (statusShort, matchData) => {
+    const kickoff = new Date(matchData.utcDate).getTime()
+    const sinceKickoff = Number.isFinite(kickoff)
+        ? Math.max(0, Math.floor((Date.now() - kickoff) / (1000 * 60)))
+        : 0
+
+    if (statusShort === 'P') return 120
+    if (statusShort === 'ET' || statusShort === 'BT') {
+        // ~15m half-time break sits between kickoff and the 90' mark.
+        return Math.max(91, Math.min(sinceKickoff - 15, 120))
+    }
+    if (statusShort === '1H' || statusShort === '2H') return Math.min(sinceKickoff, 90)
+    if (statusShort === 'HT') return 45
+    return null
 }
 
 // Helper: Convert football-data.org match format to our database format
@@ -117,21 +179,11 @@ const convertMatchFormat = (matchData) => {
     
     // Map football-data.org status to our internal format
     const apiStatus = matchData.status || 'SCHEDULED'
-    const statusMapping = STATUS_MAP[apiStatus] || STATUS_MAP['SCHEDULED']
+    const statusMapping = resolveStatusCodes(apiStatus, matchData)
     const statusShort = statusMapping.short
     const statusLong = statusMapping.long
-    
-    // Calculate elapsed time for live matches
-    let elapsed = null
-    if (apiStatus === 'LIVE' || apiStatus === 'IN_PLAY') {
-        const matchStart = new Date(matchData.utcDate)
-        const now = new Date()
-        const diffMs = now - matchStart
-        const diffMinutes = Math.floor(diffMs / (1000 * 60))
-        elapsed = Math.max(0, Math.min(diffMinutes, 90))
-    } else if (apiStatus === 'PAUSED') {
-        elapsed = 45
-    }
+
+    const elapsed = estimateElapsed(statusShort, matchData)
     
     // Get scores
     const score = matchData.score || {}
@@ -246,6 +298,35 @@ const fetchFromAPI = async (endpoint) => {
         console.error('⚽ [fetchFromAPI] Fetch Error:', error.message)
         return { success: false, error: error.message }
     }
+}
+
+/** Cap the `?ids=` list so one verification stays a single small request. */
+const MAX_VERIFY_IDS = 20
+
+/**
+ * Read the true status of matches that vanished from the live poll.
+ * One request for the whole batch; an empty map means "could not confirm" and callers must not
+ * assume the match finished.
+ * @returns {Promise<Map<number, object>>} fixtureId → raw football-data.org match
+ */
+const verifyOmittedMatchStatuses = async (fixtureIds) => {
+    const result = new Map()
+    const ids = [...new Set(fixtureIds.filter((id) => Number.isFinite(id)))].slice(0, MAX_VERIFY_IDS)
+    if (ids.length === 0) return result
+
+    const res = await fetchFromAPI(`/matches?ids=${ids.join(',')}`)
+    if (!res.success || !Array.isArray(res.data)) {
+        console.warn(
+            `⚠️ [verifyOmittedMatchStatuses] Could not confirm ${ids.length} match(es): ${res.error || 'no data'}`
+        )
+        return result
+    }
+
+    for (const m of res.data) {
+        const fid = typeof m?.id === 'string' ? parseInt(m.id, 10) : Number(m?.id)
+        if (Number.isFinite(fid)) result.set(fid, m)
+    }
+    return result
 }
 
 // getFootballAccount is imported from '../controller/football.js' - no need to redeclare
@@ -439,9 +520,6 @@ const fetchAndUpdateLiveMatches = async () => {
         if (isDev) {
             console.log('⚽ [fetchAndUpdateLiveMatches] Fetching live matches...')
         }
-        
-        // Reconcile first: no API cost — fixes rows stuck LIVE after full time
-        await reconcileStaleLiveMatches(Match)
 
         // Get date range for today (UTC calendar day)
         const now = new Date()
@@ -555,6 +633,12 @@ const fetchAndUpdateLiveMatches = async () => {
         const MIN_MS_AFTER_KICKOFF_BEFORE_OMISSION_FT = 45 * 60 * 1000 // avoid kickoff/API lag false positives
 
         if (canInferFinishedFromOmission) {
+            /**
+             * Absence from `?status=LIVE` does NOT mean the match is over: that filter only covers
+             * IN_PLAY + PAUSED, so a match drops out the moment it enters EXTRA_TIME or
+             * PENALTY_SHOOTOUT. Confirm the real status with one `?ids=` lookup before writing FT.
+             */
+            const omitted = []
             for (const dbMatch of previouslyLiveMatches) {
                 const dbFixtureId = toFixtureIdNum(dbMatch.fixtureId)
                 if (Number.isNaN(dbFixtureId)) {
@@ -569,24 +653,58 @@ const fetchAndUpdateLiveMatches = async () => {
                     Number.isFinite(kickoff) && Date.now() - kickoff >= MIN_MS_AFTER_KICKOFF_BEFORE_OMISSION_FT
                 if (!kickoffOk) continue
 
-                console.log(
-                    `  🏁 Match finished (not in live response): ${dbMatch.teams?.home?.name} vs ${dbMatch.teams?.away?.name}`
-                )
+                omitted.push({ fixtureId: dbFixtureId, dbMatch })
+            }
 
-                await Match.findOneAndUpdate(
-                    { fixtureId: dbFixtureId },
-                    {
-                        'fixture.status.short': 'FT',
-                        'fixture.status.long': 'Full Time',
-                        'fixture.status.elapsed': 90,
+            if (omitted.length > 0) {
+                const verified = await verifyOmittedMatchStatuses(omitted.map((o) => o.fixtureId))
+
+                for (const { fixtureId, dbMatch } of omitted) {
+                    const label = `${dbMatch.teams?.home?.name} vs ${dbMatch.teams?.away?.name}`
+                    const apiMatch = verified.get(fixtureId)
+
+                    if (!apiMatch) {
+                        // Lookup unavailable (rate limit / error): leave it live. The stale-row
+                        // reconciler is the backstop for genuinely abandoned rows.
+                        console.warn(`  ⏳ Could not confirm status, keeping live: ${label}`)
+                        continue
                     }
-                )
+
+                    const codes = resolveStatusCodes(apiMatch.status || '', apiMatch)
+                    if (!FINISHED_STATUS_SHORT.includes(codes.short)) {
+                        console.log(`  ⏱️ Still playing (${codes.long}), keeping live: ${label}`)
+                        await Match.findOneAndUpdate(
+                            { fixtureId },
+                            {
+                                'fixture.status.short': codes.short,
+                                'fixture.status.long': codes.long,
+                                'fixture.status.elapsed': estimateElapsed(codes.short, apiMatch),
+                                lastUpdated: new Date(),
+                            }
+                        )
+                        continue
+                    }
+
+                    console.log(`  🏁 Match finished (${codes.long}): ${label}`)
+                    await Match.findOneAndUpdate(
+                        { fixtureId },
+                        {
+                            'fixture.status.short': codes.short,
+                            'fixture.status.long': codes.long,
+                            'fixture.status.elapsed': codes.short === 'FT' ? 90 : 120,
+                            lastUpdated: new Date(),
+                        }
+                    )
+                }
             }
         } else if (previouslyLiveMatches.length > 0 && isDev) {
             console.warn(
                 `⚽ [fetchAndUpdateLiveMatches] Skipping "omit from LIVE list ⇒ FT" (${previouslyLiveMatches.length} DB live rows): liveFixtureIds=${liveFixtureIds.size}, filtered=${filteredMatches.length}, rawLive=${rawLiveCount}`
             )
         }
+
+        // After ET/P rows are labelled, clock-FT only leftover abandoned live rows.
+        await reconcileStaleLiveMatches(Match)
         
         // Process live matches and update database/feed post
         for (const matchData of filteredMatches) {
