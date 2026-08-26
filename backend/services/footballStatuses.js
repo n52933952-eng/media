@@ -103,7 +103,6 @@ export function inferLiveShort(short, ageMin) {
     if (s === 'NS' || s === 'SCHEDULED') return s
 
     if (s === 'HT' || s === 'PAUSED') {
-        if (ageMin >= OVERTIME_BREAK_AFTER_KICKOFF_MINUTES) return 'BT'
         if (ageMin >= HT_STUCK_TO_2H_MIN) return '2H'
         return 'HT'
     }
@@ -115,10 +114,11 @@ export function inferLiveShort(short, ageMin) {
     }
 
     // IN_PLAY is both halves on football-data.org v4 (STATUS_MAP used to force 2H).
+    // Never promote to ET from the clock alone: league matches have no extra time, and a fake
+    // ET label pushes the finished/stale thresholds out to 185m+ so the row is stuck in Live.
     if (s === '2H' || s === 'IN_PLAY') {
         if (ageMin < HT_INFER_AFTER_MIN) return '1H'
         if (ageMin < HT_STUCK_TO_2H_MIN) return 'HT'
-        if (ageMin >= 115) return 'ET'
         return '2H'
     }
 
@@ -170,28 +170,24 @@ export function applyLiveClock(match) {
     }
 }
 
-/** True when this live row is (or is about to be) extra time / penalties. */
-export function isOvertimePhase(short, ageMin) {
-    if (EXTRA_TIME_LIVE_SHORT.includes(short)) return true
-    if ((short === 'HT' || short === 'PAUSED') && ageMin >= OVERTIME_BREAK_AFTER_KICKOFF_MINUTES) {
-        return true
-    }
-    // 2H stored past ~115m is almost always extra time the API has not labelled yet.
-    if ((short === '2H' || short === 'IN_PLAY' || short === 'LIVE') && ageMin >= 115) {
-        return true
-    }
-    return false
+/**
+ * True only when the API itself put this row in extra time / penalties (ET, BT, P — set from
+ * `status` + `score.duration`). Guessing overtime from the clock kept regulation matches live
+ * for 3+ hours, so age alone never counts.
+ */
+export function isOvertimePhase(short) {
+    return EXTRA_TIME_LIVE_SHORT.includes(short)
 }
 
-function staleKickoffThresholdMinutes(short, ageMin) {
+function staleKickoffThresholdMinutes(short) {
     if (short === 'P') return STALE_PEN_KICKOFF_MINUTES
-    if (isOvertimePhase(short, ageMin)) return STALE_ET_KICKOFF_MINUTES
+    if (isOvertimePhase(short)) return STALE_ET_KICKOFF_MINUTES
     return STALE_LIVE_AFTER_KICKOFF_MINUTES
 }
 
-function displayFinishedKickoffThresholdMinutes(short, ageMin) {
+function displayFinishedKickoffThresholdMinutes(short) {
     if (short === 'P') return DISPLAY_PEN_KICKOFF_MINUTES
-    if (isOvertimePhase(short, ageMin)) return DISPLAY_ET_KICKOFF_MINUTES
+    if (isOvertimePhase(short)) return DISPLAY_ET_KICKOFF_MINUTES
     return DISPLAY_FINISHED_AFTER_KICKOFF_MINUTES
 }
 
@@ -208,12 +204,7 @@ export function isStaleLiveMatchRow(match) {
     if (!Number.isFinite(kickoff)) return false
 
     const ageMin = kickoffAgeMinutes(match)
-    if (isOvertimePhase(short, ageMin)) {
-        return ageMin >= staleKickoffThresholdMinutes(short, ageMin)
-    }
-    if (ageMin >= staleKickoffThresholdMinutes(short, ageMin)) return true
-
-    return false
+    return ageMin >= staleKickoffThresholdMinutes(short)
 }
 
 /**
@@ -227,9 +218,7 @@ export function isEffectivelyFinishedForDisplay(match) {
     if (!short || !LIVE_STATUS_SHORT.includes(short)) return false
 
     const ageMin = kickoffAgeMinutes(match)
-    if (ageMin >= displayFinishedKickoffThresholdMinutes(short, ageMin)) return true
-
-    return false
+    return ageMin >= displayFinishedKickoffThresholdMinutes(short)
 }
 
 /**
@@ -252,7 +241,6 @@ export function getMatchDisplayStatus(match) {
     if (isEffectivelyFinishedForDisplay(clocked)) {
         return { kind: 'finished', label: 'FINISHED', elapsed: elapsed ?? 90 }
     }
-    const ageMin = clocked?.fixture?.date ? kickoffAgeMinutes(clocked) : 0
     if (short === 'HT') {
         return { kind: 'halftime', label: 'HALF TIME', elapsed: elapsed ?? 45 }
     }
@@ -265,13 +253,6 @@ export function getMatchDisplayStatus(match) {
     }
     if (short === 'BT') {
         return { kind: 'extratime', label: 'EXTRA TIME', elapsed }
-    }
-    if ((short === '2H' || short === 'IN_PLAY') && ageMin >= 115) {
-        return {
-            kind: 'extratime',
-            label: elapsed != null && elapsed > 90 ? `ET ${elapsed}'` : 'ET',
-            elapsed,
-        }
     }
     if (short === 'P') {
         return { kind: 'penalties', label: 'PENALTIES', elapsed }
@@ -295,18 +276,16 @@ export function enrichMatchForClient(match) {
 
 /**
  * Current score from a football-data.org `score` object.
- * Live rows sometimes fill `regularTime` before `fullTime`; never prefer an empty pair.
+ * Strict priority — `fullTime` is authoritative and running during play. Picking the highest
+ * total across pairs inflated scores (halfTime/regularTime can disagree mid-update).
  */
 export function pickLiveGoals(score) {
-    const pairs = [score?.fullTime, score?.regularTime, score?.halfTime]
-    const numbered = []
-    for (const p of pairs) {
-        if (!p) continue
-        if (p.home == null && p.away == null) continue
-        numbered.push({ home: p.home ?? 0, away: p.away ?? 0 })
+    for (const pair of [score?.fullTime, score?.regularTime, score?.halfTime]) {
+        if (!pair) continue
+        if (pair.home == null && pair.away == null) continue
+        return { home: pair.home ?? 0, away: pair.away ?? 0 }
     }
-    if (numbered.length === 0) return { home: null, away: null }
-    return numbered.reduce((a, b) => (a.home + a.away >= b.home + b.away ? a : b))
+    return { home: null, away: null }
 }
 
 /**
@@ -314,7 +293,13 @@ export function pickLiveGoals(score) {
  * Runs on every live cron tick — O(batch) indexed query, safe at scale.
  */
 export async function reconcileStaleLiveMatches(Match) {
-    const oldestCutoff = new Date(Date.now() - STALE_LIVE_AFTER_KICKOFF_MINUTES * 60 * 1000)
+    // Use the display threshold (~125m regulation) as the query cutoff, not the 200m backstop:
+    // otherwise a finished match sits in neither tab — filtered out of Live, still not FT in Mongo.
+    const earliestThreshold = Math.min(
+        DISPLAY_FINISHED_AFTER_KICKOFF_MINUTES,
+        STALE_LIVE_AFTER_KICKOFF_MINUTES,
+    )
+    const oldestCutoff = new Date(Date.now() - earliestThreshold * 60 * 1000)
 
     const candidates = await Match.find({
         'fixture.status.short': { $in: LIVE_STATUS_SHORT },
@@ -328,16 +313,17 @@ export async function reconcileStaleLiveMatches(Match) {
 
     let updated = 0
     for (const row of candidates) {
-        if (!isStaleLiveMatchRow(row)) continue
+        if (!isStaleLiveMatchRow(row) && !isEffectivelyFinishedForDisplay(row)) continue
 
         const fid = row.fixtureId
+        const wasOvertime = isOvertimePhase(row.fixture?.status?.short)
         await Match.updateOne(
             { fixtureId: fid },
             {
                 $set: {
-                    'fixture.status.short': 'FT',
-                    'fixture.status.long': 'Full Time',
-                    'fixture.status.elapsed': 90,
+                    'fixture.status.short': wasOvertime ? 'AET' : 'FT',
+                    'fixture.status.long': wasOvertime ? 'Finished After Extra Time' : 'Full Time',
+                    'fixture.status.elapsed': wasOvertime ? 120 : 90,
                     lastUpdated: new Date(),
                 },
             },

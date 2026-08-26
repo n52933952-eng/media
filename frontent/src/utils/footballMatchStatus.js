@@ -12,7 +12,6 @@ const FINISHED_STATUS_SHORT = [
 ]
 
 const EXTRA_TIME_LIVE_SHORT = ['ET', 'P', 'BT']
-const OVERTIME_BREAK_AFTER_KICKOFF_MIN = 95
 
 const DISPLAY_FINISHED_KICKOFF_MIN = 125
 const DISPLAY_ET_FINISHED_KICKOFF_MIN = 185
@@ -36,7 +35,6 @@ function inferLiveShort(short, ageMin) {
   if (s === 'NS' || s === 'SCHEDULED') return s
 
   if (s === 'HT' || s === 'PAUSED') {
-    if (ageMin >= OVERTIME_BREAK_AFTER_KICKOFF_MIN) return 'BT'
     if (ageMin >= HT_STUCK_TO_2H_MIN) return '2H'
     return 'HT'
   }
@@ -47,10 +45,11 @@ function inferLiveShort(short, ageMin) {
     return '1H'
   }
 
+  // Never promote to ET from the clock: league matches have no extra time, and a fake ET label
+  // keeps the row "live" for 3+ hours.
   if (s === '2H' || s === 'IN_PLAY') {
     if (ageMin < HT_INFER_AFTER_MIN) return '1H'
     if (ageMin < HT_STUCK_TO_2H_MIN) return 'HT'
-    if (ageMin >= 115) return 'ET'
     return '2H'
   }
 
@@ -75,20 +74,14 @@ function estimateLiveElapsed(short, ageMin) {
   return null
 }
 
-function isOvertimePhase(short, ageMin) {
-  if (EXTRA_TIME_LIVE_SHORT.includes(short)) return true
-  if ((short === 'HT' || short === 'PAUSED') && ageMin >= OVERTIME_BREAK_AFTER_KICKOFF_MIN) {
-    return true
-  }
-  if ((short === '2H' || short === 'IN_PLAY' || short === 'LIVE') && ageMin >= 115) {
-    return true
-  }
-  return false
+/** Only the API's own ET/BT/P counts as overtime — never a guess from kickoff age. */
+function isOvertimePhase(short) {
+  return EXTRA_TIME_LIVE_SHORT.includes(short)
 }
 
-function displayFinishedKickoffMin(short, ageMin) {
+function displayFinishedKickoffMin(short) {
   if (short === 'P') return DISPLAY_PEN_FINISHED_KICKOFF_MIN
-  if (isOvertimePhase(short, ageMin)) return DISPLAY_ET_FINISHED_KICKOFF_MIN
+  if (isOvertimePhase(short)) return DISPLAY_ET_FINISHED_KICKOFF_MIN
   return DISPLAY_FINISHED_KICKOFF_MIN
 }
 
@@ -97,8 +90,7 @@ function isEffectivelyFinishedForDisplay(match) {
   if (FINISHED_STATUS_SHORT.includes(short)) return true
   if (!LIVE_STATUS_SHORT.includes(short)) return false
 
-  const ageMin = kickoffAgeMinutes(match)
-  return ageMin >= displayFinishedKickoffMin(short, ageMin)
+  return kickoffAgeMinutes(match) >= displayFinishedKickoffMin(short)
 }
 
 export function getMatchDisplayStatus(match) {
@@ -133,13 +125,6 @@ export function getMatchDisplayStatus(match) {
   }
   if (short === 'BT') {
     return { kind: 'extratime', label: 'EXTRA TIME', elapsed }
-  }
-  if (short === '2H' && ageMin >= 115) {
-    return {
-      kind: 'extratime',
-      label: elapsed != null && elapsed > 90 ? `ET ${elapsed}'` : 'ET',
-      elapsed,
-    }
   }
   if (short === 'P') {
     return { kind: 'penalties', label: 'PENALTIES', elapsed }

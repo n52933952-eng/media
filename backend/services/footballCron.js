@@ -7,8 +7,6 @@ import Follow from '../models/follow.js'
 import { getIO, getAllUserSockets, getUserSocketMap } from '../socket/socket.js'
 import { autoPostTodayMatches, getFootballAccount, fetchMatchDetails } from '../controller/football.js'
 import {
-    getCachedLiveMatches,
-    setCachedLiveMatches,
     getCachedMatchDetails,
     setCachedMatchDetails,
     getCacheStats,
@@ -17,6 +15,7 @@ import {
     LIVE_STATUS_SHORT,
     FINISHED_STATUS_SHORT,
     isStaleLiveMatchRow,
+    isEffectivelyFinishedForDisplay,
     reconcileStaleLiveMatches,
     enrichMatchForClient,
     inferLiveShort,
@@ -133,20 +132,19 @@ const resolveStatusCodes = (apiStatus, matchData) => {
     const kickoff = new Date(matchData?.utcDate || matchData?.date || 0).getTime()
     const ageMin =
         Number.isFinite(kickoff) && kickoff > 0 ? (Date.now() - kickoff) / (60 * 1000) : 0
-    // After 90'+ the API often stays on PAUSED/IN_PLAY with duration still REGULAR.
-    const latePause = apiStatus === 'PAUSED' && ageMin >= 95
-    const latePlay = (apiStatus === 'IN_PLAY' || apiStatus === 'LIVE') && ageMin >= 115
 
     if (apiStatus === 'FINISHED') {
         if (duration === 'PENALTY_SHOOTOUT') return { short: 'PEN', long: 'Finished After Penalties' }
         if (duration === 'EXTRA_TIME') return { short: 'AET', long: 'Finished After Extra Time' }
         return STATUS_MAP.FINISHED
     }
-    if ((apiStatus === 'IN_PLAY' || apiStatus === 'LIVE') && (inOvertime || latePlay)) {
+    // Overtime only when `score.duration` says so. Age-based guessing labelled regulation league
+    // matches as ET, which then kept them in the Live tab for hours.
+    if ((apiStatus === 'IN_PLAY' || apiStatus === 'LIVE') && inOvertime) {
         return duration === 'PENALTY_SHOOTOUT' ? STATUS_MAP.PENALTY_SHOOTOUT : STATUS_MAP.EXTRA_TIME
     }
     // A break during overtime is not half time — 'BT' keeps it live without the 45' regulation rules.
-    if (apiStatus === 'PAUSED' && (inOvertime || latePause)) {
+    if (apiStatus === 'PAUSED' && inOvertime) {
         return { short: 'BT', long: 'Break Time' }
     }
 
@@ -793,7 +791,9 @@ export const emitFootballPageUpdate = async () => {
         .limit(50)
         .lean()
 
-        const liveMatches = liveMatchesRaw.filter((m) => !isStaleLiveMatchRow(m))
+        const liveMatches = liveMatchesRaw.filter(
+            (m) => !isStaleLiveMatchRow(m) && !isEffectivelyFinishedForDisplay(m),
+        )
         
         // Fetch upcoming matches (next 7 days)
         const nextWeek = new Date()

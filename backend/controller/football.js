@@ -7,6 +7,7 @@ import {
     LIVE_STATUS_SHORT,
     FINISHED_STATUS_SHORT,
     isStaleLiveMatchRow,
+    isEffectivelyFinishedForDisplay,
     reconcileStaleLiveMatches,
     enrichMatchForClient,
     applyLiveClock,
@@ -510,12 +511,14 @@ export const getMatches = async (req, res) => {
             .limit(50)
 
         if (status === 'live' && matches.length > 0) {
-            const stale = matches.filter((m) => isStaleLiveMatchRow(m))
-            if (stale.length > 0) {
+            // Drop rows the badge already calls FINISHED, not just the 200m backstop — otherwise an
+            // ended match shows in Live while missing from Finished until reconcile writes FT.
+            const over = (m) => isStaleLiveMatchRow(m) || isEffectivelyFinishedForDisplay(m)
+            if (matches.some(over)) {
                 reconcileStaleLiveMatches(Match).catch((e) =>
                     console.error('⚽ [getMatches] reconcileStaleLive:', e.message),
                 )
-                matches = matches.filter((m) => !isStaleLiveMatchRow(m))
+                matches = matches.filter((m) => !over(m))
             }
         }
         
