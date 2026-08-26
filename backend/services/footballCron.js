@@ -644,6 +644,16 @@ const fetchAndUpdateLiveMatches = async () => {
                     }
 
                     const codes = resolveStatusCodes(apiMatch.status || '', apiMatch)
+                    // This `?ids=` payload is the last score we ever see for the match: once it
+                    // leaves `?status=LIVE` nothing refetches it, so writing only the status would
+                    // freeze whatever the final live tick happened to report.
+                    const finalGoals = pickLiveGoals(apiMatch.score)
+                    const goalsUpdate = {}
+                    if (finalGoals.home != null) {
+                        goalsUpdate['goals.home'] = finalGoals.home
+                        goalsUpdate['goals.away'] = finalGoals.away
+                    }
+
                     if (!FINISHED_STATUS_SHORT.includes(codes.short)) {
                         console.log(`  ⏱️ Still playing (${codes.long}), keeping live: ${label}`)
                         await Match.findOneAndUpdate(
@@ -652,19 +662,23 @@ const fetchAndUpdateLiveMatches = async () => {
                                 'fixture.status.short': codes.short,
                                 'fixture.status.long': codes.long,
                                 'fixture.status.elapsed': estimateElapsed(codes.short, apiMatch),
+                                ...goalsUpdate,
                                 lastUpdated: new Date(),
                             }
                         )
                         continue
                     }
 
-                    console.log(`  🏁 Match finished (${codes.long}): ${label}`)
+                    console.log(
+                        `  🏁 Match finished (${codes.long}): ${label} ${finalGoals.home ?? '?'}-${finalGoals.away ?? '?'}`
+                    )
                     await Match.findOneAndUpdate(
                         { fixtureId },
                         {
                             'fixture.status.short': codes.short,
                             'fixture.status.long': codes.long,
                             'fixture.status.elapsed': codes.short === 'FT' ? 90 : 120,
+                            ...goalsUpdate,
                             lastUpdated: new Date(),
                         }
                     )
