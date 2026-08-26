@@ -35,6 +35,9 @@ const MatchSchema = mongoose.Schema({
     // Match details
     fixture: {
         date: Date,
+        // Real kickoff, captured the tick the API flips SCHEDULED/TIMED → live. `date` is only the
+        // scheduled time, and matches start a few minutes late, which skewed the live minute.
+        liveStartedAt: Date,
         venue: String,
         city: String,
         status: {

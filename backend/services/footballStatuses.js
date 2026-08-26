@@ -72,10 +72,28 @@ const DISPLAY_PEN_KICKOFF_MINUTES = (() => {
     return Number.isFinite(raw) && raw >= 180 ? raw : 210
 })()
 
+/** Kickoff delay we accept from `liveStartedAt`; beyond this the observation is untrustworthy. */
+const MAX_KICKOFF_DELAY_MIN = 15
+
+/**
+ * Minutes of actual play. Anchors on the observed kickoff (`fixture.liveStartedAt`) when we caught
+ * the SCHEDULED → live flip, since matches start late and counting from the scheduled `date`
+ * ran the badge several minutes fast. Falls back to `date` when the flip was never observed.
+ */
 function kickoffAgeMinutes(match) {
-    const kickoff = new Date(match.fixture.date).getTime()
-    if (!Number.isFinite(kickoff)) return 0
-    return (Date.now() - kickoff) / (60 * 1000)
+    const scheduled = new Date(match.fixture.date).getTime()
+    if (!Number.isFinite(scheduled)) return 0
+
+    const observed = match.fixture.liveStartedAt
+        ? new Date(match.fixture.liveStartedAt).getTime()
+        : NaN
+    const delayMin = Number.isFinite(observed) ? (observed - scheduled) / (60 * 1000) : NaN
+    const anchor =
+        Number.isFinite(delayMin) && delayMin >= 0 && delayMin <= MAX_KICKOFF_DELAY_MIN
+            ? observed
+            : scheduled
+
+    return (Date.now() - anchor) / (60 * 1000)
 }
 
 /**
@@ -179,15 +197,35 @@ export function isOvertimePhase(short) {
     return EXTRA_TIME_LIVE_SHORT.includes(short)
 }
 
-function staleKickoffThresholdMinutes(short) {
+/** football-data.org id + name for competitions whose knockout ties can run past 90'. */
+const EXTRA_TIME_CAPABLE_LEAGUE_IDS = [2001]
+const EXTRA_TIME_CAPABLE_NAME_HINTS = ['champions league', 'cup', 'copa', 'coppa', 'pokal']
+
+/**
+ * True when this competition can play extra time / penalties.
+ *
+ * Needed because a tie only reports ET after the API updates: if that update is late or a verify
+ * call is rate-limited, the row still reads '2H' and the regulation cut-off would mark a knockout
+ * FINISHED while extra time is being played. Leagues keep the tight cut-off.
+ */
+function canPlayExtraTime(match) {
+    const league = match?.league || {}
+    if (EXTRA_TIME_CAPABLE_LEAGUE_IDS.includes(Number(league.id))) return true
+    if (String(league.id || '').toUpperCase() === 'CL') return true
+
+    const name = String(league.name || '').toLowerCase()
+    return EXTRA_TIME_CAPABLE_NAME_HINTS.some((hint) => name.includes(hint))
+}
+
+function staleKickoffThresholdMinutes(short, match) {
     if (short === 'P') return STALE_PEN_KICKOFF_MINUTES
-    if (isOvertimePhase(short)) return STALE_ET_KICKOFF_MINUTES
+    if (isOvertimePhase(short) || canPlayExtraTime(match)) return STALE_ET_KICKOFF_MINUTES
     return STALE_LIVE_AFTER_KICKOFF_MINUTES
 }
 
-function displayFinishedKickoffThresholdMinutes(short) {
+function displayFinishedKickoffThresholdMinutes(short, match) {
     if (short === 'P') return DISPLAY_PEN_KICKOFF_MINUTES
-    if (isOvertimePhase(short)) return DISPLAY_ET_KICKOFF_MINUTES
+    if (isOvertimePhase(short) || canPlayExtraTime(match)) return DISPLAY_ET_KICKOFF_MINUTES
     return DISPLAY_FINISHED_AFTER_KICKOFF_MINUTES
 }
 
@@ -204,7 +242,7 @@ export function isStaleLiveMatchRow(match) {
     if (!Number.isFinite(kickoff)) return false
 
     const ageMin = kickoffAgeMinutes(match)
-    return ageMin >= staleKickoffThresholdMinutes(short)
+    return ageMin >= staleKickoffThresholdMinutes(short, match)
 }
 
 /**
@@ -218,7 +256,7 @@ export function isEffectivelyFinishedForDisplay(match) {
     if (!short || !LIVE_STATUS_SHORT.includes(short)) return false
 
     const ageMin = kickoffAgeMinutes(match)
-    return ageMin >= displayFinishedKickoffThresholdMinutes(short)
+    return ageMin >= displayFinishedKickoffThresholdMinutes(short, match)
 }
 
 /**
@@ -305,7 +343,7 @@ export async function reconcileStaleLiveMatches(Match) {
         'fixture.status.short': { $in: LIVE_STATUS_SHORT },
         'fixture.date': { $exists: true, $lt: oldestCutoff },
     })
-        .select('fixtureId teams fixture goals')
+        .select('fixtureId teams fixture goals league')
         .limit(80)
         .lean()
 

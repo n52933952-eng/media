@@ -58,6 +58,16 @@ function refreshLiveElapsedMinute(matchLike) {
     return estimateLiveElapsed(short, wallMin)
 }
 
+/**
+ * Whether to spend API calls on per-match detail lookups.
+ *
+ * Off by default: on the free tier `/matches/{id}` never returns events, so this loop cost one
+ * call per finished match (up to 50 per request once the 10-minute cache expired) and always
+ * wrote nothing. That alone could blow the 10 req/min limit with a couple of users on the
+ * Finished tab. Turn on only with a paid tier that actually returns events.
+ */
+export const EVENTS_FETCH_ENABLED = process.env.FOOTBALL_FETCH_EVENTS === 'true'
+
 // Helper: Fetch match details with events (scorers, cards, substitutions) - football-data.org
 // Note: football-data.org doesn't provide detailed events in free tier, so this is simplified
 // For finished matches, we'll try to extract basic info from the match response
@@ -527,7 +537,7 @@ export const getMatches = async (req, res) => {
         matches = matches.map((m) => enrichMatchForClient(m))
         
         // For finished matches: Fetch timeline data (scorers, cards, substitutions) if not already fetched
-        if (status === 'finished') {
+        if (status === 'finished' && EVENTS_FETCH_ENABLED) {
             for (const match of matches) {
                 // Only fetch if events array is empty or missing
                 if (!match.events || match.events.length === 0) {
@@ -746,7 +756,11 @@ export const manualFetchFixtures = async (req, res) => {
                     const isFinished = convertedMatch.fixture?.status?.short === 'FT' || 
                                       convertedMatch.fixture?.status?.short === 'FINISHED'
                     
-                    if (isFinished && (!convertedMatch.events || convertedMatch.events.length === 0)) {
+                    if (
+                        EVENTS_FETCH_ENABLED &&
+                        isFinished &&
+                        (!convertedMatch.events || convertedMatch.events.length === 0)
+                    ) {
                         try {
                             // Note: football-data.org free tier doesn't provide detailed events
                             // This is just for structure - events will likely be empty

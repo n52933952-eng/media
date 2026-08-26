@@ -13,6 +13,9 @@ const FINISHED_STATUS_SHORT = [
 
 const EXTRA_TIME_LIVE_SHORT = ['ET', 'P', 'BT']
 
+/** Kickoff delay we accept from `liveStartedAt`; beyond this the observation is untrustworthy. */
+const MAX_KICKOFF_DELAY_MIN = 15
+
 const DISPLAY_FINISHED_KICKOFF_MIN = 125
 const DISPLAY_ET_FINISHED_KICKOFF_MIN = 185
 const DISPLAY_PEN_FINISHED_KICKOFF_MIN = 210
@@ -22,10 +25,24 @@ const HT_INFER_AFTER_MIN = 51
 const SECOND_HALF_WALL_MIN = 60
 const HT_STUCK_TO_2H_MIN = 62
 
+/**
+ * Minutes of actual play. Prefers the observed kickoff (`fixture.liveStartedAt`) over the
+ * scheduled date, since matches start late and that made the badge run minutes fast.
+ */
 function kickoffAgeMinutes(match) {
-  const kickoff = match?.fixture?.date ? new Date(match.fixture.date).getTime() : NaN
-  if (!Number.isFinite(kickoff)) return 0
-  return (Date.now() - kickoff) / (60 * 1000)
+  const scheduled = match?.fixture?.date ? new Date(match.fixture.date).getTime() : NaN
+  if (!Number.isFinite(scheduled)) return 0
+
+  const observed = match?.fixture?.liveStartedAt
+    ? new Date(match.fixture.liveStartedAt).getTime()
+    : NaN
+  const delayMin = Number.isFinite(observed) ? (observed - scheduled) / (60 * 1000) : NaN
+  const anchor =
+    Number.isFinite(delayMin) && delayMin >= 0 && delayMin <= MAX_KICKOFF_DELAY_MIN
+      ? observed
+      : scheduled
+
+  return (Date.now() - anchor) / (60 * 1000)
 }
 
 function inferLiveShort(short, ageMin) {
@@ -79,9 +96,25 @@ function isOvertimePhase(short) {
   return EXTRA_TIME_LIVE_SHORT.includes(short)
 }
 
-function displayFinishedKickoffMin(short) {
+const EXTRA_TIME_CAPABLE_LEAGUE_IDS = [2001]
+const EXTRA_TIME_CAPABLE_NAME_HINTS = ['champions league', 'cup', 'copa', 'coppa', 'pokal']
+
+/**
+ * True when this competition can play extra time / penalties. A knockout tie only reports ET once
+ * the API updates, so the regulation cut-off would otherwise show FINISHED during extra time.
+ */
+function canPlayExtraTime(match) {
+  const league = match?.league || {}
+  if (EXTRA_TIME_CAPABLE_LEAGUE_IDS.includes(Number(league.id))) return true
+  if (String(league.id || '').toUpperCase() === 'CL') return true
+
+  const name = String(league.name || '').toLowerCase()
+  return EXTRA_TIME_CAPABLE_NAME_HINTS.some((hint) => name.includes(hint))
+}
+
+function displayFinishedKickoffMin(short, match) {
   if (short === 'P') return DISPLAY_PEN_FINISHED_KICKOFF_MIN
-  if (isOvertimePhase(short)) return DISPLAY_ET_FINISHED_KICKOFF_MIN
+  if (isOvertimePhase(short) || canPlayExtraTime(match)) return DISPLAY_ET_FINISHED_KICKOFF_MIN
   return DISPLAY_FINISHED_KICKOFF_MIN
 }
 
@@ -90,7 +123,7 @@ function isEffectivelyFinishedForDisplay(match) {
   if (FINISHED_STATUS_SHORT.includes(short)) return true
   if (!LIVE_STATUS_SHORT.includes(short)) return false
 
-  return kickoffAgeMinutes(match) >= displayFinishedKickoffMin(short)
+  return kickoffAgeMinutes(match) >= displayFinishedKickoffMin(short, match)
 }
 
 export function getMatchDisplayStatus(match) {

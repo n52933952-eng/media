@@ -5,7 +5,12 @@ import User from '../models/user.js'
 import Post from '../models/post.js'
 import Follow from '../models/follow.js'
 import { getIO, getAllUserSockets, getUserSocketMap } from '../socket/socket.js'
-import { autoPostTodayMatches, getFootballAccount, fetchMatchDetails } from '../controller/football.js'
+import {
+    autoPostTodayMatches,
+    getFootballAccount,
+    fetchMatchDetails,
+    EVENTS_FETCH_ENABLED,
+} from '../controller/football.js'
 import {
     getCachedMatchDetails,
     setCachedMatchDetails,
@@ -126,6 +131,13 @@ const scoreDurationOf = (matchData) => String(matchData?.score?.duration || 'REG
  * second signal so a match sitting in IN_PLAY/PAUSED during overtime is not mistaken for
  * regulation play, and a finished knockout is recorded as AET / PEN rather than plain FT.
  */
+/**
+ * Only record an observed kickoff this soon after the scheduled time. If the cron was not running
+ * at kickoff, the first live tick we see could be 20m late and would make the badge read far too
+ * low — better to fall back to the scheduled date in that case.
+ */
+const OBSERVED_KICKOFF_MAX_LATE_MIN = 12
+
 const resolveStatusCodes = (apiStatus, matchData) => {
     const duration = scoreDurationOf(matchData)
     const inOvertime = duration === 'EXTRA_TIME' || duration === 'PENALTY_SHOOTOUT'
@@ -725,7 +737,29 @@ const fetchAndUpdateLiveMatches = async () => {
             
             // IMPORTANT: Don't fetch events/scorers for live matches (only for finished)
             convertedMatch.events = []
-            
+
+            // Anchor the live clock on the real kickoff. Only trust the tick where we actually saw
+            // the flip out of SCHEDULED/NS — then the error is bounded by the poll interval. Carry
+            // the stored value forward otherwise, since this update replaces the whole `fixture`.
+            const previousLiveStartedAt = previousMatch?.fixture?.liveStartedAt || null
+            const previousShort = previousMatch?.fixture?.status?.short
+            const wasNotStarted = previousShort === 'NS' || previousShort === 'SCHEDULED'
+            const isLiveNow = LIVE_STATUS_SHORT.includes(convertedMatch.fixture?.status?.short)
+
+            const scheduledMs = new Date(convertedMatch.fixture?.date || 0).getTime()
+            const minutesLate = Number.isFinite(scheduledMs)
+                ? (Date.now() - scheduledMs) / (60 * 1000)
+                : Infinity
+
+            if (previousLiveStartedAt) {
+                convertedMatch.fixture.liveStartedAt = previousLiveStartedAt
+            } else if (wasNotStarted && isLiveNow && minutesLate <= OBSERVED_KICKOFF_MAX_LATE_MIN) {
+                convertedMatch.fixture.liveStartedAt = new Date()
+                console.log(
+                    `  ⏱️ Kickoff observed (+${minutesLate.toFixed(1)}m): ${convertedMatch.teams?.home?.name} vs ${convertedMatch.teams?.away?.name}`
+                )
+            }
+
             // Ensure convertedMatch has numeric fixtureId
             const matchToSave = {
                 ...convertedMatch,
@@ -832,18 +866,20 @@ export const emitFootballPageUpdate = async () => {
         .lean()
         
         // Fetch events for finished matches if missing (lazy load - only first 10 to avoid delays)
-        const finishedToProcess = finishedMatches.slice(0, 10)
-        for (const match of finishedToProcess) {
-            if (!match.events || match.events.length === 0) {
-                try {
-                    const matchDetails = await fetchMatchDetails(match.fixtureId, true)
-                    if (matchDetails && matchDetails.events && matchDetails.events.length > 0) {
-                        match.events = matchDetails.events
-                        // Save to database for future queries
-                        await Match.findByIdAndUpdate(match._id, { events: matchDetails.events })
+        if (EVENTS_FETCH_ENABLED) {
+            const finishedToProcess = finishedMatches.slice(0, 10)
+            for (const match of finishedToProcess) {
+                if (!match.events || match.events.length === 0) {
+                    try {
+                        const matchDetails = await fetchMatchDetails(match.fixtureId, true)
+                        if (matchDetails && matchDetails.events && matchDetails.events.length > 0) {
+                            match.events = matchDetails.events
+                            // Save to database for future queries
+                            await Match.findByIdAndUpdate(match._id, { events: matchDetails.events })
+                        }
+                    } catch (error) {
+                        // Silent fail - events will be fetched on-demand when user views match
                     }
-                } catch (error) {
-                    // Silent fail - events will be fetched on-demand when user views match
                 }
             }
         }
