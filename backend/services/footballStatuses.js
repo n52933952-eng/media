@@ -78,6 +78,98 @@ function kickoffAgeMinutes(match) {
     return (Date.now() - kickoff) / (60 * 1000)
 }
 
+/**
+ * football-data.org has no official minute. Wall-clock from utcDate includes the ~15'
+ * half-time break, so a raw "minutes since kickoff" reads 53' at HT and ~15' fast in the 2nd half.
+ *
+ * v4 `IN_PLAY` is BOTH halves (`LIVE` is only the 1st-half leftover from older payloads).
+ */
+const FIRST_HALF_STOPPAGE_CAP = 48
+/** 1H/IN_PLAY still set after this → treat as HT (API lags PAUSED). */
+const HT_INFER_AFTER_MIN = 51
+/** 45' play + ~15' break — 2nd-half clock origin. */
+const SECOND_HALF_WALL_MIN = 60
+/** PAUSED/HT still set after this → treat as 2H (API lags IN_PLAY). */
+const HT_STUCK_TO_2H_MIN = 62
+
+/**
+ * @param {string} short stored / API short code
+ * @param {number} ageMin minutes since kickoff
+ */
+export function inferLiveShort(short, ageMin) {
+    const s = String(short || '').toUpperCase()
+    if (EXTRA_TIME_LIVE_SHORT.includes(s)) return s
+    if (FINISHED_STATUS_SHORT.includes(s)) return s
+    if (s === 'NS' || s === 'SCHEDULED') return s
+
+    if (s === 'HT' || s === 'PAUSED') {
+        if (ageMin >= OVERTIME_BREAK_AFTER_KICKOFF_MINUTES) return 'BT'
+        if (ageMin >= HT_STUCK_TO_2H_MIN) return '2H'
+        return 'HT'
+    }
+
+    if (s === '1H' || s === 'LIVE') {
+        if (ageMin >= HT_STUCK_TO_2H_MIN) return '2H'
+        if (ageMin >= HT_INFER_AFTER_MIN) return 'HT'
+        return '1H'
+    }
+
+    // IN_PLAY is both halves on football-data.org v4 (STATUS_MAP used to force 2H).
+    if (s === '2H' || s === 'IN_PLAY') {
+        if (ageMin < HT_INFER_AFTER_MIN) return '1H'
+        if (ageMin < HT_STUCK_TO_2H_MIN) return 'HT'
+        if (ageMin >= 115) return 'ET'
+        return '2H'
+    }
+
+    return s
+}
+
+/**
+ * Approximate match minute for the LIVE badge.
+ * @returns {number|null}
+ */
+export function estimateLiveElapsed(short, ageMin) {
+    const inferred = inferLiveShort(short, ageMin)
+    const wall = Math.max(0, Math.floor(ageMin))
+
+    if (inferred === 'P') return 120
+    if (inferred === 'HT') return 45
+    if (inferred === '1H') return Math.min(wall, FIRST_HALF_STOPPAGE_CAP)
+    if (inferred === '2H') {
+        const approx = 45 + Math.max(0, wall - SECOND_HALF_WALL_MIN)
+        return Math.min(Math.max(approx, 45), 95)
+    }
+    if (inferred === 'ET' || inferred === 'BT') {
+        const approx = 90 + Math.max(0, wall - 105)
+        return Math.min(Math.max(approx, 90), 120)
+    }
+    return null
+}
+
+/** Recompute elapsed (+ inferred short) for a live row. Safe to run on every request/socket emit. */
+export function applyLiveClock(match) {
+    if (!match || typeof match !== 'object') return match
+    const plain = typeof match.toObject === 'function' ? match.toObject() : match
+    const short = String(plain?.fixture?.status?.short || '').trim()
+    if (!short || !LIVE_STATUS_SHORT.includes(short) || !plain?.fixture?.date) return plain
+
+    const ageMin = kickoffAgeMinutes(plain)
+    const inferred = inferLiveShort(short, ageMin)
+    const elapsed = estimateLiveElapsed(short, ageMin)
+    return {
+        ...plain,
+        fixture: {
+            ...plain.fixture,
+            status: {
+                ...plain.fixture.status,
+                short: inferred,
+                elapsed,
+            },
+        },
+    }
+}
+
 /** True when this live row is (or is about to be) extra time / penalties. */
 export function isOvertimePhase(short, ageMin) {
     if (EXTRA_TIME_LIVE_SHORT.includes(short)) return true
@@ -144,10 +236,11 @@ export function isEffectivelyFinishedForDisplay(match) {
  * @returns {{ kind: 'live'|'halftime'|'extratime'|'penalties'|'finished'|'scheduled'|'other', label: string, elapsed?: number|null }}
  */
 export function getMatchDisplayStatus(match) {
-    const short = String(match?.fixture?.status?.short || '').trim()
+    const clocked = applyLiveClock(match)
+    const short = String(clocked?.fixture?.status?.short || '').trim()
     const elapsed =
-        typeof match?.fixture?.status?.elapsed === 'number'
-            ? match.fixture.status.elapsed
+        typeof clocked?.fixture?.status?.elapsed === 'number'
+            ? clocked.fixture.status.elapsed
             : null
 
     if (FINISHED_STATUS_SHORT.includes(short)) {
@@ -156,13 +249,10 @@ export function getMatchDisplayStatus(match) {
     if (short === 'NS' || short === 'SCHEDULED') {
         return { kind: 'scheduled', label: short, elapsed: null }
     }
-    if (isEffectivelyFinishedForDisplay(match)) {
+    if (isEffectivelyFinishedForDisplay(clocked)) {
         return { kind: 'finished', label: 'FINISHED', elapsed: elapsed ?? 90 }
     }
-    const ageMin = match?.fixture?.date ? kickoffAgeMinutes(match) : 0
-    if (short === 'HT' && ageMin >= OVERTIME_BREAK_AFTER_KICKOFF_MINUTES) {
-        return { kind: 'extratime', label: 'EXTRA TIME', elapsed }
-    }
+    const ageMin = clocked?.fixture?.date ? kickoffAgeMinutes(clocked) : 0
     if (short === 'HT') {
         return { kind: 'halftime', label: 'HALF TIME', elapsed: elapsed ?? 45 }
     }
@@ -176,7 +266,7 @@ export function getMatchDisplayStatus(match) {
     if (short === 'BT') {
         return { kind: 'extratime', label: 'EXTRA TIME', elapsed }
     }
-    if ((short === '2H' || short === 'IN_PLAY' || short === 'LIVE') && ageMin >= 115) {
+    if ((short === '2H' || short === 'IN_PLAY') && ageMin >= 115) {
         return {
             kind: 'extratime',
             label: elapsed != null && elapsed > 90 ? `ET ${elapsed}'` : 'ET',
@@ -195,12 +285,28 @@ export function getMatchDisplayStatus(match) {
 /** Attach `displayStatus` for web/mobile badges (computed once per API/socket payload). */
 export function enrichMatchForClient(match) {
     if (!match || typeof match !== 'object') return match
-    const plain = typeof match.toObject === 'function' ? match.toObject() : { ...match }
+    const plain = applyLiveClock(match)
     const display = getMatchDisplayStatus(plain)
     return {
         ...plain,
         displayStatus: display,
     }
+}
+
+/**
+ * Current score from a football-data.org `score` object.
+ * Live rows sometimes fill `regularTime` before `fullTime`; never prefer an empty pair.
+ */
+export function pickLiveGoals(score) {
+    const pairs = [score?.fullTime, score?.regularTime, score?.halfTime]
+    const numbered = []
+    for (const p of pairs) {
+        if (!p) continue
+        if (p.home == null && p.away == null) continue
+        numbered.push({ home: p.home ?? 0, away: p.away ?? 0 })
+    }
+    if (numbered.length === 0) return { home: null, away: null }
+    return numbered.reduce((a, b) => (a.home + a.away >= b.home + b.away ? a : b))
 }
 
 /**

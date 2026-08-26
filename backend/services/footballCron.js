@@ -19,6 +19,9 @@ import {
     isStaleLiveMatchRow,
     reconcileStaleLiveMatches,
     enrichMatchForClient,
+    inferLiveShort,
+    estimateLiveElapsed,
+    pickLiveGoals,
 } from './footballStatuses.js'
 
 /** Find a row in feed `footballData` JSON: prefer fixtureId, then normalized team names. */
@@ -152,24 +155,26 @@ const resolveStatusCodes = (apiStatus, matchData) => {
         console.warn(`⚠️ [convertMatchFormat] Unknown football-data.org status "${apiStatus}" — treating as scheduled`)
         return STATUS_MAP.SCHEDULED
     }
-    return mapped
+    const inferred = inferLiveShort(mapped.short, ageMin)
+    if (inferred === mapped.short) return mapped
+    const LONG = {
+        '1H': 'First Half',
+        '2H': 'Second Half',
+        HT: 'Half Time',
+        ET: 'Extra Time',
+        BT: 'Break Time',
+        P: 'Penalty Shootout',
+    }
+    return { short: inferred, long: LONG[inferred] || mapped.long }
 }
 
-/** Rough minute for the badge. Overtime is allowed past 90; the API gives us no live clock. */
+/** Match minute for the badge. Overtime is allowed past 90; the API gives us no live clock. */
 const estimateElapsed = (statusShort, matchData) => {
-    const kickoff = new Date(matchData.utcDate).getTime()
-    const sinceKickoff = Number.isFinite(kickoff)
-        ? Math.max(0, Math.floor((Date.now() - kickoff) / (1000 * 60)))
+    const kickoff = new Date(matchData.utcDate || matchData.date || 0).getTime()
+    const ageMin = Number.isFinite(kickoff) && kickoff > 0
+        ? (Date.now() - kickoff) / (60 * 1000)
         : 0
-
-    if (statusShort === 'P') return 120
-    if (statusShort === 'ET' || statusShort === 'BT') {
-        // ~15m half-time break sits between kickoff and the 90' mark.
-        return Math.max(91, Math.min(sinceKickoff - 15, 120))
-    }
-    if (statusShort === '1H' || statusShort === '2H') return Math.min(sinceKickoff, 90)
-    if (statusShort === 'HT') return 45
-    return null
+    return estimateLiveElapsed(statusShort, ageMin)
 }
 
 // Helper: Convert football-data.org match format to our database format
@@ -185,11 +190,7 @@ const convertMatchFormat = (matchData) => {
 
     const elapsed = estimateElapsed(statusShort, matchData)
     
-    // Get scores
-    const score = matchData.score || {}
-    const fullTime = score.fullTime || {}
-    const homeScore = fullTime.home !== null && fullTime.home !== undefined ? fullTime.home : null
-    const awayScore = fullTime.away !== null && fullTime.away !== undefined ? fullTime.away : null
+    const liveGoals = pickLiveGoals(matchData.score)
     
     // Ensure fixtureId is always a number (football-data.org API returns numbers)
     // Handle case where it might be a string (e.g., from database or conversion)
@@ -234,8 +235,8 @@ const convertMatchFormat = (matchData) => {
             }
         },
         goals: {
-            home: homeScore,
-            away: awayScore
+            home: liveGoals.home,
+            away: liveGoals.away
         },
         events: [],
         lastUpdated: new Date()
@@ -531,62 +532,36 @@ const fetchAndUpdateLiveMatches = async () => {
         // IMPROVED: Detect finished matches by comparing database with /matches?status=LIVE response
         // This is much more efficient than checking each match individually!
         
-        // NOW: Fetch currently live matches from API (with caching)
-        // Check cache first to avoid unnecessary API calls
-        let cachedMatches = getCachedLiveMatches()
+        // Live scores: always hit the API. Caching this list made goals wait an extra 25–50s.
+        let result = await fetchFromAPI('/matches?status=LIVE')
         
-        if (cachedMatches) {
-            // Only log cache hits in dev (less noisy)
-            if (isDev) {
-                console.log('📦 Using cached live matches (saving API call!)')
-            }
-            // Use cached data but still update database and feed post
-            // This reduces API calls while keeping data fresh
-        } else if (isDev) {
-            console.log('🌐 Cache miss - fetching from API...')
-        }
-        
-        // Only fetch from API if cache is expired or doesn't exist
-        let result = { success: false, data: null }
-        if (!cachedMatches) {
-            result = await fetchFromAPI('/matches?status=LIVE')
-            
-            if (result.rateLimit) {
-                console.warn('⚠️ [fetchAndUpdateLiveMatches] Rate limit hit, skipping this update')
-                // Try to use database matches as fallback
-                const dbMatches = await Match.find({
-                    'fixture.date': { $gte: todayStart, $lte: todayEnd },
-                    'fixture.status.short': { $in: LIVE_STATUS_SHORT },
-                }).limit(10)
-                
-                if (dbMatches.length > 0) {
-                    console.log(`📦 [fetchAndUpdateLiveMatches] Using ${dbMatches.length} database matches as fallback`)
-                    // Database matches are already in our format, just use them directly
-                    result = { success: true, data: dbMatches }
-                } else {
-                    await reconcileStaleLiveMatches(Match)
-                    await emitFootballPageUpdate()
-                    return
-                }
-            }
-            
-            if (!result.success || !result.data) {
-                if (isDev) {
-                    console.log('📭 No live matches found in API')
-                }
+        if (result.rateLimit) {
+            console.warn('⚠️ [fetchAndUpdateLiveMatches] Rate limit hit, skipping this update')
+            const dbMatches = await Match.find({
+                'fixture.date': { $gte: todayStart, $lte: todayEnd },
+                'fixture.status.short': { $in: LIVE_STATUS_SHORT },
+            }).limit(10)
+
+            if (dbMatches.length > 0) {
+                console.log(`📦 [fetchAndUpdateLiveMatches] Using ${dbMatches.length} database matches as fallback`)
+                result = { success: true, data: dbMatches }
+            } else {
                 await reconcileStaleLiveMatches(Match)
-                await updateFeedPostWhenMatchesFinish()
                 await emitFootballPageUpdate()
                 return
             }
-            
-            // Cache the API response for 30 seconds
-            setCachedLiveMatches(result.data)
-        } else {
-            // Use cached data but convert to same format
-            result = { success: true, data: cachedMatches }
         }
-        
+
+        if (!result.success || !result.data) {
+            if (isDev) {
+                console.log('📭 No live matches found in API')
+            }
+            await reconcileStaleLiveMatches(Match)
+            await updateFeedPostWhenMatchesFinish()
+            await emitFootballPageUpdate()
+            return
+        }
+
         // Filter for supported leagues only.
         // IMPORTANT: football-data.org sometimes returns `competition.id` (number) and sometimes `competition.code` (string).
         // We accept both by mapping known numeric IDs -> codes.
@@ -723,10 +698,18 @@ const fetchAndUpdateLiveMatches = async () => {
             
             const previousMatch = await Match.findOne({ fixtureId: fixtureIdNum })
             
-            const previousGoalsHome = previousMatch?.goals?.home || 0
-            const previousGoalsAway = previousMatch?.goals?.away || 0
-            const currentGoalsHome = convertedMatch.goals?.home || 0
-            const currentGoalsAway = convertedMatch.goals?.away || 0
+            const previousGoalsHome = previousMatch?.goals?.home
+            const previousGoalsAway = previousMatch?.goals?.away
+            let currentGoalsHome = convertedMatch.goals?.home
+            let currentGoalsAway = convertedMatch.goals?.away
+
+            // Don't wipe a known score if this API tick omitted fullTime/regularTime.
+            if (currentGoalsHome == null && currentGoalsAway == null && previousGoalsHome != null) {
+                convertedMatch.goals.home = previousGoalsHome
+                convertedMatch.goals.away = previousGoalsAway
+                currentGoalsHome = previousGoalsHome
+                currentGoalsAway = previousGoalsAway
+            }
             
             // IMPORTANT: Don't fetch events/scorers for live matches (only for finished)
             convertedMatch.events = []
@@ -1016,28 +999,26 @@ export const initializeFootballCron = () => {
     // Job 1: Smart Polling - Only during match hours (OPTIMIZED FOR FREE TIER)
     // Premier League, La Liga, Serie A match hours:
     // - Weekends (Sat-Sun): 12:00-22:00 UTC (peak hours)
-    // - Weekdays: 18:00-22:00 UTC (evening matches)
+    // - Weekdays: 17:00-23:00 UTC (evening matches, including late kickoffs)
     // - Off-hours: Don't poll (or very rarely)
     
-    // Free tier: 10 req/min. Live cron every 1 min + ~50s cache = ~1 LIVE API call/min in peak windows.
+    // Free tier: 10 req/min. Live poll every 30s in peak windows (~2 LIVE calls/min).
     const isDev = process.env.NODE_ENV !== 'production'
     
-    // IMPORTANT: football-data.org free tier = 10 requests/minute
-    // Live poll every 1 minute during match hours (~1 LIVE request/min — well under limit).
-    // Weekend matches (Saturday & Sunday): Poll every 1 minute during 12:00-22:00 UTC
-    cron.schedule('*/1 12-22 * * 6,0', async () => {
+    // Weekend (Sat-Sun) 12:00-22:00 UTC — 6-field cron (seconds first)
+    cron.schedule('*/30 * 12-22 * * 6,0', async () => {
         if (isDev) {
             const timestamp = new Date().toLocaleString('en-US', { timeZone: 'UTC' })
-            console.log(`⚽ [CRON] Running live match update (weekend: every 1 min) - ${timestamp} UTC`)
+            console.log(`⚽ [CRON] Running live match update (weekend: every 30s) - ${timestamp} UTC`)
         }
         await fetchAndUpdateLiveMatches()
     })
     
-    // Weekday evening matches (Mon-Fri): Poll every 1 minute during 18:00-22:00 UTC
-    cron.schedule('*/1 18-22 * * 1-5', async () => {
+    // Weekday (Mon-Fri) 17:00-23:00 UTC
+    cron.schedule('*/30 * 17-23 * * 1-5', async () => {
         if (isDev) {
             const timestamp = new Date().toLocaleString('en-US', { timeZone: 'UTC' })
-            console.log(`⚽ [CRON] Running live match update (weekday: every 1 min) - ${timestamp} UTC`)
+            console.log(`⚽ [CRON] Running live match update (weekday: every 30s) - ${timestamp} UTC`)
         }
         await fetchAndUpdateLiveMatches()
     })

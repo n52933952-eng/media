@@ -9,6 +9,9 @@ import {
     isStaleLiveMatchRow,
     reconcileStaleLiveMatches,
     enrichMatchForClient,
+    applyLiveClock,
+    estimateLiveElapsed,
+    pickLiveGoals,
 } from '../services/footballStatuses.js'
 
 // football-data.org API configuration
@@ -42,13 +45,7 @@ const STATUS_MAP = {
 
 /**
  * football-data.org (free tier) does not expose the official match minute.
- * Old logic used "minutes since kickoff" capped at 90 — wrong in the 2nd half (half-time not removed),
- * so the clock looked like 70'+ when the real match was ~55'.
- *
- * Heuristic (recomputed often via getMatches for live games):
- * - 1H / LIVE: wall minutes since kickoff, capped for 1st-half stoppage.
- * - 2H / IN_PLAY: 45 + max(0, wallMin - 60) (~45' play + ~15' HT before 2nd half clock starts).
- * - HT / PAUSED: no minute (UI shows half-time).
+ * Delegates to footballStatuses.estimateLiveElapsed (pauses at HT, 2nd half subtracts ~15' break).
  */
 function refreshLiveElapsedMinute(matchLike) {
     const short = String(matchLike?.fixture?.status?.short || '').toUpperCase()
@@ -56,43 +53,8 @@ function refreshLiveElapsedMinute(matchLike) {
     if (!kick || Number.isNaN(kick.getTime())) {
         return matchLike?.fixture?.status?.elapsed ?? null
     }
-
-    const wallMin = Math.floor((Date.now() - kick.getTime()) / (1000 * 60))
-
-    if (short === 'HT' || short === 'PAUSED') {
-        if (wallMin >= 95) {
-            const approx = 90 + Math.max(0, wallMin - 105)
-            return Math.min(Math.max(approx, 90), 120)
-        }
-        return null
-    }
-
-    if (short === 'BT') {
-        const approx = 90 + Math.max(0, wallMin - 105)
-        return Math.min(Math.max(approx, 90), 120)
-    }
-
-    if (short === '1H' || short === 'LIVE') {
-        return Math.min(Math.max(wallMin, 0), 54)
-    }
-
-    if (short === '2H' || short === 'IN_PLAY') {
-        if (wallMin >= 115) {
-            const approx = 90 + Math.max(0, wallMin - 105)
-            return Math.min(Math.max(approx, 90), 120)
-        }
-        const approx = 45 + Math.max(0, wallMin - 60)
-        return Math.min(Math.max(approx, 45), 95)
-    }
-
-    if (short === 'ET') {
-        const approx = 90 + Math.max(0, wallMin - 105)
-        return Math.min(Math.max(approx, 90), 120)
-    }
-
-    if (short === 'P') return 120
-
-    return matchLike?.fixture?.status?.elapsed ?? null
+    const wallMin = (Date.now() - kick.getTime()) / (1000 * 60)
+    return estimateLiveElapsed(short, wallMin)
 }
 
 // Helper: Fetch match details with events (scorers, cards, substitutions) - football-data.org
@@ -272,11 +234,7 @@ const convertMatchFormat = (matchData) => {
     const statusShort = statusMapping.short
     const statusLong = statusMapping.long
     
-    // Get scores (football-data.org uses score.fullTime)
-    const score = matchData.score || {}
-    const fullTime = score.fullTime || {}
-    const homeScore = fullTime.home !== null && fullTime.home !== undefined ? fullTime.home : null
-    const awayScore = fullTime.away !== null && fullTime.away !== undefined ? fullTime.away : null
+    const liveGoals = pickLiveGoals(matchData.score)
     
     // football-data.org free tier doesn't provide detailed events (scorers, cards)
     // Events array will be empty - can be populated from other sources if needed
@@ -315,16 +273,14 @@ const convertMatchFormat = (matchData) => {
             }
         },
         goals: {
-            home: homeScore,
-            away: awayScore
+            home: liveGoals.home,
+            away: liveGoals.away
         },
         events: events, // Empty - free tier doesn't provide detailed events
-        lastUpdated: new Date()
     }
 
     converted.fixture.status.elapsed = refreshLiveElapsedMinute(converted)
-
-    return converted
+    return applyLiveClock(converted)
 }
 
 // Helper: Get or create football system account
@@ -613,24 +569,6 @@ export const getMatches = async (req, res) => {
             } else {
                 console.log('⚽ [getMatches] Database is empty - no matches have been fetched yet!')
             }
-        }
-
-        // Live: recompute display minute on every request (DB value may be stale; old formula was wrong for 2nd half)
-        if (status === 'live' && matches.length > 0) {
-            matches = matches.map((m) => {
-                const o = typeof m.toObject === 'function' ? m.toObject() : m
-                if (!o.fixture?.status) return o
-                return {
-                    ...o,
-                    fixture: {
-                        ...o.fixture,
-                        status: {
-                            ...o.fixture.status,
-                            elapsed: refreshLiveElapsedMinute(o),
-                        },
-                    },
-                }
-            })
         }
 
         res.status(200).json({ matches })

@@ -20,7 +20,7 @@ const CACHE_KEYS = {
 // Cache TTL (Time To Live) in seconds
 // OPTIMIZED FOR FREE TIER (5,000 requests/day limit)
 const CACHE_TTL = {
-    LIVE_MATCHES: 50, // ~50s — pairs with 1-min live cron so each tick can refresh from API
+    LIVE_MATCHES: 25, // ~25s so live scores/status aren't stuck behind a 50s cache + 1-min cron
     UPCOMING_MATCHES: 3600, // 1 hour - upcoming matches don't change often
     FINISHED_MATCHES: 3600, // 1 hour - finished matches don't change
     MATCH_DETAILS: 600 // 10 minutes - match details (scorers, events) don't change often
