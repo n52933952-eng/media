@@ -21,6 +21,7 @@ import {
     FINISHED_STATUS_SHORT,
     isStaleLiveMatchRow,
     isEffectivelyFinishedForDisplay,
+    isStartedButNotYetLive,
     reconcileStaleLiveMatches,
     enrichMatchForClient,
     inferLiveShort,
@@ -832,15 +833,26 @@ export const emitFootballPageUpdate = async () => {
         todayEnd.setHours(23, 59, 59, 999)
         
         const liveMatchesRaw = await Match.find({
-            'fixture.status.short': { $in: LIVE_STATUS_SHORT },
             'fixture.date': { $gte: todayStart, $lt: todayEnd },
+            $or: [
+                { 'fixture.status.short': { $in: LIVE_STATUS_SHORT } },
+                // Kicked off but the API has not flipped the status yet — see isStartedButNotYetLive.
+                {
+                    'fixture.status.short': { $in: ['NS', 'SCHEDULED', 'TIMED'] },
+                    'fixture.date': { $lte: new Date(), $gte: new Date(Date.now() - 25 * 60 * 1000) },
+                },
+            ],
         })
         .sort({ 'fixture.date': -1 })
         .limit(50)
         .lean()
 
         const liveMatches = liveMatchesRaw.filter(
-            (m) => !isStaleLiveMatchRow(m) && !isEffectivelyFinishedForDisplay(m),
+            (m) =>
+                !isStaleLiveMatchRow(m) &&
+                !isEffectivelyFinishedForDisplay(m) &&
+                (LIVE_STATUS_SHORT.includes(m.fixture?.status?.short) ||
+                    isStartedButNotYetLive(m)),
         )
         
         // Fetch upcoming matches (next 7 days)

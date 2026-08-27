@@ -8,6 +8,7 @@ import {
     FINISHED_STATUS_SHORT,
     isStaleLiveMatchRow,
     isEffectivelyFinishedForDisplay,
+    isStartedButNotYetLive,
     reconcileStaleLiveMatches,
     enrichMatchForClient,
     applyLiveClock,
@@ -447,7 +448,19 @@ export const getMatches = async (req, res) => {
         // Map our query status to database status codes (compatible with both old and new API formats)
         if (status) {
             if (status === 'live') {
-                query['fixture.status.short'] = { $in: LIVE_STATUS_SHORT }
+                // Include rows still reading NS/SCHEDULED whose kickoff has passed: the free tier
+                // can take ~5 minutes to flip the status, which kept a running match out of Live.
+                // `isStartedButNotYetLive` filters these down to the ones that really just started.
+                query.$or = [
+                    { 'fixture.status.short': { $in: LIVE_STATUS_SHORT } },
+                    {
+                        'fixture.status.short': { $in: ['NS', 'SCHEDULED', 'TIMED'] },
+                        'fixture.date': {
+                            $lte: new Date(),
+                            $gte: new Date(Date.now() - 25 * 60 * 1000),
+                        },
+                    },
+                ]
                 console.log('⚽ [getMatches] Filtering for LIVE matches')
             } else if (status === 'finished') {
                 query['fixture.status.short'] = { $in: FINISHED_STATUS_SHORT }
@@ -530,6 +543,12 @@ export const getMatches = async (req, res) => {
                 )
                 matches = matches.filter((m) => !over(m))
             }
+            // Keep only the not-yet-flipped rows that really did just kick off.
+            matches = matches.filter(
+                (m) =>
+                    LIVE_STATUS_SHORT.includes(m.fixture?.status?.short) ||
+                    isStartedButNotYetLive(m)
+            )
         }
         
         console.log('⚽ [getMatches] Found matches:', matches.length)

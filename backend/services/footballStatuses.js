@@ -72,13 +72,18 @@ const DISPLAY_PEN_KICKOFF_MINUTES = (() => {
     return Number.isFinite(raw) && raw >= 180 ? raw : 210
 })()
 
-/** Kickoff delay we accept from `liveStartedAt`; beyond this the observation is untrustworthy. */
-const MAX_KICKOFF_DELAY_MIN = 15
+/**
+ * Real kickoffs run a couple of minutes past the scheduled time, so `liveStartedAt` is a better
+ * anchor — but only partly trustworthy: the free tier flips SCHEDULED → IN_PLAY up to ~5 minutes
+ * late, and taking that at face value started the badge at 1' when the match was at 6'. Cap how
+ * much delay we credit so the clock can never be more than this many minutes slow.
+ */
+const MAX_CREDITED_KICKOFF_DELAY_MIN = 3
 
 /**
- * Minutes of actual play. Anchors on the observed kickoff (`fixture.liveStartedAt`) when we caught
- * the SCHEDULED → live flip, since matches start late and counting from the scheduled `date`
- * ran the badge several minutes fast. Falls back to `date` when the flip was never observed.
+ * Minutes of actual play, anchored between the two signals we have: the scheduled `date` (a little
+ * early) and the observed live flip (late by the API's status lag). Error stays within ~3 minutes
+ * either way.
  */
 function kickoffAgeMinutes(match) {
     const scheduled = new Date(match.fixture.date).getTime()
@@ -87,13 +92,10 @@ function kickoffAgeMinutes(match) {
     const observed = match.fixture.liveStartedAt
         ? new Date(match.fixture.liveStartedAt).getTime()
         : NaN
-    const delayMin = Number.isFinite(observed) ? (observed - scheduled) / (60 * 1000) : NaN
-    const anchor =
-        Number.isFinite(delayMin) && delayMin >= 0 && delayMin <= MAX_KICKOFF_DELAY_MIN
-            ? observed
-            : scheduled
+    const delayMin = Number.isFinite(observed) ? (observed - scheduled) / (60 * 1000) : 0
+    const creditedDelayMin = Math.min(Math.max(delayMin, 0), MAX_CREDITED_KICKOFF_DELAY_MIN)
 
-    return (Date.now() - anchor) / (60 * 1000)
+    return (Date.now() - scheduled) / (60 * 1000) - creditedDelayMin
 }
 
 /**
@@ -246,6 +248,23 @@ export function isStaleLiveMatchRow(match) {
 }
 
 /**
+ * How long a row may still read NS/SCHEDULED after kickoff before we stop assuming it has started.
+ * The free tier can take ~5 minutes to flip the status, which left a running match out of the Live
+ * tab. A genuinely delayed game gets its own status (POSTPONED / CANCELLED) from the API.
+ */
+const ASSUME_STARTED_WITHIN_MIN = 20
+
+/** True when kickoff has passed but the API has not flipped the status to live yet. */
+export function isStartedButNotYetLive(match) {
+    const short = String(match?.fixture?.status?.short || '').trim()
+    if (short !== 'NS' && short !== 'SCHEDULED' && short !== 'TIMED') return false
+    if (!match?.fixture?.date) return false
+
+    const ageMin = kickoffAgeMinutes(match)
+    return ageMin >= 0 && ageMin <= ASSUME_STARTED_WITHIN_MIN
+}
+
+/**
  * Client badge: game is over but row may still be in the Live tab until cron writes FT.
  * Uses elapsed minute + kickoff age — no API call.
  */
@@ -273,7 +292,11 @@ export function getMatchDisplayStatus(match) {
     if (FINISHED_STATUS_SHORT.includes(short)) {
         return { kind: 'finished', label: 'FINISHED', elapsed: elapsed ?? 90 }
     }
-    if (short === 'NS' || short === 'SCHEDULED') {
+    if (short === 'NS' || short === 'SCHEDULED' || short === 'TIMED') {
+        if (isStartedButNotYetLive(clocked)) {
+            const ageMin = kickoffAgeMinutes(clocked)
+            return { kind: 'live', label: 'LIVE', elapsed: Math.max(1, Math.floor(ageMin)) }
+        }
         return { kind: 'scheduled', label: short, elapsed: null }
     }
     if (isEffectivelyFinishedForDisplay(clocked)) {
