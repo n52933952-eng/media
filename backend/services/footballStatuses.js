@@ -294,8 +294,7 @@ export function getMatchDisplayStatus(match) {
     }
     if (short === 'NS' || short === 'SCHEDULED' || short === 'TIMED') {
         if (isStartedButNotYetLive(clocked)) {
-            const ageMin = kickoffAgeMinutes(clocked)
-            return { kind: 'live', label: 'LIVE', elapsed: Math.max(1, Math.floor(ageMin)) }
+            return { kind: 'live', label: 'LIVE', elapsed: null }
         }
         return { kind: 'scheduled', label: short, elapsed: null }
     }
@@ -306,11 +305,7 @@ export function getMatchDisplayStatus(match) {
         return { kind: 'halftime', label: 'HALF TIME', elapsed: elapsed ?? 45 }
     }
     if (short === 'ET') {
-        return {
-            kind: 'extratime',
-            label: elapsed != null && elapsed > 90 ? `ET ${elapsed}'` : 'ET',
-            elapsed,
-        }
+        return { kind: 'extratime', label: 'EXTRA TIME', elapsed }
     }
     if (short === 'BT') {
         return { kind: 'extratime', label: 'EXTRA TIME', elapsed }

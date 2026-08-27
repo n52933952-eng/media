@@ -254,8 +254,10 @@ const FootballPage = () => {
                     {match.league?.name}
                 </Text>
                 {showStatus && display.kind === 'live' && (
+                    // No minute: the free API sends no match clock, so any number here is an
+                    // estimate that drifts from the real time (stoppage time, late kickoff).
                     <Badge ml="auto" colorScheme="red" fontSize="xs">
-                        🔴 LIVE{display.elapsed != null ? ` ${display.elapsed}'` : ''}
+                        🔴 LIVE
                     </Badge>
                 )}
                 {showStatus && display.kind === 'finished' && (
