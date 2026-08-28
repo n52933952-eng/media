@@ -525,8 +525,18 @@ const autoPostMatchUpdate = async (match, updateType) => {
     }
 }
 
+// Skip overlapping ticks. At 15s a slow API/Mongo round must not fire a second LIVE request.
+let liveUpdateInFlight = false
+
 // 1. Fetch live matches and update database
 const fetchAndUpdateLiveMatches = async () => {
+    if (liveUpdateInFlight) {
+        if (process.env.NODE_ENV !== 'production') {
+            console.log('⚽ [fetchAndUpdateLiveMatches] Previous tick still running, skipping')
+        }
+        return
+    }
+    liveUpdateInFlight = true
     try {
         const isDev = process.env.NODE_ENV !== 'production'
         if (isDev) {
@@ -804,6 +814,8 @@ const fetchAndUpdateLiveMatches = async () => {
         
     } catch (error) {
         console.error('❌ Error in fetchAndUpdateLiveMatches:', error)
+    } finally {
+        liveUpdateInFlight = false
     }
 }
 
@@ -1064,23 +1076,23 @@ export const initializeFootballCron = () => {
     // - Weekdays: 17:00-23:00 UTC (evening matches, including late kickoffs)
     // - Off-hours: Don't poll (or very rarely)
     
-    // Free tier: 10 req/min. Live poll every 30s in peak windows (~2 LIVE calls/min).
+    // Free tier: 10 req/min. Live poll every 15s in peak windows (~4 LIVE calls/min).
     const isDev = process.env.NODE_ENV !== 'production'
     
     // Weekend (Sat-Sun) 12:00-22:00 UTC — 6-field cron (seconds first)
-    cron.schedule('*/30 * 12-22 * * 6,0', async () => {
+    cron.schedule('*/15 * 12-22 * * 6,0', async () => {
         if (isDev) {
             const timestamp = new Date().toLocaleString('en-US', { timeZone: 'UTC' })
-            console.log(`⚽ [CRON] Running live match update (weekend: every 30s) - ${timestamp} UTC`)
+            console.log(`⚽ [CRON] Running live match update (weekend: every 15s) - ${timestamp} UTC`)
         }
         await fetchAndUpdateLiveMatches()
     })
     
     // Weekday (Mon-Fri) 17:00-23:00 UTC
-    cron.schedule('*/30 * 17-23 * * 1-5', async () => {
+    cron.schedule('*/15 * 17-23 * * 1-5', async () => {
         if (isDev) {
             const timestamp = new Date().toLocaleString('en-US', { timeZone: 'UTC' })
-            console.log(`⚽ [CRON] Running live match update (weekday: every 30s) - ${timestamp} UTC`)
+            console.log(`⚽ [CRON] Running live match update (weekday: every 15s) - ${timestamp} UTC`)
         }
         await fetchAndUpdateLiveMatches()
     })
@@ -1094,7 +1106,7 @@ export const initializeFootballCron = () => {
         await fetchAndUpdateLiveMatches()
     })
     
-    // Peak ~1 LIVE call/min in windows above; off-hours */10. Still well under free-tier limits.
+    // Peak ~4 LIVE calls/min in windows above; off-hours */10. Still well under free-tier limits.
     
     // Job 2: Fetch today's fixtures once at 6 AM UTC
     cron.schedule('0 6 * * *', async () => {
