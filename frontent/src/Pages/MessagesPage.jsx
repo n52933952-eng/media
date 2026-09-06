@@ -99,6 +99,7 @@ const isUserInOnlineList = (onlineList, userId) =>
   onlineList.some((ou) => idStr(ou.userId || ou._id) === idStr(userId))
 
 const SHARED_POST_LINK_REGEX = /https?:\/\/[^\s/]+\/[^/\s]+\/post\/([a-fA-F0-9]{24})/i
+const CHAT_URL_REGEX = /(https?:\/\/[^\s]+|www\.[^\s]+)/gi
 const sharedPostCache = new Map()
 
 const extractSharedPostId = (text) => {
@@ -106,6 +107,177 @@ const extractSharedPostId = (text) => {
   if (!value) return null
   const match = value.match(SHARED_POST_LINK_REGEX)
   return match?.[1] || null
+}
+
+const hrefFromChatUrl = (raw) => {
+  const value = String(raw || '').trim()
+  if (!value) return ''
+  return /^https?:\/\//i.test(value) ? value : `https://${value}`
+}
+
+const renderChatTextWithLinks = (text, isOwn) => {
+  const body = String(text || '')
+  const chunks = []
+  const re = new RegExp(CHAT_URL_REGEX.source, 'gi')
+  let last = 0
+  let match
+  while ((match = re.exec(body))) {
+    if (match.index > last) {
+      chunks.push({ text: body.slice(last, match.index), link: false })
+    }
+    chunks.push({ text: match[0], link: true })
+    last = match.index + match[0].length
+  }
+  if (last < body.length) chunks.push({ text: body.slice(last), link: false })
+  if (chunks.length === 0) return body
+  const linkColor = isOwn ? '#0563C1' : '#53BDEB'
+  return chunks.map((chunk, idx) =>
+    chunk.link ? (
+      <Box
+        as="a"
+        key={`lnk-${idx}`}
+        href={hrefFromChatUrl(chunk.text)}
+        target="_blank"
+        rel="noopener noreferrer"
+        color={linkColor}
+        textDecoration="underline"
+        wordBreak="break-all"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {chunk.text}
+      </Box>
+    ) : (
+      <Box as="span" key={`txt-${idx}`}>
+        {chunk.text}
+      </Box>
+    ),
+  )
+}
+
+const ChatVideoMessage = ({ src, onMenu, showMenu = true, maxH = '400px' }) => {
+  const videoRef = useRef(null)
+  const [playing, setPlaying] = useState(false)
+
+  const showFirstFrame = useCallback(() => {
+    const v = videoRef.current
+    if (!v || playing) return
+    try {
+      if (v.readyState >= 1 && Number.isFinite(v.duration) && v.duration > 0) {
+        v.currentTime = Math.min(0.8, Math.max(0.05, v.duration * 0.05))
+      }
+    } catch (_) {}
+  }, [playing])
+
+  const startPlay = (e) => {
+    e?.stopPropagation?.()
+    setPlaying(true)
+    const v = videoRef.current
+    if (!v) return
+    try {
+      v.muted = false
+      v.currentTime = 0
+      const playPromise = v.play()
+      if (playPromise && typeof playPromise.catch === 'function') {
+        playPromise.catch(() => {})
+      }
+    } catch (_) {}
+  }
+
+  const handleEnded = () => {
+    setPlaying(false)
+    const v = videoRef.current
+    if (!v) return
+    try {
+      v.pause()
+      v.muted = true
+      if (Number.isFinite(v.duration) && v.duration > 0) {
+        v.currentTime = Math.min(0.8, Math.max(0.05, v.duration * 0.05))
+      } else {
+        v.currentTime = 0
+      }
+    } catch (_) {}
+  }
+
+  return (
+    <Box position="relative" bg="black" borderRadius="md" overflow="hidden">
+      <Box
+        as="video"
+        ref={videoRef}
+        src={src}
+        controls={playing}
+        playsInline
+        preload="metadata"
+        muted={!playing}
+        maxW="100%"
+        maxH={maxH}
+        w="100%"
+        display="block"
+        bg="black"
+        onLoadedMetadata={showFirstFrame}
+        onEnded={handleEnded}
+        onClick={(e) => {
+          e.stopPropagation()
+          if (!playing) startPlay(e)
+        }}
+        onContextMenu={(e) => {
+          e.preventDefault()
+          onMenu?.(e)
+        }}
+      />
+      {!playing && (
+        <Flex
+          position="absolute"
+          inset={0}
+          align="center"
+          justify="center"
+          cursor="pointer"
+          bg="blackAlpha.400"
+          onClick={startPlay}
+        >
+          <Flex
+            w="56px"
+            h="56px"
+            borderRadius="full"
+            bg="blackAlpha.700"
+            align="center"
+            justify="center"
+            border="2px solid white"
+          >
+            <Text color="white" fontSize="xl" ml="3px" lineHeight="1">
+              ▶
+            </Text>
+          </Flex>
+        </Flex>
+      )}
+      {showMenu && (
+        <Box
+          position="absolute"
+          top={2}
+          right={2}
+          bg="rgba(0,0,0,0.7)"
+          borderRadius="full"
+          p={1.5}
+          cursor="pointer"
+          zIndex={10}
+          onClick={(e) => {
+            e.stopPropagation()
+            onMenu?.(e)
+          }}
+          onContextMenu={(e) => {
+            e.preventDefault()
+            onMenu?.(e)
+          }}
+          title="Click for options (delete, reply, etc.)"
+          _hover={{ bg: 'rgba(0,0,0,0.9)' }}
+          transition="background 0.2s"
+        >
+          <Text fontSize="xs" color="white" fontWeight="bold">
+            ⋯
+          </Text>
+        </Box>
+      )}
+    </Box>
+  )
 }
 
 const SharedPostPreview = ({ postId, onOpen, onMessageClick }) => {
@@ -204,15 +376,9 @@ const SharedPostPreview = ({ postId, onOpen, onMessageClick }) => {
           </Text>
           {postData?.img && (
             postData.img.includes('/video/upload/') || /\.(mp4|webm|ogg|mov)$/i.test(postData.img) ? (
-              <Box
-                as="video"
-                src={postData.img}
-                controls
-                maxW="100%"
-                maxH="260px"
-                borderRadius="md"
-                onClick={(e) => e.stopPropagation()}
-              />
+              <Box onClick={(e) => e.stopPropagation()}>
+                <ChatVideoMessage src={postData.img} showMenu={false} maxH="260px" />
+              </Box>
             ) : (
               <Image src={postData.img} maxW="100%" maxH="260px" borderRadius="md" objectFit="contain" />
             )
@@ -3330,49 +3496,10 @@ const MessagesPage = () => {
                                 
                                 if (isVideo) {
                                   return (
-                                    <Box position="relative" bg="transparent">
-                                      <Box
-                                        as="video"
-                                        src={imgUrl}
-                                        controls
-                                        maxW="100%"
-                                        maxH="400px"
-                                        borderRadius="md"
-                                        bg="transparent"
-                                        onClick={(e) => {
-                                          e.stopPropagation()
-                                          handleMessageClick(e, msg._id)
-                                        }}
-                                        onContextMenu={(e) => {
-                                          e.preventDefault()
-                                          handleMessageClick(e, msg._id)
-                                        }}
-                                      />
-                                      {/* Menu button overlay - always visible for easy access */}
-                                      <Box
-                                        position="absolute"
-                                        top={2}
-                                        right={2}
-                                        bg={useColorModeValue('rgba(0,0,0,0.7)', 'rgba(0,0,0,0.7)')}
-                                        borderRadius="full"
-                                        p={1.5}
-                                        cursor="pointer"
-                                        onClick={(e) => {
-                                          e.stopPropagation()
-                                          handleMessageClick(e, msg._id)
-                                        }}
-                                        onContextMenu={(e) => {
-                                          e.preventDefault()
-                                          handleMessageClick(e, msg._id)
-                                        }}
-                                        title="Click for options (delete, reply, etc.)"
-                                        _hover={{ bg: useColorModeValue('rgba(0,0,0,0.9)', 'rgba(0,0,0,0.9)') }}
-                                        transition="background 0.2s"
-                                        zIndex={10}
-                                      >
-                                        <Text fontSize="xs" color="white" fontWeight="bold">⋯</Text>
-                                      </Box>
-                                    </Box>
+                                    <ChatVideoMessage
+                                      src={imgUrl}
+                                      onMenu={(e) => handleMessageClick(e, msg._id)}
+                                    />
                                   )
                                 } else if (isImage) {
                                   return (
@@ -3480,7 +3607,7 @@ const MessagesPage = () => {
                                   whiteSpace="pre-wrap" 
                                   flex={1}
                                 >
-                                  {textWithoutSharedLink}
+                                  {renderChatTextWithLinks(textWithoutSharedLink, isOwn)}
                                 </Text>
                                 {isOwn && (
                                   <Box alignSelf="flex-end" color={msg.seen ? "blue.600" : "gray.600"} flexShrink={0} ml={1}>
