@@ -732,31 +732,31 @@ export const saveWeatherPreferences = async (req, res) => {
                     }
                     apiCalls += 1
 
-                    const endpoint = `/weather?lat=${city.lat}&lon=${city.lon}`
-                    const result = await fetchFromWeatherAPI(endpoint)
-                    if (result.success && result.data) {
-                        const convertedWeather = convertWeatherFormat(result.data, city)
-                        await Weather.findOneAndUpdate(
-                            {
-                                'location.city': convertedWeather.location.city,
+                            const endpoint = `/weather?lat=${city.lat}&lon=${city.lon}`
+                            const result = await fetchFromWeatherAPI(endpoint)
+                            if (result.success && result.data) {
+                                const convertedWeather = convertWeatherFormat(result.data, city)
+                                await Weather.findOneAndUpdate(
+                                    { 
+                                        'location.city': convertedWeather.location.city,
                                 'location.country': convertedWeather.location.country,
-                            },
-                            convertedWeather,
+                                    },
+                                    convertedWeather,
                             { upsert: true, new: true },
                         )
                         console.log(
                             `✅ [saveWeatherPreferences] Cached weather for ${city.name}: ${convertedWeather.current.temperature}°C`,
-                        )
-                    } else {
+                                )
+                            } else {
                         console.warn(
                             `⚠️ [saveWeatherPreferences] Failed to fetch weather for ${city.name}: ${result.error}`,
                         )
+                        }
+                    } catch (error) {
+                        console.error(`❌ [saveWeatherPreferences] Error fetching weather for ${city.name}:`, error)
                     }
-                } catch (error) {
-                    console.error(`❌ [saveWeatherPreferences] Error fetching weather for ${city.name}:`, error)
                 }
-            }
-
+                
             // Feed sync can stay in background
             setImmediate(async () => {
                 try {
