@@ -3,7 +3,7 @@ import Message from '../models/message.js'
 import { getRecipientSockedId, getIO, getUserSocket, isUserEffectivelyOnline, getUserSelfRoomId } from '../socket/socket.js'
 import { deleteMediaAsset, isManagedMediaUrl } from '../services/mediaStorage.js'
 import { assertManagedMediaUrls } from '../services/r2Presign.js'
-import { incrementUnread, clearConversationUnreadForUsers, emitUnreadCountUpdate, getTotalUnread, rebuildUnreadCache } from '../services/unreadCounter.js'
+import { incrementUnread, clearConversationUnreadForUsers, emitUnreadCountUpdate, getTotalUnread } from '../services/unreadCounter.js'
 import mongoose from 'mongoose'
 import {
   encodeConversationCursor,
@@ -845,8 +845,7 @@ export const searchConversations = async (req, res) => {
 export const getTotalUnreadCount = async (req, res) => {
   try {
     const userId = req.user._id
-    // Rebuild from DB so a stale Redis total cannot show 99+ with no unread chats.
-    const totalUnread = await rebuildUnreadCache(userId)
+    const totalUnread = await getTotalUnread(userId)
     res.status(200).json({ totalUnread })
   } catch (error) {
     res.status(500).json({ error: error.message })
