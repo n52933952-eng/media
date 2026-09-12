@@ -39,6 +39,7 @@ import {
   DrawerBody,
   DrawerCloseButton,
   Tooltip,
+  Collapse,
 } from '@chakra-ui/react'
 import { SearchIcon, ArrowBackIcon, AddIcon } from '@chakra-ui/icons'
 import { MdGroup } from 'react-icons/md'
@@ -87,6 +88,8 @@ const isExcludedSystemUsername = (username) => {
 }
 
 /** Match socket `userId` strings to API user `_id` (string or ObjectId) — strict === fails and hides online friends. */
+const RECENT_CONVERSATION_LIMIT = 40
+
 const idStr = (id) => {
   if (id == null || id === '') return ''
   if (typeof id === 'string') return id.trim()
@@ -403,7 +406,7 @@ const MessagesPage = () => {
   const { startCall, busyUsers, isCalling, callAccepted } = useContext(LiveKitContext) || {}
   // Group calling
   const { startGroupCall, groupCallActive } = useContext(GroupCallContext) || {}
-  const { endNormalLiveBeforeInterrupt } = useLiveBroadcast()
+  const { isLive } = useLiveBroadcast()
   const showToast = useShowToast()
 
   // State
@@ -411,6 +414,10 @@ const MessagesPage = () => {
   const [hasMoreConversations, setHasMoreConversations] = useState(false)
   const [loadingMoreConversations, setLoadingMoreConversations] = useState(false)
   const conversationsContainerRef = useRef(null) // Ref for conversations scroll container
+  // Recently opened/active chats stack on top of the server order. Snapshots keep a
+  // recent chat visible even when it falls outside the loaded page.
+  const [recentConversationOrder, setRecentConversationOrder] = useState([])
+  const recentConversationSnapshotsRef = useRef({})
   const [selectedConversation, setSelectedConversation] = useState(null)
   const [messages, setMessages] = useState([])
   const [newMessage, setNewMessage] = useState('')
@@ -500,6 +507,10 @@ const MessagesPage = () => {
 
   // Pre-flight check for group calls: warn about busy members BEFORE connecting to LiveKit
   const handleGroupCallStart = useCallback(async (type) => {
+    if (isLive) {
+      showToast('You are live', 'End your live stream before starting a call.', 'warning')
+      return
+    }
     const participants = selectedConversation?.participants || []
     const myId = idStr(user?._id)
     const others = participants.filter(p => idStr(p?._id) !== myId)
@@ -516,9 +527,8 @@ const MessagesPage = () => {
         'warning'
       )
     }
-    await endNormalLiveBeforeInterrupt()
     startGroupCall?.(selectedConversation._id, type)
-  }, [selectedConversation, user?._id, busyUsers, startGroupCall, showToast, endNormalLiveBeforeInterrupt])
+  }, [selectedConversation, user?._id, busyUsers, startGroupCall, showToast, isLive])
 
   // Theme colors - white for light mode, dark for dark mode
   const bgColor = useColorModeValue('white', '#101010')  // White in light mode, dark in dark mode
@@ -528,6 +538,65 @@ const MessagesPage = () => {
   const emojiPickerTheme = useColorModeValue('light', 'dark')
 
   // Function to fetch conversations with cursor pagination (matches mobile MessagesScreen)
+  const touchRecentConversation = useCallback((id, snapshot) => {
+    const key = idStr(id)
+    if (!key) return
+    if (snapshot) {
+      recentConversationSnapshotsRef.current = { ...recentConversationSnapshotsRef.current, [key]: snapshot }
+    }
+    setRecentConversationOrder((prev) => {
+      if (prev[0] === key) return prev
+      return [key, ...prev.filter((entry) => entry !== key)].slice(0, RECENT_CONVERSATION_LIMIT)
+    })
+  }, [])
+
+  const forgetRecentConversation = useCallback((id) => {
+    const key = idStr(id)
+    if (!key) return
+    if (recentConversationSnapshotsRef.current[key]) {
+      const next = { ...recentConversationSnapshotsRef.current }
+      delete next[key]
+      recentConversationSnapshotsRef.current = next
+    }
+    setRecentConversationOrder((prev) => (prev.includes(key) ? prev.filter((entry) => entry !== key) : prev))
+  }, [])
+
+  useEffect(() => {
+    recentConversationSnapshotsRef.current = {}
+    setRecentConversationOrder([])
+  }, [user?._id])
+
+  // Keep snapshots of recent rows fresh so an off-page recent shows its latest message
+  useEffect(() => {
+    if (!recentConversationOrder.length) return
+    const recent = new Set(recentConversationOrder)
+    const next = { ...recentConversationSnapshotsRef.current }
+    let changed = false
+    for (const conv of conversations) {
+      const key = idStr(conv?._id)
+      if (key && recent.has(key) && next[key] !== conv) {
+        next[key] = conv
+        changed = true
+      }
+    }
+    if (changed) recentConversationSnapshotsRef.current = next
+  }, [conversations, recentConversationOrder])
+
+  const orderedConversations = useMemo(() => {
+    if (!recentConversationOrder.length) return conversations
+    const byId = new Map(conversations.map((conv) => [idStr(conv?._id), conv]))
+    const head = []
+    const used = new Set()
+    for (const key of recentConversationOrder) {
+      const row = byId.get(key) || recentConversationSnapshotsRef.current[key]
+      if (!row) continue
+      head.push(row)
+      used.add(key)
+    }
+    if (!head.length) return conversations
+    return [...head, ...conversations.filter((conv) => !used.has(idStr(conv?._id)))]
+  }, [conversations, recentConversationOrder])
+
   const fetchConversations = async (loadMore = false) => {
     if (loadMore && !convCursorRef.current) return
 
@@ -1263,6 +1332,9 @@ const MessagesPage = () => {
         return // Don't process own messages via socket
       }
 
+      // Newest activity wins over a previously opened chat
+      touchRecentConversation(message.conversationId)
+
       if (message._id && socket?.emit) {
         socket.emit('ackMessageDelivered', { messageId: String(message._id) })
       }
@@ -1779,6 +1851,7 @@ const MessagesPage = () => {
     const handleGroupMemberLeft = ({ conversationId, userId: leftId, newAdmin }) => {
       if (idStr(leftId) === idStr(user?._id)) {
         setConversations((prev) => prev.filter((c) => !convIdEq(c._id, conversationId)))
+        forgetRecentConversation(conversationId)
         clearIfSelected(conversationId)
       } else {
         handleGroupMemberRemoved({ conversationId, userId: leftId })
@@ -1789,16 +1862,19 @@ const MessagesPage = () => {
     }
     const handleRemovedFromGroup = ({ conversationId }) => {
       setConversations((prev) => prev.filter((c) => !convIdEq(c._id, conversationId)))
+      forgetRecentConversation(conversationId)
       clearIfSelected(conversationId)
     }
     const handleGroupDeleted = ({ conversationId }) => {
       if (conversationId == null) return
       setConversations((prev) => prev.filter((c) => !convIdEq(c._id, conversationId)))
+      forgetRecentConversation(conversationId)
       clearIfSelected(conversationId)
     }
     const handleConversationDeleted = ({ conversationId }) => {
       if (conversationId == null) return
       setConversations((prev) => prev.filter((c) => !convIdEq(c._id, conversationId)))
+      forgetRecentConversation(conversationId)
       clearIfSelected(conversationId)
     }
     // Deleted message was the sidebar preview — server sends the repaired lastMessage.
@@ -2097,6 +2173,7 @@ const MessagesPage = () => {
       const res = await fetch(`${baseUrl}/api/message/group/${convId}/leave`, { method: 'POST', credentials: 'include' })
       if (!res.ok) { const d = await res.json(); showToast('Error', d.error || 'Failed to leave group', 'error'); return }
       setConversations(prev => prev.filter(c => c._id !== convId))
+      forgetRecentConversation(convId)
       setSelectedConversation(null)
       closeGroupInfo()
     } catch (e) { showToast('Error', 'Failed to leave group', 'error') }
@@ -2110,6 +2187,7 @@ const MessagesPage = () => {
       if (!res.ok) { const d = await res.json(); showToast('Error', d.error || 'Failed to delete group', 'error'); return }
       // Clean up local state immediately (socket groupDeleted handles other members)
       setConversations(prev => prev.filter(c => c._id !== convId))
+      forgetRecentConversation(convId)
       setSelectedConversation(null)
       setMessages([])
       closeGroupInfo()
@@ -2213,6 +2291,7 @@ const MessagesPage = () => {
       
       // Set selected conversation - this will trigger the useEffect to fetch messages
       setSelectedConversation(existingConv)
+      touchRecentConversation(existingConv._id, existingConv)
       
       // Mark messages as seen if there are unread messages
       if (existingConv._id && socket && user?._id && existingConv.participants[0]?._id && existingConv.unreadCount > 0) {
@@ -2409,6 +2488,7 @@ const MessagesPage = () => {
       if (res.ok) {
         // Remove conversation from list
         setConversations((prev) => prev.filter((conv) => conv._id !== conversationId))
+        forgetRecentConversation(conversationId)
         // Clear selected conversation and messages
         if (selectedConversation?._id === conversationId) {
           setSelectedConversation(null)
@@ -3003,7 +3083,7 @@ const MessagesPage = () => {
                 </Text>
               ) : (
                 <>
-                  {conversations.map((conv) => {
+                  {orderedConversations.map((conv) => {
                   const isGroupConv = !!conv.isGroup
                   const otherUser = isGroupConv ? null : conv.participants[0]
                   const isSelected =
@@ -3020,6 +3100,7 @@ const MessagesPage = () => {
                       _hover={{ bg: hoverBg }}
                       onClick={() => {
                         setSelectedConversation(conv)
+                        touchRecentConversation(conv._id, conv)
                         if (conv._id && socket && user?._id && conv.unreadCount > 0) {
                           socket.emit("markmessageasSeen", {
                             conversationId: conv._id,
@@ -3797,7 +3878,7 @@ const MessagesPage = () => {
                   )
                 })}
                 {/* Typing indicator */}
-                {isTyping && (
+                <Collapse in={isTyping} animateOpacity>
                   <Flex
                     justifyContent="flex-start"
                     alignItems="flex-end"
@@ -3807,8 +3888,8 @@ const MessagesPage = () => {
                   >
                     <Avatar
                       size="xs"
-                      src={selectedConversation.participants[0]?.profilePic}
-                      name={selectedConversation.participants[0]?.name || selectedConversation.participants[0]?.username || 'User'}
+                      src={selectedConversation?.participants?.[0]?.profilePic}
+                      name={selectedConversation?.participants?.[0]?.name || selectedConversation?.participants?.[0]?.username || 'User'}
                       bg={useColorModeValue('blue.500', 'blue.600')}
                       display={{ base: "none", sm: "flex" }}
                     />
@@ -3853,7 +3934,7 @@ const MessagesPage = () => {
                       </Flex>
                     </Flex>
                   </Flex>
-                )}
+                </Collapse>
                 <div ref={messagesEndRef} />
                 {/* Unread message indicator (WhatsApp style) - Sticky at bottom of visible chat area */}
                 {(() => {
@@ -4241,7 +4322,12 @@ const MessagesPage = () => {
                 >
                   <MenuItem
                     icon={<FaVideo />}
+                    isDisabled={isLive}
                     onClick={() => {
+                      if (isLive) {
+                        showToast('You are live', 'End your live stream before starting a call.', 'warning')
+                        return
+                      }
                       const currentUserId = idStr(user?._id)
                       const recipient = selectedConversation?.participants?.find(
                         (p) => idStr(p?._id) !== currentUserId
@@ -4251,10 +4337,7 @@ const MessagesPage = () => {
                         showToast('Busy', 'User is busy right now. Please try again later.', 'warning')
                         return
                       }
-                      void (async () => {
-                        await endNormalLiveBeforeInterrupt()
-                        startCall(recipient, 'video')
-                      })()
+                      startCall(recipient, 'video')
                     }}
                     bg={bgColor}
                     color={useColorModeValue('black', 'white')}
@@ -4279,7 +4362,12 @@ const MessagesPage = () => {
                   </MenuItem>
                   <MenuItem
                     icon={<FaPhone />}
+                    isDisabled={isLive}
                     onClick={() => {
+                      if (isLive) {
+                        showToast('You are live', 'End your live stream before starting a call.', 'warning')
+                        return
+                      }
                       const currentUserId = idStr(user?._id)
                       const recipient = selectedConversation?.participants?.find(
                         (p) => idStr(p?._id) !== currentUserId
@@ -4289,10 +4377,7 @@ const MessagesPage = () => {
                         showToast('Busy', 'User is busy right now. Please try again later.', 'warning')
                         return
                       }
-                      void (async () => {
-                        await endNormalLiveBeforeInterrupt()
-                        startCall(recipient, 'audio')
-                      })()
+                      startCall(recipient, 'audio')
                     }}
                     bg={bgColor}
                     color={useColorModeValue('black', 'white')}
