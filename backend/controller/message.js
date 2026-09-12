@@ -15,7 +15,7 @@ import {
   decodeMessageCursor,
   MESSAGES_PAGE_SIZE_DEFAULT,
 } from '../services/messageCursor.js'
-import { buildConversationLastMessageFromMessage } from '../services/conversationLastMessage.js'
+import { buildConversationLastMessageFromMessage, mediaPreviewLabel } from '../services/conversationLastMessage.js'
 
 // ── helpers ────────────────────────────────────────────────────────────────
 const idStr = (id) => (id != null ? id.toString() : '')
@@ -480,7 +480,7 @@ function parseLiveShareStreamerId(text) {
 /** Core send logic for new messages (JSON body with optional image URL). */
 async function _persistAndBroadcastMessage({ conversation, senderId, message, img, replyTo }) {
   const liveShareStreamerId = parseLiveShareStreamerId(message)
-  const previewText = (message && String(message).trim()) || (img ? '📷 Image' : '')
+  const previewText = (message && String(message).trim()) || mediaPreviewLabel(img)
   const newMessage = new Message({
     conversationId: conversation._id,
     sender: senderId,

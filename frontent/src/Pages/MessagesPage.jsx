@@ -54,7 +54,7 @@ import { BsCheck2All, BsReply, BsFillImageFill, BsTrash } from 'react-icons/bs'
 import { MdDelete } from 'react-icons/md'
 import EmojiPicker from 'emoji-picker-react'
 import { compressVideo, needsCompression } from '../utils/videoCompress'
-import { isVideoUrl } from '../utils/mediaUrl'
+import { isVideoUrl, mediaPreviewLabel } from '../utils/mediaUrl'
 import { uploadMediaToR2 } from '../utils/directR2Upload'
 import LiveShareChatCard from '../Components/LiveShareChatCard'
 import { parseLiveShareMessage, liveSharePreviewText, resolveLiveShareFromMessage } from '../utils/liveShareMessage'
@@ -2743,7 +2743,7 @@ const MessagesPage = () => {
             return {
               ...conv,
               lastMessage: {
-                text: (data.text && data.text.trim()) || (data.img ? '📷 Image' : ''),
+                text: (data.text && data.text.trim()) || mediaPreviewLabel(data.img),
                 sender: data.sender || {
                   _id: user._id,
                   name: user.name,
@@ -2767,7 +2767,7 @@ const MessagesPage = () => {
             _id: data.conversationId,
             participants: selectedConversation?.participants || [],
             lastMessage: {
-              text: (data.text && data.text.trim()) || (data.img ? '📷 Image' : ''),
+              text: (data.text && data.text.trim()) || mediaPreviewLabel(data.img),
               sender: data.sender || {
                 _id: user._id,
                 name: user.name,
@@ -3143,7 +3143,7 @@ const MessagesPage = () => {
                           }
                           
                           const livePreview = liveSharePreviewText(lastText)
-                          const normalizedPreview = livePreview || lastText || (hasImageAttachment ? '📷 Image' : '')
+                          const normalizedPreview = livePreview || lastText || mediaPreviewLabel(conv.lastMessage.img)
                           const messagePreview = normalizedPreview.length > 30
                             ? normalizedPreview.substring(0, 30) + "..."
                             : normalizedPreview

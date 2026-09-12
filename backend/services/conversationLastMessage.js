@@ -1,3 +1,12 @@
+/** Chat list preview label for an attachment-only message. */
+export function mediaPreviewLabel(img) {
+  const url = String(img || '').trim()
+  if (!url) return ''
+  return /\.(mp4|webm|ogg|mov|m4v)(\?.*)?$/i.test(url) || url.includes('/video/upload/')
+    ? '🎥 Video'
+    : '📷 Image'
+}
+
 /** Build denormalized conversation.lastMessage from a Message doc (or lean row). */
 export function buildConversationLastMessageFromMessage(msg) {
   if (!msg) {
@@ -10,7 +19,7 @@ export function buildConversationLastMessageFromMessage(msg) {
       messageId: null,
     }
   }
-  const text = (msg.text && String(msg.text).trim()) || (msg.img ? '📷 Image' : '')
+  const text = (msg.text && String(msg.text).trim()) || mediaPreviewLabel(msg.img)
   return {
     text,
     sender: msg.sender ?? null,
