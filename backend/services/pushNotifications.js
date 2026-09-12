@@ -3,6 +3,37 @@
 
 import { debugLog } from '../utils/debugLog.js';
 
+/** Tray text stays short so Android/iOS don't clip mid-word. */
+const PUSH_PREVIEW_MAX = 140;
+const SHARED_POST_LINK_REGEX = /https?:\/\/[^\s/]+\/[^/\s]+\/post\/[a-fA-F0-9]{24}/i;
+
+/**
+ * WhatsApp-style preview of a chat message for the notification body.
+ * Falls back to a generic line when there is nothing safe to show.
+ */
+function messagePreviewText(message, fallback = 'sent you a message') {
+  const text = typeof message?.text === 'string' ? message.text.trim() : '';
+  const img = typeof message?.img === 'string' ? message.img.trim() : '';
+
+  if (text.startsWith('LIVE_SHARE:')) return '🔴 Shared a live stream';
+  if (SHARED_POST_LINK_REGEX.test(text)) return '📎 Shared a post';
+
+  if (text) {
+    const oneLine = text.replace(/\s+/g, ' ').trim();
+    return oneLine.length > PUSH_PREVIEW_MAX
+      ? `${oneLine.slice(0, PUSH_PREVIEW_MAX - 1)}…`
+      : oneLine;
+  }
+
+  if (img) {
+    return /\.(mp4|webm|ogg|mov|m4v)(\?|$)/i.test(img) || img.includes('/video/upload/')
+      ? '🎥 Video'
+      : '📷 Photo';
+  }
+
+  return fallback;
+}
+
 /**
  * Send a push notification to a specific user (FCM).
  * @param {string} userId - MongoDB user ID
@@ -86,14 +117,14 @@ async function sendMentionNotification(userId, mentionerName, postId, images = {
 /**
  * Send notification when someone sends you a message (when you're offline / not in app)
  */
-async function sendMessageNotification(recipientUserId, senderUser, conversationId, messageId) {
+async function sendMessageNotification(recipientUserId, senderUser, conversationId, messageId, message = null) {
   const senderName = senderUser?.name || senderUser?.username || 'Someone';
   try {
     const { sendMessagePushDataOnly } = await import('./fcmNotifications.js');
     const result = await sendMessagePushDataOnly(
       recipientUserId,
       senderName,
-      'sent you a message',
+      messagePreviewText(message),
       {
         type: 'message',
         conversationId: String(conversationId || ''),
@@ -240,15 +271,16 @@ async function sendMissedCallNotification(userId, callerName, callType = 'video'
  * @param {string}   groupName        - group display name
  * @param {string}   conversationId
  * @param {string}   messageId
+ * @param {object}   [message]        - message doc/payload, used for the text preview
  */
-async function sendGroupMessageNotification(recipientUserIds, senderName, groupName, conversationId, messageId) {
+async function sendGroupMessageNotification(recipientUserIds, senderName, groupName, conversationId, messageId, message = null) {
   if (!Array.isArray(recipientUserIds) || recipientUserIds.length === 0) return
   try {
     const { sendGroupMessageMulticast } = await import('./fcmNotifications.js')
     await sendGroupMessageMulticast(
       recipientUserIds,
       groupName || 'Group',
-      `${senderName}: sent a message`,
+      `${senderName}: ${messagePreviewText(message, 'sent a message')}`,
       {
         type: 'group_message',
         conversationId: String(conversationId || ''),

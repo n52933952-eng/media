@@ -301,9 +301,9 @@ async function broadcastToConversation(conversationId, event, payload, excludeSe
       if (!inRoom) {
         if (groupName) {
           const sName = senderPopulated?.name || senderPopulated?.username || 'Someone'
-          sendGroupMessageNotification([pidStr], sName, groupName, roomId, payload._id || '').catch(() => {})
+          sendGroupMessageNotification([pidStr], sName, groupName, roomId, payload._id || '', payload).catch(() => {})
         } else {
-          sendMessageNotification(pidStr, senderPopulated, roomId, payload._id || '').catch(() => {})
+          sendMessageNotification(pidStr, senderPopulated, roomId, payload._id || '', payload).catch(() => {})
         }
       }
     }
@@ -360,7 +360,13 @@ async function deliverOutboundMessage(newMessage, conversation, recipientId) {
   if (recipientId) {
     try {
       const { sendMessageNotification } = await import('../services/pushNotifications.js')
-      await sendMessageNotification(recipientId, newMessage.sender, conversation._id.toString(), newMessage._id)
+      await sendMessageNotification(
+        recipientId,
+        newMessage.sender,
+        conversation._id.toString(),
+        newMessage._id,
+        newMessage,
+      )
     } catch (e) {
       console.log('❌ Error sending FCM message notification:', e?.message || e)
     }
