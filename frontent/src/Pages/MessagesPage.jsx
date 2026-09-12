@@ -482,6 +482,13 @@ const MessagesPage = () => {
   const messageCursorRef = useRef(null) // Older messages cursor for active chat
   const lastOlderCursorRequestRef = useRef(null) // Prevent duplicate older-page fetches
   const lastScrollAtRef = useRef(0) // Avoid opening reactions while user is actively scrolling
+  const initialScrollTimersRef = useRef([])
+  const LOAD_MORE_REVEAL_PX = 80
+
+  const clearInitialScrollTimers = () => {
+    initialScrollTimersRef.current.forEach((id) => clearTimeout(id))
+    initialScrollTimersRef.current = []
+  }
   const touchStartPointRef = useRef({ x: 0, y: 0, t: 0 })
   const touchMovedRef = useRef(false)
   const pointerStartPointRef = useRef({ x: 0, y: 0, active: false })
@@ -964,11 +971,13 @@ const MessagesPage = () => {
     const isInitialLoad = shouldScrollToBottomRef.current && 
                          messages.length > 0 && 
                          !loadingMoreMessages && 
+                         !isLoadingOlderMessagesRef.current &&
                          selectedConversation?._id
     
     if (isInitialLoad) {
       // Use multiple approaches to ensure scroll works
       const scrollToBottom = () => {
+        if (!shouldScrollToBottomRef.current || isLoadingOlderMessagesRef.current) return
         if (messagesContainerRef.current) {
           const container = messagesContainerRef.current
           // Force scroll to absolute bottom
@@ -993,36 +1002,23 @@ const MessagesPage = () => {
         scrollToBottom()
       })
       
+      clearInitialScrollTimers()
       // Multiple delayed attempts to ensure it works
-      setTimeout(scrollToBottom, 10)
-      setTimeout(scrollToBottom, 50)
-      setTimeout(scrollToBottom, 100)
-      setTimeout(scrollToBottom, 200)
-      setTimeout(scrollToBottom, 300)
+      ;[10, 50, 100, 200, 300].forEach((ms) => {
+        initialScrollTimersRef.current.push(setTimeout(scrollToBottom, ms))
+      })
       
-      // Final verification and force scroll
-      setTimeout(() => {
-        if (messagesContainerRef.current) {
+      // Final verification — only if the user is still at the latest messages
+      initialScrollTimersRef.current.push(setTimeout(() => {
+        if (shouldScrollToBottomRef.current && !isLoadingOlderMessagesRef.current && messagesContainerRef.current) {
           const container = messagesContainerRef.current
-          const scrollHeight = container.scrollHeight
-          const clientHeight = container.clientHeight
-          const scrollTop = container.scrollTop
-          const distanceFromBottom = scrollHeight - scrollTop - clientHeight
-          
-          // If not at bottom, force scroll
+          const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight
           if (distanceFromBottom > 10) {
-            container.scrollTop = scrollHeight
-            // Double check
-            setTimeout(() => {
-              if (messagesContainerRef.current) {
-                messagesContainerRef.current.scrollTop = messagesContainerRef.current.scrollHeight
-              }
-            }, 50)
+            container.scrollTop = container.scrollHeight
           }
         }
-        // Reset the flag after scrolling is complete
         shouldScrollToBottomRef.current = false
-      }, 400)
+      }, 400))
     }
   }, [messages.length, selectedConversation?._id, loadingMoreMessages]) // Only when messages change and it's initial load
 
@@ -1033,6 +1029,9 @@ const MessagesPage = () => {
 
     const cursorToLoad = messageCursorRef.current
     if (lastOlderCursorRequestRef.current === cursorToLoad) return
+
+    shouldScrollToBottomRef.current = false
+    clearInitialScrollTimers()
 
     // Store current scroll position
     const container = messagesContainerRef.current
@@ -1080,13 +1079,19 @@ const MessagesPage = () => {
         })
         setHasMoreMessages(data.hasMore === true)
 
-        setTimeout(() => {
-          if (container) {
-            const newScrollHeight = container.scrollHeight
-            const scrollDifference = newScrollHeight - previousScrollHeight
-            container.scrollTop = previousScrollTop + scrollDifference
-          }
-        }, 50)
+        const restoreOlderScroll = () => {
+          const el = messagesContainerRef.current
+          if (!el) return
+          const scrollDifference = el.scrollHeight - previousScrollHeight
+          // Keep the same message on screen, then ease up a little so the
+          // newly loaded older rows peek in (same as mobile).
+          el.scrollTop = Math.max(0, previousScrollTop + scrollDifference - LOAD_MORE_REVEAL_PX)
+        }
+        requestAnimationFrame(() => {
+          restoreOlderScroll()
+          requestAnimationFrame(restoreOlderScroll)
+        })
+        setTimeout(restoreOlderScroll, 80)
       } else {
         setHasMoreMessages(false)
         messageCursorRef.current = null
@@ -1116,6 +1121,10 @@ const MessagesPage = () => {
 
       setIsAtBottom(isAtBottom)
       isUserScrollingRef.current = true // User is manually scrolling
+      if (!isAtBottom) {
+        shouldScrollToBottomRef.current = false
+        clearInitialScrollTimers()
+      }
       
       // Check if scrolled to top (load older messages)
       if (scrollTop <= 50 && hasMoreMessages && !loadingMoreMessages) {
