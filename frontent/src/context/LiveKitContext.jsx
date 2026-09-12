@@ -145,7 +145,7 @@ export const LiveKitProvider = ({ children }) => {
           }
         });
       });
-      if (next.length > 0) setRemoteTracks(next);
+      setRemoteTracks(next);
     };
 
     room.on(RoomEvent.TrackSubscribed, addRemoteTrack);
@@ -180,12 +180,13 @@ export const LiveKitProvider = ({ children }) => {
 
     await room.connect(livekitUrl, token);
 
-    // Publish local tracks: audio calls should not keep camera enabled.
+    // Always publish the mic — voice and video. Camera only for video calls.
     if (type === 'audio') {
       await room.localParticipant.setCameraEnabled(false);
-      await room.localParticipant.setMicrophoneEnabled(true);
-    } else {
-      await room.localParticipant.enableCameraAndMicrophone();
+    }
+    await room.localParticipant.setMicrophoneEnabled(true);
+    if (type !== 'audio') {
+      await room.localParticipant.setCameraEnabled(true);
     }
     syncLocalTracks();
     syncRemoteTracks();
@@ -228,8 +229,9 @@ export const LiveKitProvider = ({ children }) => {
       const room = sortedRoomName(myId, theirId);
       setRoomName(room);
 
-      // Start permission prompt early so camera/mic is ready sooner.
-      warmupUserMedia({ video: type !== 'audio', audio: true });
+      // Wait for mic permission before joining — otherwise LiveKit can connect
+      // muted and the other side hears silence on voice calls.
+      await warmupUserMedia({ video: type !== 'audio', audio: true });
 
       // Notify receiver immediately so ringing starts with less delay.
       socket.emit('livekit:callUser', {
@@ -267,8 +269,10 @@ export const LiveKitProvider = ({ children }) => {
       setCallAccepted(true);
       setIncomingCall(null);
 
+      const joinType = ct || 'video';
+      await warmupUserMedia({ video: joinType !== 'audio', audio: true });
       const { token, livekitUrl } = await fetchToken({ type: 'direct', targetId: from });
-      await connectRoom(token, livekitUrl, ct || 'video');
+      await connectRoom(token, livekitUrl, joinType);
     } catch (err) {
       console.error('❌ [LiveKit] answerCall error:', err.message);
       setCallAccepted(false);

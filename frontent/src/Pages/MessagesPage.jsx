@@ -3877,64 +3877,6 @@ const MessagesPage = () => {
                     </Flex>
                   )
                 })}
-                {/* Typing indicator */}
-                <Collapse in={isTyping} animateOpacity>
-                  <Flex
-                    justifyContent="flex-start"
-                    alignItems="flex-end"
-                    gap={2}
-                    w="100%"
-                    px={2}
-                  >
-                    <Avatar
-                      size="xs"
-                      src={selectedConversation?.participants?.[0]?.profilePic}
-                      name={selectedConversation?.participants?.[0]?.name || selectedConversation?.participants?.[0]?.username || 'User'}
-                      bg={useColorModeValue('blue.500', 'blue.600')}
-                      display={{ base: "none", sm: "flex" }}
-                    />
-                    <Flex
-                      bg={useColorModeValue('gray.200', '#1a1a1a')}
-                      p={3}
-                      borderRadius="xl"
-                      borderTopLeftRadius="sm"
-                      borderTopRightRadius="xl"
-                    >
-                      <Flex gap={1.5} alignItems="center">
-                        <Box
-                          w={2}
-                          h={2}
-                          bg="gray.500"
-                          borderRadius="full"
-                          sx={{
-                            animation: 'typing 1.4s infinite',
-                            animationDelay: '0s'
-                          }}
-                        />
-                        <Box
-                          w={2}
-                          h={2}
-                          bg="gray.500"
-                          borderRadius="full"
-                          sx={{
-                            animation: 'typing 1.4s infinite',
-                            animationDelay: '0.2s'
-                          }}
-                        />
-                        <Box
-                          w={2}
-                          h={2}
-                          bg="gray.500"
-                          borderRadius="full"
-                          sx={{
-                            animation: 'typing 1.4s infinite',
-                            animationDelay: '0.4s'
-                          }}
-                        />
-                      </Flex>
-                    </Flex>
-                  </Flex>
-                </Collapse>
                 <div ref={messagesEndRef} />
                 {/* Unread message indicator (WhatsApp style) - Sticky at bottom of visible chat area */}
                 {(() => {
@@ -4011,6 +3953,66 @@ const MessagesPage = () => {
                 })()}
               </VStack>
             </Box>
+
+            <Collapse in={isTyping} animateOpacity>
+              <Flex
+                justifyContent="flex-start"
+                alignItems="flex-end"
+                gap={2}
+                w="100%"
+                px={3}
+                py={1}
+                bg={useColorModeValue('white', '#101010')}
+              >
+                <Avatar
+                  size="xs"
+                  src={selectedConversation?.participants?.[0]?.profilePic}
+                  name={selectedConversation?.participants?.[0]?.name || selectedConversation?.participants?.[0]?.username || 'User'}
+                  bg={useColorModeValue('blue.500', 'blue.600')}
+                  display={{ base: 'none', sm: 'flex' }}
+                />
+                <Flex
+                  bg={useColorModeValue('gray.200', '#1a1a1a')}
+                  p={3}
+                  borderRadius="xl"
+                  borderTopLeftRadius="sm"
+                  borderTopRightRadius="xl"
+                >
+                  <Flex gap={1.5} alignItems="center">
+                    <Box
+                      w={2}
+                      h={2}
+                      bg="gray.500"
+                      borderRadius="full"
+                      sx={{
+                        animation: 'typing 1.4s infinite',
+                        animationDelay: '0s',
+                      }}
+                    />
+                    <Box
+                      w={2}
+                      h={2}
+                      bg="gray.500"
+                      borderRadius="full"
+                      sx={{
+                        animation: 'typing 1.4s infinite',
+                        animationDelay: '0.2s',
+                      }}
+                    />
+                    <Box
+                      w={2}
+                      h={2}
+                      bg="gray.500"
+                      borderRadius="full"
+                      sx={{
+                        animation: 'typing 1.4s infinite',
+                        animationDelay: '0.4s',
+                      }}
+                    />
+                  </Flex>
+                </Flex>
+              </Flex>
+            </Collapse>
 
             {/* Message Input - Mobile optimized */}
             <Flex

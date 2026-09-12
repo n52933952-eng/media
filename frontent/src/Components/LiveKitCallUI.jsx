@@ -390,8 +390,11 @@ const ActiveCallScreen = () => {
     try {
       const audioEl = remoteAudio.track.attach();
       audioEl.autoplay = true;
+      audioEl.playsInline = true;
+      audioEl.muted = false;
       audioEl.style.display = 'none';
       document.body.appendChild(audioEl);
+      void audioEl.play?.().catch(() => {});
       if (remoteAudioElRef.current) {
         try { remoteAudioElRef.current.remove(); } catch (_) {}
       }
