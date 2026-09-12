@@ -12,9 +12,9 @@ export const NOTIFICATION_RETENTION_DAYS = Math.max(
   1,
   parseInt(process.env.NOTIFICATION_RETENTION_DAYS || '14', 10) || 14,
 )
-const MESSAGE_RETENTION_DAYS = Math.max(
+export const MESSAGE_RETENTION_DAYS = Math.max(
   1,
-  parseInt(process.env.MESSAGE_RETENTION_DAYS || '100', 10) || 100,
+  parseInt(process.env.MESSAGE_RETENTION_DAYS || '200', 10) || 200,
 )
 const FEED_HIDDEN_RETENTION_DAYS = Math.max(
   1,

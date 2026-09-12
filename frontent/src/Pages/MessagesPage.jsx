@@ -41,7 +41,7 @@ import {
   Tooltip,
   Collapse,
 } from '@chakra-ui/react'
-import { SearchIcon, ArrowBackIcon, AddIcon } from '@chakra-ui/icons'
+import { SearchIcon, ArrowBackIcon, AddIcon, InfoOutlineIcon } from '@chakra-ui/icons'
 import { MdGroup } from 'react-icons/md'
 import { UserContext } from '../context/UserContext'
 import { SocketContext } from '../context/SocketContext'
@@ -3344,6 +3344,21 @@ const MessagesPage = () => {
                   </>
                 )}
               </Flex>
+              <Tooltip label="Messages are kept for 200 days" hasArrow>
+                <IconButton
+                  aria-label="Chat history info"
+                  icon={<InfoOutlineIcon boxSize={3} />}
+                  size="xs"
+                  variant="ghost"
+                  onClick={() =>
+                    showToast(
+                      'Chat history',
+                      'Messages are kept for 200 days, then they are deleted automatically.',
+                      'info',
+                    )
+                  }
+                />
+              </Tooltip>
               {/* Delete conversation button (1-to-1 only) */}
               {!selectedConversation.isGroup && (
               <IconButton
