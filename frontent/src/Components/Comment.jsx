@@ -3,7 +3,7 @@ import { Avatar, Flex, Text, Divider, Button, Input, Box, Link, VStack, IconButt
 import { Link as RouterLink } from 'react-router-dom'
 import { BiDotsHorizontalRounded } from "react-icons/bi";
 import { MdOutlineDeleteOutline } from "react-icons/md";
-import { formatDistanceToNow } from 'date-fns'
+import { formatChatStamp } from '../utils/formatChatStamp'
 import { UserContext } from '../context/UserContext'
 import { PostContext } from '../context/PostContext'
 import useShowToast from '../hooks/useShowToast'
@@ -567,17 +567,21 @@ const Comment = ({ reply, postId, allReplies, postedBy, onRepliesChange, onReply
     
     <Flex gap={4} py={2} my={2} mb={6} w="full">  {/* Added mb={6} for margin bottom */}
    
-    <Avatar src={displayProfilePic} size="sm"/>
+    <Avatar
+      as={reply?.username ? RouterLink : undefined}
+      to={reply?.username ? `/${reply.username}` : undefined}
+      src={displayProfilePic}
+      size="sm"
+      cursor={reply?.username ? 'pointer' : 'default'}
+    />
 
     <Flex w="full" gap={1} flexDirection="column">
         <Flex justifyContent="space-between" w="full" alignItems="center">
             <Text fontWeight="semibold">{reply.name || reply.username}</Text>
            
             <Flex alignItems="center" gap={2}>
-               <Text fontSize="sm">
-                 {reply?.date && !isNaN(new Date(reply.date).getTime())
-                   ? `${formatDistanceToNow(new Date(reply.date))} ago`
-                   : 'just now'}
+               <Text fontSize="sm" color="gray.500">
+                 {formatChatStamp(reply?.date) || 'just now'}
                </Text>
                 {canDelete && (
                   <IconButton

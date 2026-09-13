@@ -49,7 +49,7 @@ import useShowToast from '../hooks/useShowToast'
 import { LiveKitContext } from '../context/LiveKitContext'
 import { GroupCallContext } from '../context/GroupCallContext'
 import { useLiveBroadcast } from '../context/LiveBroadcastContext'
-import { formatDistanceToNow } from 'date-fns'
+import { formatChatStamp } from '../utils/formatChatStamp'
 import { FaPhone, FaPhoneSlash, FaVideo } from 'react-icons/fa'
 import { BsCheck2All, BsReply, BsFillImageFill, BsTrash } from 'react-icons/bs'
 import { MdDelete } from 'react-icons/md'
@@ -408,6 +408,12 @@ const MessagesPage = () => {
   const { startGroupCall, groupCallActive } = useContext(GroupCallContext) || {}
   const { isLive } = useLiveBroadcast()
   const showToast = useShowToast()
+
+  const openUserProfile = useCallback((username) => {
+    const name = String(username || '').trim()
+    if (!name) return
+    navigate(`/${name}`)
+  }, [navigate])
 
   // State
   const [conversations, setConversations] = useState([])
@@ -3318,6 +3324,10 @@ const MessagesPage = () => {
                   src={selectedConversation.participants[0]?.profilePic}
                   name={selectedConversation.participants[0]?.name || selectedConversation.participants[0]?.username || 'User'}
                   bg={useColorModeValue('blue.500', 'blue.600')}
+                  cursor="pointer"
+                  onClick={() =>
+                    openUserProfile(selectedConversation.participants[0]?.username)
+                  }
                 />
               )}
               <Flex
@@ -3491,6 +3501,11 @@ const MessagesPage = () => {
                         name={senderUser?.name || senderUser?.username || 'User'}
                         display={{ base: "none", sm: "flex" }}
                         bg={useColorModeValue('blue.500', 'blue.600')}
+                        cursor="pointer"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          openUserProfile(isOwn ? user?.username : senderUser?.username)
+                        }}
                       />
                       <Flex 
                         direction="column" 
@@ -3729,10 +3744,7 @@ const MessagesPage = () => {
                           mt={0.5}
                           px={2}
                         >
-                          {msg.createdAt &&
-                            formatDistanceToNow(new Date(msg.createdAt), {
-                              addSuffix: true,
-                            })}
+                          {formatChatStamp(msg.createdAt)}
                         </Text>
                         {/* Message Reactions */}
                         {msg.reactions && msg.reactions.length > 0 && (
