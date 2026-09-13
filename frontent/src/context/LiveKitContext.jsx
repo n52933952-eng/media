@@ -19,6 +19,7 @@ import { Room, RoomEvent } from 'livekit-client';
 import { useToast } from '@chakra-ui/react';
 import { UserContext } from './UserContext';
 import { SocketContext } from './SocketContext';
+import { warmupUserMedia } from '../utils/warmupUserMedia';
 import ringTone from '../assets/ring.mp3';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
@@ -36,18 +37,6 @@ const idStr = (v) => {
 const sortedRoomName = (a, b) => {
   const ids = [idStr(a), idStr(b)].sort();
   return `call_${ids[0]}_${ids[1]}`;
-};
-
-const warmupUserMedia = async ({ video = true, audio = true } = {}) => {
-  try {
-    if (!navigator?.mediaDevices?.getUserMedia) return;
-    const stream = await navigator.mediaDevices.getUserMedia({ video, audio });
-    stream.getTracks().forEach((t) => {
-      try { t.stop(); } catch (_) {}
-    });
-  } catch (_) {
-    // Silent: fallback is normal LiveKit publish flow.
-  }
 };
 
 // ─── Provider ────────────────────────────────────────────────────────────────

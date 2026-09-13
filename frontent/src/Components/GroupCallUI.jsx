@@ -36,7 +36,7 @@ const findScreenShare = (localParticipant, participants) => {
 };
 
 // ── Single participant tile ───────────────────────────────────────────────────
-const ParticipantTile = ({ participant }) => {
+const ParticipantTile = ({ participant, playAudio = true }) => {
   const videoTrack = [...participant.trackPublications.values()]
     .find(p => p.source === 'camera' && p.track)?.track;
   const audioTrack = [...participant.trackPublications.values()]
@@ -55,12 +55,15 @@ const ParticipantTile = ({ participant }) => {
   }, [videoTrack]);
 
   useEffect(() => {
-    if (!audioTrack) return;
+    if (!audioTrack || !playAudio) return;
     try {
       const audioEl = audioTrack.attach();
       audioEl.autoplay = true;
+      audioEl.playsInline = true;
+      audioEl.muted = false;
       audioEl.style.display = 'none';
       document.body.appendChild(audioEl);
+      void audioEl.play?.().catch(() => {});
       if (audioElRef.current) {
         try { audioElRef.current.remove(); } catch (_) {}
       }
@@ -75,7 +78,7 @@ const ParticipantTile = ({ participant }) => {
         audioElRef.current = null;
       }
     };
-  }, [audioTrack]);
+  }, [audioTrack, playAudio]);
 
   return (
     <Box
@@ -238,7 +241,7 @@ const ActiveGroupCallScreen = () => {
           <Box flexShrink={0} overflowX="auto">
             <HStack spacing={3} align="stretch" minH="120px">
               {localParticipant && (
-                <Box minW="160px" maxW="160px"><ParticipantTile participant={localParticipant} /></Box>
+                <Box minW="160px" maxW="160px"><ParticipantTile participant={localParticipant} playAudio={false} /></Box>
               )}
               {participants.map(p => (
                 <Box key={p.identity} minW="160px" maxW="160px"><ParticipantTile participant={p} /></Box>
@@ -250,7 +253,7 @@ const ActiveGroupCallScreen = () => {
         <Box flex={1} overflowY="auto" p={3}>
           <SimpleGrid columns={{ base: 1, sm: 2, md: 3, lg: 4 }} spacing={3}>
             {/* Local tile */}
-            {localParticipant && <ParticipantTile participant={localParticipant} />}
+            {localParticipant && <ParticipantTile participant={localParticipant} playAudio={false} />}
             {/* Remote tiles */}
             {participants.map(p => <ParticipantTile key={p.identity} participant={p} />)}
           </SimpleGrid>

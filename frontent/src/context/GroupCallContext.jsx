@@ -20,6 +20,7 @@ import { Room, RoomEvent } from 'livekit-client';
 import { useToast } from '@chakra-ui/react';
 import { UserContext } from './UserContext';
 import { SocketContext } from './SocketContext';
+import { warmupUserMedia } from '../utils/warmupUserMedia';
 import ringTone from '../assets/ring.mp3';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
@@ -109,13 +110,13 @@ export const GroupCallProvider = ({ children }) => {
       setParticipants([]);
     });
 
+    await warmupUserMedia({ video: type !== 'audio', audio: true });
     await room.connect(livekitUrl, token);
 
     if (type !== 'audio') {
       await room.localParticipant.enableCameraAndMicrophone();
-    } else {
-      await room.localParticipant.setMicrophoneEnabled(true);
     }
+    await room.localParticipant.setMicrophoneEnabled(true);
 
     refreshParticipants();
     return room;

@@ -432,6 +432,11 @@ const LiveStreamPage = () => {
             if (screen) setRemoteScreenTrack(screen);
             if (camera) setRemoteCameraTrack(camera);
           });
+          for (const participant of room.remoteParticipants.values()) {
+            participant.audioTrackPublications?.forEach?.((pub) => {
+              if (pub?.track) attachRemoteTrack(pub.track, pub);
+            });
+          }
         }
       });
       room.on(RoomEvent.Disconnected, () => {

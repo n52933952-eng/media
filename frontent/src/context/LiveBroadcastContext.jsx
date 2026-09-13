@@ -15,6 +15,7 @@ import {
   createLiveChatBatchSink,
   LIVE_CHAT_MAX_MESSAGES,
 } from '../utils/liveChatThrottle';
+import { warmupUserMedia } from '../utils/warmupUserMedia';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
 
@@ -456,6 +457,7 @@ export const LiveBroadcastProvider = ({ children }) => {
         } catch (_) {}
       });
 
+      await warmupUserMedia({ video: true, audio: true });
       await room.connect(livekitUrl, token);
       await room.localParticipant.setMicrophoneEnabled(true);
       await room.localParticipant.setCameraEnabled(true, {
