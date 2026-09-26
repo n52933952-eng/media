@@ -51,6 +51,13 @@ const MessageSchema = new mongoose.Schema({
         default: null
     },
 
+    /** Copied from the quoted message so the reply thumb survives reload. */
+    replyPreview: {
+        text: { type: String, default: '' },
+        img: { type: String, default: '' },
+        senderName: { type: String, default: '' },
+    },
+
 },{timestamps:true})
 
 // CRITICAL: Add indexes for performance - essential for production

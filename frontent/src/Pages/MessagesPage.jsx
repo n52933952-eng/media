@@ -55,7 +55,7 @@ import { BsCheck2All, BsReply, BsFillImageFill, BsTrash } from 'react-icons/bs'
 import { MdDelete } from 'react-icons/md'
 import EmojiPicker from 'emoji-picker-react'
 import { compressVideo, needsCompression } from '../utils/videoCompress'
-import { isVideoUrl, mediaPreviewLabel, replyMediaUrl, replyPreviewLabel } from '../utils/mediaUrl'
+import { hydrateReplyThumbs, isVideoUrl, mediaPreviewLabel, replyMediaUrl, replyPreviewLabel } from '../utils/mediaUrl'
 import { uploadMediaToR2 } from '../utils/directR2Upload'
 import LiveShareChatCard from '../Components/LiveShareChatCard'
 import { parseLiveShareMessage, liveSharePreviewText, resolveLiveShareFromMessage } from '../utils/liveShareMessage'
@@ -960,7 +960,7 @@ const MessagesPage = () => {
               firstMessageIdRef.current = data.messages[0]._id
             }
             setMessages((prev) => {
-              const combined = [...(data.messages || []), ...prev]
+              const combined = hydrateReplyThumbs([...(data.messages || []), ...prev])
               if (combined.length > 200) {
                 return combined.slice(0, 200)
               }
@@ -971,7 +971,7 @@ const MessagesPage = () => {
             return
           } else {
             // Initial load - replace all messages
-            const messagesToSet = data.messages || []
+            const messagesToSet = hydrateReplyThumbs(data.messages || [])
             
             // Set lastMessageCountRef BEFORE setting messages to prevent unread detection on initial load
             lastMessageCountRef.current = messagesToSet.length
@@ -1432,7 +1432,7 @@ const MessagesPage = () => {
           if (prev.length === 0 && message._id) {
             firstMessageIdRef.current = message._id
           }
-          const updated = [...prev, message]
+          const updated = hydrateReplyThumbs([...prev, message])
           // Limit to 200 messages max to prevent memory issues
           // If over limit, remove oldest messages (keep most recent 200)
           if (updated.length > 200) {
@@ -2876,7 +2876,7 @@ const MessagesPage = () => {
           : {}),
       }
       setMessages((prev) => {
-        const updated = [...prev, messageWithSender]
+        const updated = hydrateReplyThumbs([...prev, messageWithSender])
         // Limit to 200 messages max to prevent memory issues
         // If over limit, remove oldest messages (keep most recent 200)
         if (updated.length > 200) {
@@ -3622,15 +3622,6 @@ const MessagesPage = () => {
                             >
                               <Flex alignItems="center" gap={2}>
                                 <Box flex={1} minW={0}>
-                                  <Text fontSize="xs" color="blue.500" fontWeight="semibold" mb={0.5}>
-                                    {(() => {
-                                      const replySenderId = msg.replyTo.sender?._id ? 
-                                        (typeof msg.replyTo.sender._id === 'string' ? msg.replyTo.sender._id : msg.replyTo.sender._id.toString()) :
-                                        (typeof msg.replyTo.sender === 'string' ? msg.replyTo.sender : String(msg.replyTo.sender))
-                                      const currentUserId = typeof user._id === 'string' ? user._id : user._id.toString()
-                                      return replySenderId === currentUserId ? 'You' : (msg.replyTo.sender?.name || msg.replyTo.sender?.username || 'User')
-                                    })()}
-                                  </Text>
                                   <Text fontSize="xs" color={useColorModeValue('gray.600', 'gray.400')} noOfLines={1}>
                                     {replyPreviewLabel(msg.replyTo.text, msg.replyTo.img) || 'Message'}
                                   </Text>

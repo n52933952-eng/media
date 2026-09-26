@@ -45,3 +45,39 @@ export function replyMediaUrl(text, img) {
 export function mediaDisplayUrl(url) {
   return String(url || '').trim()
 }
+
+/** Keep reply thumbs after reload: copy img from snapshot or the original message in this list. */
+export function hydrateReplyThumbs(messages) {
+  const list = Array.isArray(messages) ? messages : []
+  const byId = new Map()
+  for (const m of list) {
+    if (m?._id) byId.set(String(m._id), m)
+  }
+  return list.map((m) => {
+    const r = m.replyTo
+    if (!r) return m
+    const preview = m.replyPreview
+    const quotedObj = r && typeof r === 'object' ? r : null
+    const quotedId = String(quotedObj?._id || r || '')
+    const fromList = quotedId ? byId.get(quotedId) : undefined
+    const img = String(quotedObj?.img || preview?.img || fromList?.img || '').trim()
+    const text = quotedObj?.text ?? preview?.text ?? fromList?.text ?? ''
+    const sender =
+      quotedObj?.sender ||
+      fromList?.sender ||
+      (preview?.senderName ? { name: preview.senderName } : undefined)
+    if (!img && quotedObj?.img == null && !preview?.img && !fromList?.img) {
+      return m
+    }
+    return {
+      ...m,
+      replyTo: {
+        ...(quotedObj || {}),
+        _id: quotedId || quotedObj?._id,
+        img: img || quotedObj?.img || '',
+        text,
+        sender,
+      },
+    }
+  })
+}

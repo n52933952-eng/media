@@ -20,6 +20,59 @@ import { buildConversationLastMessageFromMessage, mediaPreviewLabel } from '../s
 // ── helpers ────────────────────────────────────────────────────────────────
 const idStr = (id) => (id != null ? id.toString() : '')
 
+function isProbablyMediaUrl(value) {
+  const u = String(value || '').trim()
+  if (!u) return false
+  return (
+    /\.(mp4|webm|ogg|mov|jpe?g|png|gif|webp|heic|bmp|avif)(\?.*)?$/i.test(u) ||
+    u.includes('/video/upload/') ||
+    /^https?:\/\/\S+$/i.test(u)
+  )
+}
+
+function quotedMediaUrl(quoted) {
+  const img = String(quoted?.img || '').trim()
+  if (img) return img
+  const text = String(quoted?.text || '').trim()
+  return isProbablyMediaUrl(text) ? text : ''
+}
+
+async function buildReplyPreview(replyToId) {
+  if (!replyToId || !mongoose.isValidObjectId(replyToId)) return null
+  const quoted = await Message.findById(replyToId)
+    .select('text img sender')
+    .populate('sender', 'name username')
+  if (!quoted) return null
+  return {
+    text: String(quoted.text || '').trim(),
+    img: quotedMediaUrl(quoted),
+    senderName: quoted.sender?.name || quoted.sender?.username || '',
+  }
+}
+
+function mergeReplyPreviewIntoMessage(msg) {
+  const obj = typeof msg?.toObject === 'function' ? msg.toObject() : { ...(msg || {}) }
+  const preview = obj.replyPreview
+  if (!obj.replyTo && !preview) return obj
+  if (obj.replyTo && typeof obj.replyTo === 'object') {
+    const img = quotedMediaUrl(obj.replyTo) || String(preview?.img || '').trim()
+    const text = obj.replyTo.text != null && String(obj.replyTo.text).trim() !== ''
+      ? obj.replyTo.text
+      : (preview?.text || '')
+    obj.replyTo = { ...obj.replyTo, img, text }
+    return obj
+  }
+  if (obj.replyTo && preview) {
+    obj.replyTo = {
+      _id: obj.replyTo,
+      text: preview.text || '',
+      img: preview.img || '',
+      sender: preview.senderName ? { name: preview.senderName } : undefined,
+    }
+  }
+  return obj
+}
+
 function escapeRegexLiteral(value) {
   return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
@@ -341,7 +394,7 @@ async function deliverOutboundMessage(newMessage, conversation, recipientId) {
     const effectivelyOnline = await isUserEffectivelyOnline(recipientIdStr)
     if (effectivelyOnline) {
       const messageWithTimestamp = {
-        ...newMessage.toObject(),
+        ...mergeReplyPreviewIntoMessage(newMessage),
         conversationUpdatedAt: conversation.updatedAt,
         delivered: false,
       }
@@ -481,12 +534,14 @@ function parseLiveShareStreamerId(text) {
 async function _persistAndBroadcastMessage({ conversation, senderId, message, img, replyTo }) {
   const liveShareStreamerId = parseLiveShareStreamerId(message)
   const previewText = (message && String(message).trim()) || mediaPreviewLabel(img)
+  const replyPreview = await buildReplyPreview(replyTo)
   const newMessage = new Message({
     conversationId: conversation._id,
     sender: senderId,
     text: message,
     img: img || '',
     replyTo: replyTo || null,
+    ...(replyPreview ? { replyPreview } : {}),
     ...(liveShareStreamerId ? { liveShareStreamerId } : {}),
   })
 
@@ -508,9 +563,11 @@ async function _persistAndBroadcastMessage({ conversation, senderId, message, im
     })
   }
 
+  const shapedMessage = mergeReplyPreviewIntoMessage(newMessage)
+
   if (conversation.isGroup) {
     // Group: broadcast to Socket.IO room + push to offline members
-    const msgObj = { ...newMessage.toObject(), conversationUpdatedAt: conversation.updatedAt, isGroup: true }
+    const msgObj = { ...shapedMessage, conversationUpdatedAt: conversation.updatedAt, isGroup: true }
     await broadcastToConversation(
       conversation._id,
       'newMessage',
@@ -536,7 +593,7 @@ async function _persistAndBroadcastMessage({ conversation, senderId, message, im
     // 1-to-1: existing delivery path
     const recipientId = conversation.participants.find(p => idStr(p) !== idStr(senderId))
     const delivered = await deliverOutboundMessage(newMessage, conversation, recipientId)
-    const responseData = { ...newMessage.toObject(), conversationUpdatedAt: conversation.updatedAt, delivered }
+    const responseData = { ...shapedMessage, conversationUpdatedAt: conversation.updatedAt, delivered }
     return { responseData, delivered }
   }
 }
@@ -656,7 +713,11 @@ export const getMessage = async(req,res) => {
         })
       : null
 
-    res.status(200).json({ messages: messagesToReturn, hasMore, nextCursor })
+    res.status(200).json({
+      messages: messagesToReturn.map(mergeReplyPreviewIntoMessage),
+      hasMore,
+      nextCursor,
+    })
   } catch(error) {
     res.status(500).json({ error: error.message })
     console.log(error)
