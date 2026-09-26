@@ -55,7 +55,7 @@ import { BsCheck2All, BsReply, BsFillImageFill, BsTrash } from 'react-icons/bs'
 import { MdDelete } from 'react-icons/md'
 import EmojiPicker from 'emoji-picker-react'
 import { compressVideo, needsCompression } from '../utils/videoCompress'
-import { isVideoUrl, mediaPreviewLabel } from '../utils/mediaUrl'
+import { isVideoUrl, mediaPreviewLabel, replyMediaUrl, replyPreviewLabel } from '../utils/mediaUrl'
 import { uploadMediaToR2 } from '../utils/directR2Upload'
 import LiveShareChatCard from '../Components/LiveShareChatCard'
 import { parseLiveShareMessage, liveSharePreviewText, resolveLiveShareFromMessage } from '../utils/liveShareMessage'
@@ -396,6 +396,63 @@ const SharedPostPreview = ({ postId, onOpen, onMessageClick }) => {
   )
 }
 
+const ReplyMediaThumb = ({ text, img, onOpen }) => {
+  const uri = replyMediaUrl(text, img)
+  const videoRef = useRef(null)
+  const video = !!uri && isVideoUrl(uri)
+
+  if (!uri) return null
+
+  const showFirstFrame = () => {
+    const v = videoRef.current
+    if (!v) return
+    try {
+      if (v.readyState >= 1 && Number.isFinite(v.duration) && v.duration > 0) {
+        v.currentTime = Math.min(0.8, Math.max(0.05, v.duration * 0.05))
+      }
+    } catch (_) {}
+  }
+
+  return (
+    <Box
+      w="44px"
+      h="44px"
+      borderRadius="md"
+      overflow="hidden"
+      bg="black"
+      flexShrink={0}
+      position="relative"
+      cursor="pointer"
+      onClick={(e) => {
+        e.stopPropagation()
+        onOpen?.(uri, video)
+      }}
+    >
+      {video ? (
+        <>
+          <Box
+            as="video"
+            ref={videoRef}
+            src={uri}
+            muted
+            playsInline
+            preload="metadata"
+            w="44px"
+            h="44px"
+            objectFit="cover"
+            onLoadedMetadata={showFirstFrame}
+          />
+          <Flex position="absolute" inset={0} align="center" justify="center" bg="blackAlpha.400">
+            <Text color="white" fontSize="xs" ml="2px">▶</Text>
+          </Flex>
+        </>
+      ) : (
+        <Image src={uri} w="44px" h="44px" objectFit="cover" alt="" />
+      )}
+    </Box>
+  )
+}
+
 const MessagesPage = () => {
   const navigate = useNavigate()
   const location = useLocation()
@@ -438,6 +495,7 @@ const MessagesPage = () => {
   const [isAtBottom, setIsAtBottom] = useState(true) // Track if user is scrolled to bottom
   const [unreadCountInView, setUnreadCountInView] = useState(0) // Count of unread messages while scrolled up
   const [replyingTo, setReplyingTo] = useState(null) // Store message being replied to
+  const [replyMediaViewer, setReplyMediaViewer] = useState(null) // { uri, video }
   const [image, setImage] = useState(null) // File object for image/video
   const [imagePreview, setImagePreview] = useState('') // Preview URL for display
   const [uploadProgress, setUploadProgress] = useState(0) // Upload progress percentage
@@ -2796,6 +2854,7 @@ const MessagesPage = () => {
     setUploadProgress(0)
 
     if (data) {
+      const replySnapshot = replyingTo
       // Ensure the message has sender data from current user context
       const messageWithSender = {
         ...data,
@@ -2804,7 +2863,17 @@ const MessagesPage = () => {
           name: user.name,
           username: user.username,
           profilePic: user.profilePic
-        }
+        },
+        ...(replySnapshot
+          ? {
+              replyTo: {
+                ...(data.replyTo || {}),
+                img: data.replyTo?.img || replySnapshot.img,
+                text: data.replyTo?.text ?? replySnapshot.text,
+                sender: data.replyTo?.sender || replySnapshot.sender,
+              },
+            }
+          : {}),
       }
       setMessages((prev) => {
         const updated = [...prev, messageWithSender]
@@ -3551,18 +3620,27 @@ const MessagesPage = () => {
                                 }
                               }}
                             >
-                              <Text fontSize="xs" color="blue.500" fontWeight="semibold" mb={0.5}>
-                                {(() => {
-                                  const replySenderId = msg.replyTo.sender?._id ? 
-                                    (typeof msg.replyTo.sender._id === 'string' ? msg.replyTo.sender._id : msg.replyTo.sender._id.toString()) :
-                                    (typeof msg.replyTo.sender === 'string' ? msg.replyTo.sender : String(msg.replyTo.sender))
-                                  const currentUserId = typeof user._id === 'string' ? user._id : user._id.toString()
-                                  return replySenderId === currentUserId ? 'You' : (msg.replyTo.sender?.name || msg.replyTo.sender?.username || 'User')
-                                })()}
-                              </Text>
-                              <Text fontSize="xs" color={useColorModeValue('gray.600', 'gray.400')} noOfLines={1}>
-                                {msg.replyTo.text || 'Message'}
-                              </Text>
+                              <Flex alignItems="center" gap={2}>
+                                <Box flex={1} minW={0}>
+                                  <Text fontSize="xs" color="blue.500" fontWeight="semibold" mb={0.5}>
+                                    {(() => {
+                                      const replySenderId = msg.replyTo.sender?._id ? 
+                                        (typeof msg.replyTo.sender._id === 'string' ? msg.replyTo.sender._id : msg.replyTo.sender._id.toString()) :
+                                        (typeof msg.replyTo.sender === 'string' ? msg.replyTo.sender : String(msg.replyTo.sender))
+                                      const currentUserId = typeof user._id === 'string' ? user._id : user._id.toString()
+                                      return replySenderId === currentUserId ? 'You' : (msg.replyTo.sender?.name || msg.replyTo.sender?.username || 'User')
+                                    })()}
+                                  </Text>
+                                  <Text fontSize="xs" color={useColorModeValue('gray.600', 'gray.400')} noOfLines={1}>
+                                    {replyPreviewLabel(msg.replyTo.text, msg.replyTo.img) || 'Message'}
+                                  </Text>
+                                </Box>
+                                <ReplyMediaThumb
+                                  text={msg.replyTo.text}
+                                  img={msg.replyTo.img}
+                                  onOpen={(uri, video) => setReplyMediaViewer({ uri, video })}
+                                />
+                              </Flex>
                             </Box>
                           )}
                           {(() => {
@@ -4086,12 +4164,17 @@ const MessagesPage = () => {
                       })()}
                     </Text>
                     <Text fontSize="xs" color={useColorModeValue('gray.600', 'gray.400')} noOfLines={1}>
-                      {replyingTo.text || 'Message'}
+                      {replyPreviewLabel(replyingTo.text, replyingTo.img) || 'Message'}
                     </Text>
                     <Text fontSize="2xs" color={useColorModeValue('gray.500', 'gray.500')} mt={1} fontStyle="italic">
                       Type your reply in the input field below
                     </Text>
                   </Box>
+                  <ReplyMediaThumb
+                    text={replyingTo.text}
+                    img={replyingTo.img}
+                    onOpen={(uri, video) => setReplyMediaViewer({ uri, video })}
+                  />
                   <IconButton
                     aria-label="Cancel reply"
                     icon={<Text fontSize="lg">×</Text>}
@@ -4623,6 +4706,51 @@ const MessagesPage = () => {
           }
         `}
       </style>
+
+      <Modal
+        isOpen={!!replyMediaViewer}
+        onClose={() => setReplyMediaViewer(null)}
+        size="full"
+        isCentered
+      >
+        <ModalOverlay bg="blackAlpha.900" />
+        <ModalContent bg="transparent" boxShadow="none" maxW="100vw" m={0}>
+          <ModalCloseButton color="white" zIndex={2} />
+          <ModalBody
+            display="flex"
+            alignItems="center"
+            justifyContent="center"
+            p={4}
+            minH="100vh"
+            onClick={() => setReplyMediaViewer(null)}
+          >
+            {replyMediaViewer?.video ? (
+              <Box
+                as="video"
+                src={replyMediaViewer.uri}
+                controls
+                autoPlay
+                playsInline
+                preload="auto"
+                maxW="90vw"
+                maxH="90vh"
+                borderRadius="md"
+                bg="black"
+                onClick={(e) => e.stopPropagation()}
+              />
+            ) : replyMediaViewer?.uri ? (
+              <Image
+                src={replyMediaViewer.uri}
+                alt=""
+                maxW="90vw"
+                maxH="90vh"
+                objectFit="contain"
+                onClick={(e) => e.stopPropagation()}
+              />
+            ) : null}
+          </ModalBody>
+        </ModalContent>
+      </Modal>
 
       {/* ── New Group Modal ─────────────────────────────────────────────── */}
       <Modal isOpen={isGroupModalOpen} onClose={closeGroupModal} isCentered size="md">

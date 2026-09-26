@@ -503,7 +503,7 @@ async function _persistAndBroadcastMessage({ conversation, senderId, message, im
   if (newMessage.replyTo) {
     await newMessage.populate({
       path: 'replyTo',
-      select: 'text sender',
+      select: 'text img sender',
       populate: { path: 'sender', select: 'username name profilePic' },
     })
   }
@@ -638,7 +638,7 @@ export const getMessage = async(req,res) => {
       .populate('reactions.userId', 'username name profilePic')
       .populate({
         path: 'replyTo',
-        select: 'text sender',
+        select: 'text img sender',
         populate: { path: 'sender', select: 'username name profilePic' },
       })
       .sort({ createdAt: -1, _id: -1 })

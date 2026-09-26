@@ -12,6 +12,35 @@ export function mediaPreviewLabel(img) {
   return isVideoUrl(url) ? '🎥 Video' : '📷 Image'
 }
 
+function isMediaUrl(value) {
+  if (!value) return false
+  if (isVideoUrl(value)) return true
+  if (/\.(jpe?g|png|gif|webp|heic|bmp|avif)(\?.*)?$/i.test(value)) return true
+  return /^https?:\/\/\S+$/i.test(value)
+}
+
+/** Reply quote: show Video/Image, never the raw media URL. */
+export function replyPreviewLabel(text, img) {
+  const attachment = String(img || '').trim()
+  const raw = String(text || '').trim()
+  const candidate = attachment || raw
+  if (candidate && (attachment || isMediaUrl(candidate))) {
+    return mediaPreviewLabel(candidate) || raw
+  }
+  return raw
+}
+
+/** Media URL for a WhatsApp-style reply thumbnail. */
+export function replyMediaUrl(text, img) {
+  const attachment = String(img || '').trim()
+  const raw = String(text || '').trim()
+  const candidate = attachment || raw
+  if (candidate && (attachment || isMediaUrl(candidate))) {
+    return mediaDisplayUrl(candidate)
+  }
+  return ''
+}
+
 /** Display URL as stored by the backend (R2 public URL). */
 export function mediaDisplayUrl(url) {
   return String(url || '').trim()
