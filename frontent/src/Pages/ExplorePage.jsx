@@ -132,6 +132,7 @@ const ExplorePage = () => {
       ) : users.length === 0 ? (
         <Text color={muted} textAlign="center" py={10}>No people to show yet. Tap refresh.</Text>
       ) : (
+        <>
         <SimpleGrid columns={{ base: 2, lg: 3 }} spacing={{ base: 1.5, md: 2 }}>
           {users.map((item) => {
             const preview = item.latestPost
@@ -297,6 +298,7 @@ const ExplorePage = () => {
         ) : hasMore ? (
           <Button variant="ghost" onClick={() => load('more')} mt={2}>Load more</Button>
         ) : null}
+        </>
       )}
     </Box>
   )
