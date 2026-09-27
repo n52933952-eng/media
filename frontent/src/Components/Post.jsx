@@ -1481,11 +1481,10 @@ const showToast = useShowToast()
           </Box>
         ) : null}
 
-         {/* Delete: owner (or channel adder) — only on own profile / feed, not on someone else's profile. Admin can delete any post. */}
-         {((!isSomeoneElsesProfile &&
+         {/* Delete: owner (or channel adder) — only on own profile / feed, not on someone else's profile. */}
+         {!isSomeoneElsesProfile &&
            (user?._id === postedBy?._id ||
-             (post?.channelAddedBy && post.channelAddedBy === user?._id?.toString()))) ||
-           isAdminUser) && (
+             (post?.channelAddedBy && post.channelAddedBy === user?._id?.toString())) && (
            <MdOutlineDeleteOutline 
              onClick={(e) => {
                e.preventDefault()

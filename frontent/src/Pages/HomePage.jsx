@@ -23,6 +23,7 @@ import { pruneStaleGameFeedPosts } from '../utils/pruneStaleGameFeedPosts.js'
 import { isFollowingUserId, mergePostUpdate, reshapeFeedFirstPage } from '../utils/postUtils.js'
 import { applyPostEngagement } from '../hooks/usePostEngagementSubscription.js'
 import AdsterraFeedNative, { getAdsterraFeedEvery } from '../Components/ads/AdsterraFeedNative.jsx'
+import PlayStoreAnnounceCard from '../Components/PlayStoreAnnounceCard.jsx'
 
 
 
@@ -740,6 +741,7 @@ const HomePage = () => {
       >
         <Box px={{ base: 3, md: 0 }} w="100%">
           <StoryStrip />
+          <PlayStoreAnnounceCard />
         </Box>
 
         {/* Error state */}

@@ -51,6 +51,41 @@ export const SocketContextProvider = ({ children }) => {
   const chessToneAudio = useRef(new Audio(chessTone)); // Audio for chess challenge notification
   const selectedConversationIdRef = useRef(null); // Track which conversation is currently open
 
+  const refreshUnreadMessageCount = useCallback(async () => {
+    const uid = userIdToStr(user?._id)
+    if (!uid) {
+      setTotalUnreadCount(0)
+      return
+    }
+    try {
+      const socketUrl = import.meta.env.PROD
+        ? window.location.origin
+        : 'http://localhost:5000'
+      // Same source as the Messages list: each chat's unreadCount, added up.
+      // Redis totalUnread can stay at 99+ after chats are already read.
+      const res = await fetch(`${socketUrl}/api/message/conversations?limit=40`, {
+        credentials: 'include',
+      })
+      const data = await res.json()
+      if (!res.ok) return
+      const list = Array.isArray(data?.conversations)
+        ? data.conversations
+        : Array.isArray(data)
+          ? data
+          : []
+      const total = list.reduce((sum, conv) => {
+        const n = Math.floor(Number(conv?.unreadCount))
+        return sum + (Number.isFinite(n) && n > 0 ? n : 0)
+      }, 0)
+      setTotalUnreadCount(total)
+    } catch (error) {
+      console.log('Error summing chat unread counts:', error)
+    }
+  }, [user?._id])
+
+  const refreshUnreadMessageCountRef = useRef(refreshUnreadMessageCount)
+  refreshUnreadMessageCountRef.current = refreshUnreadMessageCount
+
   // One merged presenceSubscribe for the whole app (like mobile). Backend replaces the room set on each emit —
   // never subscribe from individual Posts with a single userId (that wiped feed online dots).
   const socketRef = useRef(null)
@@ -196,7 +231,10 @@ export const SocketContextProvider = ({ children }) => {
   // Setup socket connection
   useEffect(() => {
     const currentUserId = userIdToStr(user?._id)
-    if (!currentUserId) return;
+    if (!currentUserId) {
+      setTotalUnreadCount(0)
+      return
+    }
 
     const socketUrl = import.meta.env.PROD 
       ? window.location.origin 
@@ -304,9 +342,9 @@ export const SocketContextProvider = ({ children }) => {
       })
     });
 
-    // Listen for unread count updates
-    newSocket?.on('unreadCountUpdate', ({ totalUnread }) => {
-      setTotalUnreadCount(totalUnread || 0);
+    // Don't use the Redis total (it can show 99+ with no unread chats).
+    newSocket?.on('unreadCountUpdate', () => {
+      refreshUnreadMessageCountRef.current?.()
     });
 
     // Listen for new notifications
@@ -374,30 +412,7 @@ export const SocketContextProvider = ({ children }) => {
       }
     });
 
-    // Fetch initial unread count - OPTIMIZED endpoint
-    const fetchInitialUnreadCount = async () => {
-      if (!currentUserId) {
-        setTotalUnreadCount(0);
-        return;
-      }
-      try {
-        const socketUrl = import.meta.env.PROD 
-          ? window.location.origin 
-          : "http://localhost:5000";
-        // Use dedicated endpoint for total unread count (much more efficient)
-        const res = await fetch(`${socketUrl}/api/message/unread/count`, {
-          credentials: 'include',
-        });
-        const data = await res.json();
-        if (res.ok && data.totalUnread !== undefined) {
-          console.log('✅ Initial unread count fetched:', data.totalUnread);
-          setTotalUnreadCount(data.totalUnread);
-        }
-      } catch (error) {
-        console.log('Error fetching initial unread count:', error);
-      }
-    };
-    fetchInitialUnreadCount();
+    refreshUnreadMessageCountRef.current?.()
 
     // Fetch initial notification count
     const fetchInitialNotificationCount = async () => {
