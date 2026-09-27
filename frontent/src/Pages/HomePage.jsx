@@ -143,6 +143,9 @@ const HomePage = () => {
     try{
       const limit = 12
       let url = `${import.meta.env.PROD ? window.location.origin : "http://localhost:5000"}/api/post/feed/feedpost?limit=${limit}`
+      if (!loadMore && !silent) {
+        url += '&fresh=1'
+      }
 
       if (loadMore) {
         const token = feedCursorRef.current

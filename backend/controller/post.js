@@ -33,7 +33,7 @@ import {
     fetchChannelPostsForUser,
     feedSortTime,
 } from '../services/feedAssembly.js'
-import { fetchSuggestedFeedPosts, mergeSuggestedIntoFeed } from '../services/feedSuggested.js'
+import { fetchSuggestedFeedPosts, mergeSuggestedIntoFeed, resetSuggestedSeen } from '../services/feedSuggested.js'
 import {
     createComment,
     findCommentById,
@@ -1410,18 +1410,28 @@ export const getFeedPost = async(req,res) => {
         const pageKey = cursorRaw || (skip === 0 ? '0' : String(skip))
 
         const hiddenObjectIds = await getHiddenFeedPostObjectIds(userId)
+        const wantFresh = String(req.query.fresh || '') === '1'
+        if (wantFresh && isFirstPage) {
+            await resetSuggestedSeen(userId)
+        }
 
-        const cached = await getCachedFeed(userId, pageKey, limit)
+        const suggestedFillCount = (list) => {
+            const followLike = (list || []).filter(
+                (p) => !p?.isLive && !p?.isSuggested && !p?.channelAddedBy,
+            )
+            return followLike.length === 0 ? 10 : 3
+        }
+
+        const cached = !wantFresh ? await getCachedFeed(userId, pageKey, limit) : null
         if (cached && Array.isArray(cached.posts)) {
             const base = cached.posts.filter((p) => !p?.isSuggested)
-            const nonLiveCount = base.filter((p) => !p?.isLive).length
             const posts = await withSuggestedFeedPosts(
                 viewerIdStr,
                 userId,
                 hiddenObjectIds,
                 base,
                 isFirstPage
-                    ? { count: nonLiveCount === 0 ? 10 : 3 }
+                    ? { count: suggestedFillCount(base) }
                     : { count: 1, appendOnly: true },
             )
             return res.status(200).json({ ...cached, posts })
@@ -1504,13 +1514,12 @@ export const getFeedPost = async(req,res) => {
             const combinedPosts = [...livePseudoPosts, ...mixedNonLive].map((p) =>
                 shapeFeedPostForViewer(p, viewerIdStr, likedSet, previewMap, replyPreviewMap),
             )
-            const nonLiveCount = combinedPosts.filter((p) => !p.isLive).length
             const postsWithSuggested = await withSuggestedFeedPosts(
                 viewerIdStr,
                 userId,
                 hiddenObjectIds,
                 combinedPosts,
-                { count: nonLiveCount === 0 ? 10 : 3 },
+                { count: firstNormalIds.length === 0 ? 10 : 3 },
             )
 
             const nextOffset = firstNormalIds.length

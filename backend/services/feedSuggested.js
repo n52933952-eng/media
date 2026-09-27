@@ -3,7 +3,7 @@ import Post from '../models/post.js'
 import User from '../models/user.js'
 import { findRecentDiscoverPosts } from './discoverUsers.js'
 import { populateFeedPostsByIds } from './feedAssembly.js'
-import { redisGet, redisSet } from './redis.js'
+import { redisGet, redisSet, redisDel } from './redis.js'
 
 const SUGGEST_EVERY = 5
 const STOP = new Set([
@@ -68,6 +68,14 @@ async function getSeenSuggestedIds(userId) {
   }
 }
 
+export async function resetSuggestedSeen(userId) {
+  try {
+    await redisDel(seenKey(userId))
+  } catch {
+    /* best-effort */
+  }
+}
+
 async function rememberSuggestedIds(userId, ids) {
   const next = [...new Set(ids.map(String).filter(Boolean))].slice(0, SEEN_MAX)
   if (!next.length) return
@@ -98,11 +106,14 @@ export async function fetchSuggestedFeedPosts(userId, { count = 3, hiddenObjectI
   const me = await User.findById(userId).select('country').lean()
   const country = String(me?.country || '').trim()
 
+  const fillEmpty = want >= 8
   const [candidates, tokens, seen] = await Promise.all([
     findRecentDiscoverPosts(userId, {
-      limit: Math.min(Math.max(want * 10, 40), 80),
+      limit: fillEmpty ? 80 : Math.min(Math.max(want * 10, 40), 80),
       hiddenObjectIds,
       excludePostIds,
+      maxPerAuthor: fillEmpty ? 3 : 1,
+      scan: fillEmpty ? 400 : 200,
     }),
     followedInterestTokens(userId),
     getSeenSuggestedIds(userId),

@@ -175,10 +175,15 @@ const CONTENT_MATCH = {
 }
 
 /** Recent real posts from people you do not follow. Skips empty signup accounts. */
-export async function findRecentDiscoverPosts(userId, { limit = 80, hiddenObjectIds = [], excludePostIds = new Set() } = {}) {
+export async function findRecentDiscoverPosts(
+  userId,
+  { limit = 80, hiddenObjectIds = [], excludePostIds = new Set(), maxPerAuthor = 1, scan = 150 } = {},
+) {
   const following = await followedIdSet(userId)
   following.add(String(userId))
   const hidden = hiddenPostQueryFilter(hiddenObjectIds)
+  const perAuthor = Math.min(Math.max(Number(maxPerAuthor) || 1, 1), 5)
+  const scanLimit = Math.min(Math.max(Number(scan) || 150, 80), 500)
   const rows = await Post.find({
     ...hidden,
     $and: [
@@ -195,19 +200,21 @@ export async function findRecentDiscoverPosts(userId, { limit = 80, hiddenObject
   })
     .select('_id postedBy text img images createdAt')
     .sort({ createdAt: -1 })
-    .limit(150)
+    .limit(scanLimit)
     .populate('postedBy', 'username name profilePic country')
     .lean()
 
-  const seenAuthor = new Set()
+  const authorCount = new Map()
   const out = []
   for (const p of rows) {
     if (excludePostIds.has(String(p._id))) continue
     if (!hasVisiblePostContent(p)) continue
     const authorId = p.postedBy?._id != null ? String(p.postedBy._id) : ''
-    if (!authorId || following.has(authorId) || seenAuthor.has(authorId)) continue
+    if (!authorId || following.has(authorId)) continue
     if (p.postedBy?.username && SYSTEM_USERNAMES.includes(p.postedBy.username)) continue
-    seenAuthor.add(authorId)
+    const n = authorCount.get(authorId) || 0
+    if (n >= perAuthor) continue
+    authorCount.set(authorId, n + 1)
     out.push(p)
     if (out.length >= limit) break
   }
