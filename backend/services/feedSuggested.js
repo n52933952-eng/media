@@ -101,7 +101,7 @@ function shufflePick(items, want) {
 
 /** Extra posts from unfollowed users. Country + related text first, then a fresh shuffle. Never writes into the follow index. */
 export async function fetchSuggestedFeedPosts(userId, { count = 3, hiddenObjectIds = [], excludePostIds = new Set() } = {}) {
-  const want = Math.min(Math.max(Number(count) || 3, 0), 12)
+  const want = Math.min(Math.max(Number(count) || 3, 0), 24)
   if (!want) return []
   const me = await User.findById(userId).select('country').lean()
   const country = String(me?.country || '').trim()
@@ -112,8 +112,8 @@ export async function fetchSuggestedFeedPosts(userId, { count = 3, hiddenObjectI
       limit: fillEmpty ? 80 : Math.min(Math.max(want * 10, 40), 80),
       hiddenObjectIds,
       excludePostIds,
-      maxPerAuthor: fillEmpty ? 3 : 1,
-      scan: fillEmpty ? 400 : 200,
+      maxPerAuthor: fillEmpty ? 4 : 1,
+      scan: fillEmpty ? 500 : 200,
     }),
     followedInterestTokens(userId),
     getSeenSuggestedIds(userId),

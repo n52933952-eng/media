@@ -14,6 +14,17 @@ const SYSTEM_USERNAMES = [
 
 const USER_PREVIEW = 'username name profilePic country'
 
+let systemAuthorIds = null
+let systemAuthorIdsAt = 0
+
+async function systemAuthorIdList() {
+  if (systemAuthorIds && Date.now() - systemAuthorIdsAt < 5 * 60 * 1000) return systemAuthorIds
+  const docs = await User.find({ username: { $in: SYSTEM_USERNAMES } }).select('_id').lean()
+  systemAuthorIds = docs.map((d) => d._id).filter(Boolean)
+  systemAuthorIdsAt = Date.now()
+  return systemAuthorIds
+}
+
 function escapeRegex(value) {
   return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
@@ -28,11 +39,12 @@ async function followedIdSet(userId) {
   return set
 }
 
-async function sampleUnfollowed(userId, viewerOid, following, extraMatch, want) {
+async function sampleUnfollowed(userId, viewerOid, following, extraMatch, want, excludeOids = []) {
+  const nin = [viewerOid, ...excludeOids]
   const pool = await User.aggregate([
     {
       $match: {
-        _id: { $ne: viewerOid },
+        _id: { $nin: nin },
         username: { $nin: SYSTEM_USERNAMES },
         ...extraMatch,
       },
@@ -47,15 +59,19 @@ async function sampleUnfollowed(userId, viewerOid, following, extraMatch, want) 
  * Random users: same country first, then worldwide if that pool is short.
  * $sample after an indexed country match. Followed users filtered in memory.
  */
-export async function sampleDiscoverUsers(userId, { country, size = 12, allowWorldwide = true } = {}) {
-  const want = Math.min(Math.max(Number(size) || 12, 1), 20)
+export async function sampleDiscoverUsers(userId, { country, size = 12, allowWorldwide = true, excludeIds = [] } = {}) {
+  const want = Math.min(Math.max(Number(size) || 12, 1), 24)
   const viewerOid = new mongoose.Types.ObjectId(userId)
   const countryName = String(country || '').trim()
   const following = await followedIdSet(userId)
+  const excludeOids = (Array.isArray(excludeIds) ? excludeIds : [])
+    .filter((id) => mongoose.Types.ObjectId.isValid(String(id)))
+    .map((id) => new mongoose.Types.ObjectId(String(id)))
+    .slice(0, 80)
 
   let picked = []
   if (countryName) {
-    picked = await sampleUnfollowed(userId, viewerOid, following, { country: countryName }, want)
+    picked = await sampleUnfollowed(userId, viewerOid, following, { country: countryName }, want, excludeOids)
     if (picked.length === 0) {
       picked = await sampleUnfollowed(
         userId,
@@ -63,12 +79,13 @@ export async function sampleDiscoverUsers(userId, { country, size = 12, allowWor
         following,
         { country: { $regex: new RegExp(`^${escapeRegex(countryName)}$`, 'i') } },
         want,
+        excludeOids,
       )
     }
   }
 
   if (picked.length < want && allowWorldwide) {
-    const more = await sampleUnfollowed(userId, viewerOid, following, {}, want)
+    const more = await sampleUnfollowed(userId, viewerOid, following, {}, want, excludeOids)
     const have = new Set(picked.map((u) => String(u._id)))
     for (const u of more) {
       if (have.has(String(u._id))) continue
@@ -177,15 +194,26 @@ const CONTENT_MATCH = {
 /** Recent real posts from people you do not follow. Skips empty signup accounts. */
 export async function findRecentDiscoverPosts(
   userId,
-  { limit = 80, hiddenObjectIds = [], excludePostIds = new Set(), maxPerAuthor = 1, scan = 150 } = {},
+  { limit = 80, hiddenObjectIds = [], excludePostIds = new Set(), maxPerAuthor = 1, scan = 150, excludeAuthorIds = [] } = {},
 ) {
   const following = await followedIdSet(userId)
   following.add(String(userId))
   const hidden = hiddenPostQueryFilter(hiddenObjectIds)
   const perAuthor = Math.min(Math.max(Number(maxPerAuthor) || 1, 1), 5)
   const scanLimit = Math.min(Math.max(Number(scan) || 150, 80), 500)
+  const systemIds = await systemAuthorIdList()
+  const skipAuthors = [...systemIds]
+  if (mongoose.Types.ObjectId.isValid(String(userId))) {
+    skipAuthors.push(new mongoose.Types.ObjectId(String(userId)))
+  }
+  for (const id of Array.isArray(excludeAuthorIds) ? excludeAuthorIds : []) {
+    if (mongoose.Types.ObjectId.isValid(String(id))) {
+      skipAuthors.push(new mongoose.Types.ObjectId(String(id)))
+    }
+  }
   const rows = await Post.find({
     ...hidden,
+    postedBy: { $nin: skipAuthors },
     $and: [
       {
         $or: [

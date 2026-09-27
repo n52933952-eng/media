@@ -1419,7 +1419,7 @@ export const getFeedPost = async(req,res) => {
             const followLike = (list || []).filter(
                 (p) => !p?.isLive && !p?.isSuggested && !p?.channelAddedBy,
             )
-            return followLike.length === 0 ? 10 : 3
+            return followLike.length === 0 ? 20 : 3
         }
 
         const cached = !wantFresh ? await getCachedFeed(userId, pageKey, limit) : null
@@ -1519,7 +1519,7 @@ export const getFeedPost = async(req,res) => {
                 userId,
                 hiddenObjectIds,
                 combinedPosts,
-                { count: firstNormalIds.length === 0 ? 10 : 3 },
+                { count: firstNormalIds.length === 0 ? 20 : 3 },
             )
 
             const nextOffset = firstNormalIds.length

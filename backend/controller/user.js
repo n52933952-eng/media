@@ -1061,19 +1061,32 @@ export const getSuggestedUsers = async(req, res) => {
     }
 }
 
-/** Explore: random same-country people + latest post preview. Refresh = new $sample. */
+/** Explore: random same-country people + latest post preview. Scroll sends exclude=ids for the next page. */
 export const getExplorePeople = async (req, res) => {
     try {
         const userId = req.user._id
-        const size = Math.min(Math.max(parseInt(req.query.limit, 10) || 12, 1), 20)
+        const size = Math.min(Math.max(parseInt(req.query.limit, 10) || 16, 1), 16)
+        const excludeIds = String(req.query.exclude || '')
+            .split(',')
+            .map((id) => id.trim())
+            .filter((id) => mongoose.Types.ObjectId.isValid(id))
+            .slice(0, 80)
         const me = await User.findById(userId).select('country').lean()
         const country = String(me?.country || '').trim()
-        const users = await sampleDiscoverUsers(userId, { country, size: size * 2, allowWorldwide: true })
+        const users = await sampleDiscoverUsers(userId, {
+            country,
+            size: size * 2,
+            allowWorldwide: true,
+            excludeIds,
+        })
         let withPosts = await attachLatestPostPreviews(users)
         withPosts = withPosts.filter((u) => u.latestPost && (u.latestPost.img || String(u.latestPost.text || '').trim()))
+        const have = new Set([...excludeIds.map(String), ...withPosts.map((u) => String(u._id))])
         if (withPosts.length < size) {
-            const fromPosts = await findRecentDiscoverPosts(userId, { limit: size })
-            const have = new Set(withPosts.map((u) => String(u._id)))
+            const fromPosts = await findRecentDiscoverPosts(userId, {
+                limit: size,
+                excludeAuthorIds: [...have],
+            })
             for (const p of fromPosts) {
                 const author = p.postedBy
                 const id = author?._id != null ? String(author._id) : ''
@@ -1095,8 +1108,10 @@ export const getExplorePeople = async (req, res) => {
                 if (withPosts.length >= size) break
             }
         }
+        const page = withPosts.slice(0, size)
         return res.status(200).json({
-            users: withPosts.slice(0, size).map((u) => ({ ...u, isFollowedByMe: false })),
+            users: page.map((u) => ({ ...u, isFollowedByMe: false })),
+            hasMore: page.length >= size,
             needsCountry: !country,
         })
     } catch (error) {
