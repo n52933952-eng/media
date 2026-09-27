@@ -323,6 +323,12 @@ const HomePage = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []) // Only run once on mount
 
+  useEffect(() => {
+    const onCountry = () => getFeedPost(false, { silent: true })
+    window.addEventListener('discover-country-set', onCountry)
+    return () => window.removeEventListener('discover-country-set', onCountry)
+  }, [getFeedPost])
+
   // Same idea as mobile FeedScreen: if we already have posts but loading is stuck true
   // (e.g. remount / return from game), clear spinner so the feed shows.
   useEffect(() => {

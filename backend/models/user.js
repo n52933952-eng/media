@@ -79,6 +79,7 @@ const UserSchema = mongoose.Schema({
 },{timestamps:true})
 
 // Note: username and email already have indexes from unique: true
+UserSchema.index({ country: 1 })
 
 
 

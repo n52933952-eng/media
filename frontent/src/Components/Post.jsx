@@ -12,6 +12,7 @@ import{PostContext} from '../context/PostContext'
 import { SocketContext } from '../context/SocketContext'
 import { FiMail } from 'react-icons/fi'
 import { followIdToString, mergePostUpdate, getReplyCount, getReplyPreviewUsers } from '../utils/postUtils.js'
+import { followPostHeaders } from '../utils/followRequest.js'
 import { isUserInOnlineList } from '../utils/presenceUtils.js'
 import PostEditorMenu from './PostEditorMenu'
 import FootballIcon from './FootballIcon'
@@ -245,7 +246,9 @@ const showToast = useShowToast()
     }
   }, [post?.isCollaborative, post?.contributors, post?._id]) // Added post._id to force re-run
 
-  const{user}=useContext(UserContext)
+  const{user,setUser}=useContext(UserContext)
+  const [suggestedFollowed, setSuggestedFollowed] = useState(false)
+  const [suggestedFollowBusy, setSuggestedFollowBusy] = useState(false)
   const{followPost,setFollowPost,hideFeedPostFromFeed,hideFeedSourceFromFeed}=useContext(PostContext)
   const { socket, onlineUser } = useContext(SocketContext) || {}
   usePostEngagementSubscription(socket, post?._id)
@@ -1026,6 +1029,38 @@ const showToast = useShowToast()
     return user.following.some((entry) => followIdToString(entry) === postedById)
   }, [showFeedExtras, user?.following, postedById, isOwner])
 
+  const showSuggestedFollow =
+    !!post?.isSuggested && !isOwner && !isFollowedAuthor && !suggestedFollowed && !!postedById
+
+  const handleSuggestedFollow = async (e) => {
+    e?.preventDefault?.()
+    e?.stopPropagation?.()
+    if (!postedById || suggestedFollowBusy || suggestedFollowed || !user?._id) return
+    setSuggestedFollowBusy(true)
+    try {
+      const res = await fetch(`${apiBaseUrl()}/api/user/follow/${postedById}`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: followPostHeaders,
+      })
+      const data = await res.json()
+      if (data.error) {
+        showToast('Error', data.error, 'error')
+        return
+      }
+      if (data.current && user) {
+        const next = { ...user, following: data.current.following, followers: data.current.followers }
+        localStorage.setItem('userInfo', JSON.stringify(next))
+        setUser(next)
+      }
+      setSuggestedFollowed(true)
+    } catch (err) {
+      showToast('Error', err?.message || 'Follow failed', 'error')
+    } finally {
+      setSuggestedFollowBusy(false)
+    }
+  }
+
   const showAuthorPresenceDot =
     isFollowedAuthor &&
     !isChannelPost &&
@@ -1226,6 +1261,17 @@ const showToast = useShowToast()
         >
          {postedBy?.name}
          </Text>
+        {showSuggestedFollow && (
+          <Button
+            size="xs"
+            colorScheme="blue"
+            ml={2}
+            isLoading={suggestedFollowBusy}
+            onClick={handleSuggestedFollow}
+          >
+            Follow
+          </Button>
+        )}
       
         <Image src="/verified.png" w={4} h={4} ml={1} />
      </Flex>

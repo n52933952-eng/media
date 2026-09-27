@@ -3621,11 +3621,13 @@ const MessagesPage = () => {
                               }}
                             >
                               <Flex alignItems="center" gap={2}>
-                                <Box flex={1} minW={0}>
-                                  <Text fontSize="xs" color={useColorModeValue('gray.600', 'gray.400')} noOfLines={1}>
-                                    {replyPreviewLabel(msg.replyTo.text, msg.replyTo.img) || 'Message'}
-                                  </Text>
-                                </Box>
+                                {!replyMediaUrl(msg.replyTo.text, msg.replyTo.img) ? (
+                                  <Box flex={1} minW={0}>
+                                    <Text fontSize="xs" color={useColorModeValue('gray.600', 'gray.400')} noOfLines={1}>
+                                      {replyPreviewLabel(msg.replyTo.text, msg.replyTo.img) || 'Message'}
+                                    </Text>
+                                  </Box>
+                                ) : null}
                                 <ReplyMediaThumb
                                   text={msg.replyTo.text}
                                   img={msg.replyTo.img}
@@ -4154,9 +4156,11 @@ const MessagesPage = () => {
                         return replySenderId === currentUserId ? 'yourself' : (replyingTo.sender?.name || replyingTo.sender?.username || 'User')
                       })()}
                     </Text>
-                    <Text fontSize="xs" color={useColorModeValue('gray.600', 'gray.400')} noOfLines={1}>
-                      {replyPreviewLabel(replyingTo.text, replyingTo.img) || 'Message'}
-                    </Text>
+                    {!replyMediaUrl(replyingTo.text, replyingTo.img) ? (
+                      <Text fontSize="xs" color={useColorModeValue('gray.600', 'gray.400')} noOfLines={1}>
+                        {replyPreviewLabel(replyingTo.text, replyingTo.img) || 'Message'}
+                      </Text>
+                    ) : null}
                     <Text fontSize="2xs" color={useColorModeValue('gray.500', 'gray.500')} mt={1} fontStyle="italic">
                       Type your reply in the input field below
                     </Text>

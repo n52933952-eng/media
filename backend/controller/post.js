@@ -33,6 +33,7 @@ import {
     fetchChannelPostsForUser,
     feedSortTime,
 } from '../services/feedAssembly.js'
+import { fetchSuggestedFeedPosts, mergeSuggestedIntoFeed } from '../services/feedSuggested.js'
 import {
     createComment,
     findCommentById,
@@ -114,6 +115,33 @@ function shapeFeedPostForViewer(post, viewerIdStr, likedSet, previewMap, replyPr
     const replyPreview = replyPreviewMap ? (replyPreviewMap.get(postIdStr) || []) : (post.replyPreview || [])
     const { likes: _likes, ...rest } = post
     return { ...rest, likeCount, likedByMe, likePreview, replyPreview }
+}
+
+/** Add suggested cards after the follow feed is built. Failures never break the feed. */
+async function withSuggestedFeedPosts(viewerIdStr, userId, hiddenObjectIds, posts, { count, appendOnly = false } = {}) {
+    try {
+        const existingIds = new Set((posts || []).map((p) => String(p?._id || '')))
+        const raw = await fetchSuggestedFeedPosts(userId, {
+            count,
+            hiddenObjectIds,
+            excludePostIds: existingIds,
+        })
+        if (!raw.length) return posts
+        const [likedSet, previewMap, replyPreviewMap] = await Promise.all([
+            buildLikedPostIdSet(viewerIdStr, raw),
+            buildLikePreviewMap(raw),
+            buildReplyPreviewMap(raw),
+        ])
+        const shaped = raw.map((p) => ({
+            ...shapeFeedPostForViewer(p, viewerIdStr, likedSet, previewMap, replyPreviewMap),
+            isSuggested: true,
+        }))
+        if (appendOnly) return [...posts, ...shaped.slice(0, 1)]
+        return mergeSuggestedIntoFeed(posts, shaped)
+    } catch (err) {
+        console.error('suggested feed skipped:', err?.message || err)
+        return posts
+    }
 }
 
 /**
@@ -1411,13 +1439,21 @@ export const getFeedPost = async(req,res) => {
             const combinedPosts = [...livePseudoPosts, ...mixedNonLive].map((p) =>
                 shapeFeedPostForViewer(p, viewerIdStr, likedSet, previewMap, replyPreviewMap),
             )
+            const nonLiveCount = combinedPosts.filter((p) => !p.isLive).length
+            const postsWithSuggested = await withSuggestedFeedPosts(
+                viewerIdStr,
+                userId,
+                hiddenObjectIds,
+                combinedPosts,
+                { count: nonLiveCount === 0 ? 10 : 3 },
+            )
 
             const nextOffset = firstNormalIds.length
             const hasMore = nextOffset < totalCount
             const lastNormal = normalsSorted[normalsSorted.length - 1]
             
             const payload = { 
-                posts: combinedPosts,
+                posts: postsWithSuggested,
                 hasMore,
                 totalCount,
                 liveStreams: livePseudoPosts,
@@ -1442,13 +1478,20 @@ export const getFeedPost = async(req,res) => {
         const shapedPaginatedNormal = paginatedNormal.map((p) =>
             shapeFeedPostForViewer(p, viewerIdStr, likedSet, previewMap, replyPreviewMap),
         )
+        const pageWithSuggested = await withSuggestedFeedPosts(
+            viewerIdStr,
+            userId,
+            hiddenObjectIds,
+            shapedPaginatedNormal,
+            { count: 1, appendOnly: true },
+        )
 
         console.log(
             `📄 [getFeedPost] Cursor page: ${paginatedNormal.length} posts (offset: ${startIndex}, hasMore: ${hasMore})`,
         )
         
         const payload = { 
-            posts: shapedPaginatedNormal,
+            posts: pageWithSuggested,
             hasMore,
             totalCount,
             nextCursor: buildNextCursor(nextOffset, lastPost),

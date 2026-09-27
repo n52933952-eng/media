@@ -21,6 +21,7 @@ import { getIO, getUserSelfRoomId } from '../socket/socket.js'
 import { getFollowGraphIdsForUser, attachFollowGraphToUser, isViewerFollowingFollowee } from '../services/followGraph.js'
 import { invalidateUserAuthCache } from '../services/userAuthCache.js'
 import { invalidateUserFeedCache } from '../services/feedCache.js'
+import { sampleDiscoverUsers, attachLatestPostPreviews } from '../services/discoverUsers.js'
 import { updateCommentDenormForUser, deleteCommentsByUser } from '../services/commentService.js'
 
 
@@ -647,6 +648,7 @@ export const UpdateUser = async(req,res) => {
       const previousProfilePic = user.profilePic || ''
       const previousUsername = user.username || ''
       const previousName = user.name || ''
+      const previousCountry = user.country || ''
       if (profilePic && isR2Url(profilePic)) {
         try {
           assertManagedMediaUrls([profilePic])
@@ -674,6 +676,10 @@ export const UpdateUser = async(req,res) => {
       const nameChanged = !!(name && name !== previousName)
 
           user = await user.save()
+
+      if (country !== undefined && String(country).trim() !== String(previousCountry).trim()) {
+        await invalidateUserFeedCache(userId)
+      }
 
       if (profilePicChanged || usernameChanged || nameChanged) {
         try {
@@ -1046,6 +1052,28 @@ export const getSuggestedUsers = async(req, res) => {
     catch(error) {
         console.error('Error in getSuggestedUsers:', error)
         res.status(500).json({ error: error.message || "Failed to get suggested users" })
+    }
+}
+
+/** Explore: random same-country people + latest post preview. Refresh = new $sample. */
+export const getExplorePeople = async (req, res) => {
+    try {
+        const userId = req.user._id
+        const size = Math.min(Math.max(parseInt(req.query.limit, 10) || 12, 1), 20)
+        const me = await User.findById(userId).select('country').lean()
+        const country = String(me?.country || '').trim()
+        if (!country) {
+            return res.status(200).json({ users: [], needsCountry: true })
+        }
+        const users = await sampleDiscoverUsers(userId, { country, size })
+        const withPosts = await attachLatestPostPreviews(users)
+        return res.status(200).json({
+            users: withPosts.map((u) => ({ ...u, isFollowedByMe: false })),
+            needsCountry: false,
+        })
+    } catch (error) {
+        console.error('Error in getExplorePeople:', error)
+        res.status(500).json({ error: error.message || 'Failed to load explore' })
     }
 }
 

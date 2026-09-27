@@ -5,7 +5,7 @@ import { IoIosLogOut } from 'react-icons/io'
 import useShowToast from '../hooks/useShowToast.js'
 import { TiHomeOutline } from "react-icons/ti";
 import { FaRegMessage } from "react-icons/fa6";
-import { IoNotificationsOutline } from "react-icons/io5";
+import { IoNotificationsOutline, IoPeopleOutline } from "react-icons/io5";
 
 import{UserContext} from '../context/UserContext'
 import{SocketContext} from '../context/SocketContext'
@@ -158,6 +158,20 @@ const Header = () => {
             )}
           </Box>
           
+          <Box
+            as="button"
+            onClick={(e) => {
+              e.preventDefault()
+              handleNavigation('/explore', e)
+            }}
+            cursor="pointer"
+            display="flex"
+            alignItems="center"
+            aria-label="Explore people"
+          >
+            <IoPeopleOutline size={24} />
+          </Box>
+
           <Box position="relative" display="flex" alignItems="center">
             <Box
               as="button"
