@@ -1424,17 +1424,8 @@ export const getFeedPost = async(req,res) => {
 
         const cached = !wantFresh ? await getCachedFeed(userId, pageKey, limit) : null
         if (cached && Array.isArray(cached.posts)) {
-            const base = cached.posts.filter((p) => !p?.isSuggested)
-            const posts = await withSuggestedFeedPosts(
-                viewerIdStr,
-                userId,
-                hiddenObjectIds,
-                base,
-                isFirstPage
-                    ? { count: suggestedFillCount(base) }
-                    : { count: 1, appendOnly: true },
-            )
-            return res.status(200).json({ ...cached, posts })
+            // Keep the same suggested cards. Remesh only on pull-to-refresh (fresh=1).
+            return res.status(200).json(cached)
         }
 
         const normalIds = await getFeedNormalIndex(userId, hiddenObjectIds)

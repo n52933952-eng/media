@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react'
+import React, { memo, useMemo } from 'react'
 import { Avatar, Box, Flex, Text, useColorModeValue } from '@chakra-ui/react'
 
 const DEFAULT_SCRIPT =
@@ -9,7 +9,7 @@ const DEFAULT_CONTAINER = 'container-fc74cc04657e9bfb73f4a6bff8084c15'
  * Adsterra Native Banner between feed posts.
  * Uses an iframe so the same zone (fixed container id) can appear after every post safely.
  */
-export default function AdsterraFeedNative({ slotKey = 'feed' }) {
+function AdsterraFeedNative({ slotKey = 'feed' }) {
   const scriptSrc = (import.meta.env.VITE_ADSTERRA_NATIVE_SCRIPT || DEFAULT_SCRIPT).trim()
   const containerId = (import.meta.env.VITE_ADSTERRA_NATIVE_CONTAINER || DEFAULT_CONTAINER).trim()
   const allowDev = import.meta.env.VITE_ADSTERRA_ALLOW_DEV === 'true'
@@ -92,6 +92,8 @@ export default function AdsterraFeedNative({ slotKey = 'feed' }) {
     </Flex>
   )
 }
+
+export default memo(AdsterraFeedNative)
 
 /** Insert an ad after every N posts. Default 1 = between each post. */
 export function getAdsterraFeedEvery() {

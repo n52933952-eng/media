@@ -20,7 +20,7 @@ import {
   isChessFeedPost,
 } from '../utils/gameFeedPostUtils.js'
 import { pruneStaleGameFeedPosts } from '../utils/pruneStaleGameFeedPosts.js'
-import { isFollowingUserId, mergePostUpdate, reshapeFeedFirstPage } from '../utils/postUtils.js'
+import { isFollowingUserId, mergePostUpdate, reshapeFeedFirstPage, keepExistingSuggested } from '../utils/postUtils.js'
 import { applyPostEngagement } from '../hooks/usePostEngagementSubscription.js'
 import AdsterraFeedNative, { getAdsterraFeedEvery } from '../Components/ads/AdsterraFeedNative.jsx'
 import PlayStoreAnnounceCard from '../Components/PlayStoreAnnounceCard.jsx'
@@ -252,13 +252,13 @@ const HomePage = () => {
               return dateB - dateA
             })
             const deduped = dedupeGamePostsForFeed(merged)
-            const filtered = filterFeedPosts(reshapeFeedFirstPage(deduped))
+            const filtered = keepExistingSuggested(prev, filterFeedPosts(reshapeFeedFirstPage(deduped)))
             followPostCountRef.current = filtered.length
             // Async prune ghosts after merge (missed *GameEnded on disconnect).
             applyPrunedGameFeed(filtered).then((pruned) => {
               if (pruned === filtered) return
               followPostCountRef.current = pruned.length
-              setFollowPost(filterFeedPosts(pruned))
+              setFollowPost(keepExistingSuggested(prev, filterFeedPosts(pruned)))
             })
             return filtered
           })
@@ -798,7 +798,7 @@ const HomePage = () => {
                 // After every Nth post (default N=1 → post, ad, post, ad…)
                 if ((index + 1) % every === 0) {
                   nodes.push(
-                    <AdsterraFeedNative key={`adsterra-native-${post._id || index}`} slotKey={`feed-${index}`} />,
+                    <AdsterraFeedNative key={`adsterra-slot-${index}`} slotKey={`feed-${index}`} />,
                   )
                 }
               })

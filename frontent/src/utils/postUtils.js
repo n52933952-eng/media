@@ -111,6 +111,26 @@ export function reshapeFeedFirstPage(list, sortTimeFn) {
   return [...live, ...mixed, ...rest]
 }
 
+/** Silent refresh: keep suggested cards already on screen, in the same slots. */
+export function keepExistingSuggested(prev, next) {
+  const prevList = Array.isArray(prev) ? prev : []
+  const nextList = Array.isArray(next) ? next : []
+  const prevSuggested = prevList.filter((p) => p?.isSuggested)
+  if (!prevSuggested.length) return nextList
+  const follow = nextList.filter((p) => !p?.isSuggested)
+  const slots = []
+  prevList.forEach((p, i) => {
+    if (p?.isSuggested) slots.push(i)
+  })
+  const out = follow.slice()
+  slots.forEach((pos, i) => {
+    const card = prevSuggested[i]
+    if (!card) return
+    out.splice(Math.min(pos, out.length), 0, card)
+  })
+  return out
+}
+
 /** News / YouTube channels: likes only at post level. Football keeps per-match comments. */
 export function hideChannelPostComments(post) {
   if (!isChannelPost(post)) return false
