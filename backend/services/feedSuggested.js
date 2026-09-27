@@ -3,6 +3,7 @@ import Post from '../models/post.js'
 import User from '../models/user.js'
 import { findRecentDiscoverPosts } from './discoverUsers.js'
 import { populateFeedPostsByIds } from './feedAssembly.js'
+import { redisGet, redisSet } from './redis.js'
 
 const SUGGEST_EVERY = 5
 const STOP = new Set([
@@ -53,20 +54,58 @@ async function followedInterestTokens(userId) {
     .map(([w]) => w)
 }
 
-/** Extra posts from unfollowed users. Country + related text first, then worldwide. Never writes into the follow index. */
+const SEEN_TTL_SEC = 30 * 60
+const SEEN_MAX = 40
+const seenKey = (userId) => `feed:suggest:seen:${String(userId)}`
+
+async function getSeenSuggestedIds(userId) {
+  try {
+    const raw = await redisGet(seenKey(userId))
+    if (Array.isArray(raw)) return new Set(raw.map(String).filter(Boolean))
+    return new Set()
+  } catch {
+    return new Set()
+  }
+}
+
+async function rememberSuggestedIds(userId, ids) {
+  const next = [...new Set(ids.map(String).filter(Boolean))].slice(0, SEEN_MAX)
+  if (!next.length) return
+  try {
+    const prev = await getSeenSuggestedIds(userId)
+    const merged = [...next, ...prev].filter((id, i, arr) => arr.indexOf(id) === i).slice(0, SEEN_MAX)
+    await redisSet(seenKey(userId), merged, SEEN_TTL_SEC)
+  } catch {
+    /* best-effort */
+  }
+}
+
+function shufflePick(items, want) {
+  const copy = items.slice()
+  for (let i = copy.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1))
+    const tmp = copy[i]
+    copy[i] = copy[j]
+    copy[j] = tmp
+  }
+  return copy.slice(0, want)
+}
+
+/** Extra posts from unfollowed users. Country + related text first, then a fresh shuffle. Never writes into the follow index. */
 export async function fetchSuggestedFeedPosts(userId, { count = 3, hiddenObjectIds = [], excludePostIds = new Set() } = {}) {
   const want = Math.min(Math.max(Number(count) || 3, 0), 12)
   if (!want) return []
   const me = await User.findById(userId).select('country').lean()
   const country = String(me?.country || '').trim()
 
-  const [candidates, tokens] = await Promise.all([
+  const [candidates, tokens, seen] = await Promise.all([
     findRecentDiscoverPosts(userId, {
-      limit: Math.min(want * 8, 80),
+      limit: Math.min(Math.max(want * 10, 40), 80),
       hiddenObjectIds,
       excludePostIds,
     }),
     followedInterestTokens(userId),
+    getSeenSuggestedIds(userId),
   ])
   if (!candidates.length) return []
 
@@ -78,7 +117,12 @@ export async function fetchSuggestedFeedPosts(userId, { count = 3, hiddenObjectI
     const locB = countryKey && authorCountry(b) === countryKey ? 2 : 0
     return (relB + locB) - (relA + locA)
   })
-  const picked = candidates.slice(0, want)
+
+  const unseen = candidates.filter((p) => !seen.has(String(p._id)))
+  const pool = unseen.length >= want ? unseen : candidates
+  const top = pool.slice(0, Math.min(pool.length, Math.max(want * 6, 18)))
+  const picked = shufflePick(top, want)
+  await rememberSuggestedIds(userId, picked.map((p) => String(p._id)))
   return populateFeedPostsByIds(picked.map((p) => String(p._id)))
 }
 

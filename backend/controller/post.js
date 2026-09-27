@@ -1409,10 +1409,23 @@ export const getFeedPost = async(req,res) => {
         const isFirstPage = !cursorRaw && skip === 0
         const pageKey = cursorRaw || (skip === 0 ? '0' : String(skip))
 
-        const cached = await getCachedFeed(userId, pageKey, limit)
-        if (cached) return res.status(200).json(cached)
-
         const hiddenObjectIds = await getHiddenFeedPostObjectIds(userId)
+
+        const cached = await getCachedFeed(userId, pageKey, limit)
+        if (cached && Array.isArray(cached.posts)) {
+            const base = cached.posts.filter((p) => !p?.isSuggested)
+            const nonLiveCount = base.filter((p) => !p?.isLive).length
+            const posts = await withSuggestedFeedPosts(
+                viewerIdStr,
+                userId,
+                hiddenObjectIds,
+                base,
+                isFirstPage
+                    ? { count: nonLiveCount === 0 ? 10 : 3 }
+                    : { count: 1, appendOnly: true },
+            )
+            return res.status(200).json({ ...cached, posts })
+        }
 
         const normalIds = await getFeedNormalIndex(userId, hiddenObjectIds)
         await storeFeedNormalIndex(userId, normalIds)

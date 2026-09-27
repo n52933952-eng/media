@@ -1441,7 +1441,7 @@ const showToast = useShowToast()
               >
                 <Box>
                   <Text fontWeight="semibold">
-                    {isWeatherPost || isMyChannelFeedCard ? '🗑️ Remove from feed' : '🙈 Not interested'}
+                    {isWeatherPost || isMyChannelFeedCard ? '🗑️ Remove from feed' : '🚫 Not interested'}
                   </Text>
                   <Text fontSize="xs" color="gray.500">
                     {isWeatherPost || isMyChannelFeedCard ? 'Hide this card from your home' : 'Remove it from your feed only'}
