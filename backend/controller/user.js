@@ -21,7 +21,7 @@ import { getIO, getUserSelfRoomId } from '../socket/socket.js'
 import { getFollowGraphIdsForUser, attachFollowGraphToUser, isViewerFollowingFollowee } from '../services/followGraph.js'
 import { invalidateUserAuthCache } from '../services/userAuthCache.js'
 import { invalidateUserFeedCache } from '../services/feedCache.js'
-import { sampleDiscoverUsers, attachLatestPostPreviews } from '../services/discoverUsers.js'
+import { sampleDiscoverUsers, attachLatestPostPreviews, findRecentDiscoverPosts } from '../services/discoverUsers.js'
 import { updateCommentDenormForUser, deleteCommentsByUser } from '../services/commentService.js'
 
 
@@ -1062,14 +1062,36 @@ export const getExplorePeople = async (req, res) => {
         const size = Math.min(Math.max(parseInt(req.query.limit, 10) || 12, 1), 20)
         const me = await User.findById(userId).select('country').lean()
         const country = String(me?.country || '').trim()
-        if (!country) {
-            return res.status(200).json({ users: [], needsCountry: true })
+        const users = await sampleDiscoverUsers(userId, { country, size: size * 2, allowWorldwide: true })
+        let withPosts = await attachLatestPostPreviews(users)
+        withPosts = withPosts.filter((u) => u.latestPost && (u.latestPost.img || String(u.latestPost.text || '').trim()))
+        if (withPosts.length < size) {
+            const fromPosts = await findRecentDiscoverPosts(userId, { limit: size })
+            const have = new Set(withPosts.map((u) => String(u._id)))
+            for (const p of fromPosts) {
+                const author = p.postedBy
+                const id = author?._id != null ? String(author._id) : ''
+                if (!id || have.has(id)) continue
+                have.add(id)
+                withPosts.push({
+                    _id: author._id,
+                    username: author.username,
+                    name: author.name,
+                    profilePic: author.profilePic,
+                    country: author.country,
+                    latestPost: {
+                        _id: p._id,
+                        text: p.text || '',
+                        img: p.img || (Array.isArray(p.images) ? p.images[0] : '') || '',
+                        createdAt: p.createdAt,
+                    },
+                })
+                if (withPosts.length >= size) break
+            }
         }
-        const users = await sampleDiscoverUsers(userId, { country, size })
-        const withPosts = await attachLatestPostPreviews(users)
         return res.status(200).json({
-            users: withPosts.map((u) => ({ ...u, isFollowedByMe: false })),
-            needsCountry: false,
+            users: withPosts.slice(0, size).map((u) => ({ ...u, isFollowedByMe: false })),
+            needsCountry: !country,
         })
     } catch (error) {
         console.error('Error in getExplorePeople:', error)
