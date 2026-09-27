@@ -53,6 +53,8 @@ import {
     removeCollaboratorImageForUser,
 } from '../utils/collaboratorImages.js'
 import { MAX_POST_CAROUSEL_IMAGES, MAX_COLLABORATORS } from '../utils/postCarousel.js'
+import { isAppAdmin } from '../services/appAdmin.js'
+import PostReport from '../models/postReport.js'
 
 /** Normalize contributor id list: unique strings, owner first. Returns null if over max. */
 function normalizeContributorIds(rawList, ownerId) {
@@ -398,13 +400,15 @@ function emitPostEngagementUpdate(postId, payload) {
 }
 
 /** Profile posts query for a user's authored + collaborative posts. */
-function profilePostsQuery(userId) {
-    return {
+function profilePostsQuery(userId, { includeHidden = false } = {}) {
+    const q = {
         $or: [
             { postedBy: userId },
             { isCollaborative: true, contributors: userId },
         ],
     }
+    if (includeHidden) return q
+    return { ...q, hiddenByAdmin: { $ne: true } }
 }
 
 /** Notify everyone listed as contributor except the poster when a collaborative post is created. */
@@ -613,6 +617,13 @@ export const getPost = async(req,res) => {
         if(!post){
             return res.status(500).json({message:"no post"})
         }
+        if (post.hiddenByAdmin && !isAppAdmin(req.user)) {
+            const authorId = post.postedBy?._id != null ? String(post.postedBy._id) : String(post.postedBy || '')
+            const viewerId = req.user?._id ? String(req.user._id) : ''
+            if (!viewerId || viewerId !== authorId) {
+                return res.status(404).json({ message: 'no post' })
+            }
+        }
   
         const includeReplies =
             req.query.includeReplies !== 'false' && req.query.includeReplies !== '0'
@@ -662,9 +673,16 @@ export const getPost = async(req,res) => {
 
 export const getPostComments = async (req, res) => {
     try {
-        const post = await Post.findById(req.params.id).select('_id replyCount').lean()
+        const post = await Post.findById(req.params.id).select('_id replyCount hiddenByAdmin postedBy').lean()
         if (!post) {
             return res.status(404).json({ message: 'no post' })
+        }
+        if (post.hiddenByAdmin && !isAppAdmin(req.user)) {
+            const authorId = String(post.postedBy || '')
+            const viewerId = req.user?._id ? String(req.user._id) : ''
+            if (!viewerId || viewerId !== authorId) {
+                return res.status(404).json({ message: 'no post' })
+            }
         }
 
         const { limit = 12, skip = 0, footballMatchId = null } = req.query
@@ -947,8 +965,9 @@ export const deletePost = async(req,res) => {
       // 2. User added this channel post (channelAddedBy matches)
       const isPostAuthor = post.postedBy.toString() === req.user._id.toString()
       const isChannelPostAddedByUser = post.channelAddedBy && post.channelAddedBy === req.user._id.toString()
+      const admin = isAppAdmin(req.user)
       
-      if(!isPostAuthor && !isChannelPostAddedByUser){
+      if(!isPostAuthor && !isChannelPostAddedByUser && !admin){
         return res.status(400).json({message:"you cant delete other users post"})
       }
 
@@ -992,6 +1011,39 @@ export const deletePost = async(req,res) => {
         console.log(error)
         res.status(500).json({ error: error.message })
     }
+}
+
+export const reportPost = async (req, res) => {
+  try {
+    const postId = req.params.id
+    const reporterId = req.user._id
+    const reason = String(req.body?.reason || 'adult').trim().slice(0, 40)
+    const post = await Post.findById(postId).select('_id postedBy hiddenByAdmin')
+    if (!post) return res.status(404).json({ error: 'Post not found' })
+    if (String(post.postedBy) === String(reporterId)) {
+      return res.status(400).json({ error: 'You cannot report your own post' })
+    }
+    try {
+      await PostReport.create({ postId, reporterId, reason })
+    } catch (e) {
+      if (e?.code !== 11000) throw e
+    }
+    const reportCount = await PostReport.countDocuments({ postId })
+    if (reportCount >= 1 && !post.hiddenByAdmin) {
+      post.hiddenByAdmin = true
+      await post.save()
+    }
+    const io = getIO()
+    if (io) {
+      await emitPostDeletedToAuthorFollowers(io, String(post.postedBy), String(postId))
+    } else {
+      invalidateUserFeedCache(String(post.postedBy)).catch(() => {})
+    }
+    return res.status(200).json({ ok: true, hidden: true })
+  } catch (error) {
+    console.error('reportPost:', error)
+    return res.status(500).json({ error: error.message || 'Failed to report' })
+  }
 }
 
 
@@ -1526,7 +1578,8 @@ export const getUserPostsById = async(req,res)=>{
         const limit = parseInt(req.query.limit) || 3 // Default to 3 posts (for feed)
         const skip = parseInt(req.query.skip) || 0
         
-        const posts = await Post.find(profilePostsQuery(userId))
+        const includeHidden = isAppAdmin(req.user)
+        const posts = await Post.find(profilePostsQuery(userId, { includeHidden }))
             .select('-likes')
             .populate("postedBy","-password")
             .populate("contributors", "username profilePic name")
@@ -1565,7 +1618,8 @@ export const getUserPosts = async(req,res)=>{
          const limit = parseInt(req.query.limit) || 10 // Default to 10 posts per page
          const skip = parseInt(req.query.skip) || 0 // Skip for pagination
          
-         const profileFilter = profilePostsQuery(user._id)
+         const includeHidden = isAppAdmin(req.user)
+         const profileFilter = profilePostsQuery(user._id, { includeHidden })
 
          const postsRaw = await Post.find(profileFilter)
             .select('-likes')

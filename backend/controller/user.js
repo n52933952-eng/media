@@ -23,6 +23,7 @@ import { invalidateUserAuthCache } from '../services/userAuthCache.js'
 import { invalidateUserFeedCache } from '../services/feedCache.js'
 import { sampleDiscoverUsers, attachLatestPostPreviews, findRecentDiscoverPosts } from '../services/discoverUsers.js'
 import { updateCommentDenormForUser, deleteCommentsByUser } from '../services/commentService.js'
+import { isAppAdmin } from '../services/appAdmin.js'
 
 
 export const SignUp = async(req,res) => {
@@ -54,6 +55,7 @@ export const SignUp = async(req,res) => {
                bio:newUser.bio,
                profilePic:newUser.profilePic,
                country:newUser.country,
+               admin: isAppAdmin(newUser),
                followers,
                following
               })
@@ -92,6 +94,7 @@ export const LoginUser = async(req,res) => {
         bio:user.bio,
         profilePic:user.profilePic,
         country:user.country,
+        admin: isAppAdmin(user),
         followers,
                following
       })
@@ -163,6 +166,7 @@ export const GoogleLogin = async (req, res) => {
       bio: user.bio,
       profilePic: user.profilePic,
       country: user.country,
+      admin: isAppAdmin(user),
       followers,
       following,
     })
@@ -189,6 +193,7 @@ export const getMe = async (req, res) => {
       profilePic: user.profilePic,
       country: user.country,
       instagram: user.instagram,
+      admin: isAppAdmin(user),
       followers,
       following,
     })
@@ -716,6 +721,7 @@ export const UpdateUser = async(req,res) => {
         profilePic: user.profilePic,
         country: user.country,
         instagram: user.instagram,
+        admin: isAppAdmin(user),
         followers,
         following,
       })
@@ -797,7 +803,7 @@ export const getUserProfile = async(req,res) => {
         isFollowedByMe = await isViewerFollowingFollowee(viewerId, user._id)
       }
 
-      const { followers: _omitFollowers, following: _omitFollowing, ...userWithoutFollowLists } = userObj
+      const { followers: _omitFollowers, following: _omitFollowing, admin: _omitAdmin, password: _omitPassword, ...userWithoutFollowLists } = userObj
 
       res.status(200).json({
         ...userWithoutFollowLists,

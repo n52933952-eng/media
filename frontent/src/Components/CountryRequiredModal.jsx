@@ -1,31 +1,69 @@
-import React, { useContext, useMemo, useState } from 'react'
+import React, { useContext, useEffect, useState } from 'react'
 import {
   Modal,
   ModalOverlay,
   ModalContent,
   ModalHeader,
   ModalBody,
-  Select,
   Button,
   Text,
+  VStack,
 } from '@chakra-ui/react'
 import { UserContext } from '../context/UserContext'
-import { COUNTRIES } from '../utils/countries'
+import { COUNTRY_OPTIONS } from '../utils/countries'
 import useShowToast from '../hooks/useShowToast'
 import API_BASE_URL from '../config/api'
 
 const CountryRequiredModal = () => {
   const { user, setUser } = useContext(UserContext)
   const showToast = useShowToast()
-  const [country, setCountry] = useState('')
   const [saving, setSaving] = useState(false)
+  const [checked, setChecked] = useState(false)
+  const [serverCountry, setServerCountry] = useState('')
 
-  const needsCountry = useMemo(
-    () => !!user?._id && !String(user.country || '').trim(),
-    [user?._id, user?.country],
-  )
+  useEffect(() => {
+    if (!user?._id) {
+      setChecked(false)
+      setServerCountry('')
+      return
+    }
+    const local = String(user.country || '').trim()
+    if (local) {
+      setServerCountry(local)
+      setChecked(true)
+      return
+    }
+    let cancelled = false
+    setChecked(false)
+    const base = API_BASE_URL || (import.meta.env.PROD ? window.location.origin : 'http://localhost:5000')
+    ;(async () => {
+      try {
+        const res = await fetch(`${base}/api/user/me`, { credentials: 'include' })
+        const data = await res.json()
+        const country = String(data?.country || '').trim()
+        if (cancelled) return
+        if (country) {
+          setUser((prev) => {
+            const next = { ...(prev || {}), ...data, country }
+            localStorage.setItem('userInfo', JSON.stringify(next))
+            return next
+          })
+        }
+        setServerCountry(country)
+      } catch {
+        if (!cancelled) setServerCountry('skip')
+      } finally {
+        if (!cancelled) setChecked(true)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [user?._id, user?.country, setUser])
 
-  const save = async () => {
+  const needsCountry = !!user?._id && checked && !serverCountry
+
+  const save = async (country) => {
     if (!user?._id || !country || saving) return
     setSaving(true)
     try {
@@ -44,6 +82,7 @@ const CountryRequiredModal = () => {
       const next = { ...user, ...data, country }
       localStorage.setItem('userInfo', JSON.stringify(next))
       setUser(next)
+      setServerCountry(country)
       window.dispatchEvent(new Event('discover-country-set'))
     } catch (e) {
       showToast('Error', e?.message || 'Could not save country', 'error')
@@ -61,19 +100,20 @@ const CountryRequiredModal = () => {
           <Text fontSize="sm" color="gray.500" mb={3}>
             So you can see people and posts near you.
           </Text>
-          <Select
-            placeholder="Select country"
-            value={country}
-            onChange={(e) => setCountry(e.target.value)}
-            mb={4}
-          >
-            {COUNTRIES.map((c) => (
-              <option key={c} value={c}>{c}</option>
+          <VStack align="stretch" maxH="320px" overflowY="auto" spacing={1}>
+            {COUNTRY_OPTIONS.map((c) => (
+              <Button
+                key={c.name}
+                variant="ghost"
+                justifyContent="flex-start"
+                isDisabled={saving}
+                onClick={() => save(c.name)}
+              >
+                <Text as="span" mr={3} fontSize="xl">{c.flag}</Text>
+                {c.name}
+              </Button>
             ))}
-          </Select>
-          <Button colorScheme="blue" w="100%" isLoading={saving} isDisabled={!country} onClick={save}>
-            Continue
-          </Button>
+          </VStack>
         </ModalBody>
       </ModalContent>
     </Modal>

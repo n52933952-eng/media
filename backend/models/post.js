@@ -27,6 +27,13 @@ const PostSchema = mongoose.Schema({
         type:String
     },
 
+    /** Hidden from Explore / suggested feed after reports or admin action. */
+    hiddenByAdmin: {
+        type: Boolean,
+        default: false,
+        index: true,
+    },
+
     /** Up to 4 carousel images (Instagram-style). `img` mirrors images[0] for legacy clients. */
     images: {
         type: [String],

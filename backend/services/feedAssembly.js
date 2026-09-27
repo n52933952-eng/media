@@ -117,7 +117,7 @@ export async function getFeedNormalIndex(userId, hiddenObjectIds) {
 export async function populateFeedPostsByIds(ids) {
   const wanted = (Array.isArray(ids) ? ids : []).map(String).filter(Boolean)
   if (!wanted.length) return []
-  const docs = await Post.find({ _id: { $in: wanted } })
+  const docs = await Post.find({ _id: { $in: wanted }, hiddenByAdmin: { $ne: true } })
     .select('-likes')
     .populate('postedBy', '-password')
     .populate('contributors', 'username profilePic name')

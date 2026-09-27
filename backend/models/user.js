@@ -54,6 +54,11 @@ const UserSchema = mongoose.Schema({
         default:""
     },
 
+    admin: {
+        type: Boolean,
+        default: false,
+    },
+
     instagram:{
         type:String,
         default:""

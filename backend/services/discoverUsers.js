@@ -94,6 +94,7 @@ export async function attachLatestPostPreviews(users, hiddenObjectIds = []) {
     {
       $match: {
         postedBy: { $in: ids },
+        hiddenByAdmin: { $ne: true },
         ...hidden,
         $or: [
           { channelAddedBy: { $exists: false } },
@@ -143,6 +144,7 @@ export async function latestPostIdsForUsers(userIds, hiddenObjectIds = []) {
     {
       $match: {
         postedBy: { $in: ids },
+        hiddenByAdmin: { $ne: true },
         ...hidden,
         $or: [
           { channelAddedBy: { $exists: false } },
@@ -188,6 +190,7 @@ export async function findRecentDiscoverPosts(userId, { limit = 80, hiddenObject
         ],
       },
       CONTENT_MATCH,
+      { hiddenByAdmin: { $ne: true } },
     ],
   })
     .select('_id postedBy text img images createdAt')

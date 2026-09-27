@@ -985,6 +985,8 @@ const showToast = useShowToast()
   const isMyChannelFeedCard =
     !!post?.channelAddedBy && String(post.channelAddedBy) === String(user?._id)
 
+  const isAdminUser = !!user?.admin
+
   const canHideRegularUserPost =
     showFeedExtras &&
     !!user &&
@@ -998,15 +1000,30 @@ const showToast = useShowToast()
     !!post?._id &&
     /^[0-9a-fA-F]{24}$/.test(String(post._id))
 
+  const canReportPost =
+    !!user &&
+    !isOwner &&
+    !isChannelPost &&
+    !isFootballPost &&
+    !isWeatherPost &&
+    !isChessPost &&
+    !isCardPost &&
+    !post?.isLive &&
+    !!post?._id &&
+    /^[0-9a-fA-F]{24}$/.test(String(post._id))
+
   const showFeedPostMenu =
-    showFeedExtras &&
     !!user &&
     !isChessPost &&
     !isCardPost &&
     !post?.isLive &&
     !isFootballPost &&
     !isOwner &&
-    (canHideRegularUserPost || isWeatherPost || isMyChannelFeedCard)
+    (
+      canReportPost ||
+      isAdminUser ||
+      (showFeedExtras && (canHideRegularUserPost || isWeatherPost || isMyChannelFeedCard))
+    )
 
   const canMessagePostOwner =
     showFeedExtras &&
@@ -1141,6 +1158,28 @@ const showToast = useShowToast()
       showToast('Success', 'Removed from feed', 'success')
     } catch (e) {
       showToast('Error', e?.message || 'Failed', 'error')
+    }
+  }
+
+  const handleReportPost = async () => {
+    if (!window.confirm('Report this post? It will be hidden for everyone.')) return
+    try {
+      const res = await fetch(`${apiBaseUrl()}/api/post/report/${post._id}`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason: 'adult' }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        showToast('Error', data.error || data.message || 'Failed to report', 'error')
+        return
+      }
+      if (onDelete) onDelete(post._id)
+      setFollowPost((prev) => prev.filter((p) => String(p._id) !== String(post._id)))
+      showToast('Success', 'Reported. Hidden for everyone.', 'success')
+    } catch (e) {
+      showToast('Error', e?.message || 'Failed to report', 'error')
     }
   }
 
@@ -1361,6 +1400,25 @@ const showToast = useShowToast()
               }}
             />
             <MenuList zIndex={2000}>
+              {canReportPost ? (
+                <MenuItem
+                  color="red.400"
+                  onMouseDown={(e) => {
+                    e.preventDefault()
+                    e.stopPropagation()
+                    blockPostNavBriefly()
+                  }}
+                  onClick={(e) => {
+                    e.preventDefault()
+                    e.stopPropagation()
+                    blockPostNavBriefly()
+                    window.setTimeout(() => handleReportPost(), 0)
+                  }}
+                >
+                  Report
+                </MenuItem>
+              ) : null}
+              {canHideRegularUserPost || isWeatherPost || isMyChannelFeedCard ? (
               <MenuItem
                 onMouseDown={(e) => {
                   e.preventDefault()
@@ -1376,15 +1434,34 @@ const showToast = useShowToast()
               >
                 {isWeatherPost || isMyChannelFeedCard ? 'Remove from feed' : 'Not interested'}
               </MenuItem>
+              ) : null}
+              {isAdminUser ? (
+                <MenuItem
+                  color="red.400"
+                  onMouseDown={(e) => {
+                    e.preventDefault()
+                    e.stopPropagation()
+                    blockPostNavBriefly()
+                  }}
+                  onClick={(e) => {
+                    e.preventDefault()
+                    e.stopPropagation()
+                    blockPostNavBriefly()
+                    window.setTimeout(() => handleDeletepost({ preventDefault() {}, stopPropagation() {} }), 0)
+                  }}
+                >
+                  Delete for everyone
+                </MenuItem>
+              ) : null}
             </MenuList>
           </Menu>
           </Box>
         ) : null}
 
-         {/* Delete: owner (or channel adder) — only on own profile / feed, not on someone else's profile */}
-         {!isSomeoneElsesProfile &&
+         {/* Delete: owner (or channel adder) — only on own profile / feed, not on someone else's profile. Admin can delete any post. */}
+         {(!isSomeoneElsesProfile &&
            (user?._id === postedBy?._id ||
-             (post?.channelAddedBy && post.channelAddedBy === user?._id?.toString())) && (
+             (post?.channelAddedBy && post.channelAddedBy === user?._id?.toString()))) || isAdminUser ? (
            <MdOutlineDeleteOutline 
              onClick={(e) => {
                e.preventDefault()

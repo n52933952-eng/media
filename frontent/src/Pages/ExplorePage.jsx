@@ -103,11 +103,14 @@ const ExplorePage = () => {
                 {preview?.img ? (
                   <Image src={preview.img} alt="" w="100%" maxH="220px" objectFit="cover" borderRadius="md" />
                 ) : (
-                  <Flex h="80px" align="center" justify="center" bg={emptyBg} borderRadius="md">
-                    <Text fontSize="sm" color={muted}>
-                      {preview?.text ? String(preview.text).slice(0, 80) : 'New here'}
+                  <Box bg={emptyBg} borderRadius="md" px={4} pt={2} pb={4} minH="120px">
+                    <Text fontSize="3xl" lineHeight="1" color="blue.400" opacity={0.45} fontWeight="bold">
+                      “
                     </Text>
-                  </Flex>
+                    <Text fontSize="md" fontWeight="medium" noOfLines={5} mt={-1}>
+                      {preview?.text ? String(preview.text).trim() : 'No posts yet'}
+                    </Text>
+                  </Box>
                 )}
               </Box>
             )
