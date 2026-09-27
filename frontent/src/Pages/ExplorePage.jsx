@@ -5,6 +5,7 @@ import { UserContext } from '../context/UserContext'
 import useShowToast from '../hooks/useShowToast'
 import { followPostHeaders } from '../utils/followRequest.js'
 import API_BASE_URL from '../config/api'
+import { isVideoUrl, mediaDisplayUrl, videoPosterUrl } from '../utils/mediaUrl.js'
 
 const ExplorePage = () => {
   const { user: currentUser, setUser } = useContext(UserContext)
@@ -16,7 +17,8 @@ const ExplorePage = () => {
   const cardBg = useColorModeValue('white', 'gray.800')
   const border = useColorModeValue('gray.200', 'gray.700')
   const muted = useColorModeValue('gray.600', 'gray.400')
-  const emptyBg = useColorModeValue('gray.50', 'whiteAlpha.100')
+  const emptyBg = useColorModeValue('#EEF4FF', '#15202B')
+  const textBorder = useColorModeValue('blue.100', 'whiteAlpha.200')
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -100,18 +102,86 @@ const ExplorePage = () => {
                     Follow
                   </Button>
                 </Flex>
-                {preview?.img ? (
-                  <Image src={preview.img} alt="" w="100%" maxH="220px" objectFit="cover" borderRadius="md" />
-                ) : (
-                  <Box bg={emptyBg} borderRadius="md" px={4} pt={2} pb={4} minH="120px">
-                    <Text fontSize="3xl" lineHeight="1" color="blue.400" opacity={0.45} fontWeight="bold">
-                      “
-                    </Text>
-                    <Text fontSize="md" fontWeight="medium" noOfLines={5} mt={-1}>
-                      {preview?.text ? String(preview.text).trim() : 'No posts yet'}
-                    </Text>
-                  </Box>
-                )}
+                {(() => {
+                  const raw = String(preview?.img || '').trim()
+                  const img = mediaDisplayUrl(raw)
+                  const text = String(preview?.text || '').trim()
+                  const video = isVideoUrl(img)
+                  const poster = video ? videoPosterUrl(img) : ''
+                  if (video && img) {
+                    return (
+                      <Box position="relative" h="220px" borderRadius="xl" overflow="hidden" bg="black">
+                        {poster ? (
+                          <Image src={poster} alt="" w="100%" h="100%" objectFit="cover" />
+                        ) : (
+                          <Box
+                            as="video"
+                            src={img}
+                            muted
+                            preload="metadata"
+                            playsInline
+                            w="100%"
+                            h="100%"
+                            objectFit="cover"
+                          />
+                        )}
+                        <Flex
+                          position="absolute"
+                          inset={0}
+                          align="center"
+                          justify="center"
+                          pointerEvents="none"
+                        >
+                          <Flex
+                            w="52px"
+                            h="52px"
+                            borderRadius="full"
+                            bg="blackAlpha.700"
+                            border="2px solid"
+                            borderColor="whiteAlpha.800"
+                            align="center"
+                            justify="center"
+                          >
+                            <Text color="white" fontSize="lg" ml="3px">▶</Text>
+                          </Flex>
+                        </Flex>
+                      </Box>
+                    )
+                  }
+                  if (img) {
+                    return <Image src={img} alt="" w="100%" h="220px" objectFit="cover" borderRadius="xl" />
+                  }
+                  return (
+                    <Box
+                      bg={emptyBg}
+                      borderRadius="xl"
+                      px={4}
+                      pt={2}
+                      pb={3}
+                      minH="72px"
+                      borderWidth="1px"
+                      borderColor={textBorder}
+                      position="relative"
+                      overflow="hidden"
+                    >
+                      <Box
+                        position="absolute"
+                        left={0}
+                        top="18px"
+                        bottom="18px"
+                        w="4px"
+                        borderRadius="full"
+                        bg="blue.400"
+                      />
+                      <Text fontSize="2xl" lineHeight="1" color="blue.400" opacity={0.7} fontWeight="extrabold" pl={2}>
+                        “
+                      </Text>
+                      <Text fontSize="sm" fontWeight="semibold" noOfLines={3} mt={-1} pl={2} lineHeight="1.4">
+                        {text || 'No posts yet'}
+                      </Text>
+                    </Box>
+                  )
+                })()}
               </Box>
             )
           })}

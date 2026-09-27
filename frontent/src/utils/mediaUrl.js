@@ -46,6 +46,17 @@ export function mediaDisplayUrl(url) {
   return String(url || '').trim()
 }
 
+/** Cloudinary video → still frame. Empty for R2 (client shows a video frame). */
+export function videoPosterUrl(url) {
+  const u = String(url || '').trim()
+  if (!u || !isVideoUrl(u)) return ''
+  const marker = '/video/upload/'
+  const idx = u.indexOf(marker)
+  if (idx === -1) return ''
+  const rest = u.slice(idx + marker.length).replace(/\.(mp4|webm|ogg|mov)(\?.*)?$/i, '.jpg$2')
+  return `${u.slice(0, idx)}${marker}so_1,w_720,c_fill,q_auto,f_jpg/${rest}`
+}
+
 /** Keep reply thumbs after reload: copy img from snapshot or the original message in this list. */
 export function hydrateReplyThumbs(messages) {
   const list = Array.isArray(messages) ? messages : []

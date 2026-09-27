@@ -1399,10 +1399,12 @@ const showToast = useShowToast()
                 blockPostNavBriefly()
               }}
             />
-            <MenuList zIndex={2000}>
+            <MenuList zIndex={2000} minW="240px" py={2} borderRadius="xl" boxShadow="lg">
               {canReportPost ? (
                 <MenuItem
                   color="red.400"
+                  alignItems="flex-start"
+                  py={3}
                   onMouseDown={(e) => {
                     e.preventDefault()
                     e.stopPropagation()
@@ -1415,11 +1417,16 @@ const showToast = useShowToast()
                     window.setTimeout(() => handleReportPost(), 0)
                   }}
                 >
-                  Report
+                  <Box>
+                    <Text fontWeight="semibold">🚩 Report</Text>
+                    <Text fontSize="xs" color="gray.500">Hide this post for everyone</Text>
+                  </Box>
                 </MenuItem>
               ) : null}
               {canHideRegularUserPost || isWeatherPost || isMyChannelFeedCard ? (
               <MenuItem
+                alignItems="flex-start"
+                py={3}
                 onMouseDown={(e) => {
                   e.preventDefault()
                   e.stopPropagation()
@@ -1432,12 +1439,21 @@ const showToast = useShowToast()
                   window.setTimeout(() => handleFeedPostMenuPress(), 0)
                 }}
               >
-                {isWeatherPost || isMyChannelFeedCard ? 'Remove from feed' : 'Not interested'}
+                <Box>
+                  <Text fontWeight="semibold">
+                    {isWeatherPost || isMyChannelFeedCard ? '🗑️ Remove from feed' : '🙈 Not interested'}
+                  </Text>
+                  <Text fontSize="xs" color="gray.500">
+                    {isWeatherPost || isMyChannelFeedCard ? 'Hide this card from your home' : 'Remove it from your feed only'}
+                  </Text>
+                </Box>
               </MenuItem>
               ) : null}
               {isAdminUser ? (
                 <MenuItem
                   color="red.400"
+                  alignItems="flex-start"
+                  py={3}
                   onMouseDown={(e) => {
                     e.preventDefault()
                     e.stopPropagation()
@@ -1450,7 +1466,10 @@ const showToast = useShowToast()
                     window.setTimeout(() => handleDeletepost({ preventDefault() {}, stopPropagation() {} }), 0)
                   }}
                 >
-                  Delete for everyone
+                  <Box>
+                    <Text fontWeight="semibold">⛔ Delete for everyone</Text>
+                    <Text fontSize="xs" color="gray.500">Remove the post and its media</Text>
+                  </Box>
                 </MenuItem>
               ) : null}
             </MenuList>
