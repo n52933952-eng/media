@@ -1,7 +1,7 @@
 import Follow from '../models/follow.js'
 import Post from '../models/post.js'
 import User from '../models/user.js'
-import { findRecentDiscoverPosts } from './discoverUsers.js'
+import { findRecentDiscoverPosts, sampleDiscoverUsers, attachLatestPostPreviews } from './discoverUsers.js'
 import { populateFeedPostsByIds } from './feedAssembly.js'
 import { redisGet, redisSet, redisDel } from './redis.js'
 
@@ -107,17 +107,47 @@ export async function fetchSuggestedFeedPosts(userId, { count = 3, hiddenObjectI
   const country = String(me?.country || '').trim()
 
   const fillEmpty = want >= 8
-  const [candidates, tokens, seen] = await Promise.all([
+  const [recent, tokens, seen] = await Promise.all([
     findRecentDiscoverPosts(userId, {
       limit: fillEmpty ? 80 : Math.min(Math.max(want * 10, 40), 80),
       hiddenObjectIds,
       excludePostIds,
       maxPerAuthor: fillEmpty ? 4 : 1,
-      scan: fillEmpty ? 500 : 200,
+      scan: fillEmpty ? 2000 : 200,
     }),
     followedInterestTokens(userId),
     getSeenSuggestedIds(userId),
   ])
+  const candidates = [...recent]
+  if (candidates.length < want) {
+    const users = await sampleDiscoverUsers(userId, {
+      country,
+      size: Math.max(want * 2, 24),
+      allowWorldwide: true,
+    })
+    const withPosts = await attachLatestPostPreviews(users, hiddenObjectIds)
+    const have = new Set(candidates.map((p) => String(p._id)))
+    for (const u of withPosts) {
+      const lp = u.latestPost
+      if (!lp?._id || have.has(String(lp._id)) || excludePostIds.has(String(lp._id))) continue
+      if (!String(lp.img || '').trim() && !String(lp.text || '').trim()) continue
+      have.add(String(lp._id))
+      candidates.push({
+        _id: lp._id,
+        text: lp.text,
+        img: lp.img,
+        createdAt: lp.createdAt,
+        postedBy: {
+          _id: u._id,
+          username: u.username,
+          name: u.name,
+          profilePic: u.profilePic,
+          country: u.country,
+        },
+      })
+      if (candidates.length >= want * 3) break
+    }
+  }
   if (!candidates.length) return []
 
   const countryKey = country.toLowerCase()
@@ -158,8 +188,6 @@ export function mergeSuggestedIntoFeed(posts, suggested) {
       out.push(extras[si++])
     }
   }
-  if (rest.length < SUGGEST_EVERY) {
-    while (si < extras.length) out.push(extras[si++])
-  }
+  while (si < extras.length) out.push(extras[si++])
   return out
 }

@@ -200,7 +200,7 @@ export async function findRecentDiscoverPosts(
   following.add(String(userId))
   const hidden = hiddenPostQueryFilter(hiddenObjectIds)
   const perAuthor = Math.min(Math.max(Number(maxPerAuthor) || 1, 1), 5)
-  const scanLimit = Math.min(Math.max(Number(scan) || 150, 80), 500)
+  const scanLimit = Math.min(Math.max(Number(scan) || 150, 80), 2000)
   const systemIds = await systemAuthorIdList()
   const skipAuthors = [...systemIds]
   if (mongoose.Types.ObjectId.isValid(String(userId))) {

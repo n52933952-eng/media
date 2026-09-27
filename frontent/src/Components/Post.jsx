@@ -1290,13 +1290,16 @@ const showToast = useShowToast()
     
    <Flex flex={1} flexDirection="column" gap={2}>
      <Flex justifyContent="space-between" w="full">
-     <Flex w="full" alignItems="center">
+     <Flex w="full" alignItems="center" minW={0}>
        
         <Text 
           fontSize="sm" 
           fontWeight="bold" 
           onClick={handleAvatarOrNameClick}
           cursor="pointer"
+          noOfLines={1}
+          minW={0}
+          flex={1}
         >
          {postedBy?.name}
          </Text>
@@ -1305,6 +1308,7 @@ const showToast = useShowToast()
             size="xs"
             colorScheme="blue"
             ml={2}
+            flexShrink={0}
             isLoading={suggestedFollowBusy}
             onClick={handleSuggestedFollow}
           >
