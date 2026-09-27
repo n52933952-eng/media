@@ -6,6 +6,8 @@ export function isAppAdmin(user) {
     .split(',')
     .map((s) => s.trim().toLowerCase())
     .filter(Boolean)
+  if (!names.length) return false
   const username = String(user.username || '').trim().toLowerCase()
-  return !!username && names.includes(username)
+  const email = String(user.email || '').trim().toLowerCase()
+  return names.includes(username) || (!!email && names.includes(email))
 }

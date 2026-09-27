@@ -8,6 +8,7 @@ import {Link} from 'react-router-dom'
 import useShowToast from '../hooks/useShowToast.js'
 import FollowListModal from './FollowListModal'
 import { followPostHeaders } from '../utils/followRequest.js'
+import { getCountryFlagByName } from '../utils/countries.js'
 
 const UserHeader = ({ users, activeTab, setActiveTab, onUserFollowed, postsCount = 0, onProfileRefresh }) => {
    
@@ -234,7 +235,7 @@ const UserHeader = ({ users, activeTab, setActiveTab, onUserFollowed, postsCount
        </Flex>
     
     
-    {users?.bio ? (
+    {(users?.bio || String(users?.country || '').trim()) ? (
       <Box
         w="full"
         pb={3}
@@ -242,9 +243,29 @@ const UserHeader = ({ users, activeTab, setActiveTab, onUserFollowed, postsCount
         borderBottomWidth="1px"
         borderColor={statBorder}
       >
-        <Text wordBreak="break-word" whiteSpace="pre-wrap">
-          {users.bio}
-        </Text>
+        {String(users?.country || '').trim() ? (
+          <Flex
+            display="inline-flex"
+            align="center"
+            maxW="100%"
+            mb={users?.bio ? 2 : 0}
+            px={2.5}
+            py={0.5}
+            borderWidth="1px"
+            borderColor={statBorder}
+            borderRadius="full"
+          >
+            <Text fontSize="sm" mr={1.5} lineHeight="1">{getCountryFlagByName(users.country)}</Text>
+            <Text fontSize="sm" fontWeight="semibold" color="gray.500" noOfLines={1}>
+              {String(users.country).trim()}
+            </Text>
+          </Flex>
+        ) : null}
+        {users?.bio ? (
+          <Text wordBreak="break-word" whiteSpace="pre-wrap">
+            {users.bio}
+          </Text>
+        ) : null}
       </Box>
     ) : null}
    

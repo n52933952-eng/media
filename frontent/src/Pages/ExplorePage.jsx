@@ -1,5 +1,5 @@
 import React, { useCallback, useContext, useEffect, useRef, useState } from 'react'
-import { Box, Flex, Text, Avatar, Button, Image, IconButton, Spinner, useColorModeValue } from '@chakra-ui/react'
+import { Box, Flex, Text, Avatar, Button, Image, IconButton, Spinner, SimpleGrid, useColorModeValue } from '@chakra-ui/react'
 import { useNavigate } from 'react-router-dom'
 import { UserContext } from '../context/UserContext'
 import useShowToast from '../hooks/useShowToast'
@@ -8,6 +8,13 @@ import API_BASE_URL from '../config/api'
 import { isVideoUrl, mediaDisplayUrl, videoPosterUrl } from '../utils/mediaUrl.js'
 
 const PAGE_SIZE = 16
+
+function clipWords(text, max = 10) {
+  const words = String(text || '').trim().split(/\s+/).filter(Boolean)
+  if (words.length === 0) return 'No posts yet'
+  if (words.length <= max) return words.join(' ')
+  return `${words.slice(0, max).join(' ')} …`
+}
 
 const ExplorePage = () => {
   const { user: currentUser, setUser } = useContext(UserContext)
@@ -71,7 +78,8 @@ const ExplorePage = () => {
     }
   }, [showToast])
 
-  useEffect(() => { load('reset') }, [load])
+  const country = String(currentUser?.country || '')
+  useEffect(() => { load('reset') }, [load, country])
 
   useEffect(() => {
     const el = sentinelRef.current
@@ -114,9 +122,9 @@ const ExplorePage = () => {
   }
 
   return (
-    <Box py={4}>
-      <Flex align="center" justify="space-between" mb={4}>
-        <Text fontSize="xl" fontWeight="bold">Explore people</Text>
+    <Box py={{ base: 2, md: 4 }} px={{ base: 1, sm: 0 }} maxW="720px" mx="auto" w="100%">
+      <Flex align="center" justify="space-between" mb={{ base: 2, md: 4 }} px={{ base: 1, md: 0 }}>
+        <Text fontSize={{ base: 'lg', md: 'xl' }} fontWeight="bold">Explore people</Text>
         <IconButton aria-label="Refresh" icon={<Text fontSize="lg">↻</Text>} onClick={() => load('reset')} variant="ghost" />
       </Flex>
       {loading && users.length === 0 ? (
@@ -124,42 +132,42 @@ const ExplorePage = () => {
       ) : users.length === 0 ? (
         <Text color={muted} textAlign="center" py={10}>No people to show yet. Tap refresh.</Text>
       ) : (
-        <Flex direction="column" gap={4}>
+        <SimpleGrid columns={{ base: 2, lg: 3 }} spacing={{ base: 1.5, md: 2 }}>
           {users.map((item) => {
             const preview = item.latestPost
+            const raw = String(preview?.img || '').trim()
+            const img = mediaDisplayUrl(raw)
+            const text = String(preview?.text || '').trim()
+            const video = isVideoUrl(img)
+            const poster = video ? videoPosterUrl(img) : ''
+            const snippet = clipWords(text, 20)
+            const wordCount = snippet.replace(' …', '').trim().split(/\s+/).filter(Boolean).length
+            const shortQuote = wordCount <= 3
+            const isText = !img && !video
             return (
-              <Box key={item._id} p={3} borderWidth="1px" borderColor={border} borderRadius="lg" bg={cardBg}>
-                <Flex align="center" gap={3} mb={3}>
-                  <Avatar
-                    src={item.profilePic}
-                    name={item.name || item.username}
-                    cursor="pointer"
-                    onClick={() => item.username && navigate(`/${item.username}`)}
-                  />
-                  <Box flex={1} minW={0} cursor="pointer" onClick={() => item.username && navigate(`/${item.username}`)}>
-                    <Text fontWeight="bold" noOfLines={1}>{item.name || item.username}</Text>
-                    <Text fontSize="sm" color={muted} noOfLines={1}>@{item.username}</Text>
-                  </Box>
-                  <Button
-                    size="sm"
-                    colorScheme="blue"
-                    isLoading={followingId === String(item._id)}
-                    onClick={() => follow(item)}
-                  >
-                    Follow
-                  </Button>
-                </Flex>
+              <Box key={item._id} position="relative" borderRadius="lg" overflow="hidden" bg={cardBg} borderWidth="1px" borderColor={border}>
                 {(() => {
-                  const raw = String(preview?.img || '').trim()
-                  const img = mediaDisplayUrl(raw)
-                  const text = String(preview?.text || '').trim()
-                  const video = isVideoUrl(img)
-                  const poster = video ? videoPosterUrl(img) : ''
                   if (video && img) {
                     return (
-                      <Box position="relative" h="220px" borderRadius="xl" overflow="hidden" bg="black">
+                      <Box
+                        position="relative"
+                        w="100%"
+                        pt="100%"
+                        overflow="hidden"
+                        bg="black"
+                        cursor="pointer"
+                        onClick={() => item.username && navigate(`/${item.username}`)}
+                      >
                         {poster ? (
-                          <Image src={poster} alt="" w="100%" h="100%" objectFit="cover" />
+                          <Image
+                            src={poster}
+                            alt=""
+                            position="absolute"
+                            inset={0}
+                            w="100%"
+                            h="100%"
+                            objectFit="cover"
+                          />
                         ) : (
                           <Box
                             as="video"
@@ -167,21 +175,17 @@ const ExplorePage = () => {
                             muted
                             preload="metadata"
                             playsInline
+                            position="absolute"
+                            inset={0}
                             w="100%"
                             h="100%"
                             objectFit="cover"
                           />
                         )}
-                        <Flex
-                          position="absolute"
-                          inset={0}
-                          align="center"
-                          justify="center"
-                          pointerEvents="none"
-                        >
+                        <Flex position="absolute" inset={0} align="center" justify="center" pointerEvents="none">
                           <Flex
-                            w="52px"
-                            h="52px"
+                            w="36px"
+                            h="36px"
                             borderRadius="full"
                             bg="blackAlpha.700"
                             border="2px solid"
@@ -189,56 +193,110 @@ const ExplorePage = () => {
                             align="center"
                             justify="center"
                           >
-                            <Text color="white" fontSize="lg" ml="3px">▶</Text>
+                            <Text color="white" fontSize="sm" ml="2px">▶</Text>
                           </Flex>
                         </Flex>
                       </Box>
                     )
                   }
                   if (img) {
-                    return <Image src={img} alt="" w="100%" h="220px" objectFit="cover" borderRadius="xl" />
+                    return (
+                      <Box
+                        w="100%"
+                        pt="100%"
+                        position="relative"
+                        cursor="pointer"
+                        onClick={() => item.username && navigate(`/${item.username}`)}
+                      >
+                        <Image src={img} alt="" position="absolute" inset={0} w="100%" h="100%" objectFit="cover" />
+                      </Box>
+                    )
                   }
                   return (
                     <Box
                       bg={emptyBg}
-                      borderRadius="xl"
-                      px={4}
-                      pt={2}
-                      pb={3}
-                      minH="72px"
-                      borderWidth="1px"
                       borderColor={textBorder}
+                      w="100%"
+                      pt="100%"
                       position="relative"
-                      overflow="hidden"
+                      cursor="pointer"
+                      onClick={() => item.username && navigate(`/${item.username}`)}
                     >
-                      <Box
-                        position="absolute"
-                        left={0}
-                        top="18px"
-                        bottom="18px"
-                        w="4px"
-                        borderRadius="full"
-                        bg="blue.400"
-                      />
-                      <Text fontSize="2xl" lineHeight="1" color="blue.400" opacity={0.7} fontWeight="extrabold" pl={2}>
+                      <Box position="absolute" left={0} top="16px" bottom="48px" w="3px" borderRadius="full" bg="blue.400" />
+                      <Text position="absolute" top={2} left={3} color="blue.400" fontSize="2xl" lineHeight="1" fontWeight="extrabold" opacity={0.55}>
                         “
                       </Text>
-                      <Text fontSize="sm" fontWeight="semibold" noOfLines={3} mt={-1} pl={2} lineHeight="1.4">
-                        {text || 'No posts yet'}
+                      <Text
+                        position="absolute"
+                        top={8}
+                        left={3}
+                        right={2}
+                        bottom="40px"
+                        fontSize={shortQuote ? 'lg' : 'sm'}
+                        fontWeight="bold"
+                        lineHeight="1.35"
+                        textAlign={shortQuote ? 'center' : 'left'}
+                        noOfLines={shortQuote ? 3 : 5}
+                      >
+                        {snippet}
                       </Text>
                     </Box>
                   )
                 })()}
+                <Flex
+                  position="absolute"
+                  left={0}
+                  right={0}
+                  bottom={0}
+                  align="center"
+                  gap={2}
+                  px={2}
+                  py={1.5}
+                  bg={isText ? 'transparent' : 'blackAlpha.600'}
+                  borderTopWidth={isText ? '1px' : 0}
+                  borderColor={textBorder}
+                >
+                  <Avatar
+                    size="xs"
+                    src={item.profilePic}
+                    name={item.name || item.username}
+                    cursor="pointer"
+                    onClick={() => item.username && navigate(`/${item.username}`)}
+                  />
+                  <Text
+                    flex={1}
+                    minW={0}
+                    fontSize="xs"
+                    fontWeight="bold"
+                    color={isText ? undefined : 'white'}
+                    noOfLines={1}
+                    cursor="pointer"
+                    onClick={() => item.username && navigate(`/${item.username}`)}
+                  >
+                    {item.name || item.username}
+                  </Text>
+                  <Button
+                    size="xs"
+                    minW="auto"
+                    px={{ base: 2, md: 3 }}
+                    flexShrink={0}
+                    colorScheme="blue"
+                    isLoading={followingId === String(item._id)}
+                    onClick={() => follow(item)}
+                  >
+                    Follow
+                  </Button>
+                </Flex>
               </Box>
             )
           })}
-          <Box ref={sentinelRef} h="1px" />
-          {loadingMore ? (
-            <Flex justify="center" py={4}><Spinner size="sm" /></Flex>
-          ) : hasMore ? (
-            <Button variant="ghost" onClick={() => load('more')}>Load more</Button>
-          ) : null}
-        </Flex>
+        </SimpleGrid>
+        <Box ref={sentinelRef} h="1px" />
+        {loadingMore ? (
+          <Flex justify="center" py={4}><Spinner size="sm" /></Flex>
+        ) : hasMore ? (
+          <Button variant="ghost" onClick={() => load('more')} mt={2}>Load more</Button>
+        ) : null}
       )}
     </Box>
   )

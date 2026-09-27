@@ -63,3 +63,12 @@ export const COUNTRY_OPTIONS = [
 ]
 
 export const COUNTRIES = COUNTRY_OPTIONS.map((c) => c.name)
+
+const FLAG_BY_NAME = new Map(COUNTRY_OPTIONS.map((c) => [c.name.toLowerCase(), c.flag]))
+
+/** O(1) flag lookup. Unknown names get a globe so old/free-text values still show. */
+export function getCountryFlagByName(name) {
+  const key = String(name || '').trim().toLowerCase()
+  if (!key) return ''
+  return FLAG_BY_NAME.get(key) || '🌍'
+}
