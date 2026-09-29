@@ -17,6 +17,25 @@ function authorCountry(post) {
   return String(post?.postedBy?.country || '').trim().toLowerCase()
 }
 
+function authorId(post) {
+  const pb = post?.postedBy
+  if (pb == null) return ''
+  return pb._id != null ? String(pb._id) : String(pb)
+}
+
+/** Keep the first post per person. Call after the related-word sort so the best match stays. */
+function onePostPerAuthor(list) {
+  const seen = new Set()
+  const out = []
+  for (const post of list) {
+    const id = authorId(post)
+    if (!id || seen.has(id)) continue
+    seen.add(id)
+    out.push(post)
+  }
+  return out
+}
+
 function scoreRelated(text, tokens) {
   if (!tokens.length) return 0
   const hay = String(text || '').toLowerCase()
@@ -112,7 +131,7 @@ export async function fetchSuggestedFeedPosts(userId, { count = 3, hiddenObjectI
       limit: fillEmpty ? 80 : Math.min(Math.max(want * 10, 40), 80),
       hiddenObjectIds,
       excludePostIds,
-      maxPerAuthor: fillEmpty ? 4 : 1,
+      maxPerAuthor: 1,
       scan: fillEmpty ? 2000 : 200,
     }),
     followedInterestTokens(userId),
@@ -127,11 +146,15 @@ export async function fetchSuggestedFeedPosts(userId, { count = 3, hiddenObjectI
     })
     const withPosts = await attachLatestPostPreviews(users, hiddenObjectIds)
     const have = new Set(candidates.map((p) => String(p._id)))
+    const haveAuthors = new Set(candidates.map(authorId).filter(Boolean))
     for (const u of withPosts) {
       const lp = u.latestPost
+      const uid = u?._id != null ? String(u._id) : ''
+      if (!uid || haveAuthors.has(uid)) continue
       if (!lp?._id || have.has(String(lp._id)) || excludePostIds.has(String(lp._id))) continue
       if (!String(lp.img || '').trim() && !String(lp.text || '').trim()) continue
       have.add(String(lp._id))
+      haveAuthors.add(uid)
       candidates.push({
         _id: lp._id,
         text: lp.text,
@@ -159,8 +182,9 @@ export async function fetchSuggestedFeedPosts(userId, { count = 3, hiddenObjectI
     return (relB + locB) - (relA + locA)
   })
 
-  const unseen = candidates.filter((p) => !seen.has(String(p._id)))
-  const pool = unseen.length >= want ? unseen : candidates
+  const uniqueAuthors = onePostPerAuthor(candidates)
+  const unseen = uniqueAuthors.filter((p) => !seen.has(String(p._id)))
+  const pool = unseen.length >= want ? unseen : uniqueAuthors
   const top = pool.slice(0, Math.min(pool.length, Math.max(want * 6, 18)))
   const picked = shufflePick(top, want)
   await rememberSuggestedIds(userId, picked.map((p) => String(p._id)))

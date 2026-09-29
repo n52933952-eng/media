@@ -63,13 +63,17 @@ const ExplorePage = () => {
       setHasMore(more)
       const deduped = []
       const seenUser = new Set()
+      const seenName = new Set()
       const seenPost = new Set()
       for (const u of (mode === 'more' ? [...usersRef.current, ...next] : next)) {
         const id = String(u?._id || '')
         const postId = String(u?.latestPost?._id || '')
+        const name = String(u?.name || '').trim().toLowerCase() || String(u?.username || '').trim().toLowerCase()
         if (!id || seenUser.has(id)) continue
+        if (name && seenName.has(name)) continue
         if (postId && seenPost.has(postId)) continue
         seenUser.add(id)
+        if (name) seenName.add(name)
         if (postId) seenPost.add(postId)
         deduped.push(u)
       }
@@ -283,7 +287,7 @@ const ExplorePage = () => {
                     cursor="pointer"
                     onClick={() => item.username && navigate(`/${item.username}`)}
                   >
-                    {item.name || item.username}
+                    {item.username ? `@${item.username}` : (item.name || 'User')}
                   </Text>
                   <Button
                     size="xs"

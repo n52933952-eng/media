@@ -1061,7 +1061,13 @@ export const getSuggestedUsers = async(req, res) => {
     }
 }
 
-/** Explore: random same-country people + latest post preview. Scroll sends exclude=ids for the next page. */
+function exploreNameKey(user) {
+    const name = String(user?.name || '').trim().toLowerCase()
+    if (name) return name
+    return String(user?.username || '').trim().toLowerCase()
+}
+
+/** Explore: one card per person. Same display name is one person, and the preview is their real latest post. */
 export const getExplorePeople = async (req, res) => {
     try {
         const userId = req.user._id
@@ -1073,54 +1079,73 @@ export const getExplorePeople = async (req, res) => {
             .slice(0, 80)
         const me = await User.findById(userId).select('country').lean()
         const country = String(me?.country || '').trim()
-        const users = await sampleDiscoverUsers(userId, {
-            country,
-            size: size * 2,
-            allowWorldwide: true,
-            excludeIds,
-        })
-        let withPosts = await attachLatestPostPreviews(users)
-        withPosts = withPosts.filter((u) => u.latestPost && (u.latestPost.img || String(u.latestPost.text || '').trim()))
-        const have = new Set([...excludeIds.map(String), ...withPosts.map((u) => String(u._id))])
+        const excludedDocs = excludeIds.length
+            ? await User.find({ _id: { $in: excludeIds } }).select('name username').lean()
+            : []
+        const seenUsers = new Set(excludeIds.map(String))
+        const seenNames = new Set(excludedDocs.map(exploreNameKey).filter(Boolean))
+        const seenPosts = new Set()
+        const withPosts = []
+
+        const pushPerson = (person) => {
+            const id = person?._id != null ? String(person._id) : ''
+            const postId = person?.latestPost?._id != null ? String(person.latestPost._id) : ''
+            const name = exploreNameKey(person)
+            const preview = person?.latestPost
+            const hasPreview = preview && (String(preview.img || '').trim() || String(preview.text || '').trim())
+            if (!id || !hasPreview || seenUsers.has(id)) return false
+            if (name && seenNames.has(name)) return false
+            if (postId && seenPosts.has(postId)) return false
+            seenUsers.add(id)
+            if (name) seenNames.add(name)
+            if (postId) seenPosts.add(postId)
+            withPosts.push(person)
+            return true
+        }
+
+        for (let round = 0; round < 3 && withPosts.length < size; round++) {
+            const users = await sampleDiscoverUsers(userId, {
+                country,
+                size: size * 2,
+                allowWorldwide: true,
+                excludeIds: [...seenUsers],
+            })
+            const attached = await attachLatestPostPreviews(users)
+            let added = 0
+            for (const person of attached) {
+                if (pushPerson(person)) added += 1
+                if (withPosts.length >= size) break
+            }
+            if (!added) break
+        }
+
         if (withPosts.length < size) {
             const fromPosts = await findRecentDiscoverPosts(userId, {
-                limit: size,
-                excludeAuthorIds: [...have],
+                limit: size * 3,
+                maxPerAuthor: 1,
+                excludeAuthorIds: [...seenUsers],
             })
-            for (const p of fromPosts) {
-                const author = p.postedBy
-                const id = author?._id != null ? String(author._id) : ''
-                if (!id || have.has(id)) continue
-                have.add(id)
-                withPosts.push({
+            for (const post of fromPosts) {
+                const author = post.postedBy
+                if (!author?._id) continue
+                pushPerson({
                     _id: author._id,
                     username: author.username,
                     name: author.name,
                     profilePic: author.profilePic,
                     country: author.country,
                     latestPost: {
-                        _id: p._id,
-                        text: p.text || '',
-                        img: p.img || (Array.isArray(p.images) ? p.images[0] : '') || '',
-                        createdAt: p.createdAt,
+                        _id: post._id,
+                        text: post.text || '',
+                        img: post.img || (Array.isArray(post.images) ? post.images[0] : '') || '',
+                        createdAt: post.createdAt,
                     },
                 })
                 if (withPosts.length >= size) break
             }
         }
-        const seenUsers = new Set()
-        const seenPosts = new Set()
-        const unique = []
-        for (const u of withPosts) {
-            const id = u?._id != null ? String(u._id) : ''
-            const postId = u?.latestPost?._id != null ? String(u.latestPost._id) : ''
-            if (!id || seenUsers.has(id)) continue
-            if (postId && seenPosts.has(postId)) continue
-            seenUsers.add(id)
-            if (postId) seenPosts.add(postId)
-            unique.push(u)
-        }
-        const page = unique.slice(0, size)
+
+        const page = withPosts.slice(0, size)
         return res.status(200).json({
             users: page.map((u) => ({ ...u, isFollowedByMe: false })),
             hasMore: page.length >= size,
