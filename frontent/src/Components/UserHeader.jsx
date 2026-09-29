@@ -34,6 +34,7 @@ const UserHeader = ({ users, activeTab, setActiveTab, onUserFollowed, postsCount
      const [followModal, setFollowModal] = useState(null) // null | 'followers' | 'following'
   
   const showToast=useShowToast()
+  const usernameColor = useColorModeValue('gray.600', 'gray.400')
   
   // Sync follow state and counts when viewing a different user profile (or same profile refetched,
   // e.g. followed on mobile — isFollowedByMe can flip without count changes).
@@ -210,10 +211,25 @@ const UserHeader = ({ users, activeTab, setActiveTab, onUserFollowed, postsCount
         <Flex w="full" justifyContent="space-between">
      
         <Box>
-        <Text fontSize="2xl" fontWeight="bold">{users?.name}</Text>
+        <Text
+          fontSize="2xl"
+          fontWeight="600"
+          fontFamily="'Iowan Old Style', 'Palatino Linotype', Palatino, Georgia, 'Times New Roman', serif"
+          letterSpacing="0.01em"
+          lineHeight="1.15"
+        >
+          {users?.name}
+        </Text>
        
        <Flex gap={2} alignItems="center">
-        <Text fontSize="sm">{users?.username}</Text>
+        <Text
+          fontSize="sm"
+          fontStyle="italic"
+          color={usernameColor}
+          fontFamily="'Iowan Old Style', 'Palatino Linotype', Palatino, Georgia, 'Times New Roman', serif"
+        >
+          @{users?.username}
+        </Text>
        </Flex>
        
         </Box>

@@ -30,6 +30,27 @@ import { getPostCarouselSlides, getPostCarouselAudio, shouldShowPostCarousel, po
 import { usePostEngagementSubscription } from '../hooks/usePostEngagementSubscription.js'
 
 const apiBaseUrl = () => (import.meta.env.PROD ? window.location.origin : 'http://localhost:5000')
+const ROMAN_FONT = `'Iowan Old Style', 'Palatino Linotype', Palatino, Georgia, 'Times New Roman', serif`
+
+function youtubeEmbedSrc(url) {
+  const raw = String(url || '')
+  if (!raw.includes('youtube.com/embed') && !raw.includes('youtu.be')) return raw
+  try {
+    const u = new URL(raw)
+    u.searchParams.set('enablejsapi', '1')
+    if (typeof window !== 'undefined') u.searchParams.set('origin', window.location.origin)
+    return u.toString()
+  } catch {
+    return raw.includes('enablejsapi=1') ? raw : `${raw}${raw.includes('?') ? '&' : '?'}enablejsapi=1`
+  }
+}
+
+function sendYouTubeCommand(frame, func) {
+  frame?.contentWindow?.postMessage(
+    JSON.stringify({ event: 'command', func, args: [] }),
+    '*',
+  )
+}
 
 const Post = ({post: initialPost, postedBy, onDelete, onPostUpdated, visibleVideoOnly = false, autoPlayMedia, showFeedExtras = true, isOwnProfile = true}) => {
     
@@ -41,6 +62,8 @@ const Post = ({post: initialPost, postedBy, onDelete, onPostUpdated, visibleVide
   // Use local post or initial post
   const post = localPost || initialPost
   const videoRef = useRef(null)
+  const channelFrameRef = useRef(null)
+  const channelPlayingRef = useRef(true)
   const [isVideoInView, setIsVideoInView] = useState(!visibleVideoOnly)
   const rawMediaUrl = String(post?.img || '')
   const mediaUrl = mediaDisplayUrl(rawMediaUrl)
@@ -204,6 +227,14 @@ const Post = ({post: initialPost, postedBy, onDelete, onPostUpdated, visibleVide
     },
     [shouldNavigateToPostDetail, navigate, postedBy?.username, post._id],
   )
+
+  const toggleChannelPlayback = useCallback((e) => {
+    e.preventDefault()
+    e.stopPropagation()
+    const func = channelPlayingRef.current ? 'pauseVideo' : 'playVideo'
+    channelPlayingRef.current = !channelPlayingRef.current
+    sendYouTubeCommand(channelFrameRef.current, func)
+  }, [])
 
 const showToast = useShowToast()
 
@@ -1291,18 +1322,34 @@ const showToast = useShowToast()
    <Flex flex={1} flexDirection="column" gap={2}>
      <Flex justifyContent="space-between" w="full">
      <Flex w="full" alignItems="center" minW={0}>
-       
-        <Text 
-          fontSize="sm" 
-          fontWeight="bold" 
-          onClick={handleAvatarOrNameClick}
-          cursor="pointer"
-          noOfLines={1}
-          minW={0}
-          flex={1}
-        >
-         {postedBy?.name}
-         </Text>
+        <Box minW={0} flex={1} cursor="pointer" onClick={handleAvatarOrNameClick}>
+          <Flex align="center" gap={1} minW={0}>
+            <Text
+              fontSize={isChannelPost ? 'sm' : 'md'}
+              fontWeight={isChannelPost ? 'bold' : '600'}
+              fontFamily={isChannelPost ? undefined : ROMAN_FONT}
+              letterSpacing="0.01em"
+              lineHeight="1.15"
+              noOfLines={1}
+              minW={0}
+            >
+              {postedBy?.name}
+            </Text>
+            <Image src="/verified.png" w={4} h={4} flexShrink={0} />
+          </Flex>
+          {!isChannelPost && postedBy?.username ? (
+            <Text
+              fontSize="xs"
+              color={secondaryTextColor}
+              fontFamily={ROMAN_FONT}
+              fontStyle="italic"
+              lineHeight="1.2"
+              noOfLines={1}
+            >
+              @{postedBy.username}
+            </Text>
+          ) : null}
+        </Box>
         {showSuggestedFollow && (
           <Button
             size="xs"
@@ -1315,8 +1362,6 @@ const showToast = useShowToast()
             Follow
           </Button>
         )}
-      
-        <Image src="/verified.png" w={4} h={4} ml={1} />
      </Flex>
     
     
@@ -1893,8 +1938,8 @@ const showToast = useShowToast()
       border="0.5px solid"
       borderColor="gray.light"
       my={2}
-      cursor="pointer"
-      title="Open post"
+      cursor={post?.img && (post.img.includes('youtube.com/embed') || post.img.includes('youtu.be')) ? 'default' : 'pointer'}
+      title={post?.img && (post.img.includes('youtube.com/embed') || post.img.includes('youtu.be')) ? undefined : 'Open post'}
       sx={{
         cursor: 'pointer !important',
         '& img, & video': { cursor: 'pointer !important' },
@@ -1903,9 +1948,19 @@ const showToast = useShowToast()
       {showCarousel && carouselSlides.length > 0 && !rawMediaUrl.includes('youtube.com/embed') && !rawMediaUrl.includes('youtu.be') && !isVideoMedia ? (
         <PostMediaCarousel slides={carouselSlides} audioUrl={carouselAudio} frameHeight={FEED_CAROUSEL_FRAME_H} />
       ) : post?.img && (post.img.includes('youtube.com/embed') || post.img.includes('youtu.be')) ? (
-        <Box position="relative" paddingBottom="56.25%" height="0" overflow="hidden" cursor="pointer">
+        <Box
+          position="relative"
+          paddingBottom="56.25%"
+          height="0"
+          overflow="hidden"
+          cursor="pointer"
+          data-no-navigate="true"
+          title="Pause"
+          onClick={toggleChannelPlayback}
+        >
           <iframe
-            src={post.img}
+            ref={channelFrameRef}
+            src={youtubeEmbedSrc(post.img)}
             title="Live Stream"
             style={{
               position: 'absolute',
@@ -1915,6 +1970,9 @@ const showToast = useShowToast()
               height: '100%',
               border: 'none',
               pointerEvents: 'none',
+            }}
+            onLoad={(e) => {
+              e.target.contentWindow?.postMessage(JSON.stringify({ event: 'listening' }), '*')
             }}
             allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
             allowFullScreen
@@ -2027,7 +2085,10 @@ const showToast = useShowToast()
   return (
     <Box
       data-post-id={post._id}
-      onClick={goToPostDetail}
+      onClick={(e) => {
+        if (isChannelPost) return
+        goToPostDetail(e)
+      }}
       onMouseDown={(e) => {
         if (menuOpenRef.current || menuNavBlockRef.current) {
           e.preventDefault()
