@@ -72,3 +72,15 @@ export function getCountryFlagByName(name) {
   if (!key) return ''
   return FLAG_BY_NAME.get(key) || '🌍'
 }
+
+/** Two-letter code from the flag emoji. Windows draws those emojis as "BE", so the web uses a picture. */
+export function getCountryFlagCode(name) {
+  const flag = getCountryFlagByName(name)
+  const chars = [...flag]
+  if (chars.length !== 2) return ''
+  const A = 0x1f1e6
+  const a = chars[0].codePointAt(0)
+  const b = chars[1].codePointAt(0)
+  if (a < A || a > A + 25 || b < A || b > A + 25) return ''
+  return String.fromCharCode(a - A + 97, b - A + 97)
+}

@@ -1,5 +1,5 @@
 import React,{useContext,useState,useEffect} from 'react'
-import{Button,VStack,Box,Avatar,Text,Flex,Menu,MenuItem,Portal,MenuList,MenuButton,Input,useColorModeValue,SimpleGrid} from '@chakra-ui/react'
+import{Button,VStack,Box,Avatar,Text,Flex,Image,Menu,MenuItem,Portal,MenuList,MenuButton,Input,useColorModeValue,SimpleGrid} from '@chakra-ui/react'
 import { FaSquareInstagram } from "react-icons/fa6";
 import { FaRegCopy } from "react-icons/fa";
 import{useToast} from '@chakra-ui/toast'
@@ -8,7 +8,7 @@ import {Link} from 'react-router-dom'
 import useShowToast from '../hooks/useShowToast.js'
 import FollowListModal from './FollowListModal'
 import { followPostHeaders } from '../utils/followRequest.js'
-import { getCountryFlagByName } from '../utils/countries.js'
+import { getCountryFlagByName, getCountryFlagCode } from '../utils/countries.js'
 
 const UserHeader = ({ users, activeTab, setActiveTab, onUserFollowed, postsCount = 0, onProfileRefresh }) => {
    
@@ -271,7 +271,20 @@ const UserHeader = ({ users, activeTab, setActiveTab, onUserFollowed, postsCount
             borderColor={statBorder}
             borderRadius="full"
           >
-            <Text fontSize="sm" mr={1.5} lineHeight="1">{getCountryFlagByName(users.country)}</Text>
+            {getCountryFlagCode(users.country) ? (
+              <Image
+                src={`https://flagcdn.com/w40/${getCountryFlagCode(users.country)}.png`}
+                alt=""
+                w="18px"
+                h="13px"
+                mr={1.5}
+                borderRadius="1px"
+                objectFit="cover"
+                flexShrink={0}
+              />
+            ) : (
+              <Text fontSize="sm" mr={1.5} lineHeight="1">{getCountryFlagByName(users.country)}</Text>
+            )}
             <Text fontSize="sm" fontWeight="semibold" color="gray.500" noOfLines={1}>
               {String(users.country).trim()}
             </Text>
