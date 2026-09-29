@@ -1,0 +1,3 @@
+# Used by Vite at build/dev time — must start with VITE_
+# Same Web client ID as server GOOGLE_WEB_CLIENT_ID in ../.env (Firebase → Auth → Google → Web client ID)
+VITE_GOOGLE_WEB_CLIENT_ID=931688184474-3cc8ifh10tt1ritl08iu8majbiudtncp.apps.googleusercontent.com

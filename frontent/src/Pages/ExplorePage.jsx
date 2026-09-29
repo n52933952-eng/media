@@ -61,14 +61,23 @@ const ExplorePage = () => {
       const more = data?.hasMore === true && next.length > 0
       hasMoreRef.current = more
       setHasMore(more)
-      if (mode === 'more') {
-        setUsers((prev) => {
-          const seen = new Set(prev.map((u) => String(u._id)))
-          return [...prev, ...next.filter((u) => !seen.has(String(u._id)))]
-        })
-      } else {
-        setUsers(next)
+      const deduped = []
+      const seenUser = new Set()
+      const seenPost = new Set()
+      for (const u of (mode === 'more' ? [...usersRef.current, ...next] : next)) {
+        const id = String(u?._id || '')
+        const postId = String(u?.latestPost?._id || '')
+        if (!id || seenUser.has(id)) continue
+        if (postId && seenPost.has(postId)) continue
+        seenUser.add(id)
+        if (postId) seenPost.add(postId)
+        deduped.push(u)
       }
+      if (mode === 'more' && deduped.length === usersRef.current.length) {
+        hasMoreRef.current = false
+        setHasMore(false)
+      }
+      setUsers(deduped)
     } catch (e) {
       showToast('Error', e?.message || 'Could not load people', 'error')
     } finally {

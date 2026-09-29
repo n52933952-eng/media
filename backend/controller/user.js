@@ -1108,7 +1108,19 @@ export const getExplorePeople = async (req, res) => {
                 if (withPosts.length >= size) break
             }
         }
-        const page = withPosts.slice(0, size)
+        const seenUsers = new Set()
+        const seenPosts = new Set()
+        const unique = []
+        for (const u of withPosts) {
+            const id = u?._id != null ? String(u._id) : ''
+            const postId = u?.latestPost?._id != null ? String(u.latestPost._id) : ''
+            if (!id || seenUsers.has(id)) continue
+            if (postId && seenPosts.has(postId)) continue
+            seenUsers.add(id)
+            if (postId) seenPosts.add(postId)
+            unique.push(u)
+        }
+        const page = unique.slice(0, size)
         return res.status(200).json({
             users: page.map((u) => ({ ...u, isFollowedByMe: false })),
             hasMore: page.length >= size,
