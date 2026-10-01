@@ -11,9 +11,17 @@ function youtubeIdFromUrl(u, host) {
     return u.searchParams.get('v') || ''
 }
 
+function withScheme(raw) {
+    const text = String(raw || '').trim()
+    if (!text || text.length > 500 || /\s/.test(text)) return ''
+    if (/^https?:\/\//i.test(text)) return text
+    if (!/^[a-z0-9.-]+\.[a-z]{2,}([/?#].*)?$/i.test(text)) return ''
+    return `https://${text}`
+}
+
 export function parseVideoLink(raw) {
-    const url = String(raw || '').trim()
-    if (!/^https?:\/\//i.test(url) || url.length > 500) return null
+    const url = withScheme(raw)
+    if (!url) return null
     let u
     try {
         u = new URL(url)

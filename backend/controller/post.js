@@ -9,6 +9,7 @@ import LiveStream from '../models/liveStream.js'
 import { deleteMediaAsset, deleteAllPostMedia } from '../services/mediaStorage.js'
 import { assertManagedMediaUrls, isR2Url } from '../services/r2Presign.js'
 import { parseVideoLink } from '../services/videoLinks.js'
+import { fetchPageThumb } from '../services/linkPreview.js'
 import { getIO, getUserSocket } from '../socket/socket.js'
 import { emitToUserIds, collectSocketIdsForUserIds, emitPostEngagement } from '../services/postSocketEmit.js'
 import { dedupeGamePostsForFeed } from '../utils/dedupeGameFeedPosts.js'
@@ -788,6 +789,7 @@ export const updatePost = async(req,res) => {
                 return res.status(400).json({ error: 'Paste a link' })
             }
             post.img = parsed.embedUrl
+            post.linkThumb = parsed.provider === 'link' ? await fetchPageThumb(parsed.url) : ''
         } else if (imgRaw) {
             try {
                 assertManagedMediaUrls([imgRaw])
@@ -838,6 +840,7 @@ export const updatePost = async(req,res) => {
                             for (const sibling of siblings) {
                                 sibling.text = post.text
                                 sibling.img = post.img
+                                sibling.linkThumb = post.linkThumb || ''
                                 sibling.editedAt = post.editedAt
                                 await sibling.save()
                             }

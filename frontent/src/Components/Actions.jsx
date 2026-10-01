@@ -590,6 +590,7 @@ return (
 		>
 			<Flex my={2} alignItems="center" minH="24px" w="100%" gap={showFeedExtras ? 0 : 3}>
 				<Flex alignItems="center" gap={showFeedExtras ? '48px' : 3} flexShrink={0}>
+				{!(isMyChannelFeedCard && post?.postedBy?.username !== 'Football') && (
 				<Box
 					w="24px"
 					h="24px"
@@ -617,6 +618,7 @@ return (
 					></path>
 				</svg>
 				</Box>
+				)}
 
 				{!hideComments && (
 				<svg
@@ -716,6 +718,7 @@ return (
 			)}
 			</Flex>
 
+			{(!hideComments || !(isMyChannelFeedCard && post?.postedBy?.username !== 'Football')) && (
 			<Flex gap={2} alignItems="center" minH="18px">
 				{!hideComments && (
 				<>
@@ -725,6 +728,8 @@ return (
 				<Box w={0.5} h={0.5} borderRadius={"full"} bg={"gray.light"}></Box>
 				</>
 				)}
+				{!(isMyChannelFeedCard && post?.postedBy?.username !== 'Football') && (
+				<>
 				<Box w="18px" h="18px" flexShrink={0} display="flex" alignItems="center" justifyContent="center">
 				{likeCount > 0 && (liked ? user?.profilePic : likePreview?.profilePic) ? (
 					<Box
@@ -752,7 +757,10 @@ return (
 				>
 				{likeCount} {likeCount === 1 ? 'like' : 'likes'}
 				</Text>
+				</>
+				)}
 			</Flex>
+			)}
 
 			{!hideComments && (
 			<Modal isOpen={isOpen} onClose={onClose}>

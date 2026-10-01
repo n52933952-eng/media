@@ -27,6 +27,12 @@ const PostSchema = mongoose.Schema({
         type:String
     },
 
+    /** Picture for a shared website. The page address stays in img. */
+    linkThumb: {
+        type: String,
+        default: '',
+    },
+
     /** Hidden from Explore / suggested feed after reports or admin action. */
     hiddenByAdmin: {
         type: Boolean,

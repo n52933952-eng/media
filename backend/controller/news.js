@@ -2,6 +2,7 @@
 import jwt from 'jsonwebtoken'
 import VideoLink from '../models/videoLink.js'
 import { parseVideoLink, decorateChannel } from '../services/videoLinks.js'
+import { fetchPageThumb } from '../services/linkPreview.js'
 
 const MAX_VIDEO_LINKS = 30
 const VIDEO_SHELF_USERNAME = 'VideoShelf'
@@ -120,9 +121,8 @@ export const createLiveStreamPost = async (req, res) => {
       const postObj = existingPost.toObject ? existingPost.toObject() : existingPost
 
       const io = getIO()
-      if (io && req.user) {
-        await emitToUserIds(io, [req.user._id], 'newPost', postObj)
-        console.log('✅ Emitted existing channel post to userSelf')
+      if (io && req.user && caption) {
+        await emitToUserIds(io, [req.user._id], 'postUpdated', { postId: existingPost._id, post: postObj })
       }
 
       return res.status(200).json({
@@ -320,21 +320,25 @@ async function watchEmbed({ userId, embedUrl, text, title }) {
     channelAddedBy: String(userId),
   })
   if (existing) {
-    if (text && existing.text !== text) {
+    const captionChanged = !!(text && existing.text !== text)
+    if (captionChanged) {
       existing.text = text
       await existing.save({ timestamps: false })
     }
     await invalidateUserFeedCache(userId)
     await existing.populate('postedBy', 'username profilePic name')
     const postObj = existing.toObject()
-    const io = getIO()
-    if (io) await emitToUserIds(io, [userId], 'newPost', postObj)
+    if (captionChanged) {
+      const io = getIO()
+      if (io) await emitToUserIds(io, [userId], 'postUpdated', { postId: existing._id, post: postObj })
+    }
     return { post: postObj, posted: false, postId: existing._id }
   }
   const post = new Post({
     postedBy: shelf._id,
     text: text || title || 'Video',
     img: embedUrl,
+    linkThumb: await fetchPageThumb(embedUrl),
     channelAddedBy: String(userId),
   })
   await post.save()
@@ -407,13 +411,14 @@ async function dropPrivateWatchCards(userId, embedUrls) {
   return ids.map(String)
 }
 
-async function shareEmbed({ userId, embedUrl, text }) {
+async function shareEmbed({ userId, embedUrl, text, linkThumb }) {
   const Post = (await import('../models/post.js')).default
   const { createActivity } = await import('./activity.js')
   const post = new Post({
     postedBy: userId,
     text: String(text || 'Video').slice(0, 500),
     img: embedUrl,
+    linkThumb: linkThumb || await fetchPageThumb(embedUrl),
   })
   await post.save()
   await post.populate('postedBy', 'username profilePic name')
@@ -433,7 +438,7 @@ export const shareVideo = async (req, res) => {
     const caption = String(req.body?.text || '').trim().slice(0, 500)
     if (postId) {
       const Post = (await import('../models/post.js')).default
-      const source = await Post.findById(postId).select('img images text channelAddedBy postedBy').lean()
+      const source = await Post.findById(postId).select('img images text channelAddedBy postedBy linkThumb').lean()
       const candidates = [source?.img, ...(Array.isArray(source?.images) ? source.images : []), req.body?.embedUrl, source?.text]
       let embed = ''
       for (const candidate of candidates) {
@@ -447,6 +452,7 @@ export const shareVideo = async (req, res) => {
         userId: req.user._id,
         embedUrl: embed,
         text: caption || source?.text || 'Video',
+        linkThumb: source?.img === embed ? source?.linkThumb : '',
       })
       const removedIds = await dropPrivateWatchCards(req.user._id, [embed, source?.img])
       return res.status(200).json({ post, removedIds })

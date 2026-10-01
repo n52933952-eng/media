@@ -72,11 +72,12 @@ const MobileChannelsStrip = () => {
         showToast('Error', result.error || 'Could not add channel', 'error')
         return
       }
-      const msg = result.posted
-        ? `🔴 ${channel.name} added to your feed!`
-        : `${channel.name} is already in your feed`
-      showToast('Success', msg, 'success')
       setExpandedId(null)
+      if (!result.posted) {
+        showToast('Info', 'Already in your feed', 'info')
+        return
+      }
+      showToast('Success', `🔴 ${channel.name} added to your feed!`, 'success')
       scrollToHomeFeed(result.postId)
     } catch (e) {
       console.error('[MobileChannelsStrip] addChannelToFeed', e)
@@ -100,7 +101,7 @@ const MobileChannelsStrip = () => {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: addUrl.trim() }),
+        body: JSON.stringify({ url: /^https?:\/\//i.test(addUrl.trim()) ? addUrl.trim() : `https://${addUrl.trim()}` }),
       })
       const data = await res.json()
       if (!res.ok) {
@@ -156,7 +157,11 @@ const MobileChannelsStrip = () => {
         showToast('Error', data.error || 'Could not add to feed', 'error')
         return
       }
-      showToast('Success', data.posted === false ? 'Already in your feed' : 'Added to your feed', 'success')
+      if (data.posted === false) {
+        showToast('Info', 'Already in your feed', 'info')
+        return
+      }
+      showToast('Success', 'Added to your feed', 'success')
       scrollToHomeFeed(data.postId)
     } catch (e) {
       showToast('Error', 'Could not add to feed', 'error')

@@ -227,13 +227,12 @@ const SuggestedChannels = () => {
             )
             const data = await res.json()
             
-            if (res.ok) {
+            if (res.ok && data?.posted !== false) {
                 const channel = channels.find(c => c.id === channelId)
-                const stream = channel?.streams[streamIndex]
                 showToast('Success', `🔴 ${channel?.name} added to your feed!`, 'success')
-                
-                // Scroll to top of page to see the new post in feed
                 window.scrollTo({ top: 0, behavior: 'smooth' })
+            } else if (res.ok) {
+                showToast('Info', 'Already in your feed', 'info')
             } else {
                 showToast('Info', data.message || 'Already in feed', 'info')
             }
@@ -254,7 +253,7 @@ const SuggestedChannels = () => {
                 method: 'POST',
                 credentials: 'include',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ url: addUrl.trim() }),
+                body: JSON.stringify({ url: /^https?:\/\//i.test(addUrl.trim()) ? addUrl.trim() : `https://${addUrl.trim()}` }),
             })
             const data = await res.json()
             if (!res.ok) {
@@ -334,7 +333,11 @@ const SuggestedChannels = () => {
                 showToast('Error', data.error || 'Could not add to feed', 'error')
                 return
             }
-            showToast('Success', data.posted === false ? 'Already in your feed' : 'Added to your feed', 'success')
+            if (data.posted === false) {
+                showToast('Info', 'Already in your feed', 'info')
+                return
+            }
+            showToast('Success', 'Added to your feed', 'success')
             window.scrollTo({ top: 0, behavior: 'smooth' })
         } catch (e) {
             showToast('Error', 'Could not add to feed', 'error')

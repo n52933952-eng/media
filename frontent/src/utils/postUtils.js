@@ -318,9 +318,26 @@ const PAGE_LINK_MEDIA = /\.(mp4|webm|ogg|mov|m4v|jpg|jpeg|png|gif|webp|avif)(\?|
 export function isPlainPageLink(url) {
   const raw = String(url || '').trim()
   if (!/^https?:\/\//i.test(raw)) return false
-  if (/youtube\.com\/embed|youtu\.be|youtube\.com\/watch|dailymotion\.com\/embed|player\.vimeo\.com/i.test(raw)) return false
+  if (/youtube\.com|youtu\.be|dailymotion\.com|dai\.ly|vimeo\.com/i.test(raw)) return false
   if (PAGE_LINK_MEDIA.test(raw)) return false
   return true
+}
+
+/** Pictures to try before the letter card. The page shot is one try, not a loop. */
+export function pagePreviewCandidates(url, savedThumb) {
+  const list = []
+  const thumb = String(savedThumb || '').trim()
+  if (/^https?:\/\//i.test(thumb)) list.push({ uri: thumb, kind: 'site' })
+  const raw = String(url || '').trim()
+  const host = pageLinkHost(raw)
+  if (/^https?:\/\//i.test(raw)) {
+    list.push({ uri: `https://s.wordpress.com/mshots/v1/${encodeURIComponent(raw)}?w=720`, kind: 'shot' })
+  }
+  if (host && host !== 'Link') {
+    list.push({ uri: `https://www.google.com/s2/favicons?domain=${encodeURIComponent(host)}&sz=256`, kind: 'icon' })
+    list.push({ uri: `https://icons.duckduckgo.com/ip3/${encodeURIComponent(host)}.ico`, kind: 'icon' })
+  }
+  return list
 }
 
 export function pageLinkHost(url) {

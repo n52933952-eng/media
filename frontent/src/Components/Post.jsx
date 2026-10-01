@@ -11,7 +11,7 @@ import{UserContext} from '../context/UserContext'
 import{PostContext} from '../context/PostContext'
 import { SocketContext } from '../context/SocketContext'
 import { FiMail } from 'react-icons/fi'
-import { followIdToString, mergePostUpdate, getReplyCount, getReplyPreviewUsers, isPlainPageLink, pageLinkHost } from '../utils/postUtils.js'
+import { followIdToString, mergePostUpdate, getReplyCount, getReplyPreviewUsers, isPlainPageLink, pageLinkHost, pagePreviewCandidates } from '../utils/postUtils.js'
 import { followPostHeaders } from '../utils/followRequest.js'
 import { isUserInOnlineList } from '../utils/presenceUtils.js'
 import PostEditorMenu from './PostEditorMenu'
@@ -31,6 +31,102 @@ import { usePostEngagementSubscription } from '../hooks/usePostEngagementSubscri
 
 const apiBaseUrl = () => (import.meta.env.PROD ? window.location.origin : 'http://localhost:5000')
 const ROMAN_FONT = `'Iowan Old Style', 'Palatino Linotype', Palatino, Georgia, 'Times New Roman', serif`
+
+const OWN_LINK_COLORS = ['#1D4ED8', '#7C3AED', '#0F766E', '#B45309', '#BE123C', '#0369A1']
+
+function ownLinkColor(host) {
+  let n = 0
+  const name = String(host || '')
+  for (let i = 0; i < name.length; i++) n = (n + name.charCodeAt(i)) % OWN_LINK_COLORS.length
+  return OWN_LINK_COLORS[n]
+}
+
+function PageLinkCard({ url, thumb }) {
+  const host = pageLinkHost(url)
+  const candidates = useMemo(() => pagePreviewCandidates(url, thumb), [url, thumb])
+  const [index, setIndex] = useState(0)
+  const [shotTry, setShotTry] = useState(0)
+  const [ready, setReady] = useState(false)
+  const current = candidates[index]
+  const src = current
+    ? current.kind === 'shot' && shotTry > 0
+      ? `${current.uri}&r=${shotTry}`
+      : current.uri
+    : ''
+  const showPhoto = !!current && ready
+
+  useEffect(() => {
+    setIndex(0)
+    setShotTry(0)
+    setReady(false)
+  }, [url, thumb])
+
+  useEffect(() => {
+    if (!current || ready) return undefined
+    if (current.kind !== 'shot') {
+      setReady(true)
+      return undefined
+    }
+    const timer = setTimeout(() => setIndex((i) => i + 1), 4500)
+    return () => clearTimeout(timer)
+  }, [current, index, ready])
+
+  const advance = () => {
+    setReady(false)
+    setShotTry(0)
+    setIndex((i) => i + 1)
+  }
+
+  return (
+    <Box
+      as="a"
+      href={url}
+      target="_blank"
+      rel="noopener noreferrer"
+      display="block"
+      mt={2}
+      borderRadius="lg"
+      overflow="hidden"
+      position="relative"
+      bg={showPhoto && current?.kind !== 'icon' ? 'black' : ownLinkColor(host)}
+      onClick={(e) => e.stopPropagation()}
+    >
+      {src ? (
+        <Image
+          src={src}
+          alt=""
+          w={ready ? 'full' : '1px'}
+          h={ready ? '220px' : '1px'}
+          objectFit={current?.kind === 'icon' ? 'contain' : 'cover'}
+          p={ready && current?.kind === 'icon' ? 10 : 0}
+          opacity={ready ? 1 : 0}
+          onError={advance}
+          onLoad={(e) => {
+            if (!current || current.kind !== 'shot') return
+            const width = e?.target?.naturalWidth || 0
+            if (width >= 600 && shotTry > 0) {
+              setReady(true)
+              return
+            }
+            if (shotTry < 2) {
+              setShotTry((n) => n + 1)
+              return
+            }
+            advance()
+          }}
+        />
+      ) : null}
+      {!showPhoto ? (
+        <Flex h="220px" align="center" justify="center">
+          <Text color="white" fontSize="6xl" fontWeight="700">{host.charAt(0).toUpperCase()}</Text>
+        </Flex>
+      ) : null}
+      <Box position="absolute" left={0} right={0} bottom={0} px={3} py={2} bg="blackAlpha.700">
+        <Text color="white" fontWeight="700" noOfLines={1}>{host}</Text>
+      </Box>
+    </Box>
+  )
+}
 
 function youtubeEmbedSrc(url) {
   const raw = String(url || '')
@@ -1502,7 +1598,7 @@ const showToast = useShowToast()
                 </Box>
               </MenuItem>
               ) : null}
-              {isAdminUser ? (
+              {isAdminUser && !isMyChannelFeedCard ? (
                 <MenuItem
                   color="red.400"
                   alignItems="flex-start"
@@ -2034,22 +2130,7 @@ const showToast = useShowToast()
           }}
         />
       ) : isPlainPageLink(post?.img) ? (
-        <Box
-          as="a"
-          href={post.img}
-          target="_blank"
-          rel="noopener noreferrer"
-          display="block"
-          mt={2}
-          p={3}
-          borderRadius="md"
-          border="1px solid"
-          borderColor="gray.600"
-          onClick={(e) => e.stopPropagation()}
-        >
-          <Text fontWeight="700" color="blue.300" noOfLines={1}>{pageLinkHost(post.img)}</Text>
-          <Text fontSize="sm" color="gray.400" noOfLines={2}>{post.img}</Text>
-        </Box>
+        <PageLinkCard url={post.img} thumb={post.linkThumb} />
       ) : post?.img ? (
         <Box
           h={FEED_CAROUSEL_FRAME_H}
