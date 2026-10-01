@@ -7,7 +7,8 @@ import Comment from '../models/comment.js'
 import Follow from '../models/follow.js'
 import LiveStream from '../models/liveStream.js'
 import { deleteMediaAsset, deleteAllPostMedia } from '../services/mediaStorage.js'
-import { assertManagedMediaUrls } from '../services/r2Presign.js'
+import { assertManagedMediaUrls, isR2Url } from '../services/r2Presign.js'
+import { parseVideoLink } from '../services/videoLinks.js'
 import { getIO, getUserSocket } from '../socket/socket.js'
 import { emitToUserIds, collectSocketIdsForUserIds, emitPostEngagement } from '../services/postSocketEmit.js'
 import { dedupeGamePostsForFeed } from '../utils/dedupeGameFeedPosts.js'
@@ -701,6 +702,20 @@ export const getPostComments = async (req, res) => {
 }
 
 // Update post (allows owner or contributors for collaborative posts)
+function externalImgClause(raw) {
+    const parsed = parseVideoLink(raw)
+    const embed = parsed?.embedUrl || String(raw || '')
+    const yt = embed.match(/youtube\.com\/embed\/([\w-]{6,})/i)
+    if (yt) return { img: new RegExp(`youtube\\.com/embed/${yt[1]}`) }
+    const dm = embed.match(/dailymotion\.com\/embed\/video\/([a-zA-Z0-9]+)/i)
+    if (dm) return { img: new RegExp(`dailymotion\\.com/embed/video/${dm[1]}`) }
+    const vm = embed.match(/player\.vimeo\.com\/video\/(\d+)/i)
+    if (vm) return { img: new RegExp(`player\\.vimeo\\.com/video/${vm[1]}`) }
+    const exact = [...new Set([String(raw || ''), embed].filter(Boolean))]
+    if (!exact.length) return null
+    return { img: { $in: exact } }
+}
+
 export const updatePost = async(req,res) => {
     try{
         const { id } = req.params
@@ -765,7 +780,15 @@ export const updatePost = async(req,res) => {
         }
         
         const imgRaw = req.body.img != null ? String(req.body.img).trim() : ''
-        if (imgRaw) {
+        const currentImg = String(post.img || '')
+        const editingExternal = /^https?:\/\//i.test(currentImg) && !isR2Url(currentImg)
+        if (imgRaw && editingExternal) {
+            const parsed = parseVideoLink(imgRaw)
+            if (!parsed?.embedUrl) {
+                return res.status(400).json({ error: 'Paste a link' })
+            }
+            post.img = parsed.embedUrl
+        } else if (imgRaw) {
             try {
                 assertManagedMediaUrls([imgRaw])
             } catch (e) {
@@ -792,6 +815,35 @@ export const updatePost = async(req,res) => {
                         post.text = text !== undefined && text !== null ? text : post.text
                         post.editedAt = new Date()
                         await post.save()
+
+                        if (editingExternal && isOwner) {
+                            const imgClause = externalImgClause(currentImg)
+                            const siblings = imgClause
+                                ? await Post.find({
+                                    _id: { $ne: post._id },
+                                    ...imgClause,
+                                    $or: [
+                                        { channelAddedBy: String(userId) },
+                                        {
+                                            postedBy: userId,
+                                            $or: [
+                                                { channelAddedBy: { $exists: false } },
+                                                { channelAddedBy: null },
+                                                { channelAddedBy: '' },
+                                            ],
+                                        },
+                                    ],
+                                })
+                                : []
+                            for (const sibling of siblings) {
+                                sibling.text = post.text
+                                sibling.img = post.img
+                                sibling.editedAt = post.editedAt
+                                await sibling.save()
+                            }
+                            post.$locals = post.$locals || {}
+                            post.$locals.syncedSiblings = siblings
+                        }
                         
                         // Populate for response
                         await post.populate("postedBy", "username profilePic name")
@@ -837,10 +889,17 @@ export const updatePost = async(req,res) => {
                         const io = getIO()
                         if (io) {
                             const sent = await emitPostUpdatedToRecipients(io, post, postOwnerId)
+                            const siblings = post.$locals?.syncedSiblings || []
+                            for (const sibling of siblings) {
+                                await sibling.populate("postedBy", "username profilePic name")
+                                await emitPostUpdatedToRecipients(io, sibling, String(userId))
+                            }
                             if (sent > 0) {
                                 console.log(`📤 [updatePost] Emitted postUpdated to ${sent} recipient socket(s)`)
             }
         }
+                        const refreshIds = await collectPostUpdateRecipientIds(post, postOwnerId)
+                        invalidateUserFeedCaches(refreshIds).catch(() => {})
         
         res.status(200).json({message:"Post updated successfully", post})
     }

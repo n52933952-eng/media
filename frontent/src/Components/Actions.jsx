@@ -310,10 +310,8 @@ const Actions = ({ post, showFeedExtras = true, onReplyAdded }) => {
 	}
   }, [showFeedExtras, ENABLE_POST_SHARE_TO_CHAT, user, shareConversationsHasMore, baseUrl, showToast])
 
-	const videoImg = String(post?.img || '')
-	const isVideoEmbed = videoImg.includes('youtube.com/embed') || videoImg.includes('youtu.be') || videoImg.includes('dailymotion.com/embed') || videoImg.includes('player.vimeo.com')
 	const isMyChannelFeedCard = !!post?.channelAddedBy && String(post.channelAddedBy) === String(user?._id || '')
-	const canShareToFeed = isVideoEmbed && isMyChannelFeedCard
+	const canShareToFeed = isMyChannelFeedCard && !!String(post?.img || '').trim()
 
 	const shareVideoToFeed = async (e) => {
 		e?.preventDefault?.()

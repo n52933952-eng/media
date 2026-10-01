@@ -377,6 +377,36 @@ function embedFromText(raw) {
   return ''
 }
 
+async function dropPrivateWatchCards(userId, embedUrls) {
+  const Post = (await import('../models/post.js')).default
+  const { getIO } = await import('../socket/socket.js')
+  const { emitToUserIds } = await import('../services/postSocketEmit.js')
+  const { invalidateUserFeedCache } = await import('../services/feedCache.js')
+  const needles = [...new Set((embedUrls || []).map((url) => embedFromText(url)).filter(Boolean))]
+  if (!needles.length) return []
+  const imgOr = needles.map((embed) => {
+    const yt = embed.match(/youtube\.com\/embed\/([\w-]{6,})/i)
+    if (yt) return { img: new RegExp(`youtube\\.com/embed/${yt[1]}`) }
+    const dm = embed.match(/dailymotion\.com\/embed\/video\/([a-zA-Z0-9]+)/i)
+    if (dm) return { img: new RegExp(`dailymotion\\.com/embed/video/${dm[1]}`) }
+    const vm = embed.match(/player\.vimeo\.com\/video\/(\d+)/i)
+    if (vm) return { img: new RegExp(`player\\.vimeo\\.com/video/${vm[1]}`) }
+    return { img: embed }
+  })
+  const posts = await Post.find({ channelAddedBy: String(userId), $or: imgOr }).select('_id')
+  const ids = posts.map((post) => post._id)
+  if (!ids.length) return []
+  await Post.deleteMany({ _id: { $in: ids } })
+  const io = getIO()
+  if (io) {
+    for (const id of ids) {
+      await emitToUserIds(io, [String(userId)], 'postDeleted', { postId: String(id) })
+    }
+  }
+  invalidateUserFeedCache(userId).catch(() => {})
+  return ids.map(String)
+}
+
 async function shareEmbed({ userId, embedUrl, text }) {
   const Post = (await import('../models/post.js')).default
   const { createActivity } = await import('./activity.js')
@@ -418,7 +448,8 @@ export const shareVideo = async (req, res) => {
         embedUrl: embed,
         text: caption || source?.text || 'Video',
       })
-      return res.status(200).json({ post })
+      const removedIds = await dropPrivateWatchCards(req.user._id, [embed, source?.img])
+      return res.status(200).json({ post, removedIds })
     }
     if (linkId) {
       const link = await VideoLink.findOne({ _id: linkId, userId: req.user._id }).lean()
@@ -428,7 +459,8 @@ export const shareVideo = async (req, res) => {
         embedUrl: link.embedUrl,
         text: caption || link.title || 'Video',
       })
-      return res.status(200).json({ post })
+      const removedIds = await dropPrivateWatchCards(req.user._id, [link.embedUrl, link.url])
+      return res.status(200).json({ post, removedIds })
     }
     if (channelId) {
       const { getChannelById } = await import('../config/channels.js')
@@ -437,12 +469,14 @@ export const shareVideo = async (req, res) => {
       const streamIndex = parseInt(req.body?.streamIndex, 10) || 0
       const stream = channel.streams[streamIndex] || channel.streams[0]
       if (!stream?.youtubeId) return res.status(400).json({ error: 'Stream not found' })
+      const embedUrl = `https://www.youtube.com/embed/${stream.youtubeId}?autoplay=1&mute=0`
       const post = await shareEmbed({
         userId: req.user._id,
-        embedUrl: `https://www.youtube.com/embed/${stream.youtubeId}?autoplay=1&mute=0`,
+        embedUrl,
         text: caption || stream.text || channel.name,
       })
-      return res.status(200).json({ post })
+      const removedIds = await dropPrivateWatchCards(req.user._id, [embedUrl])
+      return res.status(200).json({ post, removedIds })
     }
     return res.status(400).json({ error: 'Nothing to share' })
   } catch (error) {
