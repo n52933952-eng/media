@@ -538,6 +538,23 @@ const SuggestedChannels = () => {
                                         cursor="pointer"
                                         onClick={() => setExpandedChannel(expandedChannel === channel.id ? null : channel.id)}
                                     >
+                                        <Box
+                                            as="button"
+                                            position="absolute"
+                                            top="4px"
+                                            right="4px"
+                                            zIndex={2}
+                                            w="18px"
+                                            h="18px"
+                                            borderRadius="full"
+                                            bg="red.500"
+                                            color="white"
+                                            fontSize="11px"
+                                            lineHeight="16px"
+                                            onClick={(e) => { e.stopPropagation(); hideChannel(channel.id) }}
+                                        >
+                                            ✕
+                                        </Box>
                                         <VStack spacing={1}>
                                             <Avatar 
                                                 name={channel.name}
@@ -575,9 +592,27 @@ const SuggestedChannels = () => {
                                         p={2}
                                         border="1px solid"
                                         borderColor={expandedChannel === `link:${link._id}` ? 'blue.400' : borderColor}
+                                        position="relative"
                                         cursor="pointer"
                                         onClick={() => setExpandedChannel(expandedChannel === `link:${link._id}` ? null : `link:${link._id}`)}
                                     >
+                                        <Box
+                                            as="button"
+                                            position="absolute"
+                                            top="4px"
+                                            right="4px"
+                                            zIndex={2}
+                                            w="18px"
+                                            h="18px"
+                                            borderRadius="full"
+                                            bg="red.500"
+                                            color="white"
+                                            fontSize="11px"
+                                            lineHeight="16px"
+                                            onClick={(e) => { e.stopPropagation(); removeLink(link._id) }}
+                                        >
+                                            ✕
+                                        </Box>
                                         <VStack spacing={1}>
                                             <Avatar name={link.title || 'Video'} src={link.thumbnail} size="sm" bg="purple.500" />
                                             <Text fontSize="2xs" color={textColor} textAlign="center" noOfLines={1}>

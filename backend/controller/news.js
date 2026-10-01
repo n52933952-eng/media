@@ -219,11 +219,66 @@ export const addVideoLink = async (req, res) => {
   }
 }
 
+async function deleteViewerVideoPosts(userId, embedUrls) {
+  const Post = (await import('../models/post.js')).default
+  const Like = (await import('../models/like.js')).default
+  const Follow = (await import('../models/follow.js')).default
+  const { deleteCommentsForPost } = await import('../services/commentService.js')
+  const { getIO } = await import('../socket/socket.js')
+  const { emitToUserIds } = await import('../services/postSocketEmit.js')
+  const { invalidateUserFeedCaches } = await import('../services/feedCache.js')
+  const needles = [...new Set((embedUrls || []).map((url) => embedFromText(url)).filter(Boolean))]
+  if (!needles.length) return []
+  const imgOr = needles.map((embed) => {
+    const yt = embed.match(/youtube\.com\/embed\/([\w-]{6,})/i)
+    if (yt) return { img: new RegExp(`youtube\\.com/embed/${yt[1]}`) }
+    const dm = embed.match(/dailymotion\.com\/embed\/video\/([a-zA-Z0-9]+)/i)
+    if (dm) return { img: new RegExp(`dailymotion\\.com/embed/video/${dm[1]}`) }
+    const vm = embed.match(/player\.vimeo\.com\/video\/(\\d+)/i)
+    if (vm) return { img: new RegExp(`player\\.vimeo\\.com/video/${vm[1]}`) }
+    return { img: embed }
+  })
+  const posts = await Post.find({
+    $and: [
+      { $or: imgOr },
+      {
+        $or: [
+          { channelAddedBy: String(userId) },
+          {
+            postedBy: userId,
+            $or: [
+              { channelAddedBy: { $exists: false } },
+              { channelAddedBy: null },
+              { channelAddedBy: '' },
+            ],
+          },
+        ],
+      },
+    ],
+  }).select('_id')
+  const ids = posts.map((post) => post._id)
+  if (!ids.length) return []
+  await Post.deleteMany({ _id: { $in: ids } })
+  await Promise.all(ids.map((id) => deleteCommentsForPost(id).catch(() => {})))
+  Like.deleteMany({ post: { $in: ids } }).catch(() => {})
+  const followerDocs = await Follow.find({ followeeId: userId }).select('followerId').limit(10000).lean()
+  const recipientIds = [...new Set([String(userId), ...followerDocs.map((doc) => String(doc.followerId)).filter(Boolean)])]
+  const io = getIO()
+  if (io) {
+    for (const id of ids) {
+      await emitToUserIds(io, recipientIds, 'postDeleted', { postId: String(id) })
+    }
+  }
+  invalidateUserFeedCaches(recipientIds).catch(() => {})
+  return ids.map(String)
+}
+
 export const deleteVideoLink = async (req, res) => {
   try {
     const link = await VideoLink.findOneAndDelete({ _id: req.params.id, userId: req.user._id })
     if (!link) return res.status(404).json({ error: 'Link not found' })
-    res.status(200).json({ ok: true })
+    const removedIds = await deleteViewerVideoPosts(req.user._id, [link.embedUrl, link.url])
+    res.status(200).json({ ok: true, removedIds })
   } catch (error) {
     res.status(500).json({ error: error.message })
   }
@@ -241,7 +296,13 @@ export const hideDefaultChannel = async (req, res) => {
       { _id: req.user._id },
       { $addToSet: { hiddenChannelIds: channelId } },
     )
-    res.status(200).json({ ok: true })
+    const { getChannelById } = await import('../config/channels.js')
+    const channel = getChannelById(channelId)
+    const embeds = (channel?.streams || [])
+      .map((stream) => (stream?.youtubeId ? `https://www.youtube.com/embed/${stream.youtubeId}` : ''))
+      .filter(Boolean)
+    const removedIds = await deleteViewerVideoPosts(req.user._id, embeds)
+    res.status(200).json({ ok: true, removedIds })
   } catch (error) {
     res.status(500).json({ error: error.message })
   }

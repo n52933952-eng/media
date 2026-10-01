@@ -312,9 +312,8 @@ const Actions = ({ post, showFeedExtras = true, onReplyAdded }) => {
 
 	const videoImg = String(post?.img || '')
 	const isVideoEmbed = videoImg.includes('youtube.com/embed') || videoImg.includes('youtu.be') || videoImg.includes('dailymotion.com/embed') || videoImg.includes('player.vimeo.com')
-	const postedById = post?.postedBy?._id || post?.postedBy
-	const alreadyOnMyFeed = !post?.channelAddedBy && String(postedById || '') === String(user?._id || '')
-	const canShareToFeed = isVideoEmbed && !alreadyOnMyFeed
+	const isMyChannelFeedCard = !!post?.channelAddedBy && String(post.channelAddedBy) === String(user?._id || '')
+	const canShareToFeed = isVideoEmbed && isMyChannelFeedCard
 
 	const shareVideoToFeed = async (e) => {
 		e?.preventDefault?.()
@@ -664,7 +663,14 @@ return (
 						cursor="pointer"
 						disabled={sharingToFeed}
 					>
-						{sharingToFeed ? <Spinner size="sm" /> : <RepostSVG />}
+						<Box
+							as="span"
+							display="inline-flex"
+							animation={sharingToFeed ? 'shareSpin 0.7s linear infinite' : undefined}
+							sx={{ '@keyframes shareSpin': { from: { transform: 'rotate(0deg)' }, to: { transform: 'rotate(360deg)' } } }}
+						>
+							<RepostSVG />
+						</Box>
 					</Box>
 				</Tooltip>
 				</Box>

@@ -236,7 +236,26 @@ const MobileChannelsStrip = () => {
                   onClick={() => onChannelTap(channel)}
                   textAlign="center"
                   opacity={isBusy ? 0.7 : 1}
+                  position="relative"
                 >
+                  <Box
+                    as="button"
+                    type="button"
+                    position="absolute"
+                    top="2px"
+                    right="2px"
+                    zIndex={2}
+                    w="16px"
+                    h="16px"
+                    borderRadius="full"
+                    bg="red.500"
+                    color="white"
+                    fontSize="10px"
+                    lineHeight="14px"
+                    onClick={(e) => { e.stopPropagation(); hideChannel(channel.id) }}
+                  >
+                    ✕
+                  </Box>
                   {isBusy ? (
                     <Spinner size="sm" mx="auto" mb={1} />
                   ) : (
@@ -268,7 +287,26 @@ const MobileChannelsStrip = () => {
                 borderColor={expandedId === `link:${link._id}` ? 'blue.400' : borderColor}
                 bg={cardBg}
                 onClick={() => setExpandedId((prev) => (prev === `link:${link._id}` ? null : `link:${link._id}`))}
+                position="relative"
               >
+                <Box
+                  as="button"
+                  type="button"
+                  position="absolute"
+                  top="2px"
+                  right="2px"
+                  zIndex={2}
+                  w="16px"
+                  h="16px"
+                  borderRadius="full"
+                  bg="red.500"
+                  color="white"
+                  fontSize="10px"
+                  lineHeight="14px"
+                  onClick={(e) => { e.stopPropagation(); removeLink(link._id) }}
+                >
+                  ✕
+                </Box>
                 <Avatar name={link.title || 'Video'} src={link.thumbnail} size="sm" mx="auto" mb={1} bg="purple.500" />
                 <Text fontSize="2xs" color={textColor} noOfLines={2}>{link.title || 'Video'}</Text>
               </Box>
