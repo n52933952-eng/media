@@ -1951,7 +1951,7 @@ const showToast = useShowToast()
     >
       {showCarousel && carouselSlides.length > 0 && !rawMediaUrl.includes('youtube.com/embed') && !rawMediaUrl.includes('youtu.be') && !isVideoMedia ? (
         <PostMediaCarousel slides={carouselSlides} audioUrl={carouselAudio} frameHeight={FEED_CAROUSEL_FRAME_H} />
-      ) : post?.img && (post.img.includes('dailymotion.com/embed') || post.img.includes('player.vimeo.com')) ? (
+      ) : post?.img && (post.img.includes('dailymotion.com') || post.img.includes('player.vimeo.com')) ? (
         <Box
           position="relative"
           paddingBottom="56.25%"
@@ -1964,7 +1964,12 @@ const showToast = useShowToast()
           }}
         >
           <iframe
-            src={post.img}
+            src={(() => {
+              const raw = String(post.img || '')
+              const dm = raw.match(/dailymotion\.com\/(?:embed\/video|video)\/([a-zA-Z0-9]+)/i) || raw.match(/[?&]video=([a-zA-Z0-9]+)/i)
+              if (dm?.[1] && /dailymotion\.com/i.test(raw)) return `https://geo.dailymotion.com/player.html?video=${dm[1]}`
+              return raw
+            })()}
             title="Video"
             allow="autoplay; fullscreen; picture-in-picture"
             allowFullScreen

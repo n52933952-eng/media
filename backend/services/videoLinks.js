@@ -43,7 +43,7 @@ export function parseVideoLink(raw) {
             return {
                 provider: 'dailymotion',
                 url,
-                embedUrl: `https://www.dailymotion.com/embed/video/${vid}`,
+                embedUrl: `https://geo.dailymotion.com/player.html?video=${vid}`,
                 thumbnail: `https://www.dailymotion.com/thumbnail/video/${vid}`,
                 title: 'Dailymotion',
             }

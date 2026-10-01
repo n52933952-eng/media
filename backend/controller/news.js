@@ -232,8 +232,8 @@ async function deleteViewerVideoPosts(userId, embedUrls) {
   const imgOr = needles.map((embed) => {
     const yt = embed.match(/youtube\.com\/embed\/([\w-]{6,})/i)
     if (yt) return { img: new RegExp(`youtube\\.com/embed/${yt[1]}`) }
-    const dm = embed.match(/dailymotion\.com\/embed\/video\/([a-zA-Z0-9]+)/i)
-    if (dm) return { img: new RegExp(`dailymotion\\.com/embed/video/${dm[1]}`) }
+    const dm = embed.match(/dailymotion\.com\/(?:embed\/video|video)\/([a-zA-Z0-9]+)/i) || embed.match(/[?&]video=([a-zA-Z0-9]+)/i)
+    if (dm) return { img: new RegExp(`(?:embed/video/|[?&]video=)${dm[1]}`) }
     const vm = embed.match(/player\.vimeo\.com\/video\/(\\d+)/i)
     if (vm) return { img: new RegExp(`player\\.vimeo\\.com/video/${vm[1]}`) }
     return { img: embed }
@@ -370,8 +370,8 @@ function embedFromText(raw) {
   const text = String(raw || '')
   const yt = text.match(/(?:youtube\.com\/embed\/|youtube-nocookie\.com\/embed\/|youtu\.be\/|youtube\.com\/watch\?v=|youtube\.com\/shorts\/|youtube\.com\/live\/)([\w-]{6,})/i)
   if (yt?.[1]) return `https://www.youtube.com/embed/${yt[1]}`
-  const dm = text.match(/dailymotion\.com\/(?:embed\/video|video)\/([a-zA-Z0-9]+)/i)
-  if (dm?.[1]) return `https://www.dailymotion.com/embed/video/${dm[1]}`
+  const dm = text.match(/dailymotion\.com\/(?:embed\/video|video)\/([a-zA-Z0-9]+)/i) || text.match(/[?&]video=([a-zA-Z0-9]+)/i)
+  if (dm?.[1]) return `https://geo.dailymotion.com/player.html?video=${dm[1]}`
   const vm = text.match(/(?:player\.vimeo\.com\/video\/|vimeo\.com\/)(\d+)/i)
   if (vm?.[1]) return `https://player.vimeo.com/video/${vm[1]}`
   return ''
@@ -387,8 +387,8 @@ async function dropPrivateWatchCards(userId, embedUrls) {
   const imgOr = needles.map((embed) => {
     const yt = embed.match(/youtube\.com\/embed\/([\w-]{6,})/i)
     if (yt) return { img: new RegExp(`youtube\\.com/embed/${yt[1]}`) }
-    const dm = embed.match(/dailymotion\.com\/embed\/video\/([a-zA-Z0-9]+)/i)
-    if (dm) return { img: new RegExp(`dailymotion\\.com/embed/video/${dm[1]}`) }
+    const dm = embed.match(/dailymotion\.com\/(?:embed\/video|video)\/([a-zA-Z0-9]+)/i) || embed.match(/[?&]video=([a-zA-Z0-9]+)/i)
+    if (dm) return { img: new RegExp(`(?:embed/video/|[?&]video=)${dm[1]}`) }
     const vm = embed.match(/player\.vimeo\.com\/video\/(\d+)/i)
     if (vm) return { img: new RegExp(`player\\.vimeo\\.com/video/${vm[1]}`) }
     return { img: embed }
