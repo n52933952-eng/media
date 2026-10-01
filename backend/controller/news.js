@@ -303,6 +303,19 @@ export const watchVideoLink = async (req, res) => {
   }
 }
 
+function embedFromText(raw) {
+  const parsed = parseVideoLink(raw)
+  if (parsed?.embedUrl) return parsed.embedUrl
+  const text = String(raw || '')
+  const yt = text.match(/(?:youtube\.com\/embed\/|youtube-nocookie\.com\/embed\/|youtu\.be\/|youtube\.com\/watch\?v=|youtube\.com\/shorts\/|youtube\.com\/live\/)([\w-]{6,})/i)
+  if (yt?.[1]) return `https://www.youtube.com/embed/${yt[1]}`
+  const dm = text.match(/dailymotion\.com\/(?:embed\/video|video)\/([a-zA-Z0-9]+)/i)
+  if (dm?.[1]) return `https://www.dailymotion.com/embed/video/${dm[1]}`
+  const vm = text.match(/(?:player\.vimeo\.com\/video\/|vimeo\.com\/)(\d+)/i)
+  if (vm?.[1]) return `https://player.vimeo.com/video/${vm[1]}`
+  return ''
+}
+
 async function shareEmbed({ userId, embedUrl, text }) {
   const Post = (await import('../models/post.js')).default
   const { createActivity } = await import('./activity.js')
@@ -329,18 +342,20 @@ export const shareVideo = async (req, res) => {
     const caption = String(req.body?.text || '').trim().slice(0, 500)
     if (postId) {
       const Post = (await import('../models/post.js')).default
-      const source = await Post.findById(postId).select('img text channelAddedBy postedBy').lean()
-      const embed = String(source?.img || '')
-      const isEmbed = /youtube\.com\/embed|youtu\.be|dailymotion\.com\/embed|player\.vimeo\.com/i.test(embed)
-      const mineCard = String(source?.channelAddedBy || '') === String(req.user._id)
-      const alreadyMine = !source?.channelAddedBy && String(source?.postedBy || '') === String(req.user._id)
-      if (!isEmbed) return res.status(400).json({ error: 'Nothing to share' })
-      if (alreadyMine) return res.status(200).json({ already: true })
-      if (!mineCard && !isEmbed) return res.status(400).json({ error: 'Nothing to share' })
+      const source = await Post.findById(postId).select('img images text channelAddedBy postedBy').lean()
+      const candidates = [source?.img, ...(Array.isArray(source?.images) ? source.images : []), req.body?.embedUrl, source?.text]
+      let embed = ''
+      for (const candidate of candidates) {
+        embed = embedFromText(candidate)
+        if (embed) break
+      }
+      if (!embed) return res.status(400).json({ error: 'Nothing to share' })
+      const alreadyMine = source && !source.channelAddedBy && String(source.postedBy || '') === String(req.user._id)
+      if (alreadyMine) return res.status(200).json({ already: true, post: source })
       const post = await shareEmbed({
         userId: req.user._id,
         embedUrl: embed,
-        text: caption || source.text || 'Video',
+        text: caption || source?.text || 'Video',
       })
       return res.status(200).json({ post })
     }

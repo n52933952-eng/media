@@ -125,6 +125,7 @@ const Actions = ({ post, showFeedExtras = true, onReplyAdded }) => {
 	const [loadingMoreConversations, setLoadingMoreConversations] = useState(false)
 	const [shareConversationsHasMore, setShareConversationsHasMore] = useState(false)
 	const [sendingShareToId, setSendingShareToId] = useState(null)
+	const [sharingToFeed, setSharingToFeed] = useState(false)
 	const shareConversationsCursorRef = useRef(null)
 	const SHARE_CONVERSATIONS_PAGE = 9
 	const loadingMoreConversationsRef = useRef(false)
@@ -318,22 +319,26 @@ const Actions = ({ post, showFeedExtras = true, onReplyAdded }) => {
 	const shareVideoToFeed = async (e) => {
 		e?.preventDefault?.()
 		e?.stopPropagation?.()
+		if (sharingToFeed || !post?._id) return
+		setSharingToFeed(true)
 		try {
 			const res = await fetch(`${baseUrl}/api/news/share`, {
 				method: 'POST',
 				credentials: 'include',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ postId: post._id, text: post.text || '' }),
+				body: JSON.stringify({ postId: post._id, text: post.text || '', embedUrl: post.img || '' }),
 			})
 			const data = await res.json()
 			if (!res.ok) {
 				showToast('Error', data.error || 'Could not share to feed', 'error')
 				return
 			}
-			showToast('Success', data.already ? 'Already on your feed' : 'Shared to your feed', 'success')
+			showToast('Success', data.already ? 'Already on your feed' : 'Shared', 'success')
 			onShareClose()
 		} catch (err) {
 			showToast('Error', 'Could not share to feed', 'error')
+		} finally {
+			setSharingToFeed(false)
 		}
 	}
 
@@ -657,8 +662,9 @@ return (
 						aria-label="Share to feed"
 						onClick={shareVideoToFeed}
 						cursor="pointer"
+						disabled={sharingToFeed}
 					>
-						<RepostSVG />
+						{sharingToFeed ? <Spinner size="sm" /> : <RepostSVG />}
 					</Box>
 				</Tooltip>
 				</Box>
@@ -776,7 +782,7 @@ return (
 					<ModalCloseButton />
 					<ModalBody pb={4}>
 						{canShareToFeed ? (
-							<Button colorScheme="blue" w="full" mb={3} onClick={shareVideoToFeed}>
+							<Button colorScheme="blue" w="full" mb={3} onClick={shareVideoToFeed} isLoading={sharingToFeed}>
 								Share to feed
 							</Button>
 						) : null}
