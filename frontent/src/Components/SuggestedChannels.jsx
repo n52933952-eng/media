@@ -722,8 +722,6 @@ const SuggestedChannels = () => {
                                                     {channel.streams.map((stream, index) => {
                                                         const loadingKey = `${channel.id}-${index}`
                                                         const isLoading = streamLoading[loadingKey]
-                                                        
-                                                        // Map button colors
                                                         const colorMap = {
                                                             'red': 'red',
                                                             'blue': 'blue',
@@ -732,31 +730,31 @@ const SuggestedChannels = () => {
                                                             'orange': 'orange',
                                                             'teal': 'teal'
                                                         }
-                                                        
                                                         return (
-                                                            <Button
-                                                                key={index}
-                                                                onClick={() => handleStreamClick(channel.id, index)}
-                                                                isLoading={isLoading}
-                                                                colorScheme={colorMap[stream.buttonColor] || 'blue'}
-                                                                size="sm"
-                                                                w="full"
-                                                                leftIcon={<Box w="8px" h="8px" bg="red.500" borderRadius="full" />}
-                                                            >
-                                                                Watch Live {stream.name && `(${stream.name})`}
-                                                            </Button>
+                                                            <VStack key={index} align="stretch" spacing={2}>
+                                                                {channel.streams.length > 1 && stream.name ? (
+                                                                    <Text fontSize="sm" fontWeight="700" color={textColor}>{stream.name}</Text>
+                                                                ) : null}
+                                                                <Button
+                                                                    onClick={() => handleStreamClick(channel.id, index)}
+                                                                    isLoading={isLoading}
+                                                                    colorScheme={colorMap[stream.buttonColor] || 'blue'}
+                                                                    size="sm"
+                                                                    w="full"
+                                                                    leftIcon={<Box w="8px" h="8px" bg="red.500" borderRadius="full" />}
+                                                                >
+                                                                    Add to my feed
+                                                                </Button>
+                                                                <Button
+                                                                    size="sm"
+                                                                    variant="outline"
+                                                                    onClick={() => shareItem({ channelId: channel.id, streamIndex: index })}
+                                                                >
+                                                                    Share to feed
+                                                                </Button>
+                                                            </VStack>
                                                         )
                                                     })}
-                                                    {channel.streams.map((stream, index) => (
-                                                        <Button
-                                                            key={`share-${index}`}
-                                                            size="sm"
-                                                            variant="outline"
-                                                            onClick={() => shareItem({ channelId: channel.id, streamIndex: index })}
-                                                        >
-                                                            Share to feed {channel.streams.length > 1 && stream.name ? `(${stream.name})` : ''}
-                                                        </Button>
-                                                    ))}
                                                     <Button size="sm" variant="ghost" onClick={() => hideChannel(channel.id)}>
                                                         Remove
                                                     </Button>

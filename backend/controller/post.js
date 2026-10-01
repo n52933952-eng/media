@@ -1023,7 +1023,7 @@ export const deletePost = async(req,res) => {
       // 1. User is the post author, OR
       // 2. User added this channel post (channelAddedBy matches)
       const isPostAuthor = post.postedBy.toString() === req.user._id.toString()
-      const isChannelPostAddedByUser = post.channelAddedBy && post.channelAddedBy === req.user._id.toString()
+      const isChannelPostAddedByUser = post.channelAddedBy && String(post.channelAddedBy) === req.user._id.toString()
       const admin = isAppAdmin(req.user)
       
       if(!isPostAuthor && !isChannelPostAddedByUser && !admin){
@@ -1035,10 +1035,33 @@ export const deletePost = async(req,res) => {
       // OPTIMIZED: Get followers before deleting post
       const postAuthorId = post.postedBy.toString()
       
+      const currentImg = String(post.img || '')
+      const ownedExternal = (isPostAuthor || isChannelPostAddedByUser) && /^https?:\/\//i.test(currentImg) && !isR2Url(currentImg)
+      const imgClause = ownedExternal ? externalImgClause(currentImg) : null
+      const siblingIds = imgClause
+        ? (await Post.find({
+            _id: { $ne: post._id },
+            ...imgClause,
+            $or: [
+              { channelAddedBy: req.user._id.toString() },
+              {
+                postedBy: req.user._id,
+                $or: [
+                  { channelAddedBy: { $exists: false } },
+                  { channelAddedBy: null },
+                  { channelAddedBy: '' },
+                ],
+              },
+            ],
+          }).select('_id')).map((row) => row._id)
+        : []
+
       await Post.findByIdAndDelete(req.params.id)
+      if (siblingIds.length) await Post.deleteMany({ _id: { $in: siblingIds } })
       await deleteCommentsForPost(req.params.id)
+      await Promise.all(siblingIds.map((id) => deleteCommentsForPost(id).catch(() => {})))
       // Remove this post's likes from the Like collection.
-      Like.deleteMany({ post: req.params.id }).catch((e) =>
+      Like.deleteMany({ post: { $in: [post._id, ...siblingIds] } }).catch((e) =>
         console.error('Error deleting post likes:', e),
       )
 
@@ -1048,7 +1071,13 @@ export const deletePost = async(req,res) => {
 
       const io = getIO()
       if (io) {
-        await emitPostDeletedToAuthorFollowers(io, postAuthorId, req.params.id, collaboratorIds)
+        await emitPostDeletedToAuthorFollowers(io, postAuthorId, req.params.id, [
+          ...collaboratorIds,
+          req.user._id.toString(),
+        ])
+        for (const id of siblingIds) {
+          await emitPostDeletedToAuthorFollowers(io, req.user._id.toString(), id, [])
+        }
       } else {
         const followerDocs = await Follow.find({ followeeId: postAuthorId })
           .select('followerId')
