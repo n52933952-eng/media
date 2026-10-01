@@ -637,7 +637,7 @@ const SuggestedChannels = () => {
                                                     <Text fontSize="sm" fontWeight="semibold" color={textColor}>{link.title || 'Video'}</Text>
                                                     <Input size="sm" placeholder="Write something (optional)" value={caption} onChange={(e) => setCaption(e.target.value)} />
                                                     <Button size="sm" colorScheme="red" onClick={() => watchLink(link)} isLoading={busy}>Add to my feed</Button>
-                                                    <Button size="sm" variant="outline" onClick={() => shareItem({ linkId: link._id })} isLoading={busy}>Post</Button>
+                                                    <Button size="sm" variant="outline" onClick={() => shareItem({ linkId: link._id })} isLoading={busy}>Share to feed</Button>
                                                     <Button size="sm" variant="ghost" onClick={() => removeLink(link._id)}>Remove</Button>
                                                 </VStack>
                                             )
@@ -719,7 +719,7 @@ const SuggestedChannels = () => {
                                                             variant="outline"
                                                             onClick={() => shareItem({ channelId: channel.id, streamIndex: index })}
                                                         >
-                                                            Post {channel.streams.length > 1 && stream.name ? `(${stream.name})` : ''}
+                                                            Share to feed {channel.streams.length > 1 && stream.name ? `(${stream.name})` : ''}
                                                         </Button>
                                                     ))}
                                                     <Button size="sm" variant="ghost" onClick={() => hideChannel(channel.id)}>

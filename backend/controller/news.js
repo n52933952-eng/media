@@ -325,7 +325,25 @@ export const shareVideo = async (req, res) => {
   try {
     const linkId = req.body?.linkId
     const channelId = req.body?.channelId
+    const postId = req.body?.postId
     const caption = String(req.body?.text || '').trim().slice(0, 500)
+    if (postId) {
+      const Post = (await import('../models/post.js')).default
+      const source = await Post.findById(postId).select('img text channelAddedBy postedBy').lean()
+      const embed = String(source?.img || '')
+      const isEmbed = /youtube\.com\/embed|youtu\.be|dailymotion\.com\/embed|player\.vimeo\.com/i.test(embed)
+      const mineCard = String(source?.channelAddedBy || '') === String(req.user._id)
+      const alreadyMine = !source?.channelAddedBy && String(source?.postedBy || '') === String(req.user._id)
+      if (!isEmbed) return res.status(400).json({ error: 'Nothing to share' })
+      if (alreadyMine) return res.status(200).json({ already: true })
+      if (!mineCard && !isEmbed) return res.status(400).json({ error: 'Nothing to share' })
+      const post = await shareEmbed({
+        userId: req.user._id,
+        embedUrl: embed,
+        text: caption || source.text || 'Video',
+      })
+      return res.status(200).json({ post })
+    }
     if (linkId) {
       const link = await VideoLink.findOne({ _id: linkId, userId: req.user._id }).lean()
       if (!link?.embedUrl) return res.status(404).json({ error: 'Link not found' })

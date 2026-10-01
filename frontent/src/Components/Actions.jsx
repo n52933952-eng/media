@@ -309,7 +309,35 @@ const Actions = ({ post, showFeedExtras = true, onReplyAdded }) => {
 	}
   }, [showFeedExtras, ENABLE_POST_SHARE_TO_CHAT, user, shareConversationsHasMore, baseUrl, showToast])
 
-  const openShareModal = () => {
+	const videoImg = String(post?.img || '')
+	const isVideoEmbed = videoImg.includes('youtube.com/embed') || videoImg.includes('youtu.be') || videoImg.includes('dailymotion.com/embed') || videoImg.includes('player.vimeo.com')
+	const postedById = post?.postedBy?._id || post?.postedBy
+	const alreadyOnMyFeed = !post?.channelAddedBy && String(postedById || '') === String(user?._id || '')
+	const canShareToFeed = isVideoEmbed && !alreadyOnMyFeed
+
+	const shareVideoToFeed = async (e) => {
+		e?.preventDefault?.()
+		e?.stopPropagation?.()
+		try {
+			const res = await fetch(`${baseUrl}/api/news/share`, {
+				method: 'POST',
+				credentials: 'include',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ postId: post._id, text: post.text || '' }),
+			})
+			const data = await res.json()
+			if (!res.ok) {
+				showToast('Error', data.error || 'Could not share to feed', 'error')
+				return
+			}
+			showToast('Success', data.already ? 'Already on your feed' : 'Shared to your feed', 'success')
+			onShareClose()
+		} catch (err) {
+			showToast('Error', 'Could not share to feed', 'error')
+		}
+	}
+
+	const openShareModal = () => {
 	if (!showFeedExtras) return
 	if (!ENABLE_POST_SHARE_TO_CHAT) {
 		showToast('Info', 'Sharing is disabled right now', 'info')
@@ -558,7 +586,8 @@ return (
 				e.stopPropagation()
 			}}
 		>
-			<Flex gap={3} my={2} alignItems="center" minH="24px">
+			<Flex my={2} alignItems="center" minH="24px" w="100%" gap={showFeedExtras ? 0 : 3}>
+				<Flex alignItems="center" gap={showFeedExtras ? '48px' : 3} flexShrink={0}>
 				<Box
 					w="24px"
 					h="24px"
@@ -613,8 +642,32 @@ return (
 					></path>
 				</svg>
 				)}
+				</Flex>
 
-			{showFeedExtras && isCapsuleEligiblePost && (
+			{showFeedExtras && (
+			<Flex flex="1" minW={0} alignItems="center" ml={2}>
+			{canShareToFeed && (
+				<Box flex="1" minW={0} display="flex" alignItems="center" justifyContent="center">
+				<Tooltip label="Share to feed" placement="top" hasArrow>
+					<Box
+						as="button"
+						display="flex"
+						alignItems="center"
+						justifyContent="center"
+						aria-label="Share to feed"
+						onClick={shareVideoToFeed}
+						cursor="pointer"
+					>
+						<RepostSVG />
+					</Box>
+				</Tooltip>
+				</Box>
+			)}
+			<Box flex="1" minW={0} display="flex" alignItems="center" justifyContent="center">
+				<ShareSVG onClick={openShareModal} disabled={!ENABLE_POST_SHARE_TO_CHAT} />
+			</Box>
+			{isCapsuleEligiblePost && (
+				<Box flex="1" minW={0} display="flex" alignItems="center" justifyContent="center">
 				<Tooltip label={capsuleSealed ? `Set: ${capsuleSelectedLabel || formatCapsuleCountdown(capsuleOpenAt)}` : 'Remind me later'} placement="top" hasArrow>
 					<Box
 						as="button"
@@ -628,8 +681,9 @@ return (
 						<CapsuleSVG sealed={capsuleSealed} />
 					</Box>
 				</Tooltip>
+				</Box>
 			)}
-			{showFeedExtras && (
+			<Box flex="1" minW={0} display="flex" alignItems="center" justifyContent="center">
 				<Tooltip label="Get the app" placement="top" hasArrow>
 					<Box
 						as="button"
@@ -647,9 +701,8 @@ return (
 						<GetAppLinkSVG />
 					</Box>
 				</Tooltip>
-			)}
-			{showFeedExtras && (
-				<ShareSVG onClick={openShareModal} disabled={!ENABLE_POST_SHARE_TO_CHAT} />
+			</Box>
+			</Flex>
 			)}
 			</Flex>
 
@@ -719,9 +772,15 @@ return (
 			<Modal isOpen={isShareOpen} onClose={onShareClose}>
 				<ModalOverlay />
 				<ModalContent>
-					<ModalHeader>Share to chat</ModalHeader>
+					<ModalHeader>Share</ModalHeader>
 					<ModalCloseButton />
 					<ModalBody pb={4}>
+						{canShareToFeed ? (
+							<Button colorScheme="blue" w="full" mb={3} onClick={shareVideoToFeed}>
+								Share to feed
+							</Button>
+						) : null}
+						<Text fontSize="sm" fontWeight="semibold" mb={2}>Share to message</Text>
 						{loadingConversations ? (
 							<Flex justify="center" py={6}>
 								<Spinner size="md" />
@@ -899,6 +958,26 @@ const GetAppLinkSVG = () => (
 		<title>Get the app</title>
 		<path d='M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71' />
 		<path d='M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71' />
+	</svg>
+);
+
+const RepostSVG = () => (
+	<svg
+		aria-label='Share to feed'
+		height='18'
+		width='18'
+		viewBox='0 0 24 24'
+		fill='none'
+		stroke='currentColor'
+		strokeWidth='2'
+		strokeLinecap='round'
+		strokeLinejoin='round'
+	>
+		<title>Share to feed</title>
+		<path d='M17 1l4 4-4 4' />
+		<path d='M3 11V9a4 4 0 0 1 4-4h14' />
+		<path d='M7 23l-4-4 4-4' />
+		<path d='M21 13v2a4 4 0 0 1-4 4H3' />
 	</svg>
 );
 
