@@ -7,6 +7,7 @@ import {
   Text,
   Spinner,
   Button,
+  Input,
   useColorModeValue,
 } from '@chakra-ui/react'
 import useShowToast from '../hooks/useShowToast'
@@ -18,6 +19,9 @@ const CACHE_KEY = 'suggestedChannelsCache'
 const MobileChannelsStrip = () => {
   const showToast = useShowToast()
   const [channels, setChannels] = useState([])
+  const [links, setLinks] = useState([])
+  const [addOpen, setAddOpen] = useState(false)
+  const [addUrl, setAddUrl] = useState('')
   const [loading, setLoading] = useState(true)
   const [busyKey, setBusyKey] = useState(null)
   const [expandedId, setExpandedId] = useState(null)
@@ -41,6 +45,9 @@ const MobileChannelsStrip = () => {
         const json = await res.json()
         if (!cancelled && res.ok && json.channels) {
           setChannels(json.channels)
+        }
+        if (!cancelled && res.ok && Array.isArray(json.links)) {
+          setLinks(json.links)
         }
       } catch (e) {
         console.error('[MobileChannelsStrip]', e)
@@ -79,17 +86,124 @@ const MobileChannelsStrip = () => {
   }
 
   const onChannelTap = (channel) => {
-    const streams = channel.streams || []
-    if (streams.length > 1) {
-      setExpandedId((prev) => (prev === channel.id ? null : channel.id))
-      return
-    }
-    addChannelToFeed(channel, 0)
+    setExpandedId((prev) => (prev === channel.id ? null : channel.id))
   }
 
-  if (!loading && channels.length === 0) return null
+  const baseUrl = import.meta.env.PROD ? window.location.origin : 'http://localhost:5000'
+
+  const saveLink = async () => {
+    if (!addUrl.trim()) return
+    setBusyKey('add')
+    try {
+      const res = await fetch(`${baseUrl}/api/news/links`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: addUrl.trim() }),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        showToast('Error', data.error || 'Could not add link', 'error')
+        return
+      }
+      if (data.link) {
+        setLinks((prev) => [data.link, ...prev.filter((item) => String(item._id) !== String(data.link._id))])
+      }
+      setAddUrl('')
+      setAddOpen(false)
+      showToast('Success', 'Link added', 'success')
+    } catch (e) {
+      showToast('Error', 'Could not add link', 'error')
+    } finally {
+      setBusyKey(null)
+    }
+  }
+
+  const hideChannel = async (channelId) => {
+    setBusyKey(`hide-${channelId}`)
+    try {
+      const res = await fetch(`${baseUrl}/api/news/channels/hide`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ channelId }),
+      })
+      if (!res.ok) {
+        showToast('Error', 'Could not remove channel', 'error')
+        return
+      }
+      setChannels((prev) => prev.filter((c) => c.id !== channelId))
+      setExpandedId(null)
+    } catch (e) {
+      showToast('Error', 'Could not remove channel', 'error')
+    } finally {
+      setBusyKey(null)
+    }
+  }
+
+  const watchLink = async (link) => {
+    setBusyKey(`link-${link._id}`)
+    try {
+      const res = await fetch(`${baseUrl}/api/news/links/${link._id}/watch`, {
+        method: 'POST',
+        credentials: 'include',
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        showToast('Error', data.error || 'Could not add to feed', 'error')
+        return
+      }
+      showToast('Success', data.posted === false ? 'Already in your feed' : 'Added to your feed', 'success')
+      scrollToHomeFeed(data.postId)
+    } catch (e) {
+      showToast('Error', 'Could not add to feed', 'error')
+    } finally {
+      setBusyKey(null)
+    }
+  }
+
+  const shareBody = async (body, key) => {
+    setBusyKey(key)
+    try {
+      const res = await fetch(`${baseUrl}/api/news/share`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        showToast('Error', data.error || 'Could not share', 'error')
+        return
+      }
+      showToast('Success', 'Shared to your followers', 'success')
+      setExpandedId(null)
+    } catch (e) {
+      showToast('Error', 'Could not share', 'error')
+    } finally {
+      setBusyKey(null)
+    }
+  }
+
+  const removeLink = async (linkId) => {
+    setBusyKey(`del-${linkId}`)
+    try {
+      const res = await fetch(`${baseUrl}/api/news/links/${linkId}`, { method: 'DELETE', credentials: 'include' })
+      if (!res.ok) {
+        showToast('Error', 'Could not remove link', 'error')
+        return
+      }
+      setLinks((prev) => prev.filter((item) => String(item._id) !== String(linkId)))
+      setExpandedId(null)
+    } catch (e) {
+      showToast('Error', 'Could not remove link', 'error')
+    } finally {
+      setBusyKey(null)
+    }
+  }
 
   const expanded = channels.find((c) => c.id === expandedId)
+  const expandedLink = links.find((link) => `link:${link._id}` === expandedId)
 
   return (
     <Box>
@@ -125,6 +239,7 @@ const MobileChannelsStrip = () => {
                   ) : (
                     <Avatar
                       name={channel.name}
+                      src={channel.thumbnail}
                       size="sm"
                       bg="blue.500"
                       mx="auto"
@@ -138,9 +253,54 @@ const MobileChannelsStrip = () => {
                 </Box>
               )
             })}
+            {links.map((link) => (
+              <Box
+                key={link._id}
+                as="button"
+                type="button"
+                w="full"
+                p={2}
+                borderRadius="md"
+                border="1px solid"
+                borderColor={expandedId === `link:${link._id}` ? 'blue.400' : borderColor}
+                bg={cardBg}
+                onClick={() => setExpandedId((prev) => (prev === `link:${link._id}` ? null : `link:${link._id}`))}
+              >
+                <Avatar name={link.title || 'Video'} src={link.thumbnail} size="sm" mx="auto" mb={1} bg="purple.500" />
+                <Text fontSize="2xs" color={textColor} noOfLines={2}>{link.title || 'Video'}</Text>
+              </Box>
+            ))}
+            <Box
+              as="button"
+              type="button"
+              w="full"
+              p={2}
+              borderRadius="md"
+              border="1px dashed"
+              borderColor={borderColor}
+              onClick={() => setAddOpen((open) => !open)}
+            >
+              <Text fontSize="lg" color={textColor}>+</Text>
+              <Text fontSize="2xs" color={textColor}>Add</Text>
+            </Box>
           </SimpleGrid>
 
-          {expanded && expanded.streams?.length > 1 && (
+          {addOpen && (
+            <VStack mt={2} spacing={2} align="stretch">
+              <Input size="sm" placeholder="YouTube, Dailymotion, or Vimeo link" value={addUrl} onChange={(e) => setAddUrl(e.target.value)} />
+              <Button size="sm" colorScheme="blue" onClick={saveLink} isLoading={busyKey === 'add'}>Add link</Button>
+            </VStack>
+          )}
+
+          {expandedLink && (
+            <VStack mt={3} spacing={2} align="stretch">
+              <Button size="sm" colorScheme="red" onClick={() => watchLink(expandedLink)} isLoading={busyKey === `link-${expandedLink._id}`}>Add to my feed</Button>
+              <Button size="sm" variant="outline" onClick={() => shareBody({ linkId: expandedLink._id }, `share-${expandedLink._id}`)}>Share</Button>
+              <Button size="sm" variant="ghost" onClick={() => removeLink(expandedLink._id)}>Remove</Button>
+            </VStack>
+          )}
+
+          {expanded && (
             <Box
               mt={3}
               p={2}
@@ -150,7 +310,7 @@ const MobileChannelsStrip = () => {
               borderColor={borderColor}
             >
               <Text fontSize="xs" color={textColor} mb={2} fontWeight="semibold">
-                {expanded.name} — choose language
+                {expanded.name}
               </Text>
               <VStack align="stretch" spacing={2}>
                 {expanded.streams.map((stream, index) => {
@@ -168,10 +328,21 @@ const MobileChannelsStrip = () => {
                       }}
                       leftIcon={<Box w={2} h={2} bg="red.500" borderRadius="full" />}
                     >
-                      Watch Live {stream.name ? `(${stream.name})` : ''}
+                      Add to my feed {stream.name ? `(${stream.name})` : ''}
                     </Button>
                   )
                 })}
+                {expanded.streams.map((stream, index) => (
+                  <Button
+                    key={`share-${index}`}
+                    size="sm"
+                    variant="outline"
+                    onClick={() => shareBody({ channelId: expanded.id, streamIndex: index }, `share-${expanded.id}-${index}`)}
+                  >
+                    Share {expanded.streams.length > 1 && stream.name ? `(${stream.name})` : ''}
+                  </Button>
+                ))}
+                <Button size="sm" variant="ghost" onClick={() => hideChannel(expanded.id)}>Remove</Button>
               </VStack>
             </Box>
           )}

@@ -970,11 +970,10 @@ const showToast = useShowToast()
   
   
   // Check if this is a channel post (system account with YouTube embed or channel post)
-  const isChannelPost = post?.img?.includes('youtube.com/embed') || 
-                        post?.channelAddedBy || 
+  const isChannelPost = !!post?.channelAddedBy || 
                         ['Football', 'AlJazeera', 'NBCNews', 'BeinSportsNews', 'SkyNews', 'Cartoonito', 
                          'NatGeoKids', 'SciShowKids', 'JJAnimalTime', 'KidsArabic', 'NatGeoAnimals', 
-                         'MBCDrama', 'Fox11'].includes(postedBy?.username)
+                         'MBCDrama', 'Fox11', 'VideoShelf'].includes(postedBy?.username)
   
   const handleAvatarOrNameClick = (e) => {
     e.preventDefault()
@@ -1947,6 +1946,33 @@ const showToast = useShowToast()
     >
       {showCarousel && carouselSlides.length > 0 && !rawMediaUrl.includes('youtube.com/embed') && !rawMediaUrl.includes('youtu.be') && !isVideoMedia ? (
         <PostMediaCarousel slides={carouselSlides} audioUrl={carouselAudio} frameHeight={FEED_CAROUSEL_FRAME_H} />
+      ) : post?.img && (post.img.includes('dailymotion.com/embed') || post.img.includes('player.vimeo.com')) ? (
+        <Box
+          position="relative"
+          paddingBottom="56.25%"
+          height="0"
+          overflow="hidden"
+          data-no-navigate="true"
+          onClick={(e) => {
+            e.preventDefault()
+            e.stopPropagation()
+          }}
+        >
+          <iframe
+            src={post.img}
+            title="Video"
+            allow="autoplay; fullscreen; picture-in-picture"
+            allowFullScreen
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              width: '100%',
+              height: '100%',
+              border: 'none',
+            }}
+          />
+        </Box>
       ) : post?.img && (post.img.includes('youtube.com/embed') || post.img.includes('youtu.be')) ? (
         <Box
           position="relative"

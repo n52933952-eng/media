@@ -75,6 +75,12 @@ const UserSchema = mongoose.Schema({
         default:[]
     },
 
+    /** Default live channels this user hid from their channel list. */
+    hiddenChannelIds: {
+        type: [String],
+        default: [],
+    },
+
     // FCM token for push notifications (for calls)
     fcmToken: {
         type: String,

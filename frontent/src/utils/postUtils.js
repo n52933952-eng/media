@@ -49,6 +49,7 @@ export const CHANNEL_USERNAMES = [
   'NatGeoAnimals',
   'MBCDrama',
   'Fox11',
+  'VideoShelf',
 ]
 
 export function getYouTubeVideoId(url) {
@@ -75,7 +76,6 @@ export function isYouTubePost(post) {
 
 export function isChannelPost(post) {
   if (!post) return false
-  if (isYouTubePost(post)) return true
   if (post.channelAddedBy) return true
   const username = post.postedBy?.username
   return !!username && CHANNEL_USERNAMES.includes(username)

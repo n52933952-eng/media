@@ -10,6 +10,7 @@ const SYSTEM_USERNAMES = [
   'Weather',
   ...LIVE_CHANNELS.map((channel) => channel.username),
   'SkySportsNews',
+  'VideoShelf',
 ]
 
 const USER_PREVIEW = 'username name profilePic country'

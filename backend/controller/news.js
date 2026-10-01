@@ -1,4 +1,52 @@
 // Live TV channels (Al Jazeera, Fox11, etc.) — mounted at /api/news for mobile compatibility.
+import jwt from 'jsonwebtoken'
+import VideoLink from '../models/videoLink.js'
+import { parseVideoLink, decorateChannel } from '../services/videoLinks.js'
+
+const MAX_VIDEO_LINKS = 30
+const VIDEO_SHELF_USERNAME = 'VideoShelf'
+
+async function viewerIdFromCookie(req) {
+  try {
+    const token = req.cookies?.jwt
+    if (!token) return null
+    const decode = jwt.verify(token, process.env.JWT_SECRET)
+    return decode?.userId || null
+  } catch {
+    return null
+  }
+}
+
+async function videoShelfAccount() {
+  const User = (await import('../models/user.js')).default
+  let account = await User.findOne({ username: VIDEO_SHELF_USERNAME })
+  if (!account) {
+    account = new User({
+      name: 'Video',
+      username: VIDEO_SHELF_USERNAME,
+      email: 'videoshelf@system.com',
+      password: 'system_account',
+      bio: 'Saved videos',
+    })
+    await account.save()
+  }
+  return account
+}
+
+async function emitNormalPost(authorId, post) {
+  const Follow = (await import('../models/follow.js')).default
+  const { getIO } = await import('../socket/socket.js')
+  const { emitToUserIds } = await import('../services/postSocketEmit.js')
+  const { invalidateUserFeedCaches } = await import('../services/feedCache.js')
+  const io = getIO()
+  if (!io) return
+  const followerDocs = await Follow.find({ followeeId: authorId }).select('followerId').limit(10000).lean()
+  const followerIds = followerDocs.map((d) => d.followerId).filter(Boolean)
+  const postObj = post.toObject ? post.toObject() : post
+  const recipientIds = [...new Set([...followerIds.map(String), String(authorId)])]
+  await emitToUserIds(io, recipientIds, 'newPost', postObj)
+  invalidateUserFeedCaches(recipientIds).catch(() => {})
+}
 
 export const createLiveStreamPost = async (req, res) => {
   try {
@@ -121,9 +169,180 @@ export const createLiveStreamPost = async (req, res) => {
 export const getChannels = async (req, res) => {
   try {
     const { LIVE_CHANNELS } = await import('../config/channels.js')
-    res.status(200).json({ channels: LIVE_CHANNELS })
+    const User = (await import('../models/user.js')).default
+    const userId = await viewerIdFromCookie(req)
+    let hidden = []
+    let links = []
+    if (userId) {
+      const user = await User.findById(userId).select('hiddenChannelIds').lean()
+      hidden = Array.isArray(user?.hiddenChannelIds) ? user.hiddenChannelIds : []
+      links = await VideoLink.find({ userId }).sort({ createdAt: -1 }).limit(MAX_VIDEO_LINKS).lean()
+    }
+    const hiddenSet = new Set(hidden.map(String))
+    const channels = LIVE_CHANNELS
+      .filter((channel) => !hiddenSet.has(channel.id))
+      .map(decorateChannel)
+    res.status(200).json({ channels, links })
   } catch (error) {
     console.error('📺 [getChannels] Error:', error)
+    res.status(500).json({ error: error.message })
+  }
+}
+
+export const addVideoLink = async (req, res) => {
+  try {
+    const parsed = parseVideoLink(req.body?.url)
+    if (!parsed) {
+      return res.status(400).json({
+        error: 'Paste a YouTube, Dailymotion, Vimeo, or video file link',
+      })
+    }
+    const count = await VideoLink.countDocuments({ userId: req.user._id })
+    if (count >= MAX_VIDEO_LINKS) {
+      return res.status(400).json({ error: `You can save up to ${MAX_VIDEO_LINKS} links` })
+    }
+    const existing = await VideoLink.findOne({ userId: req.user._id, url: parsed.url })
+    if (existing) return res.status(200).json({ link: existing, posted: false })
+    const link = await VideoLink.create({ userId: req.user._id, ...parsed })
+    res.status(200).json({ link })
+  } catch (error) {
+    if (error?.code === 11000) {
+      const link = await VideoLink.findOne({ userId: req.user._id, url: String(req.body?.url || '').trim() })
+      return res.status(200).json({ link, posted: false })
+    }
+    console.error('📺 [addVideoLink]', error)
+    res.status(500).json({ error: error.message })
+  }
+}
+
+export const deleteVideoLink = async (req, res) => {
+  try {
+    const link = await VideoLink.findOneAndDelete({ _id: req.params.id, userId: req.user._id })
+    if (!link) return res.status(404).json({ error: 'Link not found' })
+    res.status(200).json({ ok: true })
+  } catch (error) {
+    res.status(500).json({ error: error.message })
+  }
+}
+
+export const hideDefaultChannel = async (req, res) => {
+  try {
+    const User = (await import('../models/user.js')).default
+    const { LIVE_CHANNELS } = await import('../config/channels.js')
+    const channelId = String(req.body?.channelId || '').trim()
+    if (!LIVE_CHANNELS.some((c) => c.id === channelId)) {
+      return res.status(400).json({ error: 'Channel not found' })
+    }
+    await User.updateOne(
+      { _id: req.user._id },
+      { $addToSet: { hiddenChannelIds: channelId } },
+    )
+    res.status(200).json({ ok: true })
+  } catch (error) {
+    res.status(500).json({ error: error.message })
+  }
+}
+
+async function watchEmbed({ userId, embedUrl, text, title }) {
+  const Post = (await import('../models/post.js')).default
+  const { getIO } = await import('../socket/socket.js')
+  const { emitToUserIds } = await import('../services/postSocketEmit.js')
+  const { invalidateUserFeedCache } = await import('../services/feedCache.js')
+  const shelf = await videoShelfAccount()
+  const existing = await Post.findOne({
+    postedBy: shelf._id,
+    img: embedUrl,
+    channelAddedBy: String(userId),
+  })
+  if (existing) {
+    await invalidateUserFeedCache(userId)
+    await existing.populate('postedBy', 'username profilePic name')
+    const postObj = existing.toObject()
+    const io = getIO()
+    if (io) await emitToUserIds(io, [userId], 'newPost', postObj)
+    return { post: postObj, posted: false, postId: existing._id }
+  }
+  const post = new Post({
+    postedBy: shelf._id,
+    text: text || title || 'Video',
+    img: embedUrl,
+    channelAddedBy: String(userId),
+  })
+  await post.save()
+  await post.populate('postedBy', 'username profilePic name')
+  await invalidateUserFeedCache(userId)
+  const postObj = post.toObject()
+  const io = getIO()
+  if (io) await emitToUserIds(io, [userId], 'newPost', postObj)
+  return { post: postObj, posted: true, postId: post._id }
+}
+
+export const watchVideoLink = async (req, res) => {
+  try {
+    const link = await VideoLink.findOne({ _id: req.params.id, userId: req.user._id }).lean()
+    if (!link?.embedUrl) return res.status(404).json({ error: 'Link not found' })
+    const result = await watchEmbed({
+      userId: req.user._id,
+      embedUrl: link.embedUrl,
+      text: link.title,
+      title: link.title,
+    })
+    res.status(200).json(result)
+  } catch (error) {
+    console.error('📺 [watchVideoLink]', error)
+    res.status(500).json({ error: error.message })
+  }
+}
+
+async function shareEmbed({ userId, embedUrl, text }) {
+  const Post = (await import('../models/post.js')).default
+  const { createActivity } = await import('./activity.js')
+  const post = new Post({
+    postedBy: userId,
+    text: String(text || 'Video').slice(0, 500),
+    img: embedUrl,
+  })
+  await post.save()
+  await post.populate('postedBy', 'username profilePic name')
+  await emitNormalPost(userId, post)
+  createActivity(userId, 'post', {
+    postId: post._id,
+    metadata: { text: String(text || '').slice(0, 50), hasImage: false },
+  }).catch(() => {})
+  return post.toObject()
+}
+
+export const shareVideo = async (req, res) => {
+  try {
+    const linkId = req.body?.linkId
+    const channelId = req.body?.channelId
+    if (linkId) {
+      const link = await VideoLink.findOne({ _id: linkId, userId: req.user._id }).lean()
+      if (!link?.embedUrl) return res.status(404).json({ error: 'Link not found' })
+      const post = await shareEmbed({
+        userId: req.user._id,
+        embedUrl: link.embedUrl,
+        text: link.title || 'Video',
+      })
+      return res.status(200).json({ post })
+    }
+    if (channelId) {
+      const { getChannelById } = await import('../config/channels.js')
+      const channel = getChannelById(String(channelId))
+      if (!channel) return res.status(400).json({ error: 'Channel not found' })
+      const streamIndex = parseInt(req.body?.streamIndex, 10) || 0
+      const stream = channel.streams[streamIndex] || channel.streams[0]
+      if (!stream?.youtubeId) return res.status(400).json({ error: 'Stream not found' })
+      const post = await shareEmbed({
+        userId: req.user._id,
+        embedUrl: `https://www.youtube.com/embed/${stream.youtubeId}?autoplay=1&mute=0`,
+        text: stream.text || channel.name,
+      })
+      return res.status(200).json({ post })
+    }
+    return res.status(400).json({ error: 'Nothing to share' })
+  } catch (error) {
+    console.error('📺 [shareVideo]', error)
     res.status(500).json({ error: error.message })
   }
 }

@@ -853,7 +853,8 @@ export const searchUsers = async(req, res) => {
         const systemAccounts = [
             'Football', 'Weather',
             ...LIVE_CHANNELS.map((c) => c.username),
-            ...LEGACY_LIVE_CHANNEL_USERNAMES
+            ...LEGACY_LIVE_CHANNEL_USERNAMES,
+            'VideoShelf'
         ]
 
         const escaped = trimmed.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -941,7 +942,8 @@ export const getSuggestedUsers = async(req, res) => {
             'Football', // System account (not in LIVE_CHANNELS)
             'Weather', // Weather system account
             ...LIVE_CHANNELS.map(channel => channel.username), // All channel accounts from config
-            'SkySportsNews' // Additional channel (if exists in database but not in config)
+            'SkySportsNews', // Additional channel (if exists in database but not in config)
+            'VideoShelf'
         ]
         
         // Find all channel accounts and exclude them
