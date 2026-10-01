@@ -11,7 +11,7 @@ import{UserContext} from '../context/UserContext'
 import{PostContext} from '../context/PostContext'
 import { SocketContext } from '../context/SocketContext'
 import { FiMail } from 'react-icons/fi'
-import { followIdToString, mergePostUpdate, getReplyCount, getReplyPreviewUsers } from '../utils/postUtils.js'
+import { followIdToString, mergePostUpdate, getReplyCount, getReplyPreviewUsers, isPlainPageLink, pageLinkHost } from '../utils/postUtils.js'
 import { followPostHeaders } from '../utils/followRequest.js'
 import { isUserInOnlineList } from '../utils/presenceUtils.js'
 import PostEditorMenu from './PostEditorMenu'
@@ -2028,6 +2028,23 @@ const showToast = useShowToast()
             e.target.play().catch(() => {})
           }}
         />
+      ) : isPlainPageLink(post?.img) ? (
+        <Box
+          as="a"
+          href={post.img}
+          target="_blank"
+          rel="noopener noreferrer"
+          display="block"
+          mt={2}
+          p={3}
+          borderRadius="md"
+          border="1px solid"
+          borderColor="gray.600"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <Text fontWeight="700" color="blue.300" noOfLines={1}>{pageLinkHost(post.img)}</Text>
+          <Text fontSize="sm" color="gray.400" noOfLines={2}>{post.img}</Text>
+        </Box>
       ) : post?.img ? (
         <Box
           h={FEED_CAROUSEL_FRAME_H}

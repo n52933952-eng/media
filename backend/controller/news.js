@@ -198,7 +198,7 @@ export const addVideoLink = async (req, res) => {
     const parsed = parseVideoLink(req.body?.url)
     if (!parsed) {
       return res.status(400).json({
-        error: 'Paste a YouTube, Dailymotion, Vimeo, or video file link',
+        error: 'Paste a link',
       })
     }
     const count = await VideoLink.countDocuments({ userId: req.user._id })

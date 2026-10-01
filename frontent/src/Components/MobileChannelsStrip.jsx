@@ -328,7 +328,7 @@ const MobileChannelsStrip = () => {
 
           {addOpen && (
             <VStack mt={2} spacing={2} align="stretch">
-              <Input size="sm" placeholder="Paste a video link" value={addUrl} onChange={(e) => setAddUrl(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') saveLink() }} />
+              <Input size="sm" placeholder="Paste any link" value={addUrl} onChange={(e) => setAddUrl(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') saveLink() }} />
               <Button size="sm" colorScheme="blue" onClick={saveLink} isLoading={busyKey === 'add'}>Add link</Button>
             </VStack>
           )}

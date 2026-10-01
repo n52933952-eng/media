@@ -312,6 +312,25 @@ function sortPostsNewestFirst(list) {
   })
 }
 
+const PAGE_LINK_MEDIA = /\.(mp4|webm|ogg|mov|m4v|jpg|jpeg|png|gif|webp|avif)(\?|$)/i
+
+/** A normal website address. It opens in a new tab. It is not played inside the post. */
+export function isPlainPageLink(url) {
+  const raw = String(url || '').trim()
+  if (!/^https?:\/\//i.test(raw)) return false
+  if (/youtube\.com\/embed|youtu\.be|youtube\.com\/watch|dailymotion\.com\/embed|player\.vimeo\.com/i.test(raw)) return false
+  if (PAGE_LINK_MEDIA.test(raw)) return false
+  return true
+}
+
+export function pageLinkHost(url) {
+  try {
+    return new URL(String(url || '')).hostname.replace(/^www\./, '')
+  } catch {
+    return 'Link'
+  }
+}
+
 export function upsertProfilePost(list, incoming, postId) {
   const idStr = postId?.toString?.()
   if (!idStr) return list

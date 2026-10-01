@@ -640,7 +640,7 @@ const SuggestedChannels = () => {
                                 <VStack spacing={2} align="stretch" mb={2}>
                                     <Input
                                         size="sm"
-                                        placeholder="Paste a video link, then press Add"
+                                        placeholder="Paste any link, then press Add"
                                         value={addUrl}
                                         onChange={(e) => setAddUrl(e.target.value)}
                                         onKeyDown={(e) => { if (e.key === 'Enter') saveLink() }}

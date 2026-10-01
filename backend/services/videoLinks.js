@@ -73,7 +73,14 @@ export function parseVideoLink(raw) {
         }
     }
 
-    return null
+    if (!host.includes('.')) return null
+    return {
+        provider: 'link',
+        url,
+        embedUrl: url,
+        thumbnail: '',
+        title: host,
+    }
 }
 
 export function channelThumbnail(channel) {
