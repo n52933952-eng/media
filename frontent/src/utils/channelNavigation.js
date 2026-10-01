@@ -4,7 +4,7 @@ import API_BASE_URL from '../config/api'
  * Ensure a channel live-stream post exists for this viewer (same as desktop "Watch Live"),
  * then return postId + username for navigation.
  */
-export async function ensureChannelLivePost(channel, streamIndex = 0) {
+export async function ensureChannelLivePost(channel, streamIndex = 0, text = '') {
   if (!channel?.id) {
     return { ok: false, error: 'Invalid channel' }
   }
@@ -12,7 +12,12 @@ export async function ensureChannelLivePost(channel, streamIndex = 0) {
   const baseUrl = API_BASE_URL || (import.meta.env.PROD ? window.location.origin : 'http://localhost:5000')
   const res = await fetch(
     `${baseUrl}/api/news/post/livestream?channelId=${encodeURIComponent(channel.id)}&streamIndex=${streamIndex}`,
-    { method: 'POST', credentials: 'include' }
+    {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: String(text || '').trim() }),
+    }
   )
   const data = await res.json().catch(() => ({}))
 

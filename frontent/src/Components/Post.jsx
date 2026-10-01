@@ -979,6 +979,11 @@ const showToast = useShowToast()
     e.preventDefault()
     e.stopPropagation()
     
+    const mineChannel = post?.channelAddedBy && String(post.channelAddedBy) === String(user?._id) && postedBy?.username !== 'Football'
+    if (mineChannel && user?.username) {
+      navigate(`/${user.username}`)
+      return
+    }
     // If it's Football channel, navigate to Football page
     if (postedBy?.username === 'Football') {
       navigate('/football')
@@ -1235,8 +1240,8 @@ const showToast = useShowToast()
             <Box position="relative" display="inline-block">
             <Avatar 
               size="md" 
-              src={postedBy?.profilePic} 
-              name={postedBy?.name}
+              src={isMyChannelFeedCard && postedBy?.username !== 'Football' ? user?.profilePic : postedBy?.profilePic} 
+              name={isMyChannelFeedCard && postedBy?.username !== 'Football' ? user?.name : postedBy?.name}
               loading="lazy"
                 cursor="pointer"
                 onClick={handleAvatarOrNameClick}
@@ -1324,19 +1329,19 @@ const showToast = useShowToast()
         <Box minW={0} flex={1} cursor="pointer" onClick={handleAvatarOrNameClick}>
           <Flex align="center" gap={1} minW={0}>
             <Text
-              fontSize={isChannelPost ? 'sm' : 'md'}
-              fontWeight={isChannelPost ? 'bold' : '600'}
-              fontFamily={isChannelPost ? undefined : ROMAN_FONT}
+              fontSize={isChannelPost && !(isMyChannelFeedCard && postedBy?.username !== 'Football') ? 'sm' : 'md'}
+              fontWeight={isChannelPost && !(isMyChannelFeedCard && postedBy?.username !== 'Football') ? 'bold' : '600'}
+              fontFamily={isChannelPost && !(isMyChannelFeedCard && postedBy?.username !== 'Football') ? undefined : ROMAN_FONT}
               letterSpacing="0.01em"
               lineHeight="1.15"
               noOfLines={1}
               minW={0}
             >
-              {postedBy?.name}
+              {isMyChannelFeedCard && postedBy?.username !== 'Football' ? (user?.name || postedBy?.name) : postedBy?.name}
             </Text>
             <Image src="/verified.png" w={4} h={4} flexShrink={0} />
           </Flex>
-          {!isChannelPost && postedBy?.username ? (
+          {(!(isChannelPost) || (isMyChannelFeedCard && postedBy?.username !== 'Football')) && (isMyChannelFeedCard && postedBy?.username !== 'Football' ? user?.username : postedBy?.username) ? (
             <Text
               fontSize="xs"
               color={secondaryTextColor}
@@ -1345,7 +1350,7 @@ const showToast = useShowToast()
               lineHeight="1.2"
               noOfLines={1}
             >
-              @{postedBy.username}
+              @{isMyChannelFeedCard && postedBy?.username !== 'Football' ? user.username : postedBy.username}
             </Text>
           ) : null}
         </Box>

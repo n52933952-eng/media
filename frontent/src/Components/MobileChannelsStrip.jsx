@@ -22,6 +22,7 @@ const MobileChannelsStrip = () => {
   const [links, setLinks] = useState([])
   const [addOpen, setAddOpen] = useState(false)
   const [addUrl, setAddUrl] = useState('')
+  const [caption, setCaption] = useState('')
   const [loading, setLoading] = useState(true)
   const [busyKey, setBusyKey] = useState(null)
   const [expandedId, setExpandedId] = useState(null)
@@ -66,7 +67,7 @@ const MobileChannelsStrip = () => {
     const key = `${channel.id}-${streamIndex}`
     setBusyKey(key)
     try {
-      const result = await ensureChannelLivePost(channel, streamIndex)
+      const result = await ensureChannelLivePost(channel, streamIndex, caption.trim())
       if (!result.ok) {
         showToast('Error', result.error || 'Could not add channel', 'error')
         return
@@ -147,6 +148,8 @@ const MobileChannelsStrip = () => {
       const res = await fetch(`${baseUrl}/api/news/links/${link._id}/watch`, {
         method: 'POST',
         credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: caption.trim() }),
       })
       const data = await res.json()
       if (!res.ok) {
@@ -169,7 +172,7 @@ const MobileChannelsStrip = () => {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
+        body: JSON.stringify({ ...body, text: caption.trim() }),
       })
       const data = await res.json()
       if (!res.ok) {
@@ -287,15 +290,16 @@ const MobileChannelsStrip = () => {
 
           {addOpen && (
             <VStack mt={2} spacing={2} align="stretch">
-              <Input size="sm" placeholder="YouTube, Dailymotion, or Vimeo link" value={addUrl} onChange={(e) => setAddUrl(e.target.value)} />
+              <Input size="sm" placeholder="Paste a video link" value={addUrl} onChange={(e) => setAddUrl(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') saveLink() }} />
               <Button size="sm" colorScheme="blue" onClick={saveLink} isLoading={busyKey === 'add'}>Add link</Button>
             </VStack>
           )}
 
           {expandedLink && (
             <VStack mt={3} spacing={2} align="stretch">
+              <Input size="sm" placeholder="Write something (optional)" value={caption} onChange={(e) => setCaption(e.target.value)} />
               <Button size="sm" colorScheme="red" onClick={() => watchLink(expandedLink)} isLoading={busyKey === `link-${expandedLink._id}`}>Add to my feed</Button>
-              <Button size="sm" variant="outline" onClick={() => shareBody({ linkId: expandedLink._id }, `share-${expandedLink._id}`)}>Share</Button>
+              <Button size="sm" variant="outline" onClick={() => shareBody({ linkId: expandedLink._id }, `share-${expandedLink._id}`)}>Post</Button>
               <Button size="sm" variant="ghost" onClick={() => removeLink(expandedLink._id)}>Remove</Button>
             </VStack>
           )}
@@ -312,6 +316,7 @@ const MobileChannelsStrip = () => {
               <Text fontSize="xs" color={textColor} mb={2} fontWeight="semibold">
                 {expanded.name}
               </Text>
+              <Input size="sm" mb={2} placeholder="Write something (optional)" value={caption} onChange={(e) => setCaption(e.target.value)} />
               <VStack align="stretch" spacing={2}>
                 {expanded.streams.map((stream, index) => {
                   const key = `${expanded.id}-${index}`
@@ -339,7 +344,7 @@ const MobileChannelsStrip = () => {
                     variant="outline"
                     onClick={() => shareBody({ channelId: expanded.id, streamIndex: index }, `share-${expanded.id}-${index}`)}
                   >
-                    Share {expanded.streams.length > 1 && stream.name ? `(${stream.name})` : ''}
+                    Post {expanded.streams.length > 1 && stream.name ? `(${stream.name})` : ''}
                   </Button>
                 ))}
                 <Button size="sm" variant="ghost" onClick={() => hideChannel(expanded.id)}>Remove</Button>

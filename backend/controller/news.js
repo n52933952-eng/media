@@ -96,6 +96,8 @@ export const createLiveStreamPost = async (req, res) => {
     }
 
     const streamUrl = `https://www.youtube.com/embed/${streamConfig.youtubeId}?autoplay=1&mute=0`
+    const caption = String(req.body?.text || '').trim().slice(0, 500)
+    const postText = caption || streamConfig.text
 
     console.log(`📺 Creating ${channelConfig.name} ${streamConfig.language} live stream post...`)
 
@@ -107,11 +109,13 @@ export const createLiveStreamPost = async (req, res) => {
 
     if (existingPost) {
       console.log(`ℹ️ ${channelConfig.name} live stream post already exists for user`)
+      if (caption) existingPost.text = caption
 
       // Do NOT bump updatedAt — that pinned the channel above newer user posts on refresh.
       // Client applies a short-lived viewer boost so the card is still easy to find.
       await invalidateUserFeedCache(req.user._id)
 
+      if (caption) await existingPost.save({ timestamps: false })
       await existingPost.populate('postedBy', 'username profilePic name')
       const postObj = existingPost.toObject ? existingPost.toObject() : existingPost
 
@@ -131,7 +135,7 @@ export const createLiveStreamPost = async (req, res) => {
 
     const liveStreamPost = new Post({
       postedBy: channelAccount._id,
-      text: streamConfig.text,
+      text: postText,
       img: streamUrl,
       channelAddedBy: req.user._id.toString(),
     })
@@ -255,6 +259,10 @@ async function watchEmbed({ userId, embedUrl, text, title }) {
     channelAddedBy: String(userId),
   })
   if (existing) {
+    if (text && existing.text !== text) {
+      existing.text = text
+      await existing.save({ timestamps: false })
+    }
     await invalidateUserFeedCache(userId)
     await existing.populate('postedBy', 'username profilePic name')
     const postObj = existing.toObject()
@@ -281,10 +289,11 @@ export const watchVideoLink = async (req, res) => {
   try {
     const link = await VideoLink.findOne({ _id: req.params.id, userId: req.user._id }).lean()
     if (!link?.embedUrl) return res.status(404).json({ error: 'Link not found' })
+    const caption = String(req.body?.text || '').trim().slice(0, 500)
     const result = await watchEmbed({
       userId: req.user._id,
       embedUrl: link.embedUrl,
-      text: link.title,
+      text: caption || link.title,
       title: link.title,
     })
     res.status(200).json(result)
@@ -316,13 +325,14 @@ export const shareVideo = async (req, res) => {
   try {
     const linkId = req.body?.linkId
     const channelId = req.body?.channelId
+    const caption = String(req.body?.text || '').trim().slice(0, 500)
     if (linkId) {
       const link = await VideoLink.findOne({ _id: linkId, userId: req.user._id }).lean()
       if (!link?.embedUrl) return res.status(404).json({ error: 'Link not found' })
       const post = await shareEmbed({
         userId: req.user._id,
         embedUrl: link.embedUrl,
-        text: link.title || 'Video',
+        text: caption || link.title || 'Video',
       })
       return res.status(200).json({ post })
     }
@@ -336,7 +346,7 @@ export const shareVideo = async (req, res) => {
       const post = await shareEmbed({
         userId: req.user._id,
         embedUrl: `https://www.youtube.com/embed/${stream.youtubeId}?autoplay=1&mute=0`,
-        text: stream.text || channel.name,
+        text: caption || stream.text || channel.name,
       })
       return res.status(200).json({ post })
     }

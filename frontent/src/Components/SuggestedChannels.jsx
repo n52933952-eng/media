@@ -23,6 +23,7 @@ const SuggestedChannels = () => {
     const [addUrl, setAddUrl] = useState('')
     const [addBusy, setAddBusy] = useState(false)
     const [linkBusy, setLinkBusy] = useState('')
+    const [caption, setCaption] = useState('')
     const expandedChannelRef = useRef(null) // Ref for scrolling to expanded channel details
     
     const showToast = useShowToast()
@@ -219,7 +220,9 @@ const SuggestedChannels = () => {
                 `${baseUrl}/api/news/post/livestream?channelId=${channelId}&streamIndex=${streamIndex}`,
                 {
                     method: 'POST',
-                    credentials: 'include'
+                    credentials: 'include',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ text: caption.trim() }),
                 }
             )
             const data = await res.json()
@@ -323,6 +326,8 @@ const SuggestedChannels = () => {
             const res = await fetch(`${baseUrl}/api/news/links/${link._id}/watch`, {
                 method: 'POST',
                 credentials: 'include',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ text: caption.trim() }),
             })
             const data = await res.json()
             if (!res.ok) {
@@ -347,7 +352,7 @@ const SuggestedChannels = () => {
                 method: 'POST',
                 credentials: 'include',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(body),
+                body: JSON.stringify({ ...body, text: caption.trim() }),
             })
             const data = await res.json()
             if (!res.ok) {
@@ -600,9 +605,10 @@ const SuggestedChannels = () => {
                                 <VStack spacing={2} align="stretch" mb={2}>
                                     <Input
                                         size="sm"
-                                        placeholder="YouTube, Dailymotion, or Vimeo link"
+                                        placeholder="Paste a video link, then press Add"
                                         value={addUrl}
                                         onChange={(e) => setAddUrl(e.target.value)}
+                                        onKeyDown={(e) => { if (e.key === 'Enter') saveLink() }}
                                     />
                                     <Button size="sm" colorScheme="blue" onClick={saveLink} isLoading={addBusy}>
                                         Add link
@@ -629,8 +635,9 @@ const SuggestedChannels = () => {
                                             return (
                                                 <VStack align="stretch" spacing={2}>
                                                     <Text fontSize="sm" fontWeight="semibold" color={textColor}>{link.title || 'Video'}</Text>
+                                                    <Input size="sm" placeholder="Write something (optional)" value={caption} onChange={(e) => setCaption(e.target.value)} />
                                                     <Button size="sm" colorScheme="red" onClick={() => watchLink(link)} isLoading={busy}>Add to my feed</Button>
-                                                    <Button size="sm" variant="outline" onClick={() => shareItem({ linkId: link._id })} isLoading={busy}>Share</Button>
+                                                    <Button size="sm" variant="outline" onClick={() => shareItem({ linkId: link._id })} isLoading={busy}>Post</Button>
                                                     <Button size="sm" variant="ghost" onClick={() => removeLink(link._id)}>Remove</Button>
                                                 </VStack>
                                             )
@@ -671,6 +678,12 @@ const SuggestedChannels = () => {
                                                 
                                                 {/* Stream Buttons */}
                                                 <VStack spacing={2} align="stretch">
+                                                    <Input
+                                                        size="sm"
+                                                        placeholder="Write something (optional)"
+                                                        value={caption}
+                                                        onChange={(e) => setCaption(e.target.value)}
+                                                    />
                                                     {channel.streams.map((stream, index) => {
                                                         const loadingKey = `${channel.id}-${index}`
                                                         const isLoading = streamLoading[loadingKey]
@@ -706,7 +719,7 @@ const SuggestedChannels = () => {
                                                             variant="outline"
                                                             onClick={() => shareItem({ channelId: channel.id, streamIndex: index })}
                                                         >
-                                                            Share {channel.streams.length > 1 && stream.name ? `(${stream.name})` : ''}
+                                                            Post {channel.streams.length > 1 && stream.name ? `(${stream.name})` : ''}
                                                         </Button>
                                                     ))}
                                                     <Button size="sm" variant="ghost" onClick={() => hideChannel(channel.id)}>
