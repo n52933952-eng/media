@@ -50,7 +50,7 @@ export function updatePhysics(deltaTime, ammo, physicsState, carState, debugObje
   
   // Calculate dot product using Three.js
   const dotForward = carForward.dot(velocityThree);
-  const maxEngineForce = 1550;
+  const maxEngineForce = 2250;
   const maxBrakingForce = 55;
   
   // Calculate car speed in km/h

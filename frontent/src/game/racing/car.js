@@ -80,9 +80,21 @@ function findWheelNodes(model) {
   return WHEEL_SLOT_PATTERNS.map((re) => found.find((node) => re.test(node.name)) || null);
 }
 
+/** Width of the body alone. Wheels are left out; they are placed by physics. */
+function measureBodyHalfWidth(model) {
+  const box = new THREE.Box3();
+  const meshBox = new THREE.Box3();
+  model.traverse((node) => {
+    if (!node.isMesh || /wheel/i.test(node.name || '')) return;
+    box.union(meshBox.setFromObject(node));
+  });
+  return box.isEmpty() ? 0 : Math.max(Math.abs(box.min.x), Math.abs(box.max.x));
+}
+
 /**
- * Fit any car GLB to the raycast vehicle: scale it until its wheels sit where the
- * physics wheels are, then drop the body so the tyres touch the road.
+ * Fit any car GLB to the raycast vehicle: scale the body to the chassis width, then
+ * drop it so the tyres touch the road. Matching the width is what keeps the tyres
+ * visible beside the body — fit by wheel track instead and a wide body swallows them.
  */
 function applyCarBodyScale(model) {
   model.scale.set(1, 1, 1);
@@ -90,14 +102,8 @@ function applyCarBodyScale(model) {
   model.updateMatrixWorld(true);
 
   const box = new THREE.Box3();
-  const center = new THREE.Vector3();
-  let halfTrack = 0;
-  for (const wheel of findWheelNodes(model)) {
-    if (!wheel) continue;
-    box.setFromObject(wheel).getCenter(center);
-    halfTrack = Math.max(halfTrack, Math.abs(center.x));
-  }
-  const scale = halfTrack > 1e-6 ? WHEEL_X_OFFSET / halfTrack : CAR_MODEL_SCALE;
+  const halfWidth = measureBodyHalfWidth(model);
+  const scale = halfWidth > 1e-6 ? (VEHICLE_WIDTH / 2) / halfWidth : CAR_MODEL_SCALE;
   model.scale.setScalar(scale);
   model.updateMatrixWorld(true);
 
@@ -152,25 +158,33 @@ const WHEEL_FRICTION = 12;
  * Uniformly scale each wheel mesh so its bounding extent matches the physics radius.
  */
 function fitWheelMeshToPhysicsRadius(wheelMesh, targetRadius = WHEEL_RADIUS) {
-  if (!wheelMesh) return;
-  // Some models author each wheel at its place on the body rather than around its
-  // own origin. Physics drives the mesh origin, so move the geometry onto it.
-  if (wheelMesh.geometry) {
-    wheelMesh.geometry = wheelMesh.geometry.clone();
-    wheelMesh.geometry.center();
-  }
-  wheelMesh.position.set(0, 0, 0);
-  wheelMesh.scale.set(1, 1, 1);
-  wheelMesh.updateMatrixWorld(true);
-  const box = new THREE.Box3().setFromObject(wheelMesh);
-  if (box.isEmpty()) return;
+  if (!wheelMesh || !wheelMesh.geometry) return;
+  const geometry = wheelMesh.geometry.clone();
+  geometry.computeBoundingBox();
+  const box = geometry.boundingBox;
   const size = new THREE.Vector3();
   box.getSize(size);
-  const approxR = Math.max(size.x, size.y, size.z) / 2;
-  if (approxR > 1e-6 && Number.isFinite(approxR)) {
-    const s = targetRadius / approxR;
-    wheelMesh.scale.multiplyScalar(s);
-  }
+  // The axle runs along x, so the tyre is as big as its reach in y/z. Measuring all
+  // three would be thrown off by models that bake an axle stub into the wheel.
+  const approxR = Math.max(size.y, size.z) / 2;
+  if (!(approxR > 1e-6) || !Number.isFinite(approxR)) return;
+
+  // Physics drives the mesh origin, and models often author each wheel at its place
+  // on the body, so move the tyre onto its own origin. The middle vertex finds the
+  // tyre's centre even when a stub drags the bounding box sideways.
+  const position = geometry.attributes.position;
+  const xs = new Float32Array(position.count);
+  for (let i = 0; i < position.count; i++) xs[i] = position.getX(i);
+  xs.sort();
+  geometry.translate(
+    -xs[xs.length >> 1],
+    -(box.min.y + box.max.y) / 2,
+    -(box.min.z + box.max.z) / 2
+  );
+
+  wheelMesh.geometry = geometry;
+  wheelMesh.position.set(0, 0, 0);
+  wheelMesh.scale.setScalar(targetRadius / approxR);
 }
 
 // Reused for start-line / respawn lateral offset (host vs guest lanes)
