@@ -342,7 +342,7 @@ const MobileChannelsStrip = () => {
             <VStack mt={3} spacing={2} align="stretch">
               <Input size="sm" placeholder="Write something (optional)" value={caption} onChange={(e) => setCaption(e.target.value)} />
               <Button size="sm" colorScheme="red" onClick={() => watchLink(expandedLink)} isLoading={busyKey === `link-${expandedLink._id}`}>Add to my feed</Button>
-              <Button size="sm" variant="outline" onClick={() => shareBody({ linkId: expandedLink._id }, `share-${expandedLink._id}`)}>Share to feed</Button>
+              <Button size="sm" variant="outline" onClick={() => shareBody({ linkId: expandedLink._id }, `share-${expandedLink._id}`)} isLoading={busyKey === `share-${expandedLink._id}`}>Share to feed</Button>
               <Button size="sm" variant="ghost" onClick={() => removeLink(expandedLink._id)}>Remove</Button>
             </VStack>
           )}

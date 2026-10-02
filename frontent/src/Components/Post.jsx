@@ -332,6 +332,22 @@ const Post = ({post: initialPost, postedBy, onDelete, onPostUpdated, visibleVide
     sendYouTubeCommand(channelFrameRef.current, func)
   }, [])
 
+  useEffect(() => {
+    const onMessage = (event) => {
+      const frame = channelFrameRef.current
+      if (!frame || event.source !== frame.contentWindow) return
+      let data = event.data
+      if (typeof data === 'string') {
+        try { data = JSON.parse(data) } catch { return }
+      }
+      const state = data?.info?.playerState ?? (data?.event === 'onStateChange' ? data.info : undefined)
+      if (state === 1) channelPlayingRef.current = true
+      else if (state === 2 || state === 0) channelPlayingRef.current = false
+    }
+    window.addEventListener('message', onMessage)
+    return () => window.removeEventListener('message', onMessage)
+  }, [])
+
 const showToast = useShowToast()
 
  console.log({"postby":postedBy})
@@ -2085,10 +2101,11 @@ const showToast = useShowToast()
           paddingBottom="56.25%"
           height="0"
           overflow="hidden"
-          cursor="pointer"
           data-no-navigate="true"
-          title="Pause"
-          onClick={toggleChannelPlayback}
+          onClick={(e) => {
+            e.preventDefault()
+            e.stopPropagation()
+          }}
         >
           <iframe
             ref={channelFrameRef}
@@ -2101,13 +2118,23 @@ const showToast = useShowToast()
               width: '100%',
               height: '100%',
               border: 'none',
-              pointerEvents: 'none',
             }}
             onLoad={(e) => {
               e.target.contentWindow?.postMessage(JSON.stringify({ event: 'listening' }), '*')
             }}
             allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
             allowFullScreen
+          />
+          {/* Bottom of the player is left open so the progress bar and controls work. */}
+          <Box
+            position="absolute"
+            top={0}
+            left={0}
+            right={0}
+            bottom="30%"
+            cursor="pointer"
+            title="Pause"
+            onClick={toggleChannelPlayback}
           />
         </Box>
       ) : post?.img && (post.img.match(/\.(mp4|webm|ogg|mov)$/i) || post.img.includes('/video/upload/')) ? (

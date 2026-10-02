@@ -319,7 +319,7 @@ const SuggestedChannels = () => {
     }
 
     const watchLink = async (link) => {
-        setLinkBusy(String(link._id))
+        setLinkBusy(`watch-${link._id}`)
         try {
             const baseUrl = import.meta.env.PROD ? window.location.origin : "http://localhost:5000"
             const res = await fetch(`${baseUrl}/api/news/links/${link._id}/watch`, {
@@ -348,7 +348,7 @@ const SuggestedChannels = () => {
 
     const shareItem = async (body) => {
         const key = body.linkId || body.channelId || 'share'
-        setLinkBusy(String(key))
+        setLinkBusy(`share-${key}`)
         try {
             const baseUrl = import.meta.env.PROD ? window.location.origin : "http://localhost:5000"
             const res = await fetch(`${baseUrl}/api/news/share`, {
@@ -669,13 +669,14 @@ const SuggestedChannels = () => {
                                         if (String(expandedChannel).startsWith('link:')) {
                                             const link = links.find((item) => `link:${item._id}` === expandedChannel)
                                             if (!link) return null
-                                            const busy = linkBusy === String(link._id)
+                                            const watching = linkBusy === `watch-${link._id}`
+                                            const sharing = linkBusy === `share-${link._id}`
                                             return (
                                                 <VStack align="stretch" spacing={2}>
                                                     <Text fontSize="sm" fontWeight="semibold" color={textColor}>{link.title || 'Video'}</Text>
                                                     <Input size="sm" placeholder="Write something (optional)" value={caption} onChange={(e) => setCaption(e.target.value)} />
-                                                    <Button size="sm" colorScheme="red" onClick={() => watchLink(link)} isLoading={busy}>Add to my feed</Button>
-                                                    <Button size="sm" variant="outline" onClick={() => shareItem({ linkId: link._id })} isLoading={busy}>Share to feed</Button>
+                                                    <Button size="sm" colorScheme="red" onClick={() => watchLink(link)} isLoading={watching} isDisabled={sharing}>Add to my feed</Button>
+                                                    <Button size="sm" variant="outline" onClick={() => shareItem({ linkId: link._id })} isLoading={sharing} isDisabled={watching}>Share to feed</Button>
                                                     <Button size="sm" variant="ghost" onClick={() => removeLink(link._id)}>Remove</Button>
                                                 </VStack>
                                             )
