@@ -6,6 +6,20 @@ function getLoadingManager() {
   return typeof window !== 'undefined' ? window.loadingManager : null;
 }
 
+/**
+ * One car per player: the one who sent the challenge is the host ('blue'),
+ * the one who accepted is the guest ('red'). Both players see the same pair.
+ */
+const CAR_BY_COLOR = {
+  blue: '/models/ergoninane-fast-72.glb',
+  red: '/models/ergoninane-fast-74.glb',
+};
+const FALLBACK_CAR_URL = '/models/car_red.glb';
+
+function carModelUrl(carColor) {
+  return CAR_BY_COLOR[carColor] || CAR_BY_COLOR.blue;
+}
+
 /** Each call loads a fresh GLTF (player mutates scene — never reuse the same scene). */
 function loadCarGltf(url, onOk, onErr) {
   const loader = new GLTFLoader(getLoadingManager() || undefined);
@@ -14,7 +28,7 @@ function loadCarGltf(url, onOk, onErr) {
 
 /** Visual-only opponent car; counted by LoadingManager when present. */
 export function loadOpponentCarVisual(scene, carColor, onRoot) {
-  const url = `/models/car_${carColor}.glb`;
+  const url = carModelUrl(carColor);
   loadCarGltf(
     url,
     (gltf) => {
@@ -46,11 +60,54 @@ export function cloneCarVisualScene(sourceScene) {
 }
 
 const CAR_MODEL_SCALE = 4;
+/** Tyres rest a hair above the road so the body never scrapes on a bump. */
+const BODY_GROUND_GAP = 0.09;
 
+/** Wheel nodes in the order the physics wheels are added (see wheelPositions). */
+const WHEEL_SLOT_PATTERNS = [
+  /(front.?right|wheel-fr)/i,
+  /(front.?left|wheel-fl)/i,
+  /(rear.?right|back.?right|wheel-br)/i,
+  /(rear.?left|back.?left|wheel-bl)/i,
+];
+
+/** GLTFLoader drops dots from node names, so match loosely rather than by exact name. */
+function findWheelNodes(model) {
+  const found = [];
+  model.traverse((node) => {
+    if (node.isMesh && /wheel/i.test(node.name || '')) found.push(node);
+  });
+  return WHEEL_SLOT_PATTERNS.map((re) => found.find((node) => re.test(node.name)) || null);
+}
+
+/**
+ * Fit any car GLB to the raycast vehicle: scale it until its wheels sit where the
+ * physics wheels are, then drop the body so the tyres touch the road.
+ */
 function applyCarBodyScale(model) {
-  model.scale.set(CAR_MODEL_SCALE, CAR_MODEL_SCALE, CAR_MODEL_SCALE);
+  model.scale.set(1, 1, 1);
   model.position.set(0, 0, 0);
   model.updateMatrixWorld(true);
+
+  const box = new THREE.Box3();
+  const center = new THREE.Vector3();
+  let halfTrack = 0;
+  for (const wheel of findWheelNodes(model)) {
+    if (!wheel) continue;
+    box.setFromObject(wheel).getCenter(center);
+    halfTrack = Math.max(halfTrack, Math.abs(center.x));
+  }
+  const scale = halfTrack > 1e-6 ? WHEEL_X_OFFSET / halfTrack : CAR_MODEL_SCALE;
+  model.scale.setScalar(scale);
+  model.updateMatrixWorld(true);
+
+  box.setFromObject(model);
+  if (!box.isEmpty()) {
+    const lift = -(WHEEL_RADIUS + SUSPENSION_REST_LENGTH - BODY_GROUND_GAP) - box.min.y;
+    for (const child of model.children) child.position.y += lift / scale;
+    model.updateMatrixWorld(true);
+  }
+
   model.traverse((node) => {
     if (node.isMesh) {
       node.castShadow = true;
@@ -96,6 +153,14 @@ const WHEEL_FRICTION = 12;
  */
 function fitWheelMeshToPhysicsRadius(wheelMesh, targetRadius = WHEEL_RADIUS) {
   if (!wheelMesh) return;
+  // Some models author each wheel at its place on the body rather than around its
+  // own origin. Physics drives the mesh origin, so move the geometry onto it.
+  if (wheelMesh.geometry) {
+    wheelMesh.geometry = wheelMesh.geometry.clone();
+    wheelMesh.geometry.center();
+  }
+  wheelMesh.position.set(0, 0, 0);
+  wheelMesh.scale.set(1, 1, 1);
   wheelMesh.updateMatrixWorld(true);
   const box = new THREE.Box3().setFromObject(wheelMesh);
   if (box.isEmpty()) return;
@@ -252,19 +317,19 @@ export function createVehicle(ammo, scene, physicsWorld, debugObjects, onCarLoad
     console.log("Car model fully loaded, calling onCarLoaded callback");
     // When the car model is fully loaded, call the callback with the updated components
     if (onCarLoaded) onCarLoaded(updatedComponents);
-  });
+  }, carColor);
   
   // Return physics body immediately for setting up physics
   return carComponents;
 }
 
 // Modify loadCarModel to accept and use a callback
-function loadCarModel(ammo, scene, carComponents, wheelPositions, onModelLoaded) {
+function loadCarModel(ammo, scene, carComponents, wheelPositions, onModelLoaded, selectedColor) {
   // Get the player ID
   const myPlayerId = localStorage.getItem('myPlayerId');
   
   // Determine car color with proper priority:
-  let carColor = 'red';
+  let carColor = selectedColor || 'red';
   
   // Try getting from gameConfig that might be in sessionStorage
   try {
@@ -294,20 +359,14 @@ function loadCarModel(ammo, scene, carComponents, wheelPositions, onModelLoaded)
     }
   }
   
-  const url = `/models/car_${carColor}.glb`;
+  const url = carModelUrl(carColor);
 
   const applyGltfToPlayer = (gltf) => {
       const carModel = gltf.scene;
       applyCarBodyScale(carModel);
       carModel.visible = false;
       
-      // Find wheel meshes in the car model
-      let wheelMeshFL = carModel.getObjectByName('wheel-fr');
-      let wheelMeshFR = carModel.getObjectByName('wheel-fl');
-      let wheelMeshBL = carModel.getObjectByName('wheel-br');
-      let wheelMeshBR = carModel.getObjectByName('wheel-bl');
-      
-      const wheelModelMeshes = [wheelMeshFL, wheelMeshFR, wheelMeshBL, wheelMeshBR];
+      const wheelModelMeshes = findWheelNodes(carModel);
       
       // Store reference to wheel meshes and detach them from car model
       for (let i = 0; i < wheelModelMeshes.length; i++) {
@@ -358,7 +417,7 @@ function loadCarModel(ammo, scene, carComponents, wheelPositions, onModelLoaded)
         if (onModelLoaded) onModelLoaded(carComponents);
       } else {
         console.warn('[car] Missing wheel meshes — retrying with fallback model');
-        if (carColor !== 'red') {
+        if (url !== FALLBACK_CAR_URL) {
           loadFallbackCarModel(ammo, scene, carComponents, wheelPositions, onModelLoaded);
         } else {
           carModel.visible = true;
@@ -372,7 +431,7 @@ function loadCarModel(ammo, scene, carComponents, wheelPositions, onModelLoaded)
     applyGltfToPlayer,
     (error) => {
       console.error(`Error loading ${carColor} car model:`, error);
-      if (carColor !== 'red') {
+      if (url !== FALLBACK_CAR_URL) {
         loadFallbackCarModel(ammo, scene, carComponents, wheelPositions, onModelLoaded);
       }
     }
@@ -384,7 +443,7 @@ function loadFallbackCarModel(ammo, scene, carComponents, wheelPositions, onMode
   console.log('Falling back to red car model');
 
   loadCarGltf(
-    '/models/car_red.glb',
+    FALLBACK_CAR_URL,
     (gltf) => {
       if (carComponents.carModel) {
         scene.remove(carComponents.carModel);
@@ -398,12 +457,7 @@ function loadFallbackCarModel(ammo, scene, carComponents, wheelPositions, onMode
       applyCarBodyScale(carModel);
       
       // Process wheel meshes (same as in loadCarModel)
-      let wheelMeshFL = carModel.getObjectByName('wheel-fr');
-      let wheelMeshFR = carModel.getObjectByName('wheel-fl');
-      let wheelMeshBL = carModel.getObjectByName('wheel-br');
-      let wheelMeshBR = carModel.getObjectByName('wheel-bl');
-      
-      const wheelModelMeshes = [wheelMeshFL, wheelMeshFR, wheelMeshBL, wheelMeshBR];
+      const wheelModelMeshes = findWheelNodes(carModel);
       
       for (let i = 0; i < wheelModelMeshes.length; i++) {
         if (wheelModelMeshes[i]) {
