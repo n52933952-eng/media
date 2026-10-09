@@ -27,7 +27,7 @@ import useShowToast from '../hooks/useShowToast'
 import API_BASE_URL from '../config/api'
 import { uploadMediaToR2 } from '../utils/directR2Upload'
 import { mediaDisplayUrl } from '../utils/mediaUrl.js'
-import { fmtTime, otherParty, prepareLightVideo, uidOf } from '../utils/videoMessage.js'
+import { captureVideoThumb, fmtTime, otherParty, prepareLightVideo, uidOf } from '../utils/videoMessage.js'
 import VideoRecordModal from '../Components/VideoRecordModal.jsx'
 
 const PAGE = 15
@@ -197,7 +197,11 @@ const VideoMessagesPage = () => {
       setSendHint('Making video light…')
       const light = await prepareLightVideo(pickedFile, 'main')
       setSendHint('Uploading…')
-      const videoUrl = await uploadMediaToR2(light, 'video-messages', { skipCompress: true })
+      const thumbFile = await captureVideoThumb(light)
+      const [videoUrl, thumbnailUrl] = await Promise.all([
+        uploadMediaToR2(light, 'video-messages', { skipCompress: true }),
+        thumbFile ? uploadMediaToR2(thumbFile, 'video-messages') : Promise.resolve(''),
+      ])
       const res = await fetch(`${API_BASE_URL}/api/video-message`, {
         method: 'POST',
         credentials: 'include',
@@ -205,6 +209,7 @@ const VideoMessagesPage = () => {
         body: JSON.stringify({
           receiverId: pickedUser._id,
           videoUrl,
+          thumbnailUrl: thumbnailUrl || undefined,
           duration: Math.round(duration),
         }),
       })
@@ -267,7 +272,38 @@ const VideoMessagesPage = () => {
                   navigate(`/video-messages/${item._id}`)
                 }}
               >
-                <Avatar src={mediaDisplayUrl(other?.profilePic)} name={other?.name || other?.username} size="md" />
+                <Box
+                  w="72px"
+                  h="96px"
+                  borderRadius="md"
+                  overflow="hidden"
+                  bg="black"
+                  flexShrink={0}
+                  position="relative"
+                >
+                  {item.thumbnailUrl ? (
+                    <Box
+                      as="img"
+                      src={mediaDisplayUrl(item.thumbnailUrl)}
+                      alt=""
+                      w="100%"
+                      h="100%"
+                      objectFit="cover"
+                    />
+                  ) : (
+                    <video
+                      src={`${mediaDisplayUrl(item.videoUrl)}#t=0.4`}
+                      muted
+                      playsInline
+                      preload="metadata"
+                      style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                    />
+                  )}
+                  <Text position="absolute" left="6px" bottom="4px" color="white" fontSize="xs" textShadow="0 1px 4px #000">
+                    ▶ {fmtTime(item.duration)}
+                  </Text>
+                </Box>
+                <Avatar src={mediaDisplayUrl(other?.profilePic)} name={other?.name || other?.username} size="sm" />
                 <Box flex="1" minW={0}>
                   <HStack>
                     <Text fontWeight={unseen ? 'bold' : 'semibold'} noOfLines={1}>

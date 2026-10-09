@@ -287,6 +287,7 @@ const VideoMessageWatchPage = () => {
         <video
           ref={videoRef}
           src={mediaDisplayUrl(item.videoUrl)}
+          poster={item.thumbnailUrl ? mediaDisplayUrl(item.thumbnailUrl) : undefined}
           playsInline
           preload="metadata"
           style={{
