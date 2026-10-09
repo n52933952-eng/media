@@ -43,6 +43,7 @@ const VideoMessageWatchPage = () => {
   const pinRef = useRef(0)
   const durFixedRef = useRef(false)
   const askedRef = useRef(new Set())
+  const resumePlayRef = useRef(false)
 
   const [item, setItem] = useState(null)
   const [notes, setNotes] = useState([])
@@ -90,7 +91,18 @@ const VideoMessageWatchPage = () => {
         return [...prev, payload.note].sort((a, b) => a.t - b.t)
       })
       setItem((prev) => (prev ? { ...prev, noteCount: (prev.noteCount || 0) + 1 } : prev))
-      // The other person sees this when their playhead reaches that minute.
+      if (payload.note.type === 'reaction') {
+        const t = Number(payload.note.t) || 0
+        const v = videoRef.current
+        if (v) {
+          resumePlayRef.current = true
+          v.currentTime = t
+          v.play().catch(() => {})
+        }
+        setNow(t)
+        setPlaying(true)
+        openOverlay(payload.note, { resumeAfter: true, seek: false })
+      }
     }
     const onDel = (payload) => {
       if (String(payload?.videoMessageId) !== String(id)) return
@@ -103,13 +115,15 @@ const VideoMessageWatchPage = () => {
       const last = asks[asks.length - 1]
       if (!last) return
       setAskNow(last)
+      const t = Number(last.t) || 0
       const v = videoRef.current
       if (v) {
-        v.currentTime = Number(last.t) || 0
-        v.pause()
+        resumePlayRef.current = true
+        v.currentTime = t
+        v.play().catch(() => {})
       }
-      setNow(Number(last.t) || 0)
-      setPlaying(false)
+      setNow(t)
+      setPlaying(true)
       showToast('Asked', 'They want a reply or a reaction here', 'info')
     }
     socket.on('videoMessage:note', onNote)
@@ -152,6 +166,7 @@ const VideoMessageWatchPage = () => {
     }
     const v = videoRef.current
     if (resume && v && resumeAfterRef.current) {
+      resumePlayRef.current = true
       v.play().catch(() => {})
     }
   }, [])
@@ -248,6 +263,11 @@ const VideoMessageWatchPage = () => {
     const v = videoRef.current
     if (!v) return
     if (v.paused) {
+      const pending = videoNotes.find((n) => !shownRef.current.has(String(n._id)))
+      if (pending) {
+        openOverlay(pending, { resumeAfter: true, seek: false })
+        return
+      }
       v.play().catch(() => {})
       setPlaying(true)
     } else {
@@ -468,7 +488,19 @@ const VideoMessageWatchPage = () => {
             v.addEventListener('timeupdate', fix)
             try { v.currentTime = 1e101 } catch { /* ignore */ }
           }}
-          onPlay={() => setPlaying(true)}
+          onPlay={() => {
+            if (resumePlayRef.current) {
+              resumePlayRef.current = false
+              setPlaying(true)
+              return
+            }
+            const pending = videoNotes.find((n) => !shownRef.current.has(String(n._id)))
+            if (pending && !activeNote) {
+              openOverlay(pending, { resumeAfter: true, seek: false })
+              return
+            }
+            setPlaying(true)
+          }}
           onPause={() => setPlaying(false)}
         />
 
