@@ -78,7 +78,10 @@ const VideoMessagesPage = () => {
   const sendModal = useDisclosure()
   const [query, setQuery] = useState('')
   const [people, setPeople] = useState([])
+  const [peopleMore, setPeopleMore] = useState(false)
   const [searching, setSearching] = useState(false)
+  const peopleSkipRef = useRef(0)
+  const peopleReqRef = useRef(0)
   const [pickedUser, setPickedUser] = useState(null)
   const [pickedFile, setPickedFile] = useState(null)
   const [previewUrl, setPreviewUrl] = useState('')
@@ -170,42 +173,64 @@ const VideoMessagesPage = () => {
     }
   }, [socket, setVideoMessageUnseenCount, user?._id])
 
-  useEffect(() => {
+  const loadPeople = useCallback(async (more = false) => {
     const q = query.trim()
     if (q.length < 1) {
       setPeople([])
+      setPeopleMore(false)
       return
     }
-    const t = setTimeout(async () => {
-      setSearching(true)
-      try {
-        const me = String(user?._id || '')
-        const load = async (url) => {
-          const res = await fetch(url, { credentials: 'include' })
-          if (!res.ok) return []
-          const data = await res.json()
-          return Array.isArray(data) ? data : data?.users || []
-        }
-        const [fromFollow, fromSearchRaw] = await Promise.all([
-          load(`${API_BASE_URL}/api/user/following?q=${encodeURIComponent(q)}&limit=12`),
-          load(`${API_BASE_URL}/api/user/search?search=${encodeURIComponent(q)}`),
-        ])
-        const fromSearch = fromSearchRaw.filter((u) => u?.isFollowedByMe === true)
-        const seen = new Set()
-        const merged = []
-        for (const u of [...fromFollow, ...fromSearch]) {
-          const id = String(u?._id || '')
-          if (!id || id === me || seen.has(id)) continue
-          seen.add(id)
-          merged.push(u)
-          if (merged.length >= 12) break
-        }
-        setPeople(merged)
-      } catch {
-        setPeople([])
-      } finally {
-        setSearching(false)
+    if (more && (searching || !peopleMore)) return
+    const req = ++peopleReqRef.current
+    setSearching(true)
+    const skip = more ? peopleSkipRef.current : 0
+    try {
+      const me = String(user?._id || '')
+      const res = await fetch(
+        `${API_BASE_URL}/api/user/following?q=${encodeURIComponent(q)}&limit=8&skip=${skip}`,
+        { credentials: 'include' },
+      )
+      const data = res.ok ? await res.json() : { users: [] }
+      let list = Array.isArray(data) ? data : data?.users || []
+      if (!more && list.length === 0) {
+        const res2 = await fetch(
+          `${API_BASE_URL}/api/user/search?search=${encodeURIComponent(q)}`,
+          { credentials: 'include' },
+        )
+        const data2 = res2.ok ? await res2.json() : []
+        const raw = Array.isArray(data2) ? data2 : data2?.users || []
+        list = raw.filter((u) => u?.isFollowedByMe === true)
       }
+      if (req !== peopleReqRef.current) return
+      const page = list.filter((u) => String(u?._id || '') && String(u._id) !== me)
+      setPeople((prev) => {
+        if (!more) return page
+        const seen = new Set(prev.map((x) => String(x._id)))
+        const out = [...prev]
+        for (const u of page) {
+          const id = String(u?._id || '')
+          if (id && !seen.has(id)) out.push(u)
+        }
+        return out
+      })
+      setPeopleMore(!!data?.hasMore)
+      peopleSkipRef.current = Number.isFinite(data?.nextSkip) ? data.nextSkip : skip + page.length
+    } catch {
+      if (!more) setPeople([])
+    } finally {
+      if (req === peopleReqRef.current) setSearching(false)
+    }
+  }, [query, user?._id, searching, peopleMore])
+
+  useEffect(() => {
+    peopleSkipRef.current = 0
+    if (query.trim().length < 1) {
+      setPeople([])
+      setPeopleMore(false)
+      return
+    }
+    const t = setTimeout(() => {
+      loadPeople(false)
     }, 250)
     return () => clearTimeout(t)
   }, [query, user?._id])
@@ -398,39 +423,62 @@ const VideoMessagesPage = () => {
                 <Button size="xs" onClick={() => setPickedUser(null)}>Change</Button>
               </Flex>
             ) : (
-              <>
+              <Box position="relative" mb={3} zIndex={5}>
                 <Input
                   placeholder="Search people you follow"
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
-                  mb={2}
                 />
-                {searching && <Spinner size="sm" mb={2} />}
-                <VStack align="stretch" spacing={1} maxH="180px" overflowY="auto" mb={3}>
-                  {people.map((p) => (
-                    <Flex
-                      key={p._id}
-                      gap={2}
-                      align="center"
-                      p={2}
-                      borderRadius="md"
-                      cursor="pointer"
-                      _hover={{ bg: hoverBg }}
-                      onClick={() => {
-                        setPickedUser(p)
-                        setPeople([])
-                        setQuery('')
-                      }}
-                    >
-                      <Avatar size="sm" src={mediaDisplayUrl(p.profilePic)} name={p.name} />
-                      <Box>
-                        <Text fontSize="sm" fontWeight="semibold">{p.name || p.username}</Text>
-                        <Text fontSize="xs" color={muted}>@{p.username}</Text>
-                      </Box>
-                    </Flex>
-                  ))}
-                </VStack>
-              </>
+                {query.trim().length > 0 && (
+                  <Box
+                    position="absolute"
+                    top="44px"
+                    left={0}
+                    right={0}
+                    bg={card}
+                    border="1px solid"
+                    borderColor={border}
+                    borderRadius="md"
+                    boxShadow="lg"
+                    maxH="240px"
+                    overflowY="auto"
+                    zIndex={6}
+                    onScroll={(e) => {
+                      const el = e.currentTarget
+                      if (peopleMore && !searching && el.scrollTop + el.clientHeight >= el.scrollHeight - 24) {
+                        loadPeople(true)
+                      }
+                    }}
+                  >
+                    {people.map((p) => (
+                      <Flex
+                        key={p._id}
+                        gap={2}
+                        align="center"
+                        p={2}
+                        cursor="pointer"
+                        _hover={{ bg: hoverBg }}
+                        onClick={() => {
+                          setPickedUser(p)
+                          setPeople([])
+                          setPeopleMore(false)
+                          setQuery('')
+                        }}
+                      >
+                        <Avatar size="sm" src={mediaDisplayUrl(p.profilePic)} name={p.name} />
+                        <Box>
+                          <Text fontSize="sm" fontWeight="semibold">{p.name || p.username}</Text>
+                          <Text fontSize="xs" color={muted}>@{p.username}</Text>
+                        </Box>
+                      </Flex>
+                    ))}
+                    {searching && <Flex justify="center" py={2}><Spinner size="sm" /></Flex>}
+                    {!searching && people.length === 0 && (
+                      <Text fontSize="sm" color={muted} p={3}>No one you follow matches</Text>
+                    )}
+                  </Box>
+                )}
+              </Box>
             )}
 
             <input

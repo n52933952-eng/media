@@ -90,8 +90,7 @@ const VideoMessageWatchPage = () => {
         return [...prev, payload.note].sort((a, b) => a.t - b.t)
       })
       setItem((prev) => (prev ? { ...prev, noteCount: (prev.noteCount || 0) + 1 } : prev))
-      // Show it right away at its moment (video) or pop it (reaction).
-      openOverlay(payload.note, { resumeAfter: true, seek: true })
+      // The other person sees this when their playhead reaches that minute.
     }
     const onDel = (payload) => {
       if (String(payload?.videoMessageId) !== String(id)) return

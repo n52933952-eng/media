@@ -1377,20 +1377,24 @@ export const getFollowingUsers = async (req, res) => {
                 ids = (Array.isArray(currentUser?.following) ? currentUser.following : []).slice(0, 500)
             }
 
-            const users = ids.length
+            const found = ids.length
                 ? await User.find({
                     _id: { $in: ids },
                     $or: [{ username: nameRegex }, { name: nameRegex }],
                 })
                     .select('_id username name profilePic bio')
-                    .limit(pageSize)
+                    .sort({ username: 1 })
+                    .skip(skip)
+                    .limit(pageSize + 1)
                     .lean()
                 : []
+            const hasMore = found.length > pageSize
+            const users = hasMore ? found.slice(0, pageSize) : found
 
             return res.status(200).json({
                 users,
-                hasMore: false,
-                nextSkip: users.length,
+                hasMore,
+                nextSkip: skip + users.length,
                 nextCursor: null,
             })
         }
