@@ -52,8 +52,12 @@ export async function captureVideoThumb(file) {
 }
 
 export function fmtTime(sec) {
-  const s = Math.max(0, Math.floor(Number(sec) || 0))
+  const n = Number(sec)
+  if (!Number.isFinite(n) || n < 0) return '0:00'
+  const s = Math.floor(n)
   const m = Math.floor(s / 60)
+  const h = Math.floor(m / 60)
+  if (h > 0) return `${h}:${String(m % 60).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`
   return `${m}:${String(s % 60).padStart(2, '0')}`
 }
 

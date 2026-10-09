@@ -40,6 +40,9 @@ const VideoMessageWatchPage = () => {
   const shownRef = useRef(new Set())
   const lastTRef = useRef(0)
   const resumeAfterRef = useRef(true)
+  const pinRef = useRef(0)
+  const durFixedRef = useRef(false)
+  const askedRef = useRef(new Set())
 
   const [item, setItem] = useState(null)
   const [notes, setNotes] = useState([])
@@ -52,6 +55,7 @@ const VideoMessageWatchPage = () => {
   const [activeNote, setActiveNote] = useState(null)
   const [popReaction, setPopReaction] = useState(null)
   const [recordOpen, setRecordOpen] = useState(false)
+  const [askNow, setAskNow] = useState(null)
 
   const other = item ? otherParty(item, user?._id) : null
   const iAmSender = item ? uidOf(item.sender) === String(user?._id) : false
@@ -96,6 +100,18 @@ const VideoMessageWatchPage = () => {
     const onMarker = (payload) => {
       if (String(payload?.videoMessageId) !== String(id) || !Array.isArray(payload?.markers)) return
       setItem((prev) => (prev ? { ...prev, markers: payload.markers } : prev))
+      const asks = payload.markers.filter((m) => m?.type === 'reply')
+      const last = asks[asks.length - 1]
+      if (!last) return
+      setAskNow(last)
+      const v = videoRef.current
+      if (v) {
+        v.currentTime = Number(last.t) || 0
+        v.pause()
+      }
+      setNow(Number(last.t) || 0)
+      setPlaying(false)
+      showToast('Asked', 'They want a reply or a reaction here', 'info')
     }
     socket.on('videoMessage:note', onNote)
     socket.on('videoMessage:noteDeleted', onDel)
@@ -141,6 +157,11 @@ const VideoMessageWatchPage = () => {
     }
   }, [])
 
+  const takeFinite = (raw) => {
+    const n = Number(raw)
+    return Number.isFinite(n) && n > 0 && n < 1e5 ? n : 0
+  }
+
   const openOverlay = useCallback(
     (note, { resumeAfter = true, seek = true } = {}) => {
       if (!note || note.type !== 'video' || !note.videoUrl) {
@@ -182,6 +203,21 @@ const VideoMessageWatchPage = () => {
     if (t + 0.05 < prev) {
       for (const n of videoNotes) {
         if (n.t > t + 0.2) shownRef.current.delete(String(n._id))
+      }
+      for (const m of item?.markers || []) {
+        if (m.t > t + 0.2) askedRef.current.delete(String(m.t))
+      }
+    }
+    if (!iAmSender && !activeNote) {
+      const ask = (item?.markers || []).find((m) => {
+        if (m?.type !== 'reply' || askedRef.current.has(String(m.t))) return false
+        return m.t >= Math.min(prev, t) - 0.05 && m.t <= Math.max(prev, t) + 0.35
+      })
+      if (ask) {
+        askedRef.current.add(String(ask.t))
+        videoRef.current?.pause()
+        setPlaying(false)
+        setAskNow(ask)
       }
     }
     const hit = videoNotes.find((n) => {
@@ -265,7 +301,10 @@ const VideoMessageWatchPage = () => {
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Failed')
-      if (data.note) setNotes((prev) => [...prev, data.note].sort((a, b) => a.t - b.t))
+      if (data.note) {
+        setNotes((prev) => [...prev, data.note].sort((a, b) => a.t - b.t))
+        openOverlay(data.note, { resumeAfter: true, seek: false })
+      }
     } catch (e) {
       showToast('Error', e.message || 'Failed', 'error')
     } finally {
@@ -304,7 +343,7 @@ const VideoMessageWatchPage = () => {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: 'video', videoUrl, duration: Math.round(durationSec), t: now }),
+        body: JSON.stringify({ type: 'video', videoUrl, duration: Math.round(durationSec), t: pinRef.current }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Failed')
@@ -361,7 +400,7 @@ const VideoMessageWatchPage = () => {
   }
   if (!item) return null
 
-  const dur = duration || item.duration || 1
+  const dur = takeFinite(duration) || takeFinite(item.duration) || 1
 
   return (
     <Box
@@ -412,14 +451,37 @@ const VideoMessageWatchPage = () => {
           }}
           onClick={togglePlay}
           onTimeUpdate={(e) => handleTime(e.currentTarget.currentTime || 0)}
-          onLoadedMetadata={(e) => setDuration(e.currentTarget.duration || item.duration || 0)}
+          onLoadedMetadata={(e) => {
+            const v = e.currentTarget
+            const known = takeFinite(v.duration) || takeFinite(item.duration)
+            if (known) {
+              setDuration(known)
+              return
+            }
+            if (durFixedRef.current) return
+            durFixedRef.current = true
+            const fix = () => {
+              v.removeEventListener('timeupdate', fix)
+              const d = takeFinite(v.duration)
+              try { v.currentTime = 0 } catch { /* ignore */ }
+              if (d) setDuration(d)
+            }
+            v.addEventListener('timeupdate', fix)
+            try { v.currentTime = 1e101 } catch { /* ignore */ }
+          }}
           onPlay={() => setPlaying(true)}
           onPause={() => setPlaying(false)}
         />
 
-        {liveMarker && !activeNote && (
+        {!iAmSender && !activeNote && (askNow || liveMarker?.type === 'reply') && (
+          <Box position="absolute" left="12px" right="12px" bottom="12px" bg="blackAlpha.800" color="white" px={3} py={2.5} borderRadius="xl">
+            <Text fontWeight="bold" fontSize="sm">Wants a reply or a reaction here</Text>
+            <Text fontSize="xs" color="whiteAlpha.800">At {fmtTime((askNow || liveMarker)?.t)} · record a video or tap a reaction</Text>
+          </Box>
+        )}
+        {iAmSender && liveMarker && !activeNote && liveMarker.type !== 'reply' && (
           <Box position="absolute" top="12px" left="12px" bg="blackAlpha.700" color="white" px={3} py={1} borderRadius="full" fontSize="sm">
-            {liveMarker.type === 'reply' ? 'Reply here' : liveMarker.type === 'question' ? `❓ ${liveMarker.text || ''}` : `👀 ${liveMarker.text || 'Look here'}`}
+            {liveMarker.type === 'question' ? `❓ ${liveMarker.text || ''}` : `👀 ${liveMarker.text || 'Look here'}`}
           </Box>
         )}
 
@@ -447,12 +509,21 @@ const VideoMessageWatchPage = () => {
             boxShadow="0 16px 50px rgba(0,0,0,0.55)"
             border="2px solid rgba(255,255,255,0.85)"
           >
-            <video
+              <video
               ref={noteVideoRef}
               playsInline
               preload="auto"
               style={{ width: '100%', display: 'block', aspectRatio: '3 / 4', objectFit: 'cover', background: '#000' }}
-              onEnded={() => closeOverlay(true)}
+              onEnded={() => {
+                const endedT = Number(activeNote?.t) || 0
+                const next = videoNotes.find(
+                  (n) =>
+                    !shownRef.current.has(String(n._id)) &&
+                    Math.abs((Number(n.t) || 0) - endedT) < 0.8,
+                )
+                if (next) openOverlay(next, { resumeAfter: true, seek: false })
+                else closeOverlay(true)
+              }}
             />
             <Flex px={2} py={1.5} align="center" justify="space-between" bg="#161616">
               <Text color="white" fontSize="xs" noOfLines={1}>
@@ -467,60 +538,63 @@ const VideoMessageWatchPage = () => {
       </Box>
 
       <Box bg={card} px={{ base: 3, md: 4 }} py={4}>
-        <Flex align="center" gap={3} mb={3}>
+        <Flex align="center" mb={2}>
           <Button size="sm" onClick={togglePlay} borderRadius="full" minW="40px">
             {playing ? '❚❚' : '▶'}
           </Button>
-          <Text fontSize="xs" color={muted} w="78px">{fmtTime(now)} / {fmtTime(dur)}</Text>
-          <Box
-            flex="1"
-            h="18px"
-            bg="blackAlpha.300"
-            borderRadius="full"
-            position="relative"
-            cursor="pointer"
-            onClick={(e) => {
-              const rect = e.currentTarget.getBoundingClientRect()
-              const pct = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width))
-              seekTo(pct * dur)
-            }}
-          >
-            <Box position="absolute" left={0} top="5px" h="8px" w={`${Math.min(100, (now / dur) * 100)}%`} bg="blue.400" borderRadius="full" />
-            {(item.markers || []).map((m, i) => (
-              <Box
-                key={`m-${i}`}
-                position="absolute"
-                left={`${Math.min(98, (m.t / dur) * 100)}%`}
-                top="2px"
-                w="7px"
-                h="14px"
-                bg="yellow.300"
-                borderRadius="sm"
-                onClick={(e) => {
-                  e.stopPropagation()
-                  seekTo(m.t)
-                }}
-              />
-            ))}
-            {notes.map((n) => (
-              <Box
-                key={n._id}
-                position="absolute"
-                left={`${Math.min(98, (n.t / dur) * 100)}%`}
-                top="-3px"
-                fontSize="15px"
-                transform="translateX(-50%)"
-                cursor="pointer"
-                onClick={(e) => {
-                  e.stopPropagation()
-                  openOverlay(n, { resumeAfter: true, seek: true })
-                }}
-              >
-                {n.type === 'reaction' ? n.reaction : '🎥'}
-              </Box>
-            ))}
-          </Box>
+          <Text fontSize="sm" color={muted} ml={2} fontVariantNumeric="tabular-nums">{fmtTime(now)}</Text>
+          <Box flex="1" />
+          <Text fontSize="sm" color={muted} fontVariantNumeric="tabular-nums">{fmtTime(dur)}</Text>
         </Flex>
+        <Box
+          h="22px"
+          bg="blackAlpha.300"
+          borderRadius="full"
+          position="relative"
+          cursor="pointer"
+          mb={3}
+          onClick={(e) => {
+            const rect = e.currentTarget.getBoundingClientRect()
+            const pct = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width))
+            seekTo(pct * dur)
+          }}
+        >
+          <Box position="absolute" left={0} top="8px" h="6px" w={`${Math.min(100, (now / dur) * 100)}%`} bg="blue.400" borderRadius="full" />
+          {(item.markers || []).map((m, i) => (
+            <Box
+              key={`m-${i}`}
+              position="absolute"
+              left={`${Math.min(98, (m.t / dur) * 100)}%`}
+              top="4px"
+              w="4px"
+              h="14px"
+              bg="yellow.300"
+              borderRadius="sm"
+              onClick={(e) => {
+                e.stopPropagation()
+                seekTo(m.t)
+              }}
+            />
+          ))}
+          {notes.map((n) => (
+            <Box
+              key={n._id}
+              position="absolute"
+              left={`${Math.min(98, (n.t / dur) * 100)}%`}
+              top="-1px"
+              fontSize="13px"
+              transform="translateX(-50%)"
+              cursor="pointer"
+              lineHeight="22px"
+              onClick={(e) => {
+                e.stopPropagation()
+                openOverlay(n, { resumeAfter: true, seek: true })
+              }}
+            >
+              {n.type === 'reaction' ? n.reaction : '●'}
+            </Box>
+          ))}
+        </Box>
 
         <HStack spacing={2} mb={3} flexWrap="wrap">
           {iAmSender ? (
@@ -535,7 +609,12 @@ const VideoMessageWatchPage = () => {
                 isLoading={busy}
                 loadingText={busyHint || 'Working'}
                 onClick={() => {
-                  videoRef.current?.pause()
+                  const v = videoRef.current
+                  const t = v ? v.currentTime || now : now
+                  pinRef.current = t
+                  setNow(t)
+                  v?.pause()
+                  setPlaying(false)
                   setRecordOpen(true)
                 }}
               >
@@ -546,7 +625,12 @@ const VideoMessageWatchPage = () => {
                 borderRadius="full"
                 isDisabled={busy}
                 onClick={() => {
-                  videoRef.current?.pause()
+                  const v = videoRef.current
+                  const t = v ? v.currentTime || now : now
+                  pinRef.current = t
+                  setNow(t)
+                  v?.pause()
+                  setPlaying(false)
                   fileRef.current?.click()
                 }}
               >
@@ -576,8 +660,35 @@ const VideoMessageWatchPage = () => {
           onClose={() => setRecordOpen(false)}
           maxSeconds={20}
           title={`Reply at ${fmtTime(now)}`}
-          onReady={(file) => addVideoNote(file)}
+          onReady={(file) => {
+            if (file) addVideoNote(file)
+            else videoRef.current?.play().catch(() => {})
+          }}
         />
+
+        {!iAmSender && (item.markers || []).some((m) => m.type === 'reply') && (
+          <Box mb={3}>
+            <Text fontSize="sm" fontWeight="bold" mb={1}>Asked you</Text>
+            {(item.markers || []).filter((m) => m.type === 'reply').map((m, i) => (
+              <Flex
+                key={`ask-${i}`}
+                gap={2}
+                align="center"
+                py={1.5}
+                cursor="pointer"
+                onClick={() => {
+                  setAskNow(m)
+                  seekTo(m.t)
+                  videoRef.current?.pause()
+                  setPlaying(false)
+                }}
+              >
+                <Text w="44px" fontSize="sm" color={muted}>{fmtTime(m.t)}</Text>
+                <Text fontSize="sm">Reply or reaction here</Text>
+              </Flex>
+            ))}
+          </Box>
+        )}
 
         {notes.length > 0 && (
           <Box>

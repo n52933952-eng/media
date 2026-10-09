@@ -171,7 +171,7 @@ const VideoMessagesPage = () => {
 
   useEffect(() => {
     const q = query.trim()
-    if (q.length < 2) {
+    if (q.length < 1) {
       setPeople([])
       return
     }
@@ -179,7 +179,7 @@ const VideoMessagesPage = () => {
       setSearching(true)
       try {
         const res = await fetch(
-          `${API_BASE_URL}/api/user/search?search=${encodeURIComponent(q)}`,
+          `${API_BASE_URL}/api/user/following?q=${encodeURIComponent(q)}&limit=12`,
           { credentials: 'include' },
         )
         const data = await res.json()
@@ -374,7 +374,7 @@ const VideoMessagesPage = () => {
             ) : (
               <>
                 <Input
-                  placeholder="Search a person"
+                  placeholder="Search people you follow"
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   mb={2}

@@ -2,6 +2,7 @@ import mongoose from 'mongoose'
 import VideoMessage from '../models/videoMessage.js'
 import VideoNote from '../models/videoNote.js'
 import User from '../models/user.js'
+import Follow from '../models/follow.js'
 import { assertManagedMediaUrls } from '../services/r2Presign.js'
 import { deleteByUrl } from '../services/r2Storage.js'
 import { getIO, getUserSelfRoomId } from '../socket/socket.js'
@@ -134,6 +135,12 @@ export const sendVideoMessage = async (req, res) => {
 
     const receiver = await User.findById(receiverId).select('_id').lean()
     if (!receiver) return res.status(404).json({ error: 'User not found' })
+
+    // Private to people you follow. One indexed lookup.
+    const follows = await Follow.exists({ followerId: senderId, followeeId: receiverId })
+    if (!follows) {
+      return res.status(403).json({ error: 'You can only send video messages to people you follow' })
+    }
 
     const safeDuration = Math.min(MAX_DURATION_SEC, toNum(duration))
 
