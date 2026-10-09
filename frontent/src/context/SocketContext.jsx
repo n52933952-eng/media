@@ -34,6 +34,7 @@ export const SocketContextProvider = ({ children }) => {
   const [busyUsers, setBusyUsers] = useState(new Set()); // Track which users are busy
   const [totalUnreadCount, setTotalUnreadCount] = useState(0); // Global unread message count
   const [notificationCount, setNotificationCount] = useState(0); // Global unread notification count
+  const [videoMessageUnseenCount, setVideoMessageUnseenCount] = useState(0)
   const [chessChallenge, setChessChallenge] = useState(null); // Track incoming chess challenge
   const [cardChallenge, setCardChallenge] = useState(null);   // Track incoming card (Go Fish) challenge
 
@@ -50,6 +51,20 @@ export const SocketContextProvider = ({ children }) => {
   const messageSoundAudio = useRef(new Audio(messageSound)); // Audio for new unread message notification
   const chessToneAudio = useRef(new Audio(chessTone)); // Audio for chess challenge notification
   const selectedConversationIdRef = useRef(null); // Track which conversation is currently open
+
+  const refreshVideoMessageUnseenCount = useCallback(async () => {
+    const uid = userIdToStr(user?._id)
+    if (!uid) {
+      setVideoMessageUnseenCount(0)
+      return
+    }
+    try {
+      const socketUrl = import.meta.env.PROD ? window.location.origin : 'http://localhost:5000'
+      const res = await fetch(`${socketUrl}/api/video-message/unseen-count`, { credentials: 'include' })
+      const data = await res.json()
+      if (res.ok && typeof data.unseenCount === 'number') setVideoMessageUnseenCount(data.unseenCount)
+    } catch (_) {}
+  }, [user?._id])
 
   const refreshUnreadMessageCount = useCallback(async () => {
     const uid = userIdToStr(user?._id)
@@ -443,6 +458,27 @@ export const SocketContextProvider = ({ children }) => {
     };
     fetchInitialNotificationCount();
 
+    const fetchVideoMessageUnseen = async () => {
+      if (!currentUserId) {
+        setVideoMessageUnseenCount(0)
+        return
+      }
+      try {
+        const socketUrl = import.meta.env.PROD ? window.location.origin : 'http://localhost:5000'
+        const res = await fetch(`${socketUrl}/api/video-message/unseen-count`, { credentials: 'include' })
+        const data = await res.json()
+        if (res.ok && typeof data.unseenCount === 'number') setVideoMessageUnseenCount(data.unseenCount)
+      } catch (_) {}
+    }
+    fetchVideoMessageUnseen()
+
+    newSocket?.on('videoMessage:new', () => {
+      setVideoMessageUnseenCount((n) => (n || 0) + 1)
+    })
+    newSocket?.on('videoMessage:note', () => {
+      setVideoMessageUnseenCount((n) => (n || 0) + 1)
+    })
+
     // Listen for football match updates
     newSocket?.on('footballMatchUpdate', (data) => {
       console.log('⚽ Football match update received:', data);
@@ -472,6 +508,8 @@ export const SocketContextProvider = ({ children }) => {
       newSocket?.off('newMessage');
       newSocket?.off('newNotification');
       newSocket?.off('notificationDeleted');
+      newSocket?.off('videoMessage:new');
+      newSocket?.off('videoMessage:note');
       newSocket?.off('footballMatchUpdate');
       newSocket?.off('footballPageUpdate');
       newSocket?.off('storyStripChanged');
@@ -1607,6 +1645,9 @@ export const SocketContextProvider = ({ children }) => {
         totalUnreadCount, // Export total unread message count
         notificationCount, // Export unread notification count
         setNotificationCount, // Function to update notification count
+        videoMessageUnseenCount,
+        setVideoMessageUnseenCount,
+        refreshVideoMessageUnseenCount,
         setSelectedConversationId, // Function to update selected conversation for notification control
         chessChallenge, // Export chess challenge state
         acceptChessChallenge, // Function to accept chess challenge

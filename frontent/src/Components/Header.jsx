@@ -5,7 +5,7 @@ import { IoIosLogOut } from 'react-icons/io'
 import useShowToast from '../hooks/useShowToast.js'
 import { TiHomeOutline } from "react-icons/ti";
 import { FaRegMessage } from "react-icons/fa6";
-import { IoNotificationsOutline, IoPeopleOutline } from "react-icons/io5";
+import { IoNotificationsOutline, IoPeopleOutline, IoVideocamOutline } from "react-icons/io5";
 
 import{UserContext} from '../context/UserContext'
 import{SocketContext} from '../context/SocketContext'
@@ -17,7 +17,7 @@ const Header = () => {
   const{colorMode,toggleColorMode}=useColorMode()
 
    const{user,setUser}=useContext(UserContext)
-   const {socket, totalUnreadCount, notificationCount, endChessGameOnNavigate, endCardGameOnNavigate, endRaceGameOnNavigate} = useContext(SocketContext) || {}
+   const {socket, totalUnreadCount, notificationCount, videoMessageUnseenCount, endChessGameOnNavigate, endCardGameOnNavigate, endRaceGameOnNavigate} = useContext(SocketContext) || {}
    const navigate = useNavigate()
    const showToast = useShowToast()
 
@@ -170,6 +170,41 @@ const Header = () => {
             aria-label="Explore people"
           >
             <IoPeopleOutline size={24} />
+          </Box>
+
+          <Box position="relative" display="flex" alignItems="center">
+            <Box
+              as="button"
+              onClick={(e) => {
+                e.preventDefault()
+                handleNavigation('/video-messages', e)
+              }}
+              cursor="pointer"
+              display="flex"
+              alignItems="center"
+              aria-label="Video messages"
+            >
+              <IoVideocamOutline size={24} />
+            </Box>
+            {videoMessageUnseenCount > 0 && (
+              <Badge
+                position="absolute"
+                top="-8px"
+                right="-8px"
+                borderRadius="full"
+                bg="red.500"
+                color="white"
+                fontSize="10px"
+                minW="18px"
+                h="18px"
+                display="flex"
+                alignItems="center"
+                justifyContent="center"
+                px={1}
+              >
+                {videoMessageUnseenCount > 99 ? '99+' : videoMessageUnseenCount}
+              </Badge>
+            )}
           </Box>
 
           <Box position="relative" display="flex" alignItems="center">

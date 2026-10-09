@@ -9,6 +9,7 @@ const ALLOWED_FOLDERS = new Set([
   'stories',
   'profile-pics',
   'uploads',
+  'video-messages',
 ])
 
 const PRESIGN_EXPIRES_SEC = 15 * 60

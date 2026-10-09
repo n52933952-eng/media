@@ -15,6 +15,7 @@ import CallRoute from './routes/call.js'
 import StoryRoute from './routes/story.js'
 import MediaRoute from './routes/media.js'
 import CapsuleRoute from './routes/capsule.js'
+import VideoMessageRoute from './routes/videoMessage.js'
 import { processDueCapsules } from './controller/capsule.js'
 import { initializeSocket } from './socket/socket.js'
 import { initializeFootballCron } from './services/footballCron.js'
@@ -249,6 +250,7 @@ app.use("/api/call",CallRoute)
 app.use("/api/story",StoryRoute)
 app.use("/api/media",MediaRoute)
 app.use("/api/capsule",CapsuleRoute)
+app.use("/api/video-message",VideoMessageRoute)
 
 // 404 handler for API routes (before static files and catch-all)
 app.use('/api/*', (req, res) => {

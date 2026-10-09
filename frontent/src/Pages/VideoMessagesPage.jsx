@@ -1,0 +1,363 @@
+import React, { useCallback, useContext, useEffect, useRef, useState } from 'react'
+import {
+  Avatar,
+  Badge,
+  Box,
+  Button,
+  Flex,
+  Heading,
+  HStack,
+  Input,
+  Modal,
+  ModalBody,
+  ModalCloseButton,
+  ModalContent,
+  ModalHeader,
+  ModalOverlay,
+  Spinner,
+  Text,
+  useColorModeValue,
+  useDisclosure,
+  VStack,
+} from '@chakra-ui/react'
+import { useNavigate } from 'react-router-dom'
+import { UserContext } from '../context/UserContext'
+import { SocketContext } from '../context/SocketContext'
+import useShowToast from '../hooks/useShowToast'
+import API_BASE_URL from '../config/api'
+import { uploadMediaToR2 } from '../utils/directR2Upload'
+import { mediaDisplayUrl } from '../utils/mediaUrl.js'
+import { fmtTime, otherParty, uidOf } from '../utils/videoMessage.js'
+
+const PAGE = 15
+
+function isUnseen(item, meId) {
+  const me = String(meId)
+  if (uidOf(item.receiver) === me && !item.seenAt) return true
+  if (uidOf(item.sender) === me && item.senderHasNewNotes) return true
+  return false
+}
+
+async function videoDurationOf(file) {
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(file)
+    const v = document.createElement('video')
+    v.preload = 'metadata'
+    v.onloadedmetadata = () => {
+      const d = v.duration
+      URL.revokeObjectURL(url)
+      resolve(Number.isFinite(d) ? d : 0)
+    }
+    v.onerror = () => {
+      URL.revokeObjectURL(url)
+      resolve(0)
+    }
+    v.src = url
+  })
+}
+
+const VideoMessagesPage = () => {
+  const { user } = useContext(UserContext)
+  const { socket, videoMessageUnseenCount, setVideoMessageUnseenCount } = useContext(SocketContext) || {}
+  const showToast = useShowToast()
+  const navigate = useNavigate()
+  const bg = useColorModeValue('gray.50', '#101010')
+  const card = useColorModeValue('white', '#1a1a1a')
+  const border = useColorModeValue('#e1e4ea', '#2d3548')
+  const muted = useColorModeValue('gray.600', 'gray.400')
+  const hoverBg = useColorModeValue('gray.100', '#222')
+
+  const [items, setItems] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [loadingMore, setLoadingMore] = useState(false)
+  const [hasMore, setHasMore] = useState(true)
+  const cursorRef = useRef(null)
+  const fetchingRef = useRef(false)
+
+  const sendModal = useDisclosure()
+  const [query, setQuery] = useState('')
+  const [people, setPeople] = useState([])
+  const [searching, setSearching] = useState(false)
+  const [pickedUser, setPickedUser] = useState(null)
+  const [pickedFile, setPickedFile] = useState(null)
+  const [sending, setSending] = useState(false)
+  const fileRef = useRef(null)
+
+  const load = useCallback(async (more = false) => {
+    if (fetchingRef.current) return
+    if (more && !cursorRef.current) return
+    fetchingRef.current = true
+    if (more) setLoadingMore(true)
+    try {
+      let url = `${API_BASE_URL}/api/video-message?limit=${PAGE}`
+      if (more && cursorRef.current) url += `&cursor=${encodeURIComponent(cursorRef.current)}`
+      const res = await fetch(url, { credentials: 'include' })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Failed to load')
+      const page = Array.isArray(data.items) ? data.items : []
+      cursorRef.current = data.nextCursor || null
+      setHasMore(!!data.hasMore)
+      setItems((prev) => {
+        if (!more) return page
+        const seen = new Set(prev.map((x) => String(x._id)))
+        const out = [...prev]
+        for (const row of page) {
+          if (row?._id && !seen.has(String(row._id))) {
+            seen.add(String(row._id))
+            out.push(row)
+          }
+        }
+        return out
+      })
+    } catch (e) {
+      showToast('Error', e.message || 'Failed to load', 'error')
+    } finally {
+      fetchingRef.current = false
+      setLoading(false)
+      setLoadingMore(false)
+    }
+  }, [showToast])
+
+  useEffect(() => {
+    load(false)
+  }, [load])
+
+  useEffect(() => {
+    if (!socket) return
+    const onNew = (row) => {
+      if (!row?._id) return
+      setItems((prev) => {
+        if (prev.some((x) => String(x._id) === String(row._id))) return prev
+        return [row, ...prev]
+      })
+    }
+    const onNote = (payload) => {
+      const id = String(payload?.videoMessageId || '')
+      if (!id) return
+      setItems((prev) =>
+        prev.map((x) =>
+          String(x._id) === id
+            ? { ...x, noteCount: (x.noteCount || 0) + 1, senderHasNewNotes: uidOf(x.sender) === String(user?._id) }
+            : x,
+        ),
+      )
+    }
+    const onDeleted = (payload) => {
+      const id = String(payload?._id || '')
+      if (!id) return
+      setItems((prev) => prev.filter((x) => String(x._id) !== id))
+    }
+    socket.on('videoMessage:new', onNew)
+    socket.on('videoMessage:note', onNote)
+    socket.on('videoMessage:deleted', onDeleted)
+    return () => {
+      socket.off('videoMessage:new', onNew)
+      socket.off('videoMessage:note', onNote)
+      socket.off('videoMessage:deleted', onDeleted)
+    }
+  }, [socket, setVideoMessageUnseenCount, user?._id])
+
+  useEffect(() => {
+    const q = query.trim()
+    if (q.length < 2) {
+      setPeople([])
+      return
+    }
+    const t = setTimeout(async () => {
+      setSearching(true)
+      try {
+        const res = await fetch(
+          `${API_BASE_URL}/api/user/search?search=${encodeURIComponent(q)}`,
+          { credentials: 'include' },
+        )
+        const data = await res.json()
+        const list = Array.isArray(data) ? data : data?.users || []
+        setPeople(list.filter((u) => String(u?._id) !== String(user?._id)).slice(0, 12))
+      } catch {
+        setPeople([])
+      } finally {
+        setSearching(false)
+      }
+    }, 250)
+    return () => clearTimeout(t)
+  }, [query, user?._id])
+
+  const handleSend = async () => {
+    if (!pickedUser?._id || !pickedFile || sending) return
+    setSending(true)
+    try {
+      const duration = await videoDurationOf(pickedFile)
+      if (duration > 600) {
+        showToast('Error', 'Video must be 10 minutes or less', 'error')
+        return
+      }
+      const videoUrl = await uploadMediaToR2(pickedFile, 'video-messages', { skipCompress: true })
+      const res = await fetch(`${API_BASE_URL}/api/video-message`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          receiverId: pickedUser._id,
+          videoUrl,
+          duration: Math.round(duration),
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Failed to send')
+      setItems((prev) => [data, ...prev.filter((x) => String(x._id) !== String(data._id))])
+      sendModal.onClose()
+      setQuery('')
+      setPeople([])
+      setPickedUser(null)
+      setPickedFile(null)
+      showToast('Sent', 'Video message sent', 'success')
+    } catch (e) {
+      showToast('Error', e.message || 'Failed to send', 'error')
+    } finally {
+      setSending(false)
+    }
+  }
+
+  return (
+    <Box bg={bg} minH="calc(100vh - 72px)" px={1} py={4}>
+      <Flex justify="space-between" align="center" mb={4}>
+        <Heading size="md">Video Messages</Heading>
+        <Button size="sm" colorScheme="blue" onClick={sendModal.onOpen}>
+          + Send video
+        </Button>
+      </Flex>
+      <Text fontSize="sm" color={muted} mb={4}>
+        Private 1-to-1. Reply inside any second of the video.
+      </Text>
+
+      {loading ? (
+        <Flex justify="center" py={16}><Spinner /></Flex>
+      ) : items.length === 0 ? (
+        <Box bg={card} border="1px solid" borderColor={border} borderRadius="lg" p={8} textAlign="center">
+          <Text fontSize="2xl" mb={2}>📹</Text>
+          <Text fontWeight="bold" mb={1}>No video messages yet</Text>
+          <Text fontSize="sm" color={muted}>Send a video to one person. They can reply on any moment.</Text>
+        </Box>
+      ) : (
+        <VStack spacing={2} align="stretch">
+          {items.map((item) => {
+            const other = otherParty(item, user?._id)
+            const unseen = isUnseen(item, user?._id)
+            const mine = uidOf(item.sender) === String(user?._id)
+            return (
+              <Flex
+                key={item._id}
+                bg={card}
+                border="1px solid"
+                borderColor={unseen ? 'blue.400' : border}
+                borderRadius="lg"
+                p={3}
+                gap={3}
+                cursor="pointer"
+                align="center"
+                onClick={() => {
+                  if (unseen) setVideoMessageUnseenCount?.((n) => Math.max(0, (n || 0) - 1))
+                  navigate(`/video-messages/${item._id}`)
+                }}
+              >
+                <Avatar src={mediaDisplayUrl(other?.profilePic)} name={other?.name || other?.username} size="md" />
+                <Box flex="1" minW={0}>
+                  <HStack>
+                    <Text fontWeight={unseen ? 'bold' : 'semibold'} noOfLines={1}>
+                      {other?.name || other?.username || 'User'}
+                    </Text>
+                    {unseen && <Badge colorScheme="blue">new</Badge>}
+                  </HStack>
+                  <Text fontSize="sm" color={muted}>
+                    {mine ? 'You sent' : 'Sent you'} · {fmtTime(item.duration)} · {item.noteCount || 0} replies
+                  </Text>
+                </Box>
+                <Text fontSize="lg">▶</Text>
+              </Flex>
+            )
+          })}
+          {hasMore && (
+            <Button variant="ghost" isLoading={loadingMore} onClick={() => load(true)}>
+              Load more
+            </Button>
+          )}
+        </VStack>
+      )}
+
+      <Modal isOpen={sendModal.isOpen} onClose={sendModal.onClose} isCentered>
+        <ModalOverlay />
+        <ModalContent bg={card}>
+          <ModalHeader>Send video message</ModalHeader>
+          <ModalCloseButton />
+          <ModalBody pb={6}>
+            <Text fontSize="sm" mb={2}>To</Text>
+            {pickedUser ? (
+              <Flex align="center" gap={2} mb={3}>
+                <Avatar size="sm" src={mediaDisplayUrl(pickedUser.profilePic)} name={pickedUser.name} />
+                <Text flex="1">{pickedUser.name || pickedUser.username}</Text>
+                <Button size="xs" onClick={() => setPickedUser(null)}>Change</Button>
+              </Flex>
+            ) : (
+              <>
+                <Input
+                  placeholder="Search a person"
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  mb={2}
+                />
+                {searching && <Spinner size="sm" mb={2} />}
+                <VStack align="stretch" spacing={1} maxH="180px" overflowY="auto" mb={3}>
+                  {people.map((p) => (
+                    <Flex
+                      key={p._id}
+                      gap={2}
+                      align="center"
+                      p={2}
+                      borderRadius="md"
+                      cursor="pointer"
+                      _hover={{ bg: hoverBg }}
+                      onClick={() => {
+                        setPickedUser(p)
+                        setPeople([])
+                        setQuery('')
+                      }}
+                    >
+                      <Avatar size="sm" src={mediaDisplayUrl(p.profilePic)} name={p.name} />
+                      <Box>
+                        <Text fontSize="sm" fontWeight="semibold">{p.name || p.username}</Text>
+                        <Text fontSize="xs" color={muted}>@{p.username}</Text>
+                      </Box>
+                    </Flex>
+                  ))}
+                </VStack>
+              </>
+            )}
+
+            <input
+              ref={fileRef}
+              type="file"
+              accept="video/*"
+              hidden
+              onChange={(e) => setPickedFile(e.target.files?.[0] || null)}
+            />
+            <Button size="sm" variant="outline" mb={3} onClick={() => fileRef.current?.click()}>
+              {pickedFile ? pickedFile.name : 'Pick or record video'}
+            </Button>
+
+            <Button
+              colorScheme="blue"
+              w="full"
+              isDisabled={!pickedUser || !pickedFile}
+              isLoading={sending}
+              onClick={handleSend}
+            >
+              Send
+            </Button>
+          </ModalBody>
+        </ModalContent>
+      </Modal>
+    </Box>
+  )
+}
+
+export default VideoMessagesPage

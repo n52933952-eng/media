@@ -21,6 +21,8 @@ import WeatherPage from './Pages/WeatherPage'
 import NewsPage from './Pages/NewsPage'
 import NotificationsPage from './Pages/NotificationsPage'
 import ExplorePage from './Pages/ExplorePage'
+import VideoMessagesPage from './Pages/VideoMessagesPage'
+import VideoMessageWatchPage from './Pages/VideoMessageWatchPage'
 import CountryRequiredModal from './Components/CountryRequiredModal'
 import ChessGamePage from './Pages/ChessGamePage'
 import CardGamePage from './Pages/CardGamePage'
@@ -122,7 +124,7 @@ const AppContent = () => {
   // Check if current path is a user page (e.g., /username, but not /username/post/123 or other routes)
   const pathParts = location.pathname.split('/').filter(Boolean)
   const isUserPage = pathParts.length === 1 &&
-                     !['sign', 'update', 'football', 'weather', 'news', 'notifications', 'explore', 'chess', 'card', 'race', 'home', 'messages', 'welcome', 'about', 'privacy', 'terms', 'live', 'chat'].includes(pathParts[0])
+                     !['sign', 'update', 'football', 'weather', 'news', 'notifications', 'explore', 'video-messages', 'chess', 'card', 'race', 'home', 'messages', 'welcome', 'about', 'privacy', 'terms', 'live', 'chat'].includes(pathParts[0])
   // Check if it's the current user's own page
   const isOwnUserPage = isUserPage && user && pathParts[0] === user.username
 
@@ -253,6 +255,8 @@ const AppContent = () => {
                 <Route path="/news" element={<NewsPage/>} />
                 <Route path="/notifications" element={user ? <NotificationsPage /> : <Navigate to="/" />} />
                 <Route path="/explore" element={user ? <ExplorePage /> : <Navigate to="/" />} />
+                <Route path="/video-messages/:id" element={user ? <VideoMessageWatchPage /> : <Navigate to="/" />} />
+                <Route path="/video-messages" element={user ? <VideoMessagesPage /> : <Navigate to="/" />} />
                 <Route path="/:username" element={user ?<UserPage/> : <Navigate to="/"/>}/>
                 <Route path="/chess/:opponentId" element={user ? <ChessGamePage /> : <Navigate to="/" />} />
                 <Route path="/card/:opponentId" element={user ? <CardGamePage /> : <Navigate to="/" />} />
