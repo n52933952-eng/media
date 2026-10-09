@@ -1362,97 +1362,36 @@ export const getFollowingUsers = async (req, res) => {
                 return res.status(200).json({ users: [], hasMore: false, nextSkip: 0, nextCursor: null })
             }
             const escaped = searchQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+            const nameRegex = new RegExp(escaped, 'i')
 
-            const followMatch = { followerId: subjectId }
-            if (useCursor) {
-                if (!mongoose.Types.ObjectId.isValid(cursorRaw)) {
-                    return res.status(400).json({ error: 'Invalid cursor' })
-                }
-                followMatch._id = { $lt: new mongoose.Types.ObjectId(cursorRaw) }
+            // Ids first, then one user query. Lookup+regex was returning nobody
+            // when followeeId types did not match the users collection.
+            const followDocs = await Follow.find({ followerId: subjectId })
+                .select('followeeId')
+                .sort({ _id: -1 })
+                .limit(500)
+                .lean()
+            let ids = followDocs.map((d) => d.followeeId).filter(Boolean)
+            if (!ids.length) {
+                const currentUser = await User.findById(subjectId).select('following').lean()
+                ids = (Array.isArray(currentUser?.following) ? currentUser.following : []).slice(0, 500)
             }
 
-            const searchAgg = await Follow.aggregate([
-                { $match: followMatch },
-                { $sort: { _id: -1 } },
-                {
-                    $lookup: {
-                        from: 'users',
-                        localField: 'followeeId',
-                        foreignField: '_id',
-                        as: 'user',
-                        pipeline: [
-                            {
-                                $project: {
-                                    _id: 1,
-                                    username: 1,
-                                    name: 1,
-                                    profilePic: 1,
-                                    bio: 1,
-                                },
-                            },
-                        ],
-                    },
-                },
-                { $unwind: '$user' },
-                {
-                    $match: {
-                        $or: [
-                            { 'user.username': { $regex: escaped, $options: 'i' } },
-                            { 'user.name': { $regex: escaped, $options: 'i' } },
-                        ],
-                    },
-                },
-                { $limit: pageSize + 1 },
-                {
-                    $project: {
-                        followId: '$_id',
-                        user: 1,
-                    },
-                },
-            ])
-
-            let hasMore = searchAgg.length > pageSize
-            let slice = hasMore ? searchAgg.slice(0, pageSize) : searchAgg
-
-            // Legacy fallback when Follow collection is empty for this user.
-            if (!slice.length && !useCursor) {
-                const c = await Follow.countDocuments({ followerId: subjectId })
-                if (c === 0) {
-                    const currentUser = await User.findById(subjectId).select('following').lean()
-                    const legacyFollowing = Array.isArray(currentUser?.following) ? currentUser.following : []
-                    const legacyIds = legacyFollowing.map((id) => id?.toString?.()).filter(Boolean)
-                    if (legacyIds.length > 0) {
-                        const legacyUsers = await User.find({
-                            _id: { $in: legacyIds },
-                            $or: [
-                                { username: { $regex: escaped, $options: 'i' } },
-                                { name: { $regex: escaped, $options: 'i' } },
-                            ],
-                        })
-                            .select('_id username name profilePic bio')
-                            .limit(pageSize + 1)
-                            .lean()
-                        hasMore = legacyUsers.length > pageSize
-                        const users = hasMore ? legacyUsers.slice(0, pageSize) : legacyUsers
-                        return res.status(200).json({
-                            users,
-                            hasMore,
-                            nextSkip: users.length,
-                            nextCursor: null,
-                        })
-                    }
-                }
-            }
-
-            const users = slice.map((row) => row.user)
-            const nextCursor =
-                hasMore && slice.length > 0 ? String(slice[slice.length - 1].followId) : null
+            const users = ids.length
+                ? await User.find({
+                    _id: { $in: ids },
+                    $or: [{ username: nameRegex }, { name: nameRegex }],
+                })
+                    .select('_id username name profilePic bio')
+                    .limit(pageSize)
+                    .lean()
+                : []
 
             return res.status(200).json({
                 users,
-                hasMore,
-                nextSkip: skip + users.length,
-                nextCursor,
+                hasMore: false,
+                nextSkip: users.length,
+                nextCursor: null,
             })
         }
 

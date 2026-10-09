@@ -81,6 +81,7 @@ const VideoMessagesPage = () => {
   const [searching, setSearching] = useState(false)
   const [pickedUser, setPickedUser] = useState(null)
   const [pickedFile, setPickedFile] = useState(null)
+  const [previewUrl, setPreviewUrl] = useState('')
   const [sending, setSending] = useState(false)
   const [sendHint, setSendHint] = useState('')
   const [recordOpen, setRecordOpen] = useState(false)
@@ -178,13 +179,28 @@ const VideoMessagesPage = () => {
     const t = setTimeout(async () => {
       setSearching(true)
       try {
-        const res = await fetch(
-          `${API_BASE_URL}/api/user/following?q=${encodeURIComponent(q)}&limit=12`,
-          { credentials: 'include' },
-        )
-        const data = await res.json()
-        const list = Array.isArray(data) ? data : data?.users || []
-        setPeople(list.filter((u) => String(u?._id) !== String(user?._id)).slice(0, 12))
+        const me = String(user?._id || '')
+        const load = async (url) => {
+          const res = await fetch(url, { credentials: 'include' })
+          if (!res.ok) return []
+          const data = await res.json()
+          return Array.isArray(data) ? data : data?.users || []
+        }
+        const [fromFollow, fromSearchRaw] = await Promise.all([
+          load(`${API_BASE_URL}/api/user/following?q=${encodeURIComponent(q)}&limit=12`),
+          load(`${API_BASE_URL}/api/user/search?search=${encodeURIComponent(q)}`),
+        ])
+        const fromSearch = fromSearchRaw.filter((u) => u?.isFollowedByMe === true)
+        const seen = new Set()
+        const merged = []
+        for (const u of [...fromFollow, ...fromSearch]) {
+          const id = String(u?._id || '')
+          if (!id || id === me || seen.has(id)) continue
+          seen.add(id)
+          merged.push(u)
+          if (merged.length >= 12) break
+        }
+        setPeople(merged)
       } catch {
         setPeople([])
       } finally {
@@ -193,6 +209,16 @@ const VideoMessagesPage = () => {
     }, 250)
     return () => clearTimeout(t)
   }, [query, user?._id])
+
+  useEffect(() => {
+    if (!pickedFile) {
+      setPreviewUrl('')
+      return
+    }
+    const url = URL.createObjectURL(pickedFile)
+    setPreviewUrl(url)
+    return () => URL.revokeObjectURL(url)
+  }, [pickedFile])
 
   const handleSend = async () => {
     if (!pickedUser?._id || !pickedFile || sending) return
@@ -422,10 +448,21 @@ const VideoMessagesPage = () => {
                 Record
               </Button>
             </Flex>
-            {pickedFile && (
-              <Text fontSize="sm" color={muted} mb={3} noOfLines={1}>
-                Ready: {pickedFile.name}
-              </Text>
+            {previewUrl && (
+              <Flex align="center" gap={3} mb={3}>
+                <Box w="72px" h="96px" borderRadius="md" overflow="hidden" bg="black" flexShrink={0}>
+                  <video
+                    src={previewUrl}
+                    muted
+                    playsInline
+                    preload="metadata"
+                    style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                  />
+                </Box>
+                <Text fontSize="sm" color={muted} noOfLines={2}>
+                  Video ready
+                </Text>
+              </Flex>
             )}
             <VideoRecordModal
               isOpen={recordOpen}
