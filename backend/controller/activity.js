@@ -9,8 +9,8 @@ const ACTIVITY_RETENTION_MS = ACTIVITY_RETENTION_HOURS * 60 * 60 * 1000
 // Max activities kept per creator. Keep server + clients in sync.
 export const ACTIVITY_MAX_PER_USER = 200
 
-/** Fan-out newActivity to followers' self-rooms in the background (non-blocking). */
-function emitActivityToFollowersInBackground(userId, activityPayload) {
+/** Fan-out an activity event to followers' self-rooms in the background (non-blocking). */
+function emitActivityToFollowersInBackground(userId, activityPayload, eventName = 'newActivity') {
   setImmediate(async () => {
     try {
       const io = getIO()
@@ -35,12 +35,41 @@ function emitActivityToFollowersInBackground(userId, activityPayload) {
       const BATCH = 200
       for (let i = 0; i < rooms.length; i += BATCH) {
         const chunk = rooms.slice(i, i + BATCH)
-        io.to(chunk).emit('newActivity', activityPayload)
+        io.to(chunk).emit(eventName, activityPayload)
       }
     } catch (error) {
       console.error('Error emitting activity to followers:', error?.message || error)
     }
   })
+}
+
+/**
+ * Undo of a like / comment: drop the activity row it created and tell followers'
+ * open Activity screens to remove it. Same bounded fan-out as `newActivity`, so
+ * if creating scales, undoing scales. `commentText` pins a comment activity to
+ * the exact comment deleted (first 50 chars, same as createActivity stores).
+ */
+export const deleteActivities = async ({ userId, type, postId, commentText }) => {
+  try {
+    if (!userId || !type || !postId) return 0
+    const filter = { userId, type, postId }
+    if (commentText != null) filter['metadata.commentText'] = commentText.substring(0, 50)
+
+    const docs = await Activity.find(filter).select('_id').lean()
+    if (!docs.length) return 0
+    const ids = docs.map((d) => d._id)
+    await Activity.deleteMany({ _id: { $in: ids } })
+
+    emitActivityToFollowersInBackground(
+      userId,
+      { ids: ids.map(String), userId: userId.toString(), type, postId: postId.toString() },
+      'activityDeleted',
+    )
+    return ids.length
+  } catch (error) {
+    console.error('Error deleting activities:', error)
+    return 0
+  }
 }
 
 // Create an activity and emit to followers

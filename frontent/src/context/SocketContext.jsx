@@ -356,6 +356,11 @@ export const SocketContextProvider = ({ children }) => {
     // Listen for notification deletions (e.g., when user unfollows)
     newSocket?.on('notificationDeleted', (data) => {
       console.log('🗑️ Notification deleted via socket:', data)
+      // Like / comment undone: server tells how many unread it removed.
+      if (typeof data?.unreadRemoved === 'number' && data.unreadRemoved > 0) {
+        setNotificationCount(prev => Math.max(0, prev - data.unreadRemoved))
+        return
+      }
       // Decrease count if a follow notification was deleted
       if (data.type === 'follow') {
         setNotificationCount(prev => Math.max(0, prev - 1))

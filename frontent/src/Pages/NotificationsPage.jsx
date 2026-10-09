@@ -116,6 +116,13 @@ const NotificationsPage = () => {
 
         const handleNotificationDeleted = (data) => {
             console.log('🗑️ Notification deleted via socket:', data)
+            // Like / comment undone: server sends the exact ids it removed.
+            // Badge count is adjusted in SocketContext (always mounted) to avoid double-counting.
+            if (Array.isArray(data?.ids) && data.ids.length) {
+                const gone = new Set(data.ids.map(String))
+                setNotifications(prev => prev.filter(n => !gone.has(String(n._id))))
+                return
+            }
             // Remove follow notifications from the specified user
             if (data.type === 'follow' && data.from) {
                 setNotifications(prev => {

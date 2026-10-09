@@ -114,6 +114,11 @@ function applyCarBodyScale(model) {
     model.updateMatrixWorld(true);
   }
 
+  // Opponent cars keep wheels on the body, so trim stubs here too.
+  for (const wheel of findWheelNodes(model)) {
+    if (wheel) trimWheelAxleStub(wheel);
+  }
+
   model.traverse((node) => {
     if (node.isMesh) {
       node.castShadow = true;
@@ -153,25 +158,54 @@ const ROLL_INFLUENCE = 0.1;
 const WHEEL_FRICTION = 12;
 
 /**
+ * These car GLBs bake a short axle rod into each wheel mesh. From behind that looks
+ * like a grey cylinder sticking out of the tyre. Keep only the middle band of the
+ * mesh along the axle (x), which is the tyre itself.
+ */
+function trimWheelAxleStub(wheelMesh) {
+  if (!wheelMesh?.geometry?.attributes?.position) return;
+  const geometry = wheelMesh.geometry.clone();
+  const position = geometry.attributes.position;
+  const count = position.count;
+  if (count < 8) return;
+
+  const xs = new Float32Array(count);
+  for (let i = 0; i < count; i++) xs[i] = position.getX(i);
+  xs.sort();
+  const lo = xs[Math.floor(count * 0.1)];
+  const hi = xs[Math.floor(count * 0.9)];
+  if (!(hi > lo)) return;
+
+  for (let i = 0; i < count; i++) {
+    const x = position.getX(i);
+    if (x < lo) position.setX(i, lo);
+    else if (x > hi) position.setX(i, hi);
+  }
+  position.needsUpdate = true;
+  geometry.computeBoundingBox();
+  geometry.computeBoundingSphere();
+  wheelMesh.geometry = geometry;
+}
+
+/**
  * Bullet raycast wheels use `WHEEL_RADIUS` (m). GLB wheels are scaled with the body;
  * an extra scale after detaching can make tires huge vs physics → they look “drowned” in the road.
  * Uniformly scale each wheel mesh so its bounding extent matches the physics radius.
  */
 function fitWheelMeshToPhysicsRadius(wheelMesh, targetRadius = WHEEL_RADIUS) {
   if (!wheelMesh || !wheelMesh.geometry) return;
+  trimWheelAxleStub(wheelMesh);
   const geometry = wheelMesh.geometry.clone();
   geometry.computeBoundingBox();
   const box = geometry.boundingBox;
   const size = new THREE.Vector3();
   box.getSize(size);
-  // The axle runs along x, so the tyre is as big as its reach in y/z. Measuring all
-  // three would be thrown off by models that bake an axle stub into the wheel.
+  // The axle runs along x, so the tyre is as big as its reach in y/z.
   const approxR = Math.max(size.y, size.z) / 2;
   if (!(approxR > 1e-6) || !Number.isFinite(approxR)) return;
 
   // Physics drives the mesh origin, and models often author each wheel at its place
-  // on the body, so move the tyre onto its own origin. The middle vertex finds the
-  // tyre's centre even when a stub drags the bounding box sideways.
+  // on the body, so move the tyre onto its own origin.
   const position = geometry.attributes.position;
   const xs = new Float32Array(position.count);
   for (let i = 0; i < position.count; i++) xs[i] = position.getX(i);

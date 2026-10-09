@@ -1,7 +1,7 @@
 import Notification from '../models/notification.js'
 import User from '../models/user.js'
 import Post from '../models/post.js'
-import { getIO, getRecipientSockedId, getUserSocket, isUserEffectivelyOnline } from '../socket/socket.js'
+import { getIO, getRecipientSockedId, getUserSocket, getUserSelfRoomId, isUserEffectivelyOnline } from '../socket/socket.js'
 import {
     decodeNotificationCursor,
     encodeNotificationCursor,
@@ -382,6 +382,66 @@ export const deleteNotification = async (req, res) => {
     } catch (error) {
         console.error('Error deleting notification:', error)
         res.status(500).json({ error: 'Failed to delete notification' })
+    }
+}
+
+/**
+ * Undo of a like / comment: remove the unread notification it created and tell
+ * the owner's open screens to drop it. One indexed delete, one room emit — no
+ * fan-out beyond the owner, so cost is the same as the like itself.
+ *
+ * `commentText` pins a comment/mention notification to the exact comment that was
+ * deleted, so other comments by the same user on the same post stay.
+ */
+export const deleteEngagementNotifications = async ({ ownerId, fromUserId, postId, types, commentText }) => {
+    try {
+        if (!fromUserId || !postId || !types?.length) return 0
+
+        // ownerId narrows to one recipient (like). Without it, every recipient of this
+        // comment is covered — the owner plus anyone it @mentioned.
+        const filter = {
+            from: fromUserId,
+            post: postId,
+            type: { $in: types },
+            read: false,
+        }
+        if (ownerId) filter.user = ownerId
+        if (commentText != null) filter.comment = commentText
+
+        const docs = await Notification.find(filter).select('_id user').lean()
+        if (!docs.length) return 0
+        const ids = docs.map((d) => d._id)
+        await Notification.deleteMany({ _id: { $in: ids } })
+
+        // One small emit per affected recipient's own room (all their devices).
+        const byUser = new Map()
+        for (const d of docs) {
+            const uid = String(d.user)
+            if (!byUser.has(uid)) byUser.set(uid, [])
+            byUser.get(uid).push(String(d._id))
+        }
+        try {
+            const io = getIO()
+            if (io) {
+                for (const [uid, userIds] of byUser) {
+                    const room = getUserSelfRoomId(uid)
+                    if (!room) continue
+                    io.to(room).emit('notificationDeleted', {
+                        ids: userIds,
+                        types,
+                        from: fromUserId.toString(),
+                        post: postId.toString(),
+                        unreadRemoved: userIds.length,
+                    })
+                }
+            }
+        } catch (emitErr) {
+            console.error('❌ [deleteEngagementNotifications] Socket emit failed:', emitErr?.message)
+        }
+        return ids.length
+    } catch (error) {
+        console.error('Error deleting engagement notifications:', error)
+        return 0
     }
 }
 

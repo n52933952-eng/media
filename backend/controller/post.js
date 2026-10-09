@@ -1226,6 +1226,20 @@ export const LikePost = async(req,res) => {
         await invalidateUserFeedCache(userId)
         const likePreview = count > 0 ? await getLatestLikePreview(id) : null
         emitPostEngagementUpdate(id, { likeCount: count, likePreview })
+        // Undo what the like announced: owner's unread notification + followers' activity.
+        // Background, so the tap stays fast.
+        setImmediate(async () => {
+            try {
+                const { deleteEngagementNotifications } = await import('./notification.js')
+                const { deleteActivities } = await import('./activity.js')
+                await Promise.all([
+                    deleteEngagementNotifications({ ownerId: post.postedBy, fromUserId: userId, postId: post._id, types: ['like'] }),
+                    deleteActivities({ userId, type: 'like', postId: post._id }),
+                ])
+            } catch (err) {
+                console.error('Error clearing like notification/activity:', err)
+            }
+        })
         return res.status(200).json({
             message: 'post unlike scfully',
             liked: false,
@@ -2741,6 +2755,9 @@ export const deleteComment = async(req,res) => {
             return res.status(403).json({error:"You can only delete your own comments or comments on your posts"})
         }
 
+        const commentText = typeof reply.text === 'string' ? reply.text : null
+        const commentAuthorId = reply.userId
+
         await deleteCommentTree(postId, replyId)
 
         const refreshed = await Post.findById(postId).select('replyCount').lean()
@@ -2749,6 +2766,30 @@ export const deleteComment = async(req,res) => {
             replyCount: Math.max(0, refreshed?.replyCount ?? 0),
             replyPreview,
         })
+
+        // Undo what the comment announced: owner's unread comment/mention notifications
+        // and the commenter's activity. Pinned to this comment's text so other comments
+        // by the same user stay. Background, so the tap stays fast.
+        if (commentAuthorId && commentText) {
+            setImmediate(async () => {
+                try {
+                    const { deleteEngagementNotifications } = await import('./notification.js')
+                    const { deleteActivities } = await import('./activity.js')
+                    await Promise.all([
+                        // No ownerId: covers the owner's comment notice and every @mention from it.
+                        deleteEngagementNotifications({
+                            fromUserId: commentAuthorId,
+                            postId: post._id,
+                            types: ['comment', 'mention'],
+                            commentText,
+                        }),
+                        deleteActivities({ userId: commentAuthorId, type: 'comment', postId: post._id, commentText }),
+                    ])
+                } catch (err) {
+                    console.error('Error clearing comment notification/activity:', err)
+                }
+            })
+        }
 
         res.status(200).json({
             message: "Comment deleted successfully",
