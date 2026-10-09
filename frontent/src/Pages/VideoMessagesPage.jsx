@@ -27,7 +27,8 @@ import useShowToast from '../hooks/useShowToast'
 import API_BASE_URL from '../config/api'
 import { uploadMediaToR2 } from '../utils/directR2Upload'
 import { mediaDisplayUrl } from '../utils/mediaUrl.js'
-import { fmtTime, otherParty, uidOf } from '../utils/videoMessage.js'
+import { fmtTime, otherParty, prepareLightVideo, uidOf } from '../utils/videoMessage.js'
+import VideoRecordModal from '../Components/VideoRecordModal.jsx'
 
 const PAGE = 15
 
@@ -81,6 +82,8 @@ const VideoMessagesPage = () => {
   const [pickedUser, setPickedUser] = useState(null)
   const [pickedFile, setPickedFile] = useState(null)
   const [sending, setSending] = useState(false)
+  const [sendHint, setSendHint] = useState('')
+  const [recordOpen, setRecordOpen] = useState(false)
   const fileRef = useRef(null)
 
   const load = useCallback(async (more = false) => {
@@ -191,7 +194,10 @@ const VideoMessagesPage = () => {
         showToast('Error', 'Video must be 10 minutes or less', 'error')
         return
       }
-      const videoUrl = await uploadMediaToR2(pickedFile, 'video-messages', { skipCompress: true })
+      setSendHint('Making video light…')
+      const light = await prepareLightVideo(pickedFile, 'main')
+      setSendHint('Uploading…')
+      const videoUrl = await uploadMediaToR2(light, 'video-messages', { skipCompress: true })
       const res = await fetch(`${API_BASE_URL}/api/video-message`, {
         method: 'POST',
         credentials: 'include',
@@ -215,11 +221,12 @@ const VideoMessagesPage = () => {
       showToast('Error', e.message || 'Failed to send', 'error')
     } finally {
       setSending(false)
+      setSendHint('')
     }
   }
 
   return (
-    <Box bg={bg} minH="calc(100vh - 72px)" px={1} py={4}>
+    <Box bg={bg} minH="calc(100vh - 72px)" px={{ base: 2, md: 0 }} py={4} maxW="620px" mx="auto" w="100%">
       <Flex justify="space-between" align="center" mb={4}>
         <Heading size="md">Video Messages</Heading>
         <Button size="sm" colorScheme="blue" onClick={sendModal.onOpen}>
@@ -340,15 +347,33 @@ const VideoMessagesPage = () => {
               hidden
               onChange={(e) => setPickedFile(e.target.files?.[0] || null)}
             />
-            <Button size="sm" variant="outline" mb={3} onClick={() => fileRef.current?.click()}>
-              {pickedFile ? pickedFile.name : 'Pick or record video'}
-            </Button>
+            <Flex gap={2} mb={3}>
+              <Button size="sm" variant="outline" flex="1" onClick={() => fileRef.current?.click()}>
+                Pick video
+              </Button>
+              <Button size="sm" colorScheme="red" variant="outline" flex="1" onClick={() => setRecordOpen(true)}>
+                Record
+              </Button>
+            </Flex>
+            {pickedFile && (
+              <Text fontSize="sm" color={muted} mb={3} noOfLines={1}>
+                Ready: {pickedFile.name}
+              </Text>
+            )}
+            <VideoRecordModal
+              isOpen={recordOpen}
+              onClose={() => setRecordOpen(false)}
+              maxSeconds={180}
+              title="Record video message"
+              onReady={(file) => setPickedFile(file)}
+            />
 
             <Button
               colorScheme="blue"
               w="full"
               isDisabled={!pickedUser || !pickedFile}
               isLoading={sending}
+              loadingText={sendHint || 'Sending'}
               onClick={handleSend}
             >
               Send

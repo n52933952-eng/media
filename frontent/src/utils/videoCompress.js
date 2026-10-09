@@ -86,23 +86,39 @@ export const compressVideo = async (videoFile, options = {}) => {
 
     // Determine compression settings based on quality
     let videoBitrate = '2000k' // 2 Mbps default
-    let resolution = '1280:720' // 720p default
+    let scaleFilter = 'scale=1280:720' // 720p default
     let fps = 30
+    let preset = 'fast'
+    let audioBitrate = '128k'
 
     switch (quality) {
       case 'low':
         videoBitrate = '1000k' // 1 Mbps
-        resolution = '854:480' // 480p
+        scaleFilter = 'scale=854:480'
         fps = 24
         break
       case 'high':
         videoBitrate = '3000k' // 3 Mbps
-        resolution = '1280:720' // 720p
+        scaleFilter = 'scale=1280:720'
         fps = 30
+        break
+      case 'message':
+        videoBitrate = '1100k'
+        scaleFilter = "scale='min(960,iw)':-2"
+        fps = 24
+        preset = 'veryfast'
+        audioBitrate = '96k'
+        break
+      case 'note':
+        videoBitrate = '700k'
+        scaleFilter = "scale='min(640,iw)':-2"
+        fps = 24
+        preset = 'veryfast'
+        audioBitrate = '64k'
         break
       default: // medium
         videoBitrate = '2000k' // 2 Mbps
-        resolution = '1280:720' // 720p
+        scaleFilter = 'scale=1280:720'
         fps = 30
     }
 
@@ -118,15 +134,15 @@ export const compressVideo = async (videoFile, options = {}) => {
     const execPromise = ffmpeg.exec([
       '-i', inputFileName,
       '-c:v', 'libx264',           // Video codec
-      '-preset', 'fast',            // Faster encoding (was 'medium')
-      '-crf', '28',                 // Constant Rate Factor (lower = better quality, higher file size)
-      '-vf', `scale=${resolution}`, // Scale to target resolution
+      '-preset', preset,
+      '-crf', '28',
+      '-vf', scaleFilter,
       '-r', fps.toString(),         // Frame rate
       '-b:v', videoBitrate,         // Video bitrate
       '-maxrate', videoBitrate,     // Max bitrate
       '-bufsize', (parseInt(videoBitrate) * 2) + 'k', // Buffer size
       '-c:a', 'aac',                // Audio codec
-      '-b:a', '128k',               // Audio bitrate
+      '-b:a', audioBitrate,
       '-movflags', '+faststart',    // Web optimization
       '-threads', '2',              // Use 2 threads for faster processing
       '-y',                         // Overwrite output file

@@ -5,11 +5,9 @@ import {
   Button,
   Flex,
   HStack,
-  IconButton,
   Spinner,
   Text,
   useColorModeValue,
-  VStack,
 } from '@chakra-ui/react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { UserContext } from '../context/UserContext'
@@ -18,7 +16,8 @@ import useShowToast from '../hooks/useShowToast'
 import API_BASE_URL from '../config/api'
 import { uploadMediaToR2 } from '../utils/directR2Upload'
 import { mediaDisplayUrl } from '../utils/mediaUrl.js'
-import { fmtTime, otherParty } from '../utils/videoMessage.js'
+import { fmtTime, otherParty, prepareLightVideo } from '../utils/videoMessage.js'
+import VideoRecordModal from '../Components/VideoRecordModal.jsx'
 
 const REACTIONS = ['❤️', '😂', '🔥']
 
@@ -28,13 +27,17 @@ const VideoMessageWatchPage = () => {
   const { socket, refreshVideoMessageUnseenCount } = useContext(SocketContext) || {}
   const showToast = useShowToast()
   const navigate = useNavigate()
-  const bg = useColorModeValue('#000', '#000')
-  const panel = useColorModeValue('white', '#1a1a1a')
+  const panel = useColorModeValue('#f7f8fa', '#121212')
   const muted = useColorModeValue('gray.600', 'gray.400')
+  const card = useColorModeValue('white', '#1c1c1c')
 
   const videoRef = useRef(null)
   const noteVideoRef = useRef(null)
   const fileRef = useRef(null)
+  const shownRef = useRef(new Set())
+  const lastTRef = useRef(0)
+  const resumeAfterRef = useRef(true)
+
   const [item, setItem] = useState(null)
   const [notes, setNotes] = useState([])
   const [loading, setLoading] = useState(true)
@@ -42,9 +45,13 @@ const VideoMessageWatchPage = () => {
   const [duration, setDuration] = useState(0)
   const [playing, setPlaying] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [busyHint, setBusyHint] = useState('')
   const [activeNote, setActiveNote] = useState(null)
+  const [popReaction, setPopReaction] = useState(null)
+  const [recordOpen, setRecordOpen] = useState(false)
 
   const other = item ? otherParty(item, user?._id) : null
+  const videoNotes = useMemo(() => notes.filter((n) => n.type === 'video' && n.videoUrl), [notes])
 
   const load = useCallback(async () => {
     try {
@@ -74,7 +81,7 @@ const VideoMessageWatchPage = () => {
         if (prev.some((n) => String(n._id) === String(payload.note._id))) return prev
         return [...prev, payload.note].sort((a, b) => a.t - b.t)
       })
-      setItem((prev) => prev ? { ...prev, noteCount: (prev.noteCount || 0) + 1 } : prev)
+      setItem((prev) => (prev ? { ...prev, noteCount: (prev.noteCount || 0) + 1 } : prev))
     }
     const onDel = (payload) => {
       if (String(payload?.videoMessageId) !== String(id)) return
@@ -93,6 +100,62 @@ const VideoMessageWatchPage = () => {
     return marks.find((m) => Math.abs((m.t || 0) - now) < 1.2) || null
   }, [item?.markers, now])
 
+  const closeOverlay = useCallback((resume = true) => {
+    setActiveNote(null)
+    const v = videoRef.current
+    if (resume && v && resumeAfterRef.current) {
+      v.play().catch(() => {})
+    }
+  }, [])
+
+  const openOverlay = useCallback((note, { resumeAfter = true, seek = true } = {}) => {
+    if (!note || note.type !== 'video' || !note.videoUrl) {
+      if (note?.type === 'reaction') {
+        setPopReaction(note)
+        setTimeout(() => setPopReaction((cur) => (cur?._id === note._id ? null : cur)), 1600)
+      }
+      return
+    }
+    resumeAfterRef.current = resumeAfter
+    shownRef.current.add(String(note._id))
+    if (seek) {
+      const v = videoRef.current
+      if (v) v.currentTime = Math.max(0, Number(note.t) || 0)
+    }
+    videoRef.current?.pause()
+    setPlaying(false)
+    setActiveNote(note)
+  }, [])
+
+  const handleTime = (t) => {
+    const prev = lastTRef.current
+    lastTRef.current = t
+    setNow(t)
+    if (activeNote) return
+    if (t + 0.05 < prev) {
+      for (const n of videoNotes) {
+        if (n.t > t + 0.2) shownRef.current.delete(String(n._id))
+      }
+    }
+    const hit = videoNotes.find((n) => {
+      const idn = String(n._id)
+      if (shownRef.current.has(idn)) return false
+      return n.t >= Math.min(prev, t) - 0.05 && n.t <= Math.max(prev, t) + 0.35
+    })
+    if (hit) openOverlay(hit, { resumeAfter: true, seek: false })
+    const react = notes.find((n) => {
+      if (n.type !== 'reaction') return false
+      const idn = String(n._id)
+      if (shownRef.current.has(idn)) return false
+      return Math.abs((n.t || 0) - t) < 0.35
+    })
+    if (react) {
+      shownRef.current.add(String(react._id))
+      setPopReaction(react)
+      setTimeout(() => setPopReaction((cur) => (cur?._id === react._id ? null : cur)), 1600)
+    }
+  }
+
   const togglePlay = () => {
     const v = videoRef.current
     if (!v) return
@@ -108,8 +171,12 @@ const VideoMessageWatchPage = () => {
   const seekTo = (t) => {
     const v = videoRef.current
     if (!v) return
+    for (const n of videoNotes) {
+      if (n.t > t + 0.2) shownRef.current.delete(String(n._id))
+    }
     v.currentTime = Math.max(0, t)
     setNow(t)
+    lastTRef.current = t
   }
 
   const addReaction = async (emoji) => {
@@ -135,6 +202,7 @@ const VideoMessageWatchPage = () => {
   const addVideoNote = async (file) => {
     if (!file || busy) return
     setBusy(true)
+    setBusyHint('Making video light…')
     try {
       const tmp = document.createElement('video')
       const url = URL.createObjectURL(file)
@@ -155,7 +223,9 @@ const VideoMessageWatchPage = () => {
         showToast('Error', 'Reply video must be 30 seconds or less', 'error')
         return
       }
-      const videoUrl = await uploadMediaToR2(file, 'video-messages', { skipCompress: true })
+      const light = await prepareLightVideo(file, 'note')
+      setBusyHint('Uploading…')
+      const videoUrl = await uploadMediaToR2(light, 'video-messages', { skipCompress: true })
       const res = await fetch(`${API_BASE_URL}/api/video-message/${id}/notes`, {
         method: 'POST',
         credentials: 'include',
@@ -170,14 +240,8 @@ const VideoMessageWatchPage = () => {
       showToast('Error', e.message || 'Failed', 'error')
     } finally {
       setBusy(false)
+      setBusyHint('')
     }
-  }
-
-  const openNote = (note) => {
-    seekTo(note.t || 0)
-    videoRef.current?.pause()
-    setPlaying(false)
-    if (note.type === 'video' && note.videoUrl) setActiveNote(note)
   }
 
   if (loading) {
@@ -190,83 +254,110 @@ const VideoMessageWatchPage = () => {
   const dur = duration || item.duration || 1
 
   return (
-    <Box bg={bg} mx={{ base: -3, md: 0 }} borderRadius={{ md: 'lg' }} overflow="hidden">
-      <Flex align="center" gap={2} px={3} py={2} bg="#111">
+    <Box
+      maxW="620px"
+      mx="auto"
+      w="100%"
+      minH={{ base: 'calc(100dvh - 72px)', md: 'auto' }}
+      bg={panel}
+      borderRadius={{ md: '16px' }}
+      overflow="hidden"
+    >
+      <Flex align="center" gap={3} px={3} py={2.5} bg="#0b0b0b">
         <Button size="sm" variant="ghost" color="white" onClick={() => navigate('/video-messages')}>
           ← Back
         </Button>
         <Avatar size="sm" src={mediaDisplayUrl(other?.profilePic)} name={other?.name} />
-        <Text color="white" fontWeight="semibold" noOfLines={1}>
-          {other?.name || other?.username}
-        </Text>
+        <Box minW={0} flex="1">
+          <Text color="white" fontWeight="semibold" noOfLines={1} fontSize="sm">
+            {other?.name || other?.username}
+          </Text>
+          <Text color="whiteAlpha.700" fontSize="xs">
+            {notes.length} replies inside this video
+          </Text>
+        </Box>
       </Flex>
 
-      <Box position="relative" bg="black">
+      <Box
+        position="relative"
+        bg="black"
+        w="100%"
+        h={{ base: 'min(62dvh, 520px)', md: 'min(58vh, 560px)' }}
+      >
         <video
           ref={videoRef}
           src={mediaDisplayUrl(item.videoUrl)}
           playsInline
-          style={{ width: '100%', maxHeight: '62vh', background: '#000' }}
+          preload="metadata"
+          style={{
+            width: '100%',
+            height: '100%',
+            objectFit: 'contain',
+            background: '#000',
+            filter: activeNote ? 'brightness(0.38)' : 'none',
+          }}
           onClick={togglePlay}
-          onTimeUpdate={(e) => setNow(e.currentTarget.currentTime || 0)}
+          onTimeUpdate={(e) => handleTime(e.currentTarget.currentTime || 0)}
           onLoadedMetadata={(e) => setDuration(e.currentTarget.duration || item.duration || 0)}
           onPlay={() => setPlaying(true)}
           onPause={() => setPlaying(false)}
         />
-        {liveMarker && (
-          <Box
-            position="absolute"
-            top="12px"
-            left="12px"
-            bg="blackAlpha.700"
-            color="white"
-            px={3}
-            py={1}
-            borderRadius="full"
-            fontSize="sm"
-          >
+
+        {liveMarker && !activeNote && (
+          <Box position="absolute" top="12px" left="12px" bg="blackAlpha.700" color="white" px={3} py={1} borderRadius="full" fontSize="sm">
             {liveMarker.type === 'question' ? '❓' : '👀'} {liveMarker.text || 'Look here'}
           </Box>
         )}
+
+        {popReaction && !activeNote && (
+          <Flex position="absolute" inset={0} align="center" justify="center" pointerEvents="none">
+            <Text fontSize="5xl">{popReaction.reaction}</Text>
+          </Flex>
+        )}
+
         {activeNote && (
-          <Box
-            position="absolute"
-            right="10px"
-            bottom="10px"
-            w="38%"
-            minW="140px"
-            bg="black"
-            borderRadius="md"
-            overflow="hidden"
-            border="2px solid white"
-          >
-            <video
-              ref={noteVideoRef}
-              src={mediaDisplayUrl(activeNote.videoUrl)}
-              autoPlay
-              playsInline
-              controls
-              style={{ width: '100%', display: 'block' }}
-              onEnded={() => setActiveNote(null)}
-            />
-            <Button size="xs" w="full" onClick={() => setActiveNote(null)}>Close reply</Button>
-          </Box>
+          <Flex position="absolute" inset={0} align="center" justify="center" px={4}>
+            <Box
+              w={{ base: '58%', sm: '46%' }}
+              maxW="260px"
+              bg="#111"
+              borderRadius="18px"
+              overflow="hidden"
+              boxShadow="0 16px 50px rgba(0,0,0,0.55)"
+              border="2px solid rgba(255,255,255,0.85)"
+            >
+              <video
+                ref={noteVideoRef}
+                src={mediaDisplayUrl(activeNote.videoUrl)}
+                autoPlay
+                playsInline
+                preload="auto"
+                style={{ width: '100%', display: 'block', aspectRatio: '3 / 4', objectFit: 'cover', background: '#000' }}
+                onEnded={() => closeOverlay(true)}
+              />
+              <Flex px={2} py={1.5} align="center" justify="space-between" bg="#161616">
+                <Text color="white" fontSize="xs" noOfLines={1}>
+                  {activeNote.user?.name || activeNote.user?.username || 'Reply'} · {fmtTime(activeNote.t)}
+                </Text>
+                <Button size="xs" variant="ghost" color="white" onClick={() => closeOverlay(true)}>
+                  Close
+                </Button>
+              </Flex>
+            </Box>
+          </Flex>
         )}
       </Box>
 
-      <Box bg={panel} p={4}>
+      <Box bg={card} px={{ base: 3, md: 4 }} py={4}>
         <Flex align="center" gap={3} mb={3}>
-          <IconButton
-            aria-label={playing ? 'Pause' : 'Play'}
-            size="sm"
-            onClick={togglePlay}
-            icon={<Text>{playing ? '❚❚' : '▶'}</Text>}
-          />
-          <Text fontSize="sm" w="84px">{fmtTime(now)} / {fmtTime(dur)}</Text>
+          <Button size="sm" onClick={togglePlay} borderRadius="full" minW="40px">
+            {playing ? '❚❚' : '▶'}
+          </Button>
+          <Text fontSize="xs" color={muted} w="78px">{fmtTime(now)} / {fmtTime(dur)}</Text>
           <Box
             flex="1"
-            h="14px"
-            bg="gray.600"
+            h="18px"
+            bg="blackAlpha.300"
             borderRadius="full"
             position="relative"
             cursor="pointer"
@@ -276,26 +367,17 @@ const VideoMessageWatchPage = () => {
               seekTo(pct * dur)
             }}
           >
-            <Box
-              position="absolute"
-              left={0}
-              top={0}
-              bottom={0}
-              w={`${Math.min(100, (now / dur) * 100)}%`}
-              bg="blue.400"
-              borderRadius="full"
-            />
+            <Box position="absolute" left={0} top="5px" h="8px" w={`${Math.min(100, (now / dur) * 100)}%`} bg="blue.400" borderRadius="full" />
             {(item.markers || []).map((m, i) => (
               <Box
                 key={`m-${i}`}
                 position="absolute"
                 left={`${Math.min(98, (m.t / dur) * 100)}%`}
-                top="-3px"
-                w="8px"
-                h="20px"
+                top="2px"
+                w="7px"
+                h="14px"
                 bg="yellow.300"
                 borderRadius="sm"
-                title={m.text || 'Mark'}
                 onClick={(e) => {
                   e.stopPropagation()
                   seekTo(m.t)
@@ -307,16 +389,14 @@ const VideoMessageWatchPage = () => {
                 key={n._id}
                 position="absolute"
                 left={`${Math.min(98, (n.t / dur) * 100)}%`}
-                top="-6px"
-                fontSize="14px"
-                lineHeight="1"
+                top="-3px"
+                fontSize="15px"
                 transform="translateX(-50%)"
                 cursor="pointer"
                 onClick={(e) => {
                   e.stopPropagation()
-                  openNote(n)
+                  openOverlay(n, { resumeAfter: true, seek: true })
                 }}
-                title={`${n.type === 'reaction' ? n.reaction : 'Video note'} @ ${fmtTime(n.t)}`}
               >
                 {n.type === 'reaction' ? n.reaction : '🎥'}
               </Box>
@@ -324,23 +404,32 @@ const VideoMessageWatchPage = () => {
           </Box>
         </Flex>
 
-        <Text fontSize="sm" color={muted} mb={3}>
-          Pause at any second, then reply on that moment.
-        </Text>
-
         <HStack spacing={2} mb={3} flexWrap="wrap">
           <Button
-            colorScheme="blue"
+            colorScheme="red"
+            borderRadius="full"
             isLoading={busy}
+            loadingText={busyHint || 'Working'}
+            onClick={() => {
+              videoRef.current?.pause()
+              setRecordOpen(true)
+            }}
+          >
+            Record reply · {fmtTime(now)}
+          </Button>
+          <Button
+            variant="outline"
+            borderRadius="full"
+            isDisabled={busy}
             onClick={() => {
               videoRef.current?.pause()
               fileRef.current?.click()
             }}
           >
-            🎥 Reply here · {fmtTime(now)}
+            Pick video
           </Button>
           {REACTIONS.map((e) => (
-            <Button key={e} size="sm" variant="outline" isDisabled={busy} onClick={() => addReaction(e)}>
+            <Button key={e} size="sm" variant="outline" borderRadius="full" isDisabled={busy} onClick={() => addReaction(e)}>
               {e}
             </Button>
           ))}
@@ -356,27 +445,34 @@ const VideoMessageWatchPage = () => {
             if (f) addVideoNote(f)
           }}
         />
+        <VideoRecordModal
+          isOpen={recordOpen}
+          onClose={() => setRecordOpen(false)}
+          maxSeconds={20}
+          title={`Reply at ${fmtTime(now)}`}
+          onReady={(file) => addVideoNote(file)}
+        />
 
         {notes.length > 0 && (
-          <VStack align="stretch" spacing={1} mt={2}>
-            <Text fontSize="sm" fontWeight="bold">Replies</Text>
+          <Box>
+            <Text fontSize="sm" fontWeight="bold" mb={2}>Inside this video</Text>
             {notes.map((n) => (
               <Flex
                 key={n._id}
                 gap={2}
                 align="center"
-                py={1}
+                py={1.5}
                 cursor="pointer"
-                onClick={() => openNote(n)}
+                onClick={() => openOverlay(n, { resumeAfter: true, seek: true })}
               >
                 <Text w="44px" fontSize="sm" color={muted}>{fmtTime(n.t)}</Text>
-                <Text>{n.type === 'reaction' ? n.reaction : '🎥 Video note'}</Text>
+                <Text fontSize="sm">{n.type === 'reaction' ? n.reaction : 'Video reply'}</Text>
                 <Text fontSize="sm" color={muted} noOfLines={1}>
                   {n.user?.name || n.user?.username || ''}
                 </Text>
               </Flex>
             ))}
-          </VStack>
+          </Box>
         )}
       </Box>
     </Box>
