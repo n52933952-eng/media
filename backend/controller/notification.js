@@ -399,16 +399,16 @@ export const deleteEngagementNotifications = async ({ ownerId, fromUserId, postI
 
         // ownerId narrows to one recipient (like). Without it, every recipient of this
         // comment is covered — the owner plus anyone it @mentioned.
+        // Read ones go too — the like/comment no longer exists. Badge only drops by unread.
         const filter = {
             from: fromUserId,
             post: postId,
             type: { $in: types },
-            read: false,
         }
         if (ownerId) filter.user = ownerId
         if (commentText != null) filter.comment = commentText
 
-        const docs = await Notification.find(filter).select('_id user').lean()
+        const docs = await Notification.find(filter).select('_id user read').lean()
         if (!docs.length) return 0
         const ids = docs.map((d) => d._id)
         await Notification.deleteMany({ _id: { $in: ids } })
@@ -417,21 +417,23 @@ export const deleteEngagementNotifications = async ({ ownerId, fromUserId, postI
         const byUser = new Map()
         for (const d of docs) {
             const uid = String(d.user)
-            if (!byUser.has(uid)) byUser.set(uid, [])
-            byUser.get(uid).push(String(d._id))
+            if (!byUser.has(uid)) byUser.set(uid, { ids: [], unread: 0 })
+            const entry = byUser.get(uid)
+            entry.ids.push(String(d._id))
+            if (!d.read) entry.unread += 1
         }
         try {
             const io = getIO()
             if (io) {
-                for (const [uid, userIds] of byUser) {
+                for (const [uid, entry] of byUser) {
                     const room = getUserSelfRoomId(uid)
                     if (!room) continue
                     io.to(room).emit('notificationDeleted', {
-                        ids: userIds,
+                        ids: entry.ids,
                         types,
                         from: fromUserId.toString(),
                         post: postId.toString(),
-                        unreadRemoved: userIds.length,
+                        unreadRemoved: entry.unread,
                     })
                 }
             }
