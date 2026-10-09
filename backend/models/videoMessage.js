@@ -11,7 +11,7 @@ import mongoose from 'mongoose'
 const markerSchema = new mongoose.Schema(
   {
     t: { type: Number, required: true, min: 0 }, // seconds into the video
-    type: { type: String, enum: ['mark', 'question'], default: 'mark' },
+    type: { type: String, enum: ['mark', 'question', 'reply'], default: 'mark' },
     text: { type: String, default: '', maxlength: 120 },
   },
   { _id: false },

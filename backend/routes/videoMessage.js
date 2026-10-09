@@ -6,6 +6,7 @@ import {
   getVideoMessageUnseenCount,
   getVideoMessage,
   addVideoNote,
+  addReplyPrompt,
   deleteVideoNote,
   deleteVideoMessage,
 } from '../controller/videoMessage.js'
@@ -18,6 +19,7 @@ router.get('/unseen-count', protectRoute, getVideoMessageUnseenCount)
 router.get('/:id', protectRoute, getVideoMessage)
 router.delete('/:id', protectRoute, deleteVideoMessage)
 router.post('/:id/notes', protectRoute, addVideoNote)
+router.post('/:id/reply-prompt', protectRoute, addReplyPrompt)
 router.delete('/:id/notes/:noteId', protectRoute, deleteVideoNote)
 
 export default router

@@ -150,13 +150,22 @@ const VideoMessagesPage = () => {
       if (!id) return
       setItems((prev) => prev.filter((x) => String(x._id) !== id))
     }
+    const onSeen = (payload) => {
+      const id = String(payload?._id || '')
+      if (!id) return
+      setItems((prev) =>
+        prev.map((x) => (String(x._id) === id ? { ...x, seenAt: payload.seenAt || new Date().toISOString() } : x)),
+      )
+    }
     socket.on('videoMessage:new', onNew)
     socket.on('videoMessage:note', onNote)
     socket.on('videoMessage:deleted', onDeleted)
+    socket.on('videoMessage:seen', onSeen)
     return () => {
       socket.off('videoMessage:new', onNew)
       socket.off('videoMessage:note', onNote)
       socket.off('videoMessage:deleted', onDeleted)
+      socket.off('videoMessage:seen', onSeen)
     }
   }, [socket, setVideoMessageUnseenCount, user?._id])
 
@@ -312,10 +321,32 @@ const VideoMessagesPage = () => {
                     {unseen && <Badge colorScheme="blue">new</Badge>}
                   </HStack>
                   <Text fontSize="sm" color={muted}>
-                    {mine ? 'You sent' : 'Sent you'} · {fmtTime(item.duration)} · {item.noteCount || 0} replies
+                    {mine ? (item.seenAt ? 'Seen' : 'Not opened yet') : 'Sent you'} · {fmtTime(item.duration)} · {item.noteCount || 0} replies
                   </Text>
                 </Box>
                 <Text fontSize="lg">▶</Text>
+                <Button
+                  size="xs"
+                  variant="ghost"
+                  colorScheme="red"
+                  onClick={async (e) => {
+                    e.stopPropagation()
+                    if (!window.confirm('Delete this video for both of you?')) return
+                    try {
+                      const res = await fetch(`${API_BASE_URL}/api/video-message/${item._id}`, {
+                        method: 'DELETE',
+                        credentials: 'include',
+                      })
+                      const data = await res.json().catch(() => ({}))
+                      if (!res.ok) throw new Error(data.error || 'Failed to delete')
+                      setItems((prev) => prev.filter((x) => String(x._id) !== String(item._id)))
+                    } catch (err) {
+                      showToast('Error', err.message || 'Failed to delete', 'error')
+                    }
+                  }}
+                >
+                  Delete
+                </Button>
               </Flex>
             )
           })}

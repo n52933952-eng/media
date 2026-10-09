@@ -3,6 +3,7 @@ import VideoMessage from '../models/videoMessage.js'
 import VideoNote from '../models/videoNote.js'
 import User from '../models/user.js'
 import { assertManagedMediaUrls } from '../services/r2Presign.js'
+import { deleteByUrl } from '../services/r2Storage.js'
 import { getIO, getUserSelfRoomId } from '../socket/socket.js'
 
 /**
@@ -38,6 +39,21 @@ const emitToUser = (userId, event, payload) => {
   }
 }
 
+/** Best-effort R2 cleanup, off the request path. Never throws. */
+const cleanupMediaInBackground = (urls) => {
+  const list = (urls || []).filter(Boolean)
+  if (!list.length) return
+  setImmediate(async () => {
+    for (const url of list) {
+      try {
+        await deleteByUrl(url)
+      } catch (err) {
+        console.warn('[videoMessage] media cleanup skipped:', err?.message)
+      }
+    }
+  })
+}
+
 const encodeCursor = ({ createdAt, id }) =>
   Buffer.from(JSON.stringify({ c: new Date(createdAt).toISOString(), i: String(id) })).toString('base64url')
 
@@ -62,7 +78,7 @@ const sanitizeMarkers = (raw, duration) => {
     if (t < 0 || (duration > 0 && t > duration)) continue
     out.push({
       t: Math.round(t * 10) / 10,
-      type: m?.type === 'question' ? 'question' : 'mark',
+      type: m?.type === 'question' ? 'question' : m?.type === 'reply' ? 'reply' : 'mark',
       text: String(m?.text || '').trim().slice(0, 120),
     })
   }
@@ -239,6 +255,39 @@ export const getVideoMessage = async (req, res) => {
   }
 }
 
+/** Sender drops a text "Reply here" on a second. They do not record another video. */
+export const addReplyPrompt = async (req, res) => {
+  try {
+    const userId = req.user._id
+    const doc = await loadForParticipant(req.params.id, userId)
+    if (!doc) return res.status(404).json({ error: 'Video message not found' })
+    if (String(doc.sender) !== String(userId)) {
+      return res.status(403).json({ error: 'Only the sender can ask for a reply' })
+    }
+    if ((doc.markers || []).length >= MAX_MARKERS) {
+      return res.status(400).json({ error: 'Too many prompts on this video' })
+    }
+    const at = toNum(req.body?.t, -1)
+    if (at < 0) return res.status(400).json({ error: 'Invalid time' })
+    const safeT = doc.duration > 0 ? Math.min(doc.duration, at) : at
+    const marker = {
+      t: Math.round(safeT * 10) / 10,
+      type: 'reply',
+      text: String(req.body?.text || 'Reply here').trim().slice(0, 120) || 'Reply here',
+    }
+    doc.markers = [...(doc.markers || []), marker].sort((a, b) => a.t - b.t)
+    await doc.save()
+    emitToUser(doc.receiver, 'videoMessage:marker', {
+      videoMessageId: String(doc._id),
+      markers: doc.markers,
+    })
+    return res.status(201).json({ markers: doc.markers })
+  } catch (error) {
+    console.error('[videoMessage] reply prompt error:', error)
+    return res.status(500).json({ error: 'Failed to add reply prompt' })
+  }
+}
+
 // ───────────────────────────── reply inside a moment ─────────────────────────────
 
 export const addVideoNote = async (req, res) => {
@@ -253,6 +302,11 @@ export const addVideoNote = async (req, res) => {
     const safeT = doc.duration > 0 ? Math.min(doc.duration, at) : at
 
     const note = { videoMessage: doc._id, user: userId, t: Math.round(safeT * 10) / 10 }
+
+    // The sender already made the video. Only the receiver records a reply on a moment.
+    if (type !== 'reaction' && String(doc.sender) === String(userId)) {
+      return res.status(403).json({ error: 'Only the receiver can record a reply' })
+    }
 
     if (type === 'reaction') {
       const emoji = String(reaction || '').trim().slice(0, 8)
@@ -272,14 +326,21 @@ export const addVideoNote = async (req, res) => {
     const created = await VideoNote.create(note)
 
     const otherId = String(doc.sender) === String(userId) ? doc.receiver : doc.sender
-    const flag = String(userId) === String(doc.receiver) ? { senderHasNewNotes: true } : {}
+    const fromReceiver = String(userId) === String(doc.receiver)
+    const flag = fromReceiver ? { senderHasNewNotes: true } : {}
     await VideoMessage.updateOne(
       { _id: doc._id },
       { $inc: { noteCount: 1 }, $set: { lastNoteAt: new Date(), ...flag } },
     )
 
     await created.populate('user', USER_SELECT)
-    const payload = { videoMessageId: String(doc._id), note: created.toObject() }
+    // `badge` = the other side's unseen count really went up (flag flipped),
+    // so clients increment at most once per video instead of once per note.
+    const payload = {
+      videoMessageId: String(doc._id),
+      note: created.toObject(),
+      badge: fromReceiver && !doc.senderHasNewNotes,
+    }
 
     emitToUser(otherId, 'videoMessage:note', payload)
     return res.status(201).json(payload)
@@ -301,6 +362,7 @@ export const deleteVideoNote = async (req, res) => {
     if (!removed) return res.status(404).json({ error: 'Reply not found' })
 
     await VideoMessage.updateOne({ _id: doc._id, noteCount: { $gt: 0 } }, { $inc: { noteCount: -1 } })
+    if (removed.videoUrl) cleanupMediaInBackground([removed.videoUrl])
 
     const otherId = String(doc.sender) === String(userId) ? doc.receiver : doc.sender
     const payload = { videoMessageId: String(doc._id), noteId: String(noteId) }
@@ -320,15 +382,27 @@ export const deleteVideoMessage = async (req, res) => {
     const doc = await loadForParticipant(req.params.id, userId)
     if (!doc) return res.status(404).json({ error: 'Video message not found' })
 
+    const noteUrls = await VideoNote.find({ videoMessage: doc._id, videoUrl: { $exists: true, $ne: '' } })
+      .select('videoUrl')
+      .limit(NOTES_PAGE_SIZE)
+      .lean()
+
     await Promise.all([
       VideoMessage.deleteOne({ _id: doc._id }),
       VideoNote.deleteMany({ videoMessage: doc._id }),
     ])
 
-    const otherId = String(doc.sender) === String(userId) ? doc.receiver : doc.sender
-    const payload = { _id: String(doc._id) }
-    emitToUser(otherId, 'videoMessage:deleted', payload)
-    return res.status(200).json(payload)
+    cleanupMediaInBackground([doc.videoUrl, doc.thumbnailUrl, ...noteUrls.map((n) => n.videoUrl)])
+
+    const idStr = String(doc._id)
+    const tell = (uid) => {
+      const isReceiver = String(doc.receiver) === String(uid)
+      const unseen = isReceiver ? !doc.seenAt : !!doc.senderHasNewNotes
+      emitToUser(uid, 'videoMessage:deleted', { _id: idStr, unseen })
+    }
+    tell(doc.sender)
+    tell(doc.receiver)
+    return res.status(200).json({ _id: idStr })
   } catch (error) {
     console.error('[videoMessage] delete error:', error)
     return res.status(500).json({ error: 'Failed to delete video message' })

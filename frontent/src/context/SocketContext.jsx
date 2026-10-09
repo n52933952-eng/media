@@ -475,8 +475,11 @@ export const SocketContextProvider = ({ children }) => {
     newSocket?.on('videoMessage:new', () => {
       setVideoMessageUnseenCount((n) => (n || 0) + 1)
     })
-    newSocket?.on('videoMessage:note', () => {
-      setVideoMessageUnseenCount((n) => (n || 0) + 1)
+    newSocket?.on('videoMessage:note', (data) => {
+      if (data?.badge) setVideoMessageUnseenCount((n) => (n || 0) + 1)
+    })
+    newSocket?.on('videoMessage:deleted', (data) => {
+      if (data?.unseen) setVideoMessageUnseenCount((n) => Math.max(0, (n || 0) - 1))
     })
 
     // Listen for football match updates
@@ -510,6 +513,7 @@ export const SocketContextProvider = ({ children }) => {
       newSocket?.off('notificationDeleted');
       newSocket?.off('videoMessage:new');
       newSocket?.off('videoMessage:note');
+      newSocket?.off('videoMessage:deleted');
       newSocket?.off('footballMatchUpdate');
       newSocket?.off('footballPageUpdate');
       newSocket?.off('storyStripChanged');
