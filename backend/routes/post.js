@@ -3,6 +3,7 @@ import express from 'express'
 const router = express.Router()
 
 import{LikeComent,ReplyToComment,createPost,getPost,getPostComments,deletePost,updatePost,updateCarouselPostImages,LikePost,getPostLikes,ReplyPost,getFeedPost,getUserPosts,getUserPostsById,addContributorToPost,removeContributorFromPost,setContributorImage,removeContributorImage,setCollaborativePostAudio,removeCollaborativePostAudio,hidePostFromFeed,getHiddenFeedPostIds,getUserComments,deleteComment,reportPost} from '../controller/post.js'
+import { addPostPin, removePostPin, answerPostPin, listPostPinAnswers } from '../controller/postPin.js'
 import protectRoute from '../middlware/protectRoute.js'
 import optionalAuth from '../middlware/optionalAuth.js'
 
@@ -16,6 +17,10 @@ router.get("/comments/user/:username",getUserComments)
 router.delete("/:id",protectRoute,deletePost)
 router.post("/report/:id",protectRoute,reportPost)
 router.put("/:id",protectRoute,updatePost)
+router.post("/:id/pins", protectRoute, addPostPin)
+router.delete("/:id/pins/:pinId", protectRoute, removePostPin)
+router.post("/:id/pins/:pinId/answer", protectRoute, answerPostPin)
+router.get("/:id/pins/:pinId/answers", optionalAuth, listPostPinAnswers)
 
 router.put("/likes/:id",protectRoute,LikePost)
 router.get("/likes-list/:id",protectRoute,getPostLikes)

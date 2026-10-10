@@ -681,7 +681,13 @@ const HomePage = () => {
 
     socket.on('newPost', handleNewPost)
     socket.on('postDeleted', handlePostDeleted)
+    const handlePostPins = (data) => {
+      const postId = data?.postId?.toString?.() || (data?.postId ? String(data.postId) : '')
+      if (!postId || !Array.isArray(data?.pins)) return
+      setFollowPost((prev) => prev.map((p) => (p._id?.toString() === postId ? { ...p, pins: data.pins } : p)))
+    }
     socket.on('postUpdated', handlePostUpdated)
+    socket.on('postPins', handlePostPins)
     socket.on('postEngagement', handlePostEngagement)
     socket.on('footballPageUpdate', handleFootballFeedSync)
     socket.on('footballMatchUpdate', handleFootballFeedSync)
@@ -694,6 +700,7 @@ const HomePage = () => {
       socket.off('newPost', handleNewPost)
       socket.off('postDeleted', handlePostDeleted)
       socket.off('postUpdated', handlePostUpdated)
+      socket.off('postPins', handlePostPins)
       socket.off('postEngagement', handlePostEngagement)
       socket.off('footballPageUpdate', handleFootballFeedSync)
       socket.off('footballMatchUpdate', handleFootballFeedSync)

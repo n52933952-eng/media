@@ -52,6 +52,29 @@ const PostSchema = mongoose.Schema({
         default: null,
     },
 
+    /**
+     * Optional pins on a single photo or video. Small on purpose (max 8).
+     * Video pins use `t` (seconds). Photo pins use `x` and `y` (0–1 on the picture).
+     * Answers to a question pin live in PostPinAnswer, not here.
+     */
+    pins: {
+        type: [
+            {
+                pinType: {
+                    type: String,
+                    enum: ['text', 'question', 'mark', 'photo'],
+                    required: true,
+                },
+                t: { type: Number, default: null },
+                x: { type: Number, default: null },
+                y: { type: Number, default: null },
+                text: { type: String, default: '', maxlength: 120 },
+                imageUrl: { type: String, default: '' },
+            },
+        ],
+        default: undefined,
+    },
+
     footballData:{
         type:String // JSON string of match data for Football posts
     },

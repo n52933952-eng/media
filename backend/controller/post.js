@@ -2,6 +2,7 @@
 import mongoose from 'mongoose'
 import User from '../models/user.js'
 import Post, { MAX_REPLIES_PER_POST } from '../models/post.js'
+import PostPinAnswer from '../models/postPinAnswer.js'
 import Like from '../models/like.js'
 import Comment from '../models/comment.js'
 import Follow from '../models/follow.js'
@@ -1034,6 +1035,7 @@ export const deletePost = async(req,res) => {
       }
 
       await deleteAllPostMedia(post)
+      PostPinAnswer.deleteMany({ post: post._id }).catch(() => {})
 
       // OPTIMIZED: Get followers before deleting post
       const postAuthorId = post.postedBy.toString()

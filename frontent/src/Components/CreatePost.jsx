@@ -34,6 +34,7 @@ import API_BASE_URL from '../config/api'
 import { buildInitialContributorIds } from '../utils/collaborators'
 import { uploadMediaToR2, uploadManyMediaToR2 } from '../utils/directR2Upload'
 import CollaboratorPicker from './CollaboratorPicker'
+import { PostPinEditor, pinnableMedia } from './PostPins'
 
 import{UserContext} from '../context/UserContext'
 import{PostContext} from '../context/PostContext'
@@ -62,6 +63,7 @@ const CreatePost = () => {
     const [carouselFiles, setCarouselFiles] = useState([])
     const [carouselPreviews, setCarouselPreviews] = useState([])
     const [audioFile, setAudioFile] = useState(null)
+    const [pinPost, setPinPost] = useState(null)
 
     const imageInput = useRef()
     const carouselInput = useRef()
@@ -404,8 +406,9 @@ const CreatePost = () => {
       return
     }
 
-    if (data.post && setFollowPost) {
-      const newPost = {
+    let created = null
+    if (data.post) {
+      created = {
         ...data.post,
         postedBy: data.post.postedBy || {
           _id: user._id,
@@ -414,14 +417,17 @@ const CreatePost = () => {
           profilePic: user.profilePic,
         },
       }
-      setFollowPost((prev) => {
-        const exists = prev.some((p) => p._id?.toString() === newPost._id?.toString())
-        if (exists) return prev
-        return [newPost, ...prev]
-      })
+      if (setFollowPost) {
+        setFollowPost((prev) => {
+          const exists = prev.some((p) => p._id?.toString() === created._id?.toString())
+          if (exists) return prev
+          return [created, ...prev]
+        })
+      }
     }
 
     showToast("Success", "Post created successfully", "success")
+    if (pinnableMedia(created)) setPinPost(created)
     onClose()
     setPostText("")
     clearCarouselMedia()
@@ -744,6 +750,18 @@ const CreatePost = () => {
         </ModalContent>
      
       </Modal>
+      {pinPost ? (
+        <PostPinEditor
+          post={pinPost}
+          isOpen
+          onClose={() => setPinPost(null)}
+          onPins={(pins) => {
+            const next = { ...pinPost, pins }
+            setPinPost(next)
+            setFollowPost((prev) => prev.map((p) => (String(p._id) === String(next._id) ? { ...p, pins } : p)))
+          }}
+        />
+      ) : null}
     
     
     

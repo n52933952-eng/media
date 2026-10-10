@@ -400,12 +400,19 @@ const UserPage = () => {
       )
     }
 
+    const handlePostPins = (data) => {
+      const postId = data?.postId?.toString?.() || (data?.postId ? String(data.postId) : '')
+      if (!postId || !Array.isArray(data?.pins)) return
+      setPosts((prev) => prev.map((p) => (p._id?.toString?.() === postId ? { ...p, pins: data.pins } : p)))
+    }
     socket.on('postUpdated', handlePostUpdated)
+    socket.on('postPins', handlePostPins)
     socket.on('newPost', handleNewPost)
     socket.on('postDeleted', handlePostDeleted)
     socket.on('postEngagement', handlePostEngagement)
     return () => {
       socket.off('postUpdated', handlePostUpdated)
+      socket.off('postPins', handlePostPins)
       socket.off('newPost', handleNewPost)
       socket.off('postDeleted', handlePostDeleted)
       socket.off('postEngagement', handlePostEngagement)
