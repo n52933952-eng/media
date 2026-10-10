@@ -19,7 +19,7 @@ import { mediaDisplayUrl } from '../utils/mediaUrl.js'
 import { fmtTime, otherParty, prepareLightVideo, uidOf } from '../utils/videoMessage.js'
 import VideoRecordModal from '../Components/VideoRecordModal.jsx'
 
-const REACTIONS = ['❤️', '😂', '🔥']
+const REACTIONS = ['❤️', '😂', '🔥', '😮', '😢', '👏', '😍', '🎉']
 
 const VideoMessageWatchPage = () => {
   const { id } = useParams()
@@ -215,6 +215,11 @@ const VideoMessageWatchPage = () => {
   )
 
   const handleTime = (t) => {
+    if (dragRef.current) {
+      lastTRef.current = t
+      setNow(t)
+      return
+    }
     if (replyLockRef.current) {
       const v = videoRef.current
       const pin = pinnedTRef.current
@@ -285,16 +290,27 @@ const VideoMessageWatchPage = () => {
     }
   }
 
-  const seekTo = (t) => {
+  const seekTo = (t, { soft = false } = {}) => {
     const v = videoRef.current
-    const at = Math.max(0, Math.min(dur || t, t))
+    const at = Math.max(0, Math.min(dur || t, Number(t) || 0))
     if (!v) return
-    for (const n of videoNotes) {
-      if (n.t > at + 0.2) shownRef.current.delete(String(n._id))
+    const keepPlaying = !v.paused || replyLockRef.current
+    if (replyLockRef.current) {
+      replyLockRef.current = false
+      setActiveNote(null)
+      try { noteVideoRef.current?.pause() } catch { /* ignore */ }
     }
-    v.currentTime = at
+    if (!soft) {
+      for (const n of notes) {
+        const idn = String(n._id)
+        if ((Number(n.t) || 0) > at + 0.25) shownRef.current.delete(idn)
+        else shownRef.current.add(idn)
+      }
+    }
+    try { v.currentTime = at } catch { /* ignore */ }
     setNow(at)
     lastTRef.current = at
+    if (!soft && keepPlaying) v.play().catch(() => {})
   }
 
   const timeFromBar = (clientX) => {
@@ -579,17 +595,21 @@ const VideoMessageWatchPage = () => {
           onPointerDown={(e) => {
             dragRef.current = true
             e.currentTarget.setPointerCapture(e.pointerId)
-            seekTo(timeFromBar(e.clientX))
+            seekTo(timeFromBar(e.clientX), { soft: true })
           }}
           onPointerMove={(e) => {
             if (!dragRef.current) return
-            seekTo(timeFromBar(e.clientX))
+            seekTo(timeFromBar(e.clientX), { soft: true })
           }}
-          onPointerUp={() => {
+          onPointerUp={(e) => {
+            if (!dragRef.current) return
             dragRef.current = false
+            seekTo(timeFromBar(e.clientX), { soft: false })
           }}
-          onPointerCancel={() => {
+          onPointerCancel={(e) => {
+            if (!dragRef.current) return
             dragRef.current = false
+            seekTo(timeFromBar(e.clientX), { soft: false })
           }}
         >
           <Box position="absolute" left="0" right="0" top="11px" h="6px" bg="blackAlpha.300" borderRadius="full" />
@@ -693,7 +713,7 @@ const VideoMessageWatchPage = () => {
             Pick video
           </Button>
         </HStack>
-        <Flex justify="center" gap={3} mb={3}>
+        <Flex justify="center" gap={2} mb={3} flexWrap="wrap">
           {REACTIONS.map((e) => (
             <Button
               key={e}
