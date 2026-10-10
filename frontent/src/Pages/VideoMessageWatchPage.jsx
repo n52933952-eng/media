@@ -56,7 +56,6 @@ const VideoMessageWatchPage = () => {
   const [duration, setDuration] = useState(0)
   const [playing, setPlaying] = useState(false)
   const [busy, setBusy] = useState(false)
-  const [busyHint, setBusyHint] = useState('')
   const [activeNote, setActiveNote] = useState(null)
   const [popReaction, setPopReaction] = useState(null)
   const [recordOpen, setRecordOpen] = useState(false)
@@ -359,6 +358,26 @@ const VideoMessageWatchPage = () => {
     }
   }
 
+  const removeReplyHere = async (t) => {
+    if (busy || !iAmSender) return
+    setBusy(true)
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/video-message/${id}/reply-prompt/remove`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ t }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Failed to remove')
+      if (Array.isArray(data.markers)) setItem((prev) => (prev ? { ...prev, markers: data.markers } : prev))
+    } catch (e) {
+      showToast('Error', e.message || 'Failed to remove', 'error')
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const addReaction = async (emoji) => {
     if (busy) return
     setBusy(true)
@@ -385,7 +404,6 @@ const VideoMessageWatchPage = () => {
   const addVideoNote = async (file) => {
     if (!file || busy) return
     setBusy(true)
-    setBusyHint('Making video light…')
     try {
       const tmp = document.createElement('video')
       const url = URL.createObjectURL(file)
@@ -407,7 +425,6 @@ const VideoMessageWatchPage = () => {
         return
       }
       const light = await prepareLightVideo(file, 'note')
-      setBusyHint('Uploading…')
       const videoUrl = await uploadMediaToR2(light, 'video-messages', { skipCompress: true })
       const res = await fetch(`${API_BASE_URL}/api/video-message/${id}/notes`, {
         method: 'POST',
@@ -426,7 +443,6 @@ const VideoMessageWatchPage = () => {
       showToast('Error', e.message || 'Failed', 'error')
     } finally {
       setBusy(false)
-      setBusyHint('')
     }
   }
 
@@ -502,7 +518,7 @@ const VideoMessageWatchPage = () => {
 
       <HStack spacing={2} px={3} py={2} bg="#0b0b0b" flexWrap="wrap" justify="center">
         {iAmSender ? (
-          <Button colorScheme="blue" borderRadius="full" size="sm" isLoading={busy} onClick={askReplyHere}>
+          <Button colorScheme="blue" borderRadius="full" size="sm" onClick={askReplyHere}>
             Reply here
           </Button>
         ) : null}
@@ -510,8 +526,6 @@ const VideoMessageWatchPage = () => {
           colorScheme="red"
           borderRadius="full"
           size="sm"
-          isLoading={busy}
-          loadingText={busyHint || 'Working'}
           onClick={() => {
             const v = videoRef.current
             const t = v ? v.currentTime || now : now
@@ -531,7 +545,6 @@ const VideoMessageWatchPage = () => {
             size="sm"
             color="white"
             borderColor="whiteAlpha.700"
-            isDisabled={busy}
             onClick={() => {
               const v = videoRef.current
               const t = v ? v.currentTime || now : now
@@ -783,9 +796,9 @@ const VideoMessageWatchPage = () => {
           }}
         />
 
-        {!iAmSender && (item.markers || []).some((m) => m.type === 'reply') && (
+        {(item.markers || []).some((m) => m.type === 'reply') && (
           <Box mb={3}>
-            <Text fontSize="sm" fontWeight="bold" mb={1}>Asked you</Text>
+            <Text fontSize="sm" fontWeight="bold" mb={1}>{iAmSender ? 'Reply here' : 'Asked you'}</Text>
             {(item.markers || []).filter((m) => m.type === 'reply').map((m, i) => (
               <Flex
                 key={`ask-${i}`}
@@ -801,7 +814,20 @@ const VideoMessageWatchPage = () => {
                 }}
               >
                 <Text w="44px" fontSize="sm" color={muted}>{fmtTime(m.t)}</Text>
-                <Text fontSize="sm">Reply or reaction here</Text>
+                <Text fontSize="sm" flex="1">Reply or reaction here</Text>
+                {iAmSender && (
+                  <Button
+                    size="xs"
+                    variant="ghost"
+                    color={muted}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      removeReplyHere(m.t)
+                    }}
+                  >
+                    ✕
+                  </Button>
+                )}
               </Flex>
             ))}
           </Box>
@@ -855,7 +881,6 @@ const VideoMessageWatchPage = () => {
               minW="40px"
               fontSize="20px"
               p={0}
-              isDisabled={busy}
               onClick={() => addReaction(e)}
             >
               {e}

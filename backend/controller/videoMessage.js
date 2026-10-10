@@ -346,6 +346,31 @@ export const addReplyPrompt = async (req, res) => {
   }
 }
 
+/** Sender removes one "Reply here" mark. Match the second they tapped. */
+export const removeReplyPrompt = async (req, res) => {
+  try {
+    const userId = req.user._id
+    const doc = await loadForParticipant(req.params.id, userId)
+    if (!doc) return res.status(404).json({ error: 'Video message not found' })
+    if (String(doc.sender) !== String(userId)) {
+      return res.status(403).json({ error: 'Only the sender can remove a reply prompt' })
+    }
+    const at = toNum(req.body?.t, -1)
+    if (at < 0) return res.status(400).json({ error: 'Invalid time' })
+    const list = doc.markers || []
+    const idx = list.findIndex((m) => m?.type === 'reply' && Math.abs(Number(m.t) - at) < 0.2)
+    if (idx < 0) return res.status(404).json({ error: 'Reply prompt not found' })
+    doc.markers = list.filter((_, i) => i !== idx)
+    await doc.save()
+    const payload = { videoMessageId: String(doc._id), markers: doc.markers }
+    emitToUser(doc.receiver, 'videoMessage:marker', payload)
+    return res.status(200).json({ markers: doc.markers })
+  } catch (error) {
+    console.error('[videoMessage] remove reply prompt error:', error)
+    return res.status(500).json({ error: 'Failed to remove reply prompt' })
+  }
+}
+
 // ───────────────────────────── reply inside a moment ─────────────────────────────
 
 export const addVideoNote = async (req, res) => {

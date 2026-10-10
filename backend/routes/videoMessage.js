@@ -7,6 +7,7 @@ import {
   getVideoMessage,
   addVideoNote,
   addReplyPrompt,
+  removeReplyPrompt,
   deleteVideoNote,
   deleteVideoMessage,
 } from '../controller/videoMessage.js'
@@ -20,6 +21,7 @@ router.get('/:id', protectRoute, getVideoMessage)
 router.delete('/:id', protectRoute, deleteVideoMessage)
 router.post('/:id/notes', protectRoute, addVideoNote)
 router.post('/:id/reply-prompt', protectRoute, addReplyPrompt)
+router.post('/:id/reply-prompt/remove', protectRoute, removeReplyPrompt)
 router.delete('/:id/notes/:noteId', protectRoute, deleteVideoNote)
 
 export default router
