@@ -41,6 +41,8 @@ const VideoMessageWatchPage = () => {
   const lastTRef = useRef(0)
   const resumeAfterRef = useRef(true)
   const pinRef = useRef(0)
+  const barRef = useRef(null)
+  const dragRef = useRef(false)
   const durFixedRef = useRef(false)
   const askedRef = useRef(new Set())
   const resumePlayRef = useRef(false)
@@ -200,11 +202,14 @@ const VideoMessageWatchPage = () => {
       for (const m of item?.markers || []) {
         if (m.t > t + 0.2) askedRef.current.delete(String(m.t))
       }
+      return
     }
+    // A long jump is a seek. A normal step still catches the icon we just reached.
+    if (t - prev > 2.5) return
     if (!iAmSender && !activeNote) {
       const ask = (item?.markers || []).find((m) => {
         if (m?.type !== 'reply' || askedRef.current.has(String(m.t))) return false
-        return m.t >= Math.min(prev, t) - 0.05 && m.t <= Math.max(prev, t) + 0.35
+        return m.t > prev - 0.08 && m.t <= t + 0.08
       })
       if (ask) {
         askedRef.current.add(String(ask.t))
@@ -214,7 +219,7 @@ const VideoMessageWatchPage = () => {
     const hit = videoNotes.find((n) => {
       const idn = String(n._id)
       if (shownRef.current.has(idn)) return false
-      return n.t >= Math.min(prev, t) - 0.05 && n.t <= Math.max(prev, t) + 0.35
+      return n.t > prev - 0.08 && n.t <= t + 0.08
     })
     if (hit) {
       openOverlay(hit, { resumeAfter: true, seek: false })
@@ -227,7 +232,7 @@ const VideoMessageWatchPage = () => {
       if (n.type !== 'reaction') return false
       const idn = String(n._id)
       if (shownRef.current.has(idn)) return false
-      return Math.abs((n.t || 0) - t) < 0.35
+      return n.t > prev - 0.08 && n.t <= t + 0.08
     })
     if (react) {
       shownRef.current.add(String(react._id))
@@ -250,13 +255,21 @@ const VideoMessageWatchPage = () => {
 
   const seekTo = (t) => {
     const v = videoRef.current
+    const at = Math.max(0, Math.min(dur || t, t))
     if (!v) return
     for (const n of videoNotes) {
-      if (n.t > t + 0.2) shownRef.current.delete(String(n._id))
+      if (n.t > at + 0.2) shownRef.current.delete(String(n._id))
     }
-    v.currentTime = Math.max(0, t)
-    setNow(t)
-    lastTRef.current = t
+    v.currentTime = at
+    setNow(at)
+    lastTRef.current = at
+  }
+
+  const timeFromBar = (clientX) => {
+    const rect = barRef.current?.getBoundingClientRect()
+    if (!rect?.width) return now
+    const pct = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width))
+    return pct * (dur || 0)
   }
 
   const askReplyHere = async () => {
@@ -538,29 +551,57 @@ const VideoMessageWatchPage = () => {
           <Text fontSize="sm" color={muted} fontVariantNumeric="tabular-nums">{fmtTime(dur)}</Text>
         </Flex>
         <Box
-          h="22px"
-          bg="blackAlpha.300"
+          ref={barRef}
+          h="28px"
+          bg="blackAlpha.200"
           borderRadius="full"
           position="relative"
           cursor="pointer"
           mb={3}
-          onClick={(e) => {
-            const rect = e.currentTarget.getBoundingClientRect()
-            const pct = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width))
-            seekTo(pct * dur)
+          style={{ touchAction: 'none' }}
+          onPointerDown={(e) => {
+            dragRef.current = true
+            e.currentTarget.setPointerCapture(e.pointerId)
+            seekTo(timeFromBar(e.clientX))
+          }}
+          onPointerMove={(e) => {
+            if (!dragRef.current) return
+            seekTo(timeFromBar(e.clientX))
+          }}
+          onPointerUp={() => {
+            dragRef.current = false
+          }}
+          onPointerCancel={() => {
+            dragRef.current = false
           }}
         >
-          <Box position="absolute" left={0} top="8px" h="6px" w={`${Math.min(100, (now / dur) * 100)}%`} bg="blue.400" borderRadius="full" />
+          <Box position="absolute" left="0" right="0" top="11px" h="6px" bg="blackAlpha.300" borderRadius="full" />
+          <Box position="absolute" left={0} top="11px" h="6px" w={`${Math.min(100, (now / dur) * 100)}%`} bg="blue.400" borderRadius="full" />
+          <Box
+            position="absolute"
+            top="7px"
+            left={`${Math.min(100, (now / dur) * 100)}%`}
+            w="14px"
+            h="14px"
+            bg="white"
+            borderRadius="full"
+            border="2px solid"
+            borderColor="blue.400"
+            transform="translateX(-50%)"
+            pointerEvents="none"
+          />
           {(item.markers || []).map((m, i) => (
             <Box
               key={`m-${i}`}
               position="absolute"
               left={`${Math.min(98, (m.t / dur) * 100)}%`}
-              top="4px"
-              w="4px"
-              h="14px"
+              top="50%"
+              w="8px"
+              h="8px"
               bg="yellow.300"
-              borderRadius="sm"
+              borderRadius="full"
+              transform="translate(-50%, -50%)"
+              zIndex={2}
               onClick={(e) => {
                 e.stopPropagation()
                 seekTo(m.t)
@@ -568,73 +609,91 @@ const VideoMessageWatchPage = () => {
             />
           ))}
           {notes.map((n) => (
-            <Box
+            <Flex
               key={n._id}
               position="absolute"
               left={`${Math.min(98, (n.t / dur) * 100)}%`}
-              top="-1px"
+              top="50%"
+              transform="translate(-50%, -50%)"
+              w="22px"
+              h="22px"
+              borderRadius="full"
+              bg="white"
+              align="center"
+              justify="center"
               fontSize="13px"
-              transform="translateX(-50%)"
+              lineHeight="1"
+              boxShadow="0 1px 4px rgba(0,0,0,0.25)"
               cursor="pointer"
-              lineHeight="22px"
+              zIndex={2}
               onClick={(e) => {
                 e.stopPropagation()
                 openOverlay(n, { resumeAfter: true, seek: true })
               }}
             >
-              {n.type === 'reaction' ? n.reaction : '●'}
-            </Box>
+              {n.type === 'reaction' ? n.reaction : '🎥'}
+            </Flex>
           ))}
         </Box>
 
         <HStack spacing={2} mb={3} flexWrap="wrap">
-          {iAmSender ? (
+          {iAmSender && (
             <Button colorScheme="blue" borderRadius="full" isLoading={busy} onClick={askReplyHere}>
               Reply here · {fmtTime(now)}
             </Button>
-          ) : (
-            <>
-              <Button
-                colorScheme="red"
-                borderRadius="full"
-                isLoading={busy}
-                loadingText={busyHint || 'Working'}
-                onClick={() => {
-                  const v = videoRef.current
-                  const t = v ? v.currentTime || now : now
-                  pinRef.current = t
-                  setNow(t)
-                  v?.pause()
-                  setPlaying(false)
-                  setRecordOpen(true)
-                }}
-              >
-                Record · {fmtTime(now)}
-              </Button>
-              <Button
-                variant="outline"
-                borderRadius="full"
-                isDisabled={busy}
-                onClick={() => {
-                  const v = videoRef.current
-                  const t = v ? v.currentTime || now : now
-                  pinRef.current = t
-                  setNow(t)
-                  v?.pause()
-                  setPlaying(false)
-                  fileRef.current?.click()
-                }}
-              >
-                Pick video
-              </Button>
-            </>
           )}
+          <Button
+            colorScheme="red"
+            borderRadius="full"
+            isLoading={busy}
+            loadingText={busyHint || 'Working'}
+            onClick={() => {
+              const v = videoRef.current
+              const t = v ? v.currentTime || now : now
+              pinRef.current = t
+              setNow(t)
+              v?.pause()
+              setPlaying(false)
+              setRecordOpen(true)
+            }}
+          >
+            Record · {fmtTime(now)}
+          </Button>
+          <Button
+            variant="outline"
+            borderRadius="full"
+            isDisabled={busy}
+            onClick={() => {
+              const v = videoRef.current
+              const t = v ? v.currentTime || now : now
+              pinRef.current = t
+              setNow(t)
+              v?.pause()
+              setPlaying(false)
+              fileRef.current?.click()
+            }}
+          >
+            Pick video
+          </Button>
+        </HStack>
+        <Flex justify="center" gap={3} mb={3}>
           {REACTIONS.map((e) => (
-            <Button key={e} size="sm" variant="outline" borderRadius="full" isDisabled={busy} onClick={() => addReaction(e)}>
+            <Button
+              key={e}
+              variant="outline"
+              borderRadius="full"
+              w="48px"
+              h="48px"
+              minW="48px"
+              fontSize="22px"
+              p={0}
+              isDisabled={busy}
+              onClick={() => addReaction(e)}
+            >
               {e}
             </Button>
           ))}
-        </HStack>
+        </Flex>
         <input
           ref={fileRef}
           type="file"

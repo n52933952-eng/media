@@ -310,11 +310,6 @@ export const addVideoNote = async (req, res) => {
 
     const note = { videoMessage: doc._id, user: userId, t: Math.round(safeT * 10) / 10 }
 
-    // The sender already made the video. Only the receiver records a reply on a moment.
-    if (type !== 'reaction' && String(doc.sender) === String(userId)) {
-      return res.status(403).json({ error: 'Only the receiver can record a reply' })
-    }
-
     if (type === 'reaction') {
       const emoji = String(reaction || '').trim().slice(0, 8)
       if (!emoji) return res.status(400).json({ error: 'Reaction is required' })
