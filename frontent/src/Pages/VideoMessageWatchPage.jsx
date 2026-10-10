@@ -473,7 +473,6 @@ const VideoMessageWatchPage = () => {
 
   return (
     <Box
-      maxW="620px"
       mx="auto"
       w="100%"
       h="calc(100dvh - 80px)"
@@ -548,12 +547,14 @@ const VideoMessageWatchPage = () => {
         ) : null}
       </HStack>
 
+      <Flex flex="1" minH={0} direction={{ base: 'column', lg: 'row' }} align="stretch">
+      <Box flex="1" minW={0} minH={0} display="flex" flexDirection="column">
       <Box
         position="relative"
         bg="black"
         w="100%"
         flex="1"
-        minH={{ base: '160px', md: '200px' }}
+        minH="180px"
       >
         <video
           ref={videoRef}
@@ -742,7 +743,24 @@ const VideoMessageWatchPage = () => {
             </Flex>
           ))}
         </Box>
+      </Box>
+      </Box>
 
+      <Box
+        w={{ base: '100%', lg: '300px' }}
+        maxH={{ base: '250px', lg: 'none' }}
+        flexShrink={0}
+        minH={0}
+        display="flex"
+        flexDirection="column"
+        bg={card}
+        borderLeftWidth={{ lg: '1px' }}
+        borderTopWidth={{ base: '1px', lg: 0 }}
+        borderColor="whiteAlpha.200"
+        px={3}
+        pt={3}
+        pb={2}
+      >
         <input
           ref={fileRef}
           type="file"
@@ -790,9 +808,9 @@ const VideoMessageWatchPage = () => {
         )}
 
         {notes.length > 0 && (
-          <Box>
-            <Text fontSize="sm" fontWeight="bold" mb={2}>Inside this video</Text>
-            <Box maxH="168px" overflowY="auto" pr={1}>
+          <Box flex="1" minH={0} display="flex" flexDirection="column">
+            <Text fontSize="sm" fontWeight="bold" mb={1} flexShrink={0}>Inside this video</Text>
+            <Box flex="1" minH={0} overflowY="auto" pr={1}>
             {notes.map((n) => (
               <Flex
                 key={n._id}
@@ -826,16 +844,16 @@ const VideoMessageWatchPage = () => {
           </Box>
         )}
 
-        <Flex justify="center" gap={2} mt={3} mb={1} flexWrap="wrap">
+        <Flex justify="center" gap={2} mt={2} mb={1} flexShrink={0} flexWrap="wrap">
           {REACTIONS.map((e) => (
             <Button
               key={e}
               variant="outline"
               borderRadius="full"
-              w="48px"
-              h="48px"
-              minW="48px"
-              fontSize="22px"
+              w="40px"
+              h="40px"
+              minW="40px"
+              fontSize="20px"
               p={0}
               isDisabled={busy}
               onClick={() => addReaction(e)}
@@ -845,6 +863,7 @@ const VideoMessageWatchPage = () => {
           ))}
         </Flex>
       </Box>
+      </Flex>
     </Box>
   )
 }

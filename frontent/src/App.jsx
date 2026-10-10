@@ -112,14 +112,15 @@ const AppContent = () => {
   const isRacePage = location.pathname.startsWith("/race/")
   const isChessGamePage = /^\/chess\/[^/]+/.test(location.pathname)
   const isCardGamePage = /^\/card\/[^/]+/.test(location.pathname)
+  const isVideoWatchPage = /^\/video-messages\/[^/]+/.test(location.pathname)
   const isGamePlayPage = isRacePage || isChessGamePage || isCardGamePage
   // Header always uses the original centered column (messages, race, home, etc.).
   const headerMaxW = '620px'
 
   const contentMaxW = isHomePage
     ? '1400px'
-    : isChessGamePage || isCardGamePage
-      ? { base: '100%', md: '900px', lg: '1100px' }
+    : isChessGamePage || isCardGamePage || isVideoWatchPage
+      ? { base: '100%', md: '980px', lg: '1180px' }
       : '620px'
   // Check if current path is a user page (e.g., /username, but not /username/post/123 or other routes)
   const pathParts = location.pathname.split('/').filter(Boolean)
