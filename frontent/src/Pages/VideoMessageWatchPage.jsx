@@ -476,7 +476,9 @@ const VideoMessageWatchPage = () => {
       maxW="620px"
       mx="auto"
       w="100%"
-      minH={{ base: 'calc(100dvh - 72px)', md: 'auto' }}
+      h="calc(100dvh - 80px)"
+      display="flex"
+      flexDirection="column"
       bg={panel}
       borderRadius={{ md: '16px' }}
       overflow="hidden"
@@ -550,7 +552,8 @@ const VideoMessageWatchPage = () => {
         position="relative"
         bg="black"
         w="100%"
-        h={{ base: 'min(62dvh, 520px)', md: 'min(58vh, 560px)' }}
+        flex="1"
+        minH={{ base: '160px', md: '200px' }}
       >
         <video
           ref={videoRef}
@@ -639,7 +642,7 @@ const VideoMessageWatchPage = () => {
         </Box>
       </Box>
 
-      <Box bg={card} px={{ base: 3, md: 4 }} py={4}>
+      <Box bg={card} px={{ base: 3, md: 4 }} pt={3} pb={2} flexShrink={0}>
         <Flex align="center" mb={2}>
           <Button size="sm" onClick={togglePlay} borderRadius="full" minW="40px">
             {playing ? '❚❚' : '▶'}
@@ -789,6 +792,7 @@ const VideoMessageWatchPage = () => {
         {notes.length > 0 && (
           <Box>
             <Text fontSize="sm" fontWeight="bold" mb={2}>Inside this video</Text>
+            <Box maxH="168px" overflowY="auto" pr={1}>
             {notes.map((n) => (
               <Flex
                 key={n._id}
@@ -818,10 +822,11 @@ const VideoMessageWatchPage = () => {
                 )}
               </Flex>
             ))}
+            </Box>
           </Box>
         )}
 
-        <Flex justify="center" gap={3} mt={4} mb={1} flexWrap="wrap">
+        <Flex justify="center" gap={2} mt={3} mb={1} flexWrap="wrap">
           {REACTIONS.map((e) => (
             <Button
               key={e}
