@@ -40,6 +40,8 @@ const VideoMessageWatchPage = () => {
   const shownRef = useRef(new Set())
   const lastTRef = useRef(0)
   const resumeAfterRef = useRef(true)
+  const replyLockRef = useRef(false)
+  const pinnedTRef = useRef(0)
   const pinRef = useRef(0)
   const barRef = useRef(null)
   const dragRef = useRef(false)
@@ -139,13 +141,24 @@ const VideoMessageWatchPage = () => {
   }, [])
 
   const closeOverlay = useCallback((resume = true) => {
+    const v = videoRef.current
+    const pin = pinnedTRef.current
+    if (v) {
+      try {
+        if (Math.abs((v.currentTime || 0) - pin) > 0.2) v.currentTime = pin
+      } catch {
+        /* ignore */
+      }
+    }
+    lastTRef.current = pin
+    setNow(pin)
+    replyLockRef.current = false
     setActiveNote(null)
     try {
       noteVideoRef.current?.pause()
     } catch {
       /* ignore */
     }
-    const v = videoRef.current
     if (resume && v && resumeAfterRef.current) {
       resumePlayRef.current = true
       v.play().catch(() => {})
@@ -167,30 +180,49 @@ const VideoMessageWatchPage = () => {
         }
         return
       }
+      const v = videoRef.current
+      const noteT = Math.max(0, Number(note.t) || 0)
+      const live = v ? v.currentTime || 0 : noteT
+      const base = seek || live < noteT - 1 ? noteT : live
+      pinnedTRef.current = Math.max(base, noteT) + 0.15
+      replyLockRef.current = true
       resumeAfterRef.current = resumeAfter
       shownRef.current.add(String(note._id))
-      if (seek) {
-        const v = videoRef.current
-        if (v) v.currentTime = Math.max(0, Number(note.t) || 0)
+      if (seek && v) {
+        try { v.currentTime = noteT } catch { /* ignore */ }
       }
-      videoRef.current?.pause()
+      v?.pause()
       setPlaying(false)
       setActiveNote(note)
+      setNow(base)
       primeNote(note)
       const el = noteVideoRef.current
       if (el) {
-        try {
-          el.currentTime = 0
-        } catch {
-          /* not loaded yet; starts from 0 anyway */
+        const start = () => {
+          el.removeEventListener('loadeddata', start)
+          try {
+            if ((el.currentTime || 0) > 0.05) el.currentTime = 0
+          } catch {
+            /* ignore */
+          }
+          el.play().catch(() => {})
         }
-        el.play().catch(() => {})
+        if (el.readyState >= 2) start()
+        else el.addEventListener('loadeddata', start)
       }
     },
     [primeNote],
   )
 
   const handleTime = (t) => {
+    if (replyLockRef.current) {
+      const v = videoRef.current
+      const pin = pinnedTRef.current
+      if (v && Math.abs((v.currentTime || 0) - pin) > 0.25) {
+        try { v.currentTime = pin } catch { /* keep the original on its second */ }
+      }
+      return
+    }
     const prev = lastTRef.current
     lastTRef.current = t
     setNow(t)
@@ -451,7 +483,7 @@ const VideoMessageWatchPage = () => {
             height: '100%',
             objectFit: 'contain',
             background: '#000',
-            filter: activeNote ? 'brightness(0.38)' : 'none',
+            filter: 'none',
           }}
           onClick={togglePlay}
           onTimeUpdate={(e) => handleTime(e.currentTarget.currentTime || 0)}
@@ -496,49 +528,34 @@ const VideoMessageWatchPage = () => {
         )}
 
         {/* Always mounted so the next reply can buffer before its moment. */}
-        <Flex
-          position="absolute"
-          inset={0}
-          align="center"
-          justify="center"
-          px={4}
-          display={activeNote ? 'flex' : 'none'}
-        >
-          <Box
-            w={{ base: '58%', sm: '46%' }}
-            maxW="260px"
-            bg="#111"
-            borderRadius="18px"
-            overflow="hidden"
-            boxShadow="0 16px 50px rgba(0,0,0,0.55)"
-            border="2px solid rgba(255,255,255,0.85)"
-          >
-              <video
-              ref={noteVideoRef}
-              playsInline
-              preload="auto"
-              style={{ width: '100%', display: 'block', aspectRatio: '3 / 4', objectFit: 'cover', background: '#000' }}
-              onEnded={() => {
-                const endedT = Number(activeNote?.t) || 0
-                const next = videoNotes.find(
-                  (n) =>
-                    !shownRef.current.has(String(n._id)) &&
-                    Math.abs((Number(n.t) || 0) - endedT) < 0.8,
-                )
-                if (next) openOverlay(next, { resumeAfter: true, seek: false })
-                else closeOverlay(true)
-              }}
-            />
-            <Flex px={2} py={1.5} align="center" justify="space-between" bg="#161616">
-              <Text color="white" fontSize="xs" noOfLines={1}>
-                {activeNote?.user?.name || activeNote?.user?.username || 'Reply'} · {fmtTime(activeNote?.t)}
-              </Text>
-              <Button size="xs" variant="ghost" color="white" onClick={() => closeOverlay(true)}>
-                Close
-              </Button>
-            </Flex>
-          </Box>
-        </Flex>
+        <Box position="absolute" inset={0} bg="black" display={activeNote ? 'block' : 'none'}>
+          <video
+            ref={noteVideoRef}
+            playsInline
+            preload="auto"
+            style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block', background: '#000' }}
+            onEnded={(e) => {
+              const endedAt = e.currentTarget.currentTime || 0
+              if (endedAt < 0.2) return
+              const endedT = Number(activeNote?.t) || 0
+              const next = videoNotes.find(
+                (n) =>
+                  !shownRef.current.has(String(n._id)) &&
+                  Math.abs((Number(n.t) || 0) - endedT) < 0.8,
+              )
+              if (next) openOverlay(next, { resumeAfter: true, seek: false })
+              else closeOverlay(true)
+            }}
+          />
+          <Flex position="absolute" top="10px" left="10px" right="10px" align="center" justify="space-between">
+            <Text color="white" fontSize="xs" bg="blackAlpha.600" px={2.5} py={1} borderRadius="full" noOfLines={1}>
+              Reply · {activeNote?.user?.name || activeNote?.user?.username || ''}
+            </Text>
+            <Button size="xs" borderRadius="full" bg="blackAlpha.600" color="white" onClick={() => closeOverlay(true)}>
+              Close
+            </Button>
+          </Flex>
+        </Box>
       </Box>
 
       <Box bg={card} px={{ base: 3, md: 4 }} py={4}>
