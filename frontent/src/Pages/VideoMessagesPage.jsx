@@ -32,11 +32,16 @@ import VideoRecordModal from '../Components/VideoRecordModal.jsx'
 
 const PAGE = 15
 
-function isUnseen(item, meId) {
+function unseenAmount(item, meId) {
   const me = String(meId)
-  if (uidOf(item.receiver) === me && !item.seenAt) return true
-  if (uidOf(item.sender) === me && item.senderHasNewNotes) return true
-  return false
+  let n = 0
+  if (uidOf(item.receiver) === me && !item.seenAt) n += 1
+  if (uidOf(item.receiver) === me && (item.receiverUnseenNotes || 0) > 0) n += item.receiverUnseenNotes
+  if (uidOf(item.sender) === me) {
+    const notes = item.senderUnseenNotes || 0
+    n += notes > 0 ? notes : item.senderHasNewNotes ? 1 : 0
+  }
+  return n
 }
 
 async function videoDurationOf(file) {
@@ -144,7 +149,15 @@ const VideoMessagesPage = () => {
       setItems((prev) =>
         prev.map((x) =>
           String(x._id) === id
-            ? { ...x, noteCount: (x.noteCount || 0) + 1, senderHasNewNotes: uidOf(x.sender) === String(user?._id) }
+            ? {
+                ...x,
+                noteCount: (x.noteCount || 0) + 1,
+                ...(payload?.badge
+                  ? uidOf(x.sender) === String(user?._id)
+                    ? { senderHasNewNotes: true, senderUnseenNotes: (x.senderUnseenNotes || 0) + 1 }
+                    : { receiverUnseenNotes: (x.receiverUnseenNotes || 0) + 1 }
+                  : {}),
+              }
             : x,
         ),
       )
@@ -314,7 +327,8 @@ const VideoMessagesPage = () => {
         <VStack spacing={2} align="stretch">
           {items.map((item) => {
             const other = otherParty(item, user?._id)
-            const unseen = isUnseen(item, user?._id)
+            const fresh = unseenAmount(item, user?._id)
+            const unseen = fresh > 0
             const mine = uidOf(item.sender) === String(user?._id)
             return (
               <Flex
@@ -328,7 +342,7 @@ const VideoMessagesPage = () => {
                 cursor="pointer"
                 align="center"
                 onClick={() => {
-                  if (unseen) setVideoMessageUnseenCount?.((n) => Math.max(0, (n || 0) - 1))
+                  if (fresh > 0) setVideoMessageUnseenCount?.((n) => Math.max(0, (n || 0) - fresh))
                   navigate(`/video-messages/${item._id}`)
                 }}
               >
@@ -369,7 +383,7 @@ const VideoMessagesPage = () => {
                     <Text fontWeight={unseen ? 'bold' : 'semibold'} noOfLines={1}>
                       {other?.name || other?.username || 'User'}
                     </Text>
-                    {unseen && <Badge colorScheme="blue">new</Badge>}
+                    {unseen && <Badge colorScheme="blue">{fresh > 1 ? fresh : 'new'}</Badge>}
                   </HStack>
                   <Text fontSize="sm" color={muted}>
                     {mine ? (item.seenAt ? 'Seen' : 'Not opened yet') : 'Sent you'} · {fmtTime(item.duration)} · {item.noteCount || 0} replies

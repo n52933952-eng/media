@@ -32,6 +32,9 @@ const videoMessageSchema = new mongoose.Schema(
     seenAt: { type: Date, default: null }, // receiver opened it
     // Set when the sender has unseen replies (cleared when sender opens it).
     senderHasNewNotes: { type: Boolean, default: false },
+    // How many replies/reactions the other person has not opened yet.
+    senderUnseenNotes: { type: Number, default: 0, min: 0 },
+    receiverUnseenNotes: { type: Number, default: 0, min: 0 },
   },
   { timestamps: true },
 )
@@ -43,6 +46,8 @@ videoMessageSchema.index({ sender: 1, createdAt: -1, _id: -1 })
 // Unseen badge for the receiver / sender-with-replies.
 videoMessageSchema.index({ receiver: 1, seenAt: 1 })
 videoMessageSchema.index({ sender: 1, senderHasNewNotes: 1 })
+videoMessageSchema.index({ sender: 1, senderUnseenNotes: 1 })
+videoMessageSchema.index({ receiver: 1, receiverUnseenNotes: 1 })
 
 const VideoMessage = mongoose.model('VideoMessage', videoMessageSchema)
 export default VideoMessage

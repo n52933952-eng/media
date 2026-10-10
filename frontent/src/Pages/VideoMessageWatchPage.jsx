@@ -432,7 +432,6 @@ const VideoMessageWatchPage = () => {
 
   const deleteNote = async (note) => {
     if (!note?._id || busy) return
-    if (!window.confirm('Remove this reply?')) return
     try {
       const res = await fetch(`${API_BASE_URL}/api/video-message/${id}/notes/${note._id}`, {
         method: 'DELETE',
@@ -804,7 +803,7 @@ const VideoMessageWatchPage = () => {
                 <Text fontSize="sm" color={muted} noOfLines={1} flex="1">
                   {n.user?.name || n.user?.username || ''}
                 </Text>
-                {uidOf(n.user) === String(user?._id) && (
+                {(iAmSender || uidOf(n.user) === String(user?._id)) && (
                   <Button
                     size="xs"
                     variant="ghost"

@@ -30,6 +30,32 @@ const toNum = (v, fallback = 0) => {
   return Number.isFinite(n) && n >= 0 ? n : fallback
 }
 
+const PUSH_WAIT_MS = 4000
+
+/** Tray alert after a short wait, so a quick delete never pings anyone. Tap only opens the list. */
+const queueVideoPush = ({ recipientId, actorName, body, videoId, noteId }) => {
+  const who = String(recipientId || '')
+  const vid = String(videoId || '')
+  if (!who || !vid) return
+  setTimeout(async () => {
+    try {
+      const videoStill = await VideoMessage.exists({ _id: vid })
+      if (!videoStill) return
+      if (noteId) {
+        const noteStill = await VideoNote.exists({ _id: noteId, videoMessage: vid })
+        if (!noteStill) return
+      }
+      const { sendNotificationToUser } = await import('../services/pushNotifications.js')
+      await sendNotificationToUser(who, actorName || 'PlaySocial', body, {
+        type: 'video_message',
+        nonce: String(Date.now()),
+      })
+    } catch (err) {
+      console.error('[videoMessage] push failed:', err?.message || err)
+    }
+  }, PUSH_WAIT_MS)
+}
+
 const emitToUser = (userId, event, payload) => {
   try {
     const io = getIO()
@@ -100,6 +126,8 @@ const toPublic = (doc) => {
     lastNoteAt: o.lastNoteAt || null,
     seenAt: o.seenAt || null,
     senderHasNewNotes: !!o.senderHasNewNotes,
+    senderUnseenNotes: o.senderUnseenNotes || 0,
+    receiverUnseenNotes: o.receiverUnseenNotes || 0,
     createdAt: o.createdAt,
   }
 }
@@ -161,6 +189,12 @@ export const sendVideoMessage = async (req, res) => {
     const payload = toPublic(doc)
 
     emitToUser(receiverId, 'videoMessage:new', payload)
+    queueVideoPush({
+      recipientId: receiverId,
+      actorName: doc.sender?.name || doc.sender?.username || 'Someone',
+      body: 'sent you a video',
+      videoId: doc._id,
+    })
     return res.status(201).json(payload)
   } catch (error) {
     console.error('[videoMessage] send error:', error)
@@ -210,14 +244,27 @@ export const listVideoMessages = async (req, res) => {
   }
 }
 
-/** Badge: videos I received and never opened + my sent videos with new replies. */
+/** Badge: unopened videos + each reply or reaction I have not opened yet. */
 export const getVideoMessageUnseenCount = async (req, res) => {
   try {
     const userId = req.user._id
-    const [received, replied] = await Promise.all([
+    const [received, senderRows, receiverRows] = await Promise.all([
       VideoMessage.countDocuments({ receiver: userId, seenAt: null }),
-      VideoMessage.countDocuments({ sender: userId, senderHasNewNotes: true }),
+      VideoMessage.aggregate([
+        { $match: { sender: userId, $or: [{ senderUnseenNotes: { $gt: 0 } }, { senderHasNewNotes: true }] } },
+        {
+          $group: {
+            _id: null,
+            n: { $sum: { $cond: [{ $gt: ['$senderUnseenNotes', 0] }, '$senderUnseenNotes', 1] } },
+          },
+        },
+      ]),
+      VideoMessage.aggregate([
+        { $match: { receiver: userId, seenAt: { $ne: null }, receiverUnseenNotes: { $gt: 0 } } },
+        { $group: { _id: null, n: { $sum: '$receiverUnseenNotes' } } },
+      ]),
     ])
+    const replied = (senderRows[0]?.n || 0) + (receiverRows[0]?.n || 0)
     return res.status(200).json({ unseenCount: received + replied })
   } catch (error) {
     console.error('[videoMessage] unseen count error:', error)
@@ -237,7 +284,11 @@ export const getVideoMessage = async (req, res) => {
     const uid = String(userId)
     const update = {}
     if (String(doc.receiver) === uid && !doc.seenAt) update.seenAt = new Date()
-    if (String(doc.sender) === uid && doc.senderHasNewNotes) update.senderHasNewNotes = false
+    if (String(doc.receiver) === uid && (doc.receiverUnseenNotes || 0) > 0) update.receiverUnseenNotes = 0
+    if (String(doc.sender) === uid && (doc.senderHasNewNotes || (doc.senderUnseenNotes || 0) > 0)) {
+      update.senderHasNewNotes = false
+      update.senderUnseenNotes = 0
+    }
     if (Object.keys(update).length) {
       await VideoMessage.updateOne({ _id: doc._id }, { $set: update })
       Object.assign(doc, update)
@@ -329,22 +380,35 @@ export const addVideoNote = async (req, res) => {
 
     const otherId = String(doc.sender) === String(userId) ? doc.receiver : doc.sender
     const fromReceiver = String(userId) === String(doc.receiver)
-    const flag = fromReceiver ? { senderHasNewNotes: true } : {}
-    await VideoMessage.updateOne(
-      { _id: doc._id },
-      { $inc: { noteCount: 1 }, $set: { lastNoteAt: new Date(), ...flag } },
-    )
+    const inc = { noteCount: 1 }
+    const set = { lastNoteAt: new Date() }
+    let badge = false
+    if (fromReceiver) {
+      inc.senderUnseenNotes = 1
+      set.senderHasNewNotes = true
+      badge = true
+    } else if (doc.seenAt) {
+      inc.receiverUnseenNotes = 1
+      badge = true
+    }
+    await VideoMessage.updateOne({ _id: doc._id }, { $inc: inc, $set: set })
 
     await created.populate('user', USER_SELECT)
-    // `badge` = the other side's unseen count really went up (flag flipped),
-    // so clients increment at most once per video instead of once per note.
     const payload = {
       videoMessageId: String(doc._id),
       note: created.toObject(),
-      badge: fromReceiver && !doc.senderHasNewNotes,
+      badge,
     }
 
     emitToUser(otherId, 'videoMessage:note', payload)
+    const actorName = created.user?.name || created.user?.username || 'Someone'
+    queueVideoPush({
+      recipientId: otherId,
+      actorName,
+      body: created.type === 'reaction' ? `reacted ${created.reaction || ''} on a video` : 'replied on a video',
+      videoId: doc._id,
+      noteId: created._id,
+    })
     return res.status(201).json(payload)
   } catch (error) {
     console.error('[videoMessage] add note error:', error)
@@ -360,13 +424,19 @@ export const deleteVideoNote = async (req, res) => {
     const doc = await loadForParticipant(id, userId)
     if (!doc) return res.status(404).json({ error: 'Video message not found' })
 
-    const removed = await VideoNote.findOneAndDelete({ _id: noteId, videoMessage: doc._id, user: userId })
+    const idOf = (v) => String(v?._id || v || '')
+    const iAmSender = idOf(doc.sender) === idOf(userId)
+    const removed = await VideoNote.findOneAndDelete({
+      _id: noteId,
+      videoMessage: doc._id,
+      ...(iAmSender ? {} : { user: userId }),
+    })
     if (!removed) return res.status(404).json({ error: 'Reply not found' })
 
     await VideoMessage.updateOne({ _id: doc._id, noteCount: { $gt: 0 } }, { $inc: { noteCount: -1 } })
     if (removed.videoUrl) cleanupMediaInBackground([removed.videoUrl])
 
-    const otherId = String(doc.sender) === String(userId) ? doc.receiver : doc.sender
+    const otherId = iAmSender ? doc.receiver : doc.sender
     const payload = { videoMessageId: String(doc._id), noteId: String(noteId) }
     emitToUser(otherId, 'videoMessage:noteDeleted', payload)
     return res.status(200).json(payload)
