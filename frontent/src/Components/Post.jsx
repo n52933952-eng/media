@@ -25,7 +25,6 @@ import {
   getChessGameDataForPost,
 } from '../utils/gameFeedPostUtils.js'
 import { isVideoUrl, mediaDisplayUrl } from '../utils/mediaUrl.js'
-import { PostPinsLayer } from './PostPins'
 import PostMediaCarousel, { FEED_CAROUSEL_FRAME_H } from './PostMediaCarousel'
 import { getPostCarouselSlides, getPostCarouselAudio, shouldShowPostCarousel, postHasDisplayableMedia } from '../utils/postCarousel.js'
 import { usePostEngagementSubscription } from '../hooks/usePostEngagementSubscription.js'
@@ -159,8 +158,6 @@ const Post = ({post: initialPost, postedBy, onDelete, onPostUpdated, visibleVide
   // Use local post or initial post
   const post = localPost || initialPost
   const videoRef = useRef(null)
-  const pinTimeRef = useRef(0)
-  const [pinNow, setPinNow] = useState(0)
   const channelFrameRef = useRef(null)
   const channelPlayingRef = useRef(true)
   const [isVideoInView, setIsVideoInView] = useState(!visibleVideoOnly)
@@ -2052,7 +2049,6 @@ const showToast = useShowToast()
     <Box
       key={`feed-media-${post._id}`}
       data-post-media="true"
-      position="relative"
       borderRadius={4}
       overflow="hidden"
       border="0.5px solid"
@@ -2159,12 +2155,6 @@ const showToast = useShowToast()
             if (visibleVideoOnly && !isVideoInView) return
             e.target.play().catch(() => {})
           }}
-          onTimeUpdate={(e) => {
-            const t = e.target.currentTime || 0
-            if (Math.abs(t - pinTimeRef.current) < 0.35) return
-            pinTimeRef.current = t
-            setPinNow(t)
-          }}
         />
       ) : isPlainPageLink(post?.img) ? (
         <PageLinkCard url={post.img} thumb={post.linkThumb} />
@@ -2195,12 +2185,6 @@ const showToast = useShowToast()
       ) : showCarousel && carouselSlides.length > 0 ? (
         <PostMediaCarousel slides={carouselSlides} audioUrl={carouselAudio} frameHeight={FEED_CAROUSEL_FRAME_H} />
       ) : null}
-      <PostPinsLayer
-        post={post}
-        now={pinNow}
-        isOwner={isOwner}
-        onPins={(pins) => applyPostUpdate({ ...post, pins })}
-      />
     </Box>
   )}
   

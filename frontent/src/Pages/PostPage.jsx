@@ -29,7 +29,6 @@ import {
   openPlayStore,
 } from '../utils/postUtils.js'
 import PostMediaCarousel, { POST_DETAIL_CAROUSEL_FRAME_H } from '../Components/PostMediaCarousel'
-import { PostPinsLayer } from '../Components/PostPins'
 import { getPostCarouselSlides, getPostCarouselAudio, shouldShowPostCarousel, postHasDisplayableMedia } from '../utils/postCarousel.js'
 import { usePostEngagementSubscription, applyPostEngagement } from '../hooks/usePostEngagementSubscription.js'
 
@@ -60,8 +59,6 @@ const PostPage = () => {
     const carouselSlides = useMemo(() => (post ? getPostCarouselSlides(post) : []), [post])
     const carouselAudio = useMemo(() => (post ? getPostCarouselAudio(post) : null), [post?.audio])
     const showCarousel = post ? shouldShowPostCarousel(post) : false
-    const pinTimeRef = useRef(0)
-    const [pinNow, setPinNow] = useState(0)
     usePostEngagementSubscription(socket, post?._id)
 
     const [postReplies, setPostReplies] = useState([])
@@ -616,18 +613,11 @@ const PostPage = () => {
         )
       }
       
-      const handlePostPins = (data) => {
-        const postId = data?.postId?.toString?.() || (data?.postId ? String(data.postId) : '')
-        if (!postId || !Array.isArray(data?.pins)) return
-        setFollowPost((prev) => prev.map((p) => (p._id?.toString() === postId ? { ...p, pins: data.pins } : p)))
-      }
       socket.on('postUpdated', handlePostUpdated)
-      socket.on('postPins', handlePostPins)
       socket.on('postEngagement', handlePostEngagement)
       
       return () => {
         socket.off('postUpdated', handlePostUpdated)
-        socket.off('postPins', handlePostPins)
         socket.off('postEngagement', handlePostEngagement)
       }
     }, [socket, post?._id, setFollowPost])
@@ -1039,7 +1029,6 @@ if(!post) {
 
     <Box
       key={`detail-media-${post._id}`}
-      position="relative"
       borderRadius={16}
       overflow="hidden"
       border="1px solid"
@@ -1099,12 +1088,6 @@ if(!post) {
           onLoadedMetadata={(e) => {
             e.currentTarget.play?.().catch(() => {})
           }}
-          onTimeUpdate={(e) => {
-            const t = e.target.currentTime || 0
-            if (Math.abs(t - pinTimeRef.current) < 0.35) return
-            pinTimeRef.current = t
-            setPinNow(t)
-          }}
         />
         ) : post?.img ? (
           <Box
@@ -1122,16 +1105,6 @@ if(!post) {
           <PostMediaCarousel slides={carouselSlides} audioUrl={carouselAudio} frameHeight={POST_DETAIL_CAROUSEL_FRAME_H} />
         ) : null
       )}
-      {post ? (
-        <PostPinsLayer
-          post={post}
-          now={pinNow}
-          isOwner={String(user?._id || '') === String(post?.postedBy?._id || post?.postedBy || '')}
-          onPins={(pins) => {
-            setFollowPost((prev) => prev.map((p) => (String(p._id) === String(post._id) ? { ...p, pins } : p)))
-          }}
-        />
-      ) : null}
     </Box>
 
 

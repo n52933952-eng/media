@@ -32,7 +32,6 @@ export function collectPostMediaUrls(post) {
   add(post.audio)
   for (const u of post.images || []) add(u)
   for (const row of post.collaboratorImages || []) add(row?.img)
-  for (const pin of post.pins || []) add(pin?.imageUrl)
   add(post.thumbnail)
   add(post.videoThumbnail)
   add(post.thumb)
