@@ -493,12 +493,13 @@ const VideoMessageWatchPage = () => {
     <Box
       mx="auto"
       w="100%"
-      h="calc(100dvh - 80px)"
+      h={{ lg: 'calc(100dvh - 88px)' }}
+      minH={{ base: 0, lg: 0 }}
       display="flex"
       flexDirection="column"
       bg={panel}
       borderRadius={{ md: '16px' }}
-      overflow="hidden"
+      overflow={{ base: 'visible', lg: 'hidden' }}
     >
       <Flex align="center" gap={3} px={3} py={2.5} bg="#0b0b0b">
         <Button size="sm" variant="ghost" color="white" onClick={() => navigate('/video-messages')}>
@@ -562,14 +563,15 @@ const VideoMessageWatchPage = () => {
         ) : null}
       </HStack>
 
-      <Flex flex="1" minH={0} direction={{ base: 'column', lg: 'row' }} align="stretch">
-      <Box flex="1" minW={0} minH={0} display="flex" flexDirection="column">
+      <Flex flex={{ lg: '1' }} minH={{ lg: 0 }} direction={{ base: 'column', lg: 'row' }} align="stretch" overflow={{ lg: 'hidden' }}>
+      <Box flex={{ base: '0 0 auto', lg: '1' }} minW={0} minH={{ lg: 0 }} display="flex" flexDirection="column">
       <Box
         position="relative"
         bg="black"
         w="100%"
-        flex="1"
-        minH="180px"
+        flex={{ lg: '1' }}
+        h={{ base: 'clamp(180px, 42vw, 300px)', lg: 'auto' }}
+        minH={{ lg: '180px' }}
       >
         <video
           ref={videoRef}
@@ -766,12 +768,12 @@ const VideoMessageWatchPage = () => {
       </Box>
 
       <Box
-        w={{ base: '100%', lg: '300px' }}
+        w={{ base: '100%', lg: '320px' }}
         h={{ lg: '100%' }}
-        maxH={{ lg: '100%' }}
-        flexShrink={0}
+        flex={{ lg: '0 0 320px' }}
         alignSelf="stretch"
         minH={0}
+        overflow={{ base: 'visible', lg: 'hidden' }}
         display="flex"
         flexDirection="column"
         bg={card}
@@ -805,7 +807,7 @@ const VideoMessageWatchPage = () => {
         />
 
         {(item.markers || []).some((m) => m.type === 'reply') && (
-          <Box mb={3}>
+          <Box mb={3} flexShrink={0} maxH="88px" overflowY="auto">
             <Text fontSize="sm" fontWeight="bold" mb={1}>{iAmSender ? 'Reply here' : 'Asked you'}</Text>
             {(item.markers || []).filter((m) => m.type === 'reply').map((m, i) => (
               <Flex
@@ -841,11 +843,11 @@ const VideoMessageWatchPage = () => {
           </Box>
         )}
 
-        <Box flexShrink={0} display="flex" flexDirection="column">
+        <Box flex={{ lg: '1' }} minH={{ lg: 0 }} display="flex" flexDirection="column" overflow="hidden">
           {notes.length > 0 && (
             <Text fontSize="sm" fontWeight="bold" mb={1} flexShrink={0}>Inside this video</Text>
           )}
-          <Box h="220px" overflowY="auto" pr={1}>
+          <Box flex={{ lg: '1' }} minH={{ lg: 0 }} maxH={{ base: '180px', lg: 'none' }} overflowY="auto" pr={1}>
             {notes.map((n) => (
               <Flex
                 key={n._id}
@@ -878,23 +880,31 @@ const VideoMessageWatchPage = () => {
           </Box>
         </Box>
 
-        <Flex justify="center" gap={2} mt="auto" pt={3} pb={2} flexShrink={0} flexWrap="wrap">
+        <Box
+          display="grid"
+          gridTemplateColumns="repeat(8, minmax(0, 1fr))"
+          gap={{ base: 1.5, sm: 2 }}
+          mt={{ lg: 'auto' }}
+          pt={3}
+          pb={3}
+          flexShrink={0}
+        >
           {REACTIONS.map((e) => (
             <Button
               key={e}
               variant="outline"
               borderRadius="full"
-              w="44px"
-              h="44px"
-              minW="44px"
-              fontSize="22px"
+              w="100%"
+              h={{ base: '38px', sm: '44px' }}
+              minW={0}
+              fontSize={{ base: '18px', sm: '22px' }}
               p={0}
               onClick={() => addReaction(e)}
             >
               {e}
             </Button>
           ))}
-        </Flex>
+        </Box>
       </Box>
       </Flex>
     </Box>
