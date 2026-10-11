@@ -501,20 +501,20 @@ const VideoMessageWatchPage = () => {
       borderRadius={{ md: '16px' }}
       overflow={{ base: 'visible', lg: 'hidden' }}
     >
-      <Flex align="center" gap={3} px={3} py={2.5} bg="#0b0b0b">
-        <Button size="sm" variant="ghost" color="white" onClick={() => navigate('/video-messages')}>
-          ← Back
+      <Flex align="center" gap={{ base: 2, sm: 3 }} px={{ base: 2, sm: 3 }} py={2.5} bg="#0b0b0b" w="100%" minW={0} flexWrap="nowrap">
+        <Button size="sm" variant="ghost" color="white" flexShrink={0} px={{ base: 2, sm: 3 }} onClick={() => navigate('/video-messages')}>
+          ←
         </Button>
-        <Avatar size="sm" src={mediaDisplayUrl(other?.profilePic)} name={other?.name} />
-        <Box minW={0} flex="1">
-          <Text color="white" fontWeight="semibold" noOfLines={1} fontSize="sm">
+        <Avatar size="sm" flexShrink={0} src={mediaDisplayUrl(other?.profilePic)} name={other?.name} />
+        <Box minW={0} flex="1" overflow="hidden">
+          <Text color="white" fontWeight="semibold" noOfLines={1} fontSize="sm" wordBreak="normal">
             {other?.name || other?.username}
           </Text>
-          <Text color="whiteAlpha.700" fontSize="xs">
-            {notes.length} replies inside this video
+          <Text color="whiteAlpha.700" fontSize="xs" noOfLines={1} wordBreak="normal">
+            {notes.length} replies
           </Text>
         </Box>
-        <Button size="sm" variant="ghost" color="red.300" onClick={deleteVideo}>
+        <Button size="sm" variant="ghost" color="red.300" flexShrink={0} px={{ base: 2, sm: 3 }} onClick={deleteVideo}>
           Delete
         </Button>
       </Flex>

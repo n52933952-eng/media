@@ -454,13 +454,23 @@ export const deleteVideoNote = async (req, res) => {
     const doc = await loadForParticipant(id, userId)
     if (!doc) return res.status(404).json({ error: 'Video message not found' })
 
-    const idOf = (v) => String(v?._id || v || '')
-    const iAmSender = idOf(doc.sender) === idOf(userId)
-    const removed = await VideoNote.findOneAndDelete({
-      _id: noteId,
-      videoMessage: doc._id,
-      ...(iAmSender ? {} : { user: userId }),
-    })
+    const idStr = (v) => {
+      if (v == null || v === '') return ''
+      if (typeof v === 'string') return v
+      if (typeof v === 'object' && v._id != null && v._id !== v) return idStr(v._id)
+      if (typeof v.toHexString === 'function') return v.toHexString()
+      return String(v)
+    }
+    const note = await VideoNote.findOne({ _id: noteId, videoMessage: doc._id })
+    if (!note) return res.status(404).json({ error: 'Reply not found' })
+
+    const iAmSender = idStr(doc.sender) === idStr(userId)
+    const mine = idStr(note.user) === idStr(userId)
+    // Either person can remove a reaction. A video reply only if you sent the video or you recorded it.
+    if (!iAmSender && !mine && note.type !== 'reaction') {
+      return res.status(404).json({ error: 'Reply not found' })
+    }
+    const removed = await VideoNote.findOneAndDelete({ _id: note._id, videoMessage: doc._id })
     if (!removed) return res.status(404).json({ error: 'Reply not found' })
 
     await VideoMessage.updateOne({ _id: doc._id, noteCount: { $gt: 0 } }, { $inc: { noteCount: -1 } })
