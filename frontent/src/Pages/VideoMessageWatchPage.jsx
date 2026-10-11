@@ -19,12 +19,12 @@ import { mediaDisplayUrl } from '../utils/mediaUrl.js'
 import { fmtTime, otherParty, prepareLightVideo, uidOf } from '../utils/videoMessage.js'
 import VideoRecordModal from '../Components/VideoRecordModal.jsx'
 
-const REACTIONS = ['❤️', '😂', '🔥', '😮', '😢', '👏', '😍', '🎉']
+const REACTIONS = ['❤️', '😂', '🔥', '😮', '😢', '👏', '😍', '🎉', '👍', '💯', '🙏', '😭', '🤣', '😎', '💪', '✨']
 
 const VideoMessageWatchPage = () => {
   const { id } = useParams()
   const { user } = useContext(UserContext)
-  const { socket, refreshVideoMessageUnseenCount } = useContext(SocketContext) || {}
+  const { socket, setVideoMessageUnseenCount } = useContext(SocketContext) || {}
   const showToast = useShowToast()
   const navigate = useNavigate()
   const panel = useColorModeValue('#f7f8fa', '#121212')
@@ -72,14 +72,16 @@ const VideoMessageWatchPage = () => {
       if (!res.ok) throw new Error(data.error || 'Not found')
       setItem(data)
       setNotes(Array.isArray(data.notes) ? data.notes : [])
-      refreshVideoMessageUnseenCount?.()
+      const savedDur = Number(data.duration)
+      if (Number.isFinite(savedDur) && savedDur > 0 && savedDur < 1e5) setDuration(savedDur)
+      if (typeof data.unseenCount === 'number') setVideoMessageUnseenCount?.(data.unseenCount)
     } catch (e) {
       showToast('Error', e.message || 'Failed to open', 'error')
       navigate('/video-messages')
     } finally {
       setLoading(false)
     }
-  }, [id, navigate, showToast, refreshVideoMessageUnseenCount])
+  }, [id, navigate, showToast, setVideoMessageUnseenCount])
 
   useEffect(() => {
     load()
@@ -574,7 +576,7 @@ const VideoMessageWatchPage = () => {
           src={mediaDisplayUrl(item.videoUrl)}
           poster={item.thumbnailUrl ? mediaDisplayUrl(item.thumbnailUrl) : undefined}
           playsInline
-          preload="metadata"
+          preload="auto"
           style={{
             width: '100%',
             height: '100%',
@@ -594,13 +596,17 @@ const VideoMessageWatchPage = () => {
             if (durFixedRef.current) return
             durFixedRef.current = true
             const fix = () => {
-              v.removeEventListener('timeupdate', fix)
+              v.removeEventListener('seeked', fix)
               const d = takeFinite(v.duration)
               try { v.currentTime = 0 } catch { /* ignore */ }
               if (d) setDuration(d)
             }
-            v.addEventListener('timeupdate', fix)
+            v.addEventListener('seeked', fix)
             try { v.currentTime = 1e101 } catch { /* ignore */ }
+          }}
+          onDurationChange={(e) => {
+            const d = takeFinite(e.currentTarget.duration) || takeFinite(item.duration)
+            if (d) setDuration(d)
           }}
           onPlay={() => setPlaying(true)}
           onPause={() => setPlaying(false)}
@@ -761,8 +767,10 @@ const VideoMessageWatchPage = () => {
 
       <Box
         w={{ base: '100%', lg: '300px' }}
-        maxH={{ base: '250px', lg: 'none' }}
+        h={{ lg: '100%' }}
+        maxH={{ lg: '100%' }}
         flexShrink={0}
+        alignSelf="stretch"
         minH={0}
         display="flex"
         flexDirection="column"
@@ -833,10 +841,11 @@ const VideoMessageWatchPage = () => {
           </Box>
         )}
 
-        {notes.length > 0 && (
-          <Box flex="1" minH={0} display="flex" flexDirection="column">
+        <Box flexShrink={0} display="flex" flexDirection="column">
+          {notes.length > 0 && (
             <Text fontSize="sm" fontWeight="bold" mb={1} flexShrink={0}>Inside this video</Text>
-            <Box flex="1" minH={0} overflowY="auto" pr={1}>
+          )}
+          <Box h="220px" overflowY="auto" pr={1}>
             {notes.map((n) => (
               <Flex
                 key={n._id}
@@ -851,7 +860,7 @@ const VideoMessageWatchPage = () => {
                 <Text fontSize="sm" color={muted} noOfLines={1} flex="1">
                   {n.user?.name || n.user?.username || ''}
                 </Text>
-                {(iAmSender || uidOf(n.user) === String(user?._id)) && (
+                {(n.type === 'reaction' || iAmSender || uidOf(n.user) === String(user?._id)) && (
                   <Button
                     size="xs"
                     variant="ghost"
@@ -866,20 +875,19 @@ const VideoMessageWatchPage = () => {
                 )}
               </Flex>
             ))}
-            </Box>
           </Box>
-        )}
+        </Box>
 
-        <Flex justify="center" gap={2} mt={2} mb={1} flexShrink={0} flexWrap="wrap">
+        <Flex justify="center" gap={2} mt="auto" pt={3} pb={2} flexShrink={0} flexWrap="wrap">
           {REACTIONS.map((e) => (
             <Button
               key={e}
               variant="outline"
               borderRadius="full"
-              w="40px"
-              h="40px"
-              minW="40px"
-              fontSize="20px"
+              w="44px"
+              h="44px"
+              minW="44px"
+              fontSize="22px"
               p={0}
               onClick={() => addReaction(e)}
             >

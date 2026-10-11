@@ -60,7 +60,7 @@ export const SocketContextProvider = ({ children }) => {
     }
     try {
       const socketUrl = import.meta.env.PROD ? window.location.origin : 'http://localhost:5000'
-      const res = await fetch(`${socketUrl}/api/video-message/unseen-count`, { credentials: 'include' })
+      const res = await fetch(`${socketUrl}/api/video-message/unseen-count`, { credentials: 'include', cache: 'no-store' })
       const data = await res.json()
       if (res.ok && typeof data.unseenCount === 'number') setVideoMessageUnseenCount(data.unseenCount)
     } catch (_) {}
@@ -465,7 +465,7 @@ export const SocketContextProvider = ({ children }) => {
       }
       try {
         const socketUrl = import.meta.env.PROD ? window.location.origin : 'http://localhost:5000'
-        const res = await fetch(`${socketUrl}/api/video-message/unseen-count`, { credentials: 'include' })
+        const res = await fetch(`${socketUrl}/api/video-message/unseen-count`, { credentials: 'include', cache: 'no-store' })
         const data = await res.json()
         if (res.ok && typeof data.unseenCount === 'number') setVideoMessageUnseenCount(data.unseenCount)
       } catch (_) {}

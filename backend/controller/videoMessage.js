@@ -244,28 +244,32 @@ export const listVideoMessages = async (req, res) => {
   }
 }
 
+async function countUnseenFor(userId) {
+  const [received, senderRows, receiverRows] = await Promise.all([
+    VideoMessage.countDocuments({ receiver: userId, seenAt: null }),
+    VideoMessage.aggregate([
+      { $match: { sender: userId, $or: [{ senderUnseenNotes: { $gt: 0 } }, { senderHasNewNotes: true }] } },
+      {
+        $group: {
+          _id: null,
+          n: { $sum: { $cond: [{ $gt: ['$senderUnseenNotes', 0] }, '$senderUnseenNotes', 1] } },
+        },
+      },
+    ]),
+    VideoMessage.aggregate([
+      { $match: { receiver: userId, seenAt: { $ne: null }, receiverUnseenNotes: { $gt: 0 } } },
+      { $group: { _id: null, n: { $sum: '$receiverUnseenNotes' } } },
+    ]),
+  ])
+  const replied = (senderRows[0]?.n || 0) + (receiverRows[0]?.n || 0)
+  return received + replied
+}
+
 /** Badge: unopened videos + each reply or reaction I have not opened yet. */
 export const getVideoMessageUnseenCount = async (req, res) => {
   try {
-    const userId = req.user._id
-    const [received, senderRows, receiverRows] = await Promise.all([
-      VideoMessage.countDocuments({ receiver: userId, seenAt: null }),
-      VideoMessage.aggregate([
-        { $match: { sender: userId, $or: [{ senderUnseenNotes: { $gt: 0 } }, { senderHasNewNotes: true }] } },
-        {
-          $group: {
-            _id: null,
-            n: { $sum: { $cond: [{ $gt: ['$senderUnseenNotes', 0] }, '$senderUnseenNotes', 1] } },
-          },
-        },
-      ]),
-      VideoMessage.aggregate([
-        { $match: { receiver: userId, seenAt: { $ne: null }, receiverUnseenNotes: { $gt: 0 } } },
-        { $group: { _id: null, n: { $sum: '$receiverUnseenNotes' } } },
-      ]),
-    ])
-    const replied = (senderRows[0]?.n || 0) + (receiverRows[0]?.n || 0)
-    return res.status(200).json({ unseenCount: received + replied })
+    const unseenCount = await countUnseenFor(req.user._id)
+    return res.status(200).json({ unseenCount })
   } catch (error) {
     console.error('[videoMessage] unseen count error:', error)
     return res.status(500).json({ error: 'Failed to load count' })
@@ -306,7 +310,8 @@ export const getVideoMessage = async (req, res) => {
       .populate('user', USER_SELECT)
       .lean()
 
-    return res.status(200).json({ ...toPublic(doc), notes })
+    const unseenCount = await countUnseenFor(userId)
+    return res.status(200).json({ ...toPublic(doc), notes, unseenCount })
   } catch (error) {
     console.error('[videoMessage] get error:', error)
     return res.status(500).json({ error: 'Failed to load video message' })
