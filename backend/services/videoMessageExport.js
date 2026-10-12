@@ -50,9 +50,15 @@ function parseDuration(stderr) {
   return parseInt(match[1], 10) * 3600 + parseInt(match[2], 10) * 60 + parseFloat(match[3])
 }
 
-function ffmpegInfo(bin, file) {
+function parseFps(stderr) {
+  const match = /(\d+(?:\.\d+)?)\s+fps/.exec(String(stderr || ''))
+  const fps = match ? Number(match[1]) : 0
+  return fps >= 12 && fps <= 60 ? fps : 30
+}
+
+function ffmpegInfo(bin, file, lead = []) {
   return new Promise((resolve) => {
-    const child = spawn(bin, ['-i', file], { stdio: ['ignore', 'ignore', 'pipe'] })
+    const child = spawn(bin, [...lead, '-i', file], { stdio: ['ignore', 'ignore', 'pipe'] })
     let err = ''
     child.stderr.on('data', (d) => {
       err += String(d)
@@ -62,16 +68,36 @@ function ffmpegInfo(bin, file) {
   })
 }
 
-async function probe(bin, file) {
-  const stderr = await ffmpegInfo(bin, file)
+async function probe(bin, file, lead = []) {
+  const stderr = await ffmpegInfo(bin, file, lead)
   return {
     dur: parseDuration(stderr),
     hasAudio: /Audio:/.test(String(stderr)),
+    fps: parseFps(stderr),
   }
 }
 
+/** Phone recordings often store a 1s duration while the frames are all still there. */
+function countFrames(bin, file) {
+  return new Promise((resolve) => {
+    const child = spawn(bin, ['-ignore_editlist', '1', '-i', file, '-map', '0:v:0', '-f', 'null', '-'], {
+      stdio: ['ignore', 'ignore', 'pipe'],
+    })
+    let tail = ''
+    child.stderr.on('data', (d) => {
+      tail = (tail + String(d)).slice(-4000)
+    })
+    const finish = () => {
+      const frames = [...tail.matchAll(/frame=\s*(\d+)/g)]
+      resolve(frames.length ? Number(frames[frames.length - 1][1]) : 0)
+    }
+    child.on('error', () => resolve(0))
+    child.on('close', finish)
+  })
+}
+
 export function exportHashFor(doc, notes) {
-  const parts = ['mix2', String(doc?.videoUrl || ''), String(doc?.duration || 0)]
+  const parts = ['mix3', String(doc?.videoUrl || ''), String(doc?.duration || 0)]
   for (const n of notes || []) {
     parts.push([
       n._id,
@@ -190,23 +216,17 @@ function atempoChain(stretch) {
   return parts.join(',')
 }
 
-function replyTiming(note, seenDur) {
+function replyTiming(note, probeInfo, frames) {
   const meta = Number(note?.duration) || 0
-  const seen = Number(seenDur) || 0
-  let outDur = meta > 0 ? meta : seen || 1
-  let stretch = 1
-  if (meta > 0.4 && seen > 0.15 && meta > seen * 1.25) {
-    stretch = Math.min(meta / seen, 12)
-    outDur = meta
-  } else if (seen > outDur) {
-    outDur = seen
-  }
-  outDur = Math.min(30, Math.max(0.2, outDur))
-  const readDur = Math.min(30, Math.max(seen || 0, outDur / stretch) + 0.25)
-  return { outDur, readDur, stretch }
+  const seen = Number(probeInfo?.dur) || 0
+  const fps = probeInfo?.fps >= 12 && probeInfo?.fps <= 60 ? probeInfo.fps : 30
+  const fromFrames = frames > 1 ? frames / fps : 0
+  const outDur = Math.min(30, Math.max(meta, seen, fromFrames, 0.2))
+  const stretch = seen > 0.15 && seen < 1.6 && fromFrames > seen * 1.5 ? Math.min(fromFrames / seen, 12) : 1
+  return { outDur, stretch, fps }
 }
 
-async function encodeSegment({ bin, dir, index, input, ss, readDur, outDur, stretch = 1, reactions, cache, hasAudio }) {
+async function encodeSegment({ bin, dir, index, input, ss, readDur, outDur, stretch = 1, reactions, cache, hasAudio, wholeFile = false, frameFps = 30 }) {
   const pngs = []
   for (const reaction of reactions || []) {
     const file = await pngFor(dir, cache, reaction.emoji)
@@ -216,9 +236,13 @@ async function encodeSegment({ bin, dir, index, input, ss, readDur, outDur, stre
   const playFor = Math.max(0.2, Number(outDur) || 0.2)
   const readFor = Math.max(playFor, Number(readDur) || playFor)
   const speed = Number(stretch) > 1.01 ? Number(stretch) : 1
-  const args = [bin, '-y', '-ss', String(Math.max(0, ss || 0)), '-t', String(readFor), '-i', input]
+  const pace = Math.min(60, Math.max(12, Number(frameFps) || 30))
+  const args = [bin, '-y']
+  if (wholeFile) args.push('-ignore_editlist', '1')
+  else args.push('-ss', String(Math.max(0, ss || 0)), '-t', String(readFor))
+  args.push('-i', input)
   for (const png of pngs) args.push('-loop', '1', '-t', String(playFor), '-i', png.file)
-  const setpts = speed === 1 ? 'setpts=PTS-STARTPTS' : `setpts=(PTS-STARTPTS)*${speed.toFixed(4)}`
+  const setpts = wholeFile ? `setpts=N/${pace}/TB` : 'setpts=PTS-STARTPTS'
   const filters = [
     `[0:v]${setpts},scale=${OUT_W}:${OUT_H}:force_original_aspect_ratio=decrease,pad=${OUT_W}:${OUT_H}:(ow-iw)/2:(oh-ih)/2:black,fps=24,setsar=1,format=yuv420p[v0]`,
   ]
@@ -326,8 +350,9 @@ async function composeAndUpload(doc, notes) {
         console.warn('[videoMessage] skip reply in download:', err?.message || err)
         continue
       }
-      const replyProbe = await probe(bin, replyPath)
-      const timing = replyTiming(note, replyProbe.dur)
+      const replyProbe = await probe(bin, replyPath, ['-ignore_editlist', '1'])
+      const frames = await countFrames(bin, replyPath)
+      const timing = replyTiming(note, replyProbe, frames)
       if (!(timing.outDur > 0.15)) continue
       files.push(await encodeSegment({
         bin,
@@ -335,12 +360,14 @@ async function composeAndUpload(doc, notes) {
         index,
         input: replyPath,
         ss: 0,
-        readDur: timing.readDur,
+        readDur: timing.outDur,
         outDur: timing.outDur,
         stretch: timing.stretch,
         reactions: piece.reactions,
         cache,
         hasAudio: replyProbe.hasAudio,
+        wholeFile: true,
+        frameFps: replyProbe.fps,
       }))
       index += 1
     }
