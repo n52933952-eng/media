@@ -79,23 +79,34 @@ const VideoMessageWatchPage = () => {
   const videoNotes = useMemo(() => notes.filter((n) => n.type === 'video' && n.videoUrl), [notes])
 
   const load = useCallback(async () => {
-    try {
-      const res = await fetch(`${API_BASE_URL}/api/video-message/${id}`, { credentials: 'include' })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error || 'Not found')
-      setItem(data)
-      setNotes(Array.isArray(data.notes) ? data.notes : [])
-      const savedDur = Number(data.duration)
-      if (Number.isFinite(savedDur) && savedDur > 0 && savedDur < 1e5) setDuration(savedDur)
-      if (typeof data.unseenCount === 'number') setVideoMessageUnseenCount?.(data.unseenCount)
-    } catch (e) {
-      if (!openedFromList.current) {
-        showToast('Error', e.message || 'Failed to open', 'error')
-        navigate('/video-messages')
+    let lastErr = null
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        const res = await fetch(`${API_BASE_URL}/api/video-message/${id}`, { credentials: 'include' })
+        const data = await res.json()
+        if (!res.ok) throw new Error(data.error || 'Not found')
+        setItem(data)
+        setNotes(Array.isArray(data.notes) ? data.notes : [])
+        const savedDur = Number(data.duration)
+        if (Number.isFinite(savedDur) && savedDur > 0 && savedDur < 1e5) setDuration(savedDur)
+        if (typeof data.unseenCount === 'number') setVideoMessageUnseenCount?.(data.unseenCount)
+        setLoading(false)
+        return
+      } catch (e) {
+        lastErr = e
+        const dropped = /fetch|network/i.test(e?.message || '')
+        if (dropped && attempt === 1) {
+          await new Promise((resolve) => setTimeout(resolve, 600))
+          continue
+        }
+        break
       }
-    } finally {
-      setLoading(false)
     }
+    if (!openedFromList.current) {
+      showToast('Error', lastErr?.message || 'Failed to open', 'error')
+      navigate('/video-messages')
+    }
+    setLoading(false)
   }, [id, navigate, showToast, setVideoMessageUnseenCount])
 
   useEffect(() => {

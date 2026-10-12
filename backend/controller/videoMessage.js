@@ -383,11 +383,11 @@ async function countUnseenFor(userId) {
       { $match: { receiver: userId, seenAt: { $ne: null }, receiverUnseenNotes: { $gt: 0 } } },
       { $group: { _id: null, n: { $sum: '$receiverUnseenNotes' } } },
     ]),
-    VideoMessageReceipt.countDocuments({ user: userId, recipient: true, seenAt: null }),
+    VideoMessageReceipt.countDocuments({ user: userId, recipient: true, seenAt: null }).maxTimeMS(2500),
     VideoMessageReceipt.aggregate([
       { $match: { user: userId, seenAt: { $ne: null }, unseenNotes: { $gt: 0 } } },
       { $group: { _id: null, n: { $sum: '$unseenNotes' } } },
-    ]),
+    ]).option({ maxTimeMS: 2500 }),
   ])
   const replied = (senderRows[0]?.n || 0) + (receiverRows[0]?.n || 0)
   return received + replied + groupNew + (groupNotes[0]?.n || 0)
@@ -414,10 +414,14 @@ export const getVideoMessage = async (req, res) => {
 
     const uid = String(userId)
     if (doc.isGroup) {
-      await VideoMessageReceipt.updateOne(
-        { videoMessage: doc._id, user: userId },
-        { $set: { seenAt: new Date(), unseenNotes: 0 } },
-      )
+      try {
+        await VideoMessageReceipt.updateOne(
+          { videoMessage: doc._id, user: userId },
+          { $set: { seenAt: new Date(), unseenNotes: 0 } },
+        ).maxTimeMS(2500)
+      } catch (err) {
+        console.error('[videoMessage] group seen skipped:', err?.message || err)
+      }
     } else {
       const update = {}
       if (String(doc.receiver) === uid && !doc.seenAt) update.seenAt = new Date()
@@ -445,8 +449,13 @@ export const getVideoMessage = async (req, res) => {
       .populate('user', USER_SELECT)
       .lean()
 
-    const unseenCount = await countUnseenFor(userId)
-    return res.status(200).json({ ...toPublic(doc), notes, unseenCount })
+    let unseenCount
+    try {
+      unseenCount = await countUnseenFor(userId)
+    } catch (err) {
+      console.error('[videoMessage] unseen during open skipped:', err?.message || err)
+    }
+    return res.status(200).json({ ...toPublic(doc), notes, ...(typeof unseenCount === 'number' ? { unseenCount } : {}) })
   } catch (error) {
     console.error('[videoMessage] get error:', error)
     return res.status(500).json({ error: 'Failed to load video message' })
@@ -565,28 +574,37 @@ export const addVideoNote = async (req, res) => {
     }
 
     if (doc.isGroup) {
-      await VideoMessage.updateOne({ _id: doc._id }, { $inc: { noteCount: 1 }, $set: { lastNoteAt: new Date() } })
-      const others = await VideoMessageReceipt.find({ videoMessage: doc._id, user: { $ne: userId } })
-        .select('user seenAt')
-        .lean()
-      const opened = others.filter((row) => row.seenAt).map((row) => row.user)
-      if (opened.length) {
-        await VideoMessageReceipt.updateMany(
-          { videoMessage: doc._id, user: { $in: opened } },
-          { $inc: { unseenNotes: 1 } },
-        )
-      }
-      for (const row of others) {
-        emitToUser(row.user, 'videoMessage:note', { ...basePayload, badge: !!row.seenAt })
-        queueVideoPush({
-          recipientId: row.user,
-          actorName,
-          body: noteBody,
-          videoId: doc._id,
-          noteId: created._id,
-        })
-      }
-      return res.status(201).json({ ...basePayload, badge: false })
+      const payload = { ...basePayload, badge: false }
+      res.status(201).json(payload)
+      setImmediate(async () => {
+        try {
+          await VideoMessage.updateOne({ _id: doc._id }, { $inc: { noteCount: 1 }, $set: { lastNoteAt: new Date() } })
+          const others = await VideoMessageReceipt.find({ videoMessage: doc._id, user: { $ne: userId } })
+            .select('user seenAt')
+            .maxTimeMS(2500)
+            .lean()
+          const opened = others.filter((row) => row.seenAt).map((row) => row.user)
+          if (opened.length) {
+            await VideoMessageReceipt.updateMany(
+              { videoMessage: doc._id, user: { $in: opened } },
+              { $inc: { unseenNotes: 1 } },
+            ).maxTimeMS(2500)
+          }
+          for (const row of others) {
+            emitToUser(row.user, 'videoMessage:note', { ...basePayload, badge: !!row.seenAt })
+            queueVideoPush({
+              recipientId: row.user,
+              actorName,
+              body: noteBody,
+              videoId: doc._id,
+              noteId: created._id,
+            })
+          }
+        } catch (err) {
+          console.error('[videoMessage] group note fan-out skipped:', err?.message || err)
+        }
+      })
+      return
     }
 
     const otherId = String(doc.sender) === String(userId) ? doc.receiver : doc.sender
