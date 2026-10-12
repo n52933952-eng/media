@@ -71,7 +71,7 @@ async function probe(bin, file) {
 }
 
 export function exportHashFor(doc, notes) {
-  const parts = [String(doc?.videoUrl || ''), String(doc?.duration || 0)]
+  const parts = ['mix2', String(doc?.videoUrl || ''), String(doc?.duration || 0)]
   for (const n of notes || []) {
     parts.push([
       n._id,
@@ -174,24 +174,53 @@ function buildPieces(mainDur, notes) {
   return pieces
 }
 
-async function encodeSegment({ bin, dir, index, input, ss, dur, reactions, cache }) {
+function atempoChain(stretch) {
+  let speed = 1 / stretch
+  const parts = []
+  while (speed < 0.5 - 1e-4) {
+    parts.push('atempo=0.5')
+    speed /= 0.5
+  }
+  while (speed > 2 + 1e-4) {
+    parts.push('atempo=2.0')
+    speed /= 2
+  }
+  const last = Math.min(2, Math.max(0.5, speed))
+  parts.push(`atempo=${last.toFixed(4)}`)
+  return parts.join(',')
+}
+
+function replyTiming(note, seenDur) {
+  const meta = Number(note?.duration) || 0
+  const seen = Number(seenDur) || 0
+  let outDur = meta > 0 ? meta : seen || 1
+  let stretch = 1
+  if (meta > 0.4 && seen > 0.15 && meta > seen * 1.25) {
+    stretch = Math.min(meta / seen, 12)
+    outDur = meta
+  } else if (seen > outDur) {
+    outDur = seen
+  }
+  outDur = Math.min(30, Math.max(0.2, outDur))
+  const readDur = Math.min(30, Math.max(seen || 0, outDur / stretch) + 0.25)
+  return { outDur, readDur, stretch }
+}
+
+async function encodeSegment({ bin, dir, index, input, ss, readDur, outDur, stretch = 1, reactions, cache, hasAudio }) {
   const pngs = []
   for (const reaction of reactions || []) {
     const file = await pngFor(dir, cache, reaction.emoji)
     if (file) pngs.push({ file, start: reaction.start })
   }
-  const info = await probe(bin, input)
-  const hasAudio = info.hasAudio
   const out = join(dir, `seg-${index}.mp4`)
-  const args = [bin, '-y', '-ss', String(Math.max(0, ss || 0)), '-t', String(dur), '-i', input]
-  for (const png of pngs) args.push('-loop', '1', '-t', String(dur), '-i', png.file)
-  let audioMap = '0:a:0'
-  if (!hasAudio) {
-    args.push('-f', 'lavfi', '-t', String(dur), '-i', 'anullsrc=r=44100:cl=stereo')
-    audioMap = `${pngs.length + 1}:a`
-  }
+  const playFor = Math.max(0.2, Number(outDur) || 0.2)
+  const readFor = Math.max(playFor, Number(readDur) || playFor)
+  const speed = Number(stretch) > 1.01 ? Number(stretch) : 1
+  const args = [bin, '-y', '-ss', String(Math.max(0, ss || 0)), '-t', String(readFor), '-i', input]
+  for (const png of pngs) args.push('-loop', '1', '-t', String(playFor), '-i', png.file)
+  const setpts = speed === 1 ? 'setpts=PTS-STARTPTS' : `setpts=(PTS-STARTPTS)*${speed.toFixed(4)}`
   const filters = [
-    `[0:v]scale=${OUT_W}:${OUT_H}:force_original_aspect_ratio=decrease,pad=${OUT_W}:${OUT_H}:(ow-iw)/2:(oh-ih)/2:black,fps=24,setsar=1,format=yuv420p[v0]`,
+    `[0:v]${setpts},scale=${OUT_W}:${OUT_H}:force_original_aspect_ratio=decrease,pad=${OUT_W}:${OUT_H}:(ow-iw)/2:(oh-ih)/2:black,fps=24,setsar=1,format=yuv420p[v0]`,
   ]
   let last = 'v0'
   pngs.forEach((png, i) => {
@@ -201,6 +230,20 @@ async function encodeSegment({ bin, dir, index, input, ss, dur, reactions, cache
     filters.push(`[${last}][e${i}]overlay=(W-w)/2:(H-h)/2:enable='between(t\\,${t0}\\,${t1})'[v${i + 1}]`)
     last = `v${i + 1}`
   })
+  let audioMap = `${pngs.length + 1}:a`
+  if (hasAudio) {
+    const audio = [
+      'aformat=sample_fmts=fltp:sample_rates=44100:channel_layouts=stereo',
+      'asetpts=PTS-STARTPTS',
+    ]
+    if (speed > 1) audio.push(atempoChain(speed))
+    audio.push(`apad=whole_dur=${playFor.toFixed(3)}`)
+    audio.push(`atrim=0:${playFor.toFixed(3)}`)
+    filters.push(`[0:a]${audio.join(',')}[aout]`)
+    audioMap = '[aout]'
+  } else {
+    args.push('-f', 'lavfi', '-t', String(playFor), '-i', 'anullsrc=r=44100:cl=stereo')
+  }
   args.push(
     '-filter_complex', filters.join(';'),
     '-map', `[${last}]`,
@@ -208,13 +251,14 @@ async function encodeSegment({ bin, dir, index, input, ss, dur, reactions, cache
     '-c:v', 'libx264',
     '-preset', 'ultrafast',
     '-crf', '30',
-    '-r', '24',
     '-pix_fmt', 'yuv420p',
+    '-fps_mode', 'cfr',
+    '-video_track_timescale', '24000',
     '-c:a', 'aac',
     '-b:a', '96k',
     '-ar', '44100',
     '-ac', '2',
-    '-t', String(dur),
+    '-t', String(playFor),
     '-movflags', '+faststart',
     out,
   )
@@ -260,7 +304,16 @@ async function composeAndUpload(doc, notes) {
       if (piece.kind === 'main') {
         const dur = Math.max(0.2, piece.end - piece.start)
         files.push(await encodeSegment({
-          bin, dir, index, input: mainPath, ss: piece.start, dur, reactions: piece.reactions, cache,
+          bin,
+          dir,
+          index,
+          input: mainPath,
+          ss: piece.start,
+          readDur: dur,
+          outDur: dur,
+          reactions: piece.reactions,
+          cache,
+          hasAudio: probed.hasAudio,
         }))
         index += 1
         continue
@@ -274,10 +327,20 @@ async function composeAndUpload(doc, notes) {
         continue
       }
       const replyProbe = await probe(bin, replyPath)
-      const dur = Math.min(30, Number(note.duration) > 0 ? Number(note.duration) : replyProbe.dur || 1)
-      if (!(dur > 0.15)) continue
+      const timing = replyTiming(note, replyProbe.dur)
+      if (!(timing.outDur > 0.15)) continue
       files.push(await encodeSegment({
-        bin, dir, index, input: replyPath, ss: 0, dur, reactions: piece.reactions, cache,
+        bin,
+        dir,
+        index,
+        input: replyPath,
+        ss: 0,
+        readDur: timing.readDur,
+        outDur: timing.outDur,
+        stretch: timing.stretch,
+        reactions: piece.reactions,
+        cache,
+        hasAudio: replyProbe.hasAudio,
       }))
       index += 1
     }
