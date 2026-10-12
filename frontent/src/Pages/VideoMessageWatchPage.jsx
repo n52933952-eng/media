@@ -61,6 +61,7 @@ const VideoMessageWatchPage = () => {
   const [activeNote, setActiveNote] = useState(null)
   const [popReaction, setPopReaction] = useState(null)
   const [recordOpen, setRecordOpen] = useState(false)
+  const [replySaving, setReplySaving] = useState(false)
   const [askNow, setAskNow] = useState(null)
 
   const other = item ? otherParty(item, user?._id) : null
@@ -456,9 +457,10 @@ const VideoMessageWatchPage = () => {
     }
   }
 
-  const addVideoNote = async (file) => {
+  const addVideoNote = async (file, fromRecord = false) => {
     if (!file || busy) return
     setBusy(true)
+    if (fromRecord) setReplySaving(true)
     try {
       const tmp = document.createElement('video')
       const url = URL.createObjectURL(file)
@@ -497,6 +499,7 @@ const VideoMessageWatchPage = () => {
     } catch (e) {
       showToast('Error', e.message || 'Failed', 'error')
     } finally {
+      setReplySaving(false)
       setBusy(false)
     }
   }
@@ -582,7 +585,10 @@ const VideoMessageWatchPage = () => {
           colorScheme="red"
           borderRadius="full"
           size="sm"
+          position="relative"
+          isDisabled={replySaving}
           onClick={() => {
+            if (replySaving) return
             const v = videoRef.current
             const t = v ? v.currentTime || now : now
             pinRef.current = t
@@ -592,7 +598,8 @@ const VideoMessageWatchPage = () => {
             setRecordOpen(true)
           }}
         >
-          Record
+          <Text as="span" opacity={replySaving ? 0 : 1}>Record</Text>
+          {replySaving ? <Spinner size="sm" position="absolute" color="white" /> : null}
         </Button>
         {!iAmSender ? (
           <Button
@@ -860,7 +867,7 @@ const VideoMessageWatchPage = () => {
           maxSeconds={20}
           title={`Reply at ${fmtTime(now)}`}
           onReady={(file) => {
-            if (file) addVideoNote(file)
+            if (file) addVideoNote(file, true)
             else videoRef.current?.play().catch(() => {})
           }}
         />
