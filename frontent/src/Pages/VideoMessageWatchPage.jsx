@@ -233,6 +233,7 @@ const VideoMessageWatchPage = () => {
     if (replyLockRef.current) {
       const v = videoRef.current
       const pin = pinnedTRef.current
+      if (v && !v.paused) v.pause()
       if (v && Math.abs((v.currentTime || 0) - pin) > 0.25) {
         try { v.currentTime = pin } catch { /* keep the original on its second */ }
       }
@@ -289,6 +290,13 @@ const VideoMessageWatchPage = () => {
   }
 
   const togglePlay = () => {
+    const reply = activeNote?.type === 'video' ? noteVideoRef.current : null
+    if (reply) {
+      videoRef.current?.pause()
+      if (reply.paused) reply.play().catch(() => {})
+      else reply.pause()
+      return
+    }
     const v = videoRef.current
     if (!v) return
     if (v.paused) {
@@ -670,8 +678,17 @@ const VideoMessageWatchPage = () => {
             const d = takeFinite(e.currentTarget.duration) || takeFinite(item.duration)
             if (d) setDuration(d)
           }}
-          onPlay={() => setPlaying(true)}
-          onPause={() => setPlaying(false)}
+          onPlay={(e) => {
+            if (replyLockRef.current) {
+              e.currentTarget.pause()
+              return
+            }
+            setPlaying(true)
+          }}
+          onPause={() => {
+            if (replyLockRef.current) return
+            setPlaying(false)
+          }}
         />
 
 
@@ -700,6 +717,16 @@ const VideoMessageWatchPage = () => {
             playsInline
             preload="auto"
             style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block', background: '#000' }}
+            onClick={(e) => {
+              e.stopPropagation()
+              togglePlay()
+            }}
+            onPlay={() => {
+              if (replyLockRef.current) setPlaying(true)
+            }}
+            onPause={() => {
+              if (replyLockRef.current) setPlaying(false)
+            }}
             onTimeUpdate={(e) => handleReplyTime(e.currentTarget.currentTime || 0)}
             onEnded={(e) => {
               const endedAt = e.currentTarget.currentTime || 0
