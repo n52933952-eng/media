@@ -41,6 +41,7 @@ const VideoMessageWatchPage = () => {
   const primedUrlRef = useRef('')
   const fileRef = useRef(null)
   const shownRef = useRef(new Set())
+  const finishedReplyRef = useRef('')
   const lastTRef = useRef(0)
   const resumeAfterRef = useRef(true)
   const replyLockRef = useRef(false)
@@ -187,23 +188,28 @@ const VideoMessageWatchPage = () => {
   const closeOverlay = useCallback((resume = true) => {
     const v = videoRef.current
     const pin = pinnedTRef.current
+    const rawDur = Number(v?.duration)
+    const end = Number.isFinite(rawDur) && rawDur > 0 && rawDur < 1e5 ? rawDur : 0
+    const land = end ? Math.min(end, pin) : pin
     if (v) {
       try {
-        if (Math.abs((v.currentTime || 0) - pin) > 0.2) v.currentTime = pin
+        if (Math.abs((v.currentTime || 0) - land) > 0.05) v.currentTime = land
       } catch {
         /* ignore */
       }
     }
-    lastTRef.current = pin
-    setNow(pin)
+    lastTRef.current = land
+    setNow(land)
     replyLockRef.current = false
     setActiveNote(null)
-    try {
-      noteVideoRef.current?.pause()
-    } catch {
-      /* ignore */
+    const noteEl = noteVideoRef.current
+    if (noteEl) {
+      noteEl.loop = false
+      try { noteEl.pause() } catch { /* ignore */ }
     }
-    if (resume && v && resumeAfterRef.current) {
+    // play() at the end restarts the original from 0 and the reply shows again.
+    const atEnd = end && land >= end - 0.35
+    if (resume && v && resumeAfterRef.current && !atEnd) {
       resumePlayRef.current = true
       v.play().catch(() => {})
     }
@@ -284,6 +290,9 @@ const VideoMessageWatchPage = () => {
     setNow(t)
     if (activeNote) return
     if (t + 0.05 < prev) {
+      // Landing just after a reply is not a rewind. A real rewind replays notes.
+      if (prev - t < 0.75) return
+      finishedReplyRef.current = ''
       for (const n of videoNotes) {
         if (n.t > t + 0.2) shownRef.current.delete(String(n._id))
       }
@@ -306,7 +315,7 @@ const VideoMessageWatchPage = () => {
     }
     const hit = videoNotes.find((n) => {
       const idn = String(n._id)
-      if (shownRef.current.has(idn)) return false
+      if (shownRef.current.has(idn) || idn === finishedReplyRef.current) return false
       return n.t > prev - 0.08 && n.t <= t + 0.08
     })
     if (hit) {
@@ -361,6 +370,10 @@ const VideoMessageWatchPage = () => {
       try { noteVideoRef.current?.pause() } catch { /* ignore */ }
     }
     if (!soft) {
+      if (finishedReplyRef.current) {
+        const done = notes.find((n) => String(n._id) === finishedReplyRef.current)
+        if (!done || (Number(done.t) || 0) > at + 0.25) finishedReplyRef.current = ''
+      }
       for (const n of notes) {
         if (n.onNote) continue
         const idn = String(n._id)
@@ -371,7 +384,8 @@ const VideoMessageWatchPage = () => {
     try { v.currentTime = at } catch { /* ignore */ }
     setNow(at)
     lastTRef.current = at
-    if (!soft && keepPlaying) v.play().catch(() => {})
+    const atEnd = known && at >= known - 0.35
+    if (!soft && keepPlaying && !atEnd) v.play().catch(() => {})
   }
 
   const handleReplyTime = (t) => {
@@ -694,6 +708,7 @@ const VideoMessageWatchPage = () => {
           src={mediaDisplayUrl(item.videoUrl)}
           poster={item.thumbnailUrl ? mediaDisplayUrl(item.thumbnailUrl) : undefined}
           playsInline
+          loop={false}
           preload="auto"
           style={{
             width: '100%',
@@ -763,6 +778,7 @@ const VideoMessageWatchPage = () => {
           <video
             ref={noteVideoRef}
             playsInline
+            loop={false}
             preload="auto"
             style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block', background: '#000' }}
             onClick={(e) => {
@@ -777,14 +793,25 @@ const VideoMessageWatchPage = () => {
             }}
             onTimeUpdate={(e) => handleReplyTime(e.currentTarget.currentTime || 0)}
             onEnded={(e) => {
-              const endedAt = e.currentTarget.currentTime || 0
-              if (endedAt < 0.2) return
+              const el = e.currentTarget
+              el.loop = false
+              try { el.pause() } catch { /* ignore */ }
+              const played = replyTRef.current || 0
+              const endedAt = el.currentTime || 0
+              if (played < 0.2 && endedAt < 0.2) return
+              const endedId = String(activeNote?._id || '')
+              const endedUrl = activeNote?.videoUrl || ''
               const endedT = Number(activeNote?.t) || 0
-              const next = videoNotes.find(
-                (n) =>
-                  !shownRef.current.has(String(n._id)) &&
-                  Math.abs((Number(n.t) || 0) - endedT) < 0.8,
-              )
+              if (endedId) {
+                shownRef.current.add(endedId)
+                finishedReplyRef.current = endedId
+              }
+              const next = videoNotes.find((n) => {
+                const idn = String(n._id)
+                if (!idn || idn === endedId || shownRef.current.has(idn)) return false
+                if (endedUrl && n.videoUrl && n.videoUrl === endedUrl) return false
+                return Math.abs((Number(n.t) || 0) - endedT) < 0.8
+              })
               if (next) openOverlay(next, { resumeAfter: true, seek: false })
               else closeOverlay(true)
             }}
