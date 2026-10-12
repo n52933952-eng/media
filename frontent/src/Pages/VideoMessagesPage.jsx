@@ -343,7 +343,7 @@ const VideoMessagesPage = () => {
                 align="center"
                 onClick={() => {
                   if (fresh > 0) setVideoMessageUnseenCount?.((n) => Math.max(0, (n || 0) - fresh))
-                  navigate(`/video-messages/${item._id}`)
+                  navigate(`/video-messages/${item._id}`, { state: { preview: item } })
                 }}
               >
                 <Box

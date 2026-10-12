@@ -9,7 +9,7 @@ import {
   Text,
   useColorModeValue,
 } from '@chakra-ui/react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { UserContext } from '../context/UserContext'
 import { SocketContext } from '../context/SocketContext'
 import useShowToast from '../hooks/useShowToast'
@@ -23,6 +23,8 @@ const REACTIONS = ['❤️', '😂', '🔥', '😮', '😢', '👏', '😍', '�
 
 const VideoMessageWatchPage = () => {
   const { id } = useParams()
+  const listPreview = useLocation().state?.preview
+  const openedFromList = useRef(!!listPreview?.videoUrl)
   const { user } = useContext(UserContext)
   const { socket, setVideoMessageUnseenCount } = useContext(SocketContext) || {}
   const showToast = useShowToast()
@@ -51,11 +53,14 @@ const VideoMessageWatchPage = () => {
   const askedRef = useRef(new Set())
   const resumePlayRef = useRef(false)
 
-  const [item, setItem] = useState(null)
+  const [item, setItem] = useState(listPreview?.videoUrl ? listPreview : null)
   const [notes, setNotes] = useState([])
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(!listPreview?.videoUrl)
   const [now, setNow] = useState(0)
-  const [duration, setDuration] = useState(0)
+  const [duration, setDuration] = useState(() => {
+    const saved = Number(listPreview?.duration)
+    return Number.isFinite(saved) && saved > 0 && saved < 1e5 ? saved : 0
+  })
   const [playing, setPlaying] = useState(false)
   const [busy, setBusy] = useState(false)
   const [activeNote, setActiveNote] = useState(null)
@@ -79,8 +84,10 @@ const VideoMessageWatchPage = () => {
       if (Number.isFinite(savedDur) && savedDur > 0 && savedDur < 1e5) setDuration(savedDur)
       if (typeof data.unseenCount === 'number') setVideoMessageUnseenCount?.(data.unseenCount)
     } catch (e) {
-      showToast('Error', e.message || 'Failed to open', 'error')
-      navigate('/video-messages')
+      if (!openedFromList.current) {
+        showToast('Error', e.message || 'Failed to open', 'error')
+        navigate('/video-messages')
+      }
     } finally {
       setLoading(false)
     }
