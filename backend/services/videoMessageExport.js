@@ -56,9 +56,9 @@ function parseFps(stderr) {
   return fps >= 12 && fps <= 60 ? fps : 30
 }
 
-function ffmpegInfo(bin, file, lead = []) {
+function ffmpegInfo(bin, file) {
   return new Promise((resolve) => {
-    const child = spawn(bin, [...lead, '-i', file], { stdio: ['ignore', 'ignore', 'pipe'] })
+    const child = spawn(bin, ['-i', file], { stdio: ['ignore', 'ignore', 'pipe'] })
     let err = ''
     child.stderr.on('data', (d) => {
       err += String(d)
@@ -68,26 +68,32 @@ function ffmpegInfo(bin, file, lead = []) {
   })
 }
 
-async function probe(bin, file, lead = []) {
-  const stderr = await ffmpegInfo(bin, file, lead)
+async function probe(bin, file) {
+  const stderr = await ffmpegInfo(bin, file)
+  const format = (/Input #\d+,\s*([a-z0-9_]+)/i.exec(stderr) || [])[1] || ''
   return {
     dur: parseDuration(stderr),
     hasAudio: /Audio:/.test(String(stderr)),
     fps: parseFps(stderr),
+    mov: /mov|mp4|m4a|3gp/.test(format.toLowerCase()),
   }
 }
 
-/** Phone recordings often store a 1s duration while the frames are all still there. */
-function countFrames(bin, file) {
+function countOnce(bin, file, mov) {
   return new Promise((resolve) => {
-    const child = spawn(bin, ['-ignore_editlist', '1', '-i', file, '-map', '0:v:0', '-f', 'null', '-'], {
-      stdio: ['ignore', 'ignore', 'pipe'],
-    })
+    const args = [bin]
+    if (mov) args.push('-ignore_editlist', '1')
+    args.push('-i', file, '-map', '0:v:0', '-f', 'null', '-')
+    const child = spawn(bin, args.slice(1), { stdio: ['ignore', 'ignore', 'pipe'] })
     let tail = ''
     child.stderr.on('data', (d) => {
       tail = (tail + String(d)).slice(-4000)
     })
     const finish = () => {
+      if (/option not found|Unrecognized option/i.test(tail)) {
+        resolve(0)
+        return
+      }
       const frames = [...tail.matchAll(/frame=\s*(\d+)/g)]
       resolve(frames.length ? Number(frames[frames.length - 1][1]) : 0)
     }
@@ -96,8 +102,16 @@ function countFrames(bin, file) {
   })
 }
 
+/** Phone recordings often store a 1s duration while the frames are all still there. */
+async function countFrames(bin, file, mov) {
+  const plain = await countOnce(bin, file, false)
+  if (!mov) return plain
+  const full = await countOnce(bin, file, true)
+  return Math.max(plain, full)
+}
+
 export function exportHashFor(doc, notes) {
-  const parts = ['mix3', String(doc?.videoUrl || ''), String(doc?.duration || 0)]
+  const parts = ['mix4', String(doc?.videoUrl || ''), String(doc?.duration || 0)]
   for (const n of notes || []) {
     parts.push([
       n._id,
@@ -226,7 +240,7 @@ function replyTiming(note, probeInfo, frames) {
   return { outDur, stretch, fps }
 }
 
-async function encodeSegment({ bin, dir, index, input, ss, readDur, outDur, stretch = 1, reactions, cache, hasAudio, wholeFile = false, frameFps = 30 }) {
+async function encodeSegment({ bin, dir, index, input, ss, readDur, outDur, stretch = 1, reactions, cache, hasAudio, wholeFile = false, frameFps = 30, mov = false }) {
   const pngs = []
   for (const reaction of reactions || []) {
     const file = await pngFor(dir, cache, reaction.emoji)
@@ -238,8 +252,8 @@ async function encodeSegment({ bin, dir, index, input, ss, readDur, outDur, stre
   const speed = Number(stretch) > 1.01 ? Number(stretch) : 1
   const pace = Math.min(60, Math.max(12, Number(frameFps) || 30))
   const args = [bin, '-y']
-  if (wholeFile) args.push('-ignore_editlist', '1')
-  else args.push('-ss', String(Math.max(0, ss || 0)), '-t', String(readFor))
+  if (wholeFile && mov) args.push('-ignore_editlist', '1')
+  else if (!wholeFile) args.push('-ss', String(Math.max(0, ss || 0)), '-t', String(readFor))
   args.push('-i', input)
   for (const png of pngs) args.push('-loop', '1', '-t', String(playFor), '-i', png.file)
   const setpts = wholeFile ? `setpts=N/${pace}/TB` : 'setpts=PTS-STARTPTS'
@@ -350,11 +364,11 @@ async function composeAndUpload(doc, notes) {
         console.warn('[videoMessage] skip reply in download:', err?.message || err)
         continue
       }
-      const replyProbe = await probe(bin, replyPath, ['-ignore_editlist', '1'])
-      const frames = await countFrames(bin, replyPath)
+      const replyProbe = await probe(bin, replyPath)
+      const frames = await countFrames(bin, replyPath, replyProbe.mov)
       const timing = replyTiming(note, replyProbe, frames)
       if (!(timing.outDur > 0.15)) continue
-      files.push(await encodeSegment({
+      const replyEncode = {
         bin,
         dir,
         index,
@@ -366,9 +380,22 @@ async function composeAndUpload(doc, notes) {
         reactions: piece.reactions,
         cache,
         hasAudio: replyProbe.hasAudio,
-        wholeFile: true,
         frameFps: replyProbe.fps,
-      }))
+        mov: replyProbe.mov,
+      }
+      let replyFile = ''
+      try {
+        replyFile = await encodeSegment({ ...replyEncode, wholeFile: true })
+      } catch (err) {
+        console.warn('[videoMessage] reply mix retry:', err?.message || err)
+        try {
+          replyFile = await encodeSegment({ ...replyEncode, wholeFile: true, mov: false, stretch: 1 })
+        } catch (err2) {
+          console.warn('[videoMessage] reply mix skipped:', err2?.message || err2)
+          continue
+        }
+      }
+      files.push(replyFile)
       index += 1
     }
     if (!files.length) throw new Error('Could not prepare the download')
