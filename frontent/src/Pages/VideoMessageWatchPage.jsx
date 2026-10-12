@@ -16,7 +16,7 @@ import useShowToast from '../hooks/useShowToast'
 import API_BASE_URL from '../config/api'
 import { uploadMediaToR2 } from '../utils/directR2Upload'
 import { mediaDisplayUrl } from '../utils/mediaUrl.js'
-import { fmtTime, otherParty, prepareLightVideo, uidOf } from '../utils/videoMessage.js'
+import { fmtTime, otherParty, partyLabel, uidOf } from '../utils/videoMessage.js'
 import VideoRecordModal from '../Components/VideoRecordModal.jsx'
 
 const REACTIONS = ['❤️', '😂', '🔥', '😮', '😢', '👏', '😍', '🎉', '👍', '💯', '🙏', '😭', '🤣', '😎', '💪', '✨']
@@ -72,6 +72,9 @@ const VideoMessageWatchPage = () => {
   const [videoFull, setVideoFull] = useState(false)
 
   const other = item ? otherParty(item, user?._id) : null
+  const face = item?.isGroup
+    ? (item.members || []).find((m) => uidOf(m) !== String(user?._id)) || null
+    : other
   const iAmSender = item ? uidOf(item.sender) === String(user?._id) : false
   const videoNotes = useMemo(() => notes.filter((n) => n.type === 'video' && n.videoUrl), [notes])
 
@@ -595,10 +598,10 @@ const VideoMessageWatchPage = () => {
         <Button size="sm" variant="ghost" color="white" flexShrink={0} px={{ base: 2, sm: 3 }} onClick={() => navigate('/video-messages')}>
           ←
         </Button>
-        <Avatar size="sm" flexShrink={0} src={mediaDisplayUrl(other?.profilePic)} name={other?.name} />
+        <Avatar size="sm" flexShrink={0} src={mediaDisplayUrl(face?.profilePic)} name={face?.name || partyLabel(item, user?._id)} />
         <Box minW={0} flex="1" overflow="hidden">
           <Text color="white" fontWeight="semibold" noOfLines={1} fontSize="sm" wordBreak="normal">
-            {other?.name || other?.username}
+            {partyLabel(item, user?._id)}
           </Text>
           <Text color="whiteAlpha.700" fontSize="xs" noOfLines={1} wordBreak="normal">
             {notes.length} replies

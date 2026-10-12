@@ -1,5 +1,6 @@
 import mongoose from 'mongoose'
 import VideoMessage from '../models/videoMessage.js'
+import VideoMessageReceipt from '../models/videoMessageReceipt.js'
 import VideoNote from '../models/videoNote.js'
 import User from '../models/user.js'
 import Follow from '../models/follow.js'
@@ -22,6 +23,7 @@ const NOTES_PAGE_SIZE = 200
 const MAX_MARKERS = 10
 const MAX_DURATION_SEC = 600
 const MAX_NOTE_DURATION_SEC = 30
+const MAX_GROUP = 9
 const USER_SELECT = 'username name profilePic'
 
 const isId = (v) => mongoose.Types.ObjectId.isValid(String(v || ''))
@@ -114,10 +116,15 @@ const sanitizeMarkers = (raw, duration) => {
 
 const toPublic = (doc) => {
   const o = doc?.toObject ? doc.toObject() : { ...doc }
-  return {
+  const person = (u) => {
+    if (!u || typeof u !== 'object' || u._id == null) return null
+    if (u.username == null && u.name == null && u.profilePic == null) return null
+    return { _id: u._id, username: u.username || '', name: u.name || '', profilePic: u.profilePic || '' }
+  }
+  const base = {
     _id: o._id,
     sender: o.sender,
-    receiver: o.receiver,
+    receiver: o.receiver || null,
     videoUrl: o.videoUrl,
     thumbnailUrl: o.thumbnailUrl || '',
     duration: o.duration || 0,
@@ -130,6 +137,34 @@ const toPublic = (doc) => {
     receiverUnseenNotes: o.receiverUnseenNotes || 0,
     createdAt: o.createdAt,
   }
+  if (!o.isGroup) return base
+  const members = (o.participants || []).map(person).filter(Boolean)
+  return {
+    ...base,
+    isGroup: true,
+    memberCount: o.memberCount || members.length,
+    members,
+  }
+}
+
+const memberIdsOf = (doc) => {
+  const raw = Array.isArray(doc?.participants) && doc.participants.length
+    ? doc.participants
+    : [doc?.sender, doc?.receiver]
+  const out = []
+  for (const p of raw) {
+    const id = String(p?._id || p || '')
+    if (id && id !== 'undefined' && !out.includes(id)) out.push(id)
+  }
+  return out
+}
+
+/** One socket each, only to the people on this video. Never a follower fan-out. */
+const emitToMembers = (doc, exceptId, event, payload) => {
+  const skip = String(exceptId || '')
+  for (const uid of memberIdsOf(doc)) {
+    if (uid !== skip) emitToUser(uid, event, payload)
+  }
 }
 
 const loadForParticipant = async (id, userId) => {
@@ -137,7 +172,7 @@ const loadForParticipant = async (id, userId) => {
   const doc = await VideoMessage.findById(id)
   if (!doc) return null
   const uid = String(userId)
-  if (String(doc.sender) !== uid && String(doc.receiver) !== uid) return null
+  if (!memberIdsOf(doc).includes(uid)) return null
   return doc
 }
 
@@ -147,11 +182,7 @@ export const sendVideoMessage = async (req, res) => {
   try {
     const senderId = req.user._id
     const { receiverId, videoUrl, thumbnailUrl, duration, markers } = req.body || {}
-
-    if (!isId(receiverId)) return res.status(400).json({ error: 'receiverId is required' })
-    if (String(receiverId) === String(senderId)) {
-      return res.status(400).json({ error: 'You cannot send a video message to yourself' })
-    }
+    const rawMembers = Array.isArray(req.body?.memberIds) ? req.body.memberIds : null
 
     let safeVideoUrl
     try {
@@ -160,26 +191,100 @@ export const sendVideoMessage = async (req, res) => {
     } catch (e) {
       return res.status(400).json({ error: e.message })
     }
+    const safeDuration = Math.min(MAX_DURATION_SEC, toNum(duration))
+    const thumb = thumbnailUrl ? String(thumbnailUrl) : ''
+    const safeMarkers = sanitizeMarkers(markers, safeDuration)
 
-    const receiver = await User.findById(receiverId).select('_id').lean()
+    if (rawMembers && rawMembers.length > 1) {
+      const ids = []
+      for (const raw of rawMembers) {
+        const id = String(raw || '')
+        if (!isId(id) || id === String(senderId) || ids.includes(id)) continue
+        ids.push(id)
+      }
+      if (ids.length < 2) return res.status(400).json({ error: 'Pick at least 2 people for a group' })
+      if (ids.length > MAX_GROUP) return res.status(400).json({ error: 'A group can have up to 9 people' })
+
+      const [followed, users] = await Promise.all([
+        Follow.find({ followerId: senderId, followeeId: { $in: ids } }).select('followeeId').lean(),
+        User.find({ _id: { $in: ids } }).select('_id').lean(),
+      ])
+      if (users.length !== ids.length) return res.status(404).json({ error: 'User not found' })
+      if (followed.length !== ids.length) {
+        return res.status(403).json({ error: 'You can only send video messages to people you follow' })
+      }
+
+      const doc = await VideoMessage.create({
+        sender: senderId,
+        receiver: null,
+        isGroup: true,
+        memberCount: ids.length + 1,
+        participants: [senderId, ...ids],
+        videoUrl: safeVideoUrl,
+        thumbnailUrl: thumb,
+        duration: safeDuration,
+        markers: safeMarkers,
+      })
+      try {
+        const now = new Date()
+        await VideoMessageReceipt.insertMany([
+          { videoMessage: doc._id, user: senderId, recipient: false, seenAt: now, unseenNotes: 0 },
+          ...ids.map((id) => ({
+            videoMessage: doc._id,
+            user: id,
+            recipient: true,
+            seenAt: null,
+            unseenNotes: 0,
+          })),
+        ])
+      } catch (err) {
+        await VideoMessage.deleteOne({ _id: doc._id })
+        throw err
+      }
+
+      await doc.populate([
+        { path: 'sender', select: USER_SELECT },
+        { path: 'participants', select: USER_SELECT },
+      ])
+      const payload = { ...toPublic(doc), mySeenAt: null, myUnseenNotes: 0 }
+      const mine = { ...payload, mySeenAt: new Date().toISOString() }
+      const actorName = doc.sender?.name || doc.sender?.username || 'Someone'
+      for (const id of ids) {
+        emitToUser(id, 'videoMessage:new', payload)
+        queueVideoPush({
+          recipientId: id,
+          actorName,
+          body: 'sent you a group video',
+          videoId: doc._id,
+        })
+      }
+      return res.status(201).json(mine)
+    }
+
+    const oneId = rawMembers?.length === 1 ? rawMembers[0] : receiverId
+    if (!isId(oneId)) return res.status(400).json({ error: 'receiverId is required' })
+    if (String(oneId) === String(senderId)) {
+      return res.status(400).json({ error: 'You cannot send a video message to yourself' })
+    }
+
+    const receiver = await User.findById(oneId).select('_id').lean()
     if (!receiver) return res.status(404).json({ error: 'User not found' })
 
-    // Private to people you follow. One indexed lookup.
-    const follows = await Follow.exists({ followerId: senderId, followeeId: receiverId })
+    const follows = await Follow.exists({ followerId: senderId, followeeId: oneId })
     if (!follows) {
       return res.status(403).json({ error: 'You can only send video messages to people you follow' })
     }
 
-    const safeDuration = Math.min(MAX_DURATION_SEC, toNum(duration))
-
     const doc = await VideoMessage.create({
       sender: senderId,
-      receiver: receiverId,
-      participants: [senderId, receiverId],
+      receiver: oneId,
+      isGroup: false,
+      memberCount: 2,
+      participants: [senderId, oneId],
       videoUrl: safeVideoUrl,
-      thumbnailUrl: thumbnailUrl ? String(thumbnailUrl) : '',
+      thumbnailUrl: thumb,
       duration: safeDuration,
-      markers: sanitizeMarkers(markers, safeDuration),
+      markers: safeMarkers,
     })
 
     await doc.populate([
@@ -188,9 +293,9 @@ export const sendVideoMessage = async (req, res) => {
     ])
     const payload = toPublic(doc)
 
-    emitToUser(receiverId, 'videoMessage:new', payload)
+    emitToUser(oneId, 'videoMessage:new', payload)
     queueVideoPush({
-      recipientId: receiverId,
+      recipientId: oneId,
       actorName: doc.sender?.name || doc.sender?.username || 'Someone',
       body: 'sent you a video',
       videoId: doc._id,
@@ -227,10 +332,28 @@ export const listVideoMessages = async (req, res) => {
       .limit(limit + 1)
       .populate('sender', USER_SELECT)
       .populate('receiver', USER_SELECT)
+      .populate('participants', USER_SELECT)
       .lean()
 
     const hasMore = rows.length > limit
-    const items = (hasMore ? rows.slice(0, limit) : rows).map(toPublic)
+    const page = hasMore ? rows.slice(0, limit) : rows
+    const groupIds = page.filter((row) => row.isGroup).map((row) => row._id)
+    const receipts = groupIds.length
+      ? await VideoMessageReceipt.find({ user: userId, videoMessage: { $in: groupIds } })
+          .select('videoMessage seenAt unseenNotes')
+          .lean()
+      : []
+    const mine = new Map(receipts.map((row) => [String(row.videoMessage), row]))
+    const items = page.map((row) => {
+      const pub = toPublic(row)
+      if (!row.isGroup) return pub
+      const receipt = mine.get(String(row._id))
+      return {
+        ...pub,
+        mySeenAt: receipt?.seenAt || null,
+        myUnseenNotes: receipt?.unseenNotes || 0,
+      }
+    })
     const last = items[items.length - 1]
 
     return res.status(200).json({
@@ -245,7 +368,7 @@ export const listVideoMessages = async (req, res) => {
 }
 
 async function countUnseenFor(userId) {
-  const [received, senderRows, receiverRows] = await Promise.all([
+  const [received, senderRows, receiverRows, groupNew, groupNotes] = await Promise.all([
     VideoMessage.countDocuments({ receiver: userId, seenAt: null }),
     VideoMessage.aggregate([
       { $match: { sender: userId, $or: [{ senderUnseenNotes: { $gt: 0 } }, { senderHasNewNotes: true }] } },
@@ -260,9 +383,14 @@ async function countUnseenFor(userId) {
       { $match: { receiver: userId, seenAt: { $ne: null }, receiverUnseenNotes: { $gt: 0 } } },
       { $group: { _id: null, n: { $sum: '$receiverUnseenNotes' } } },
     ]),
+    VideoMessageReceipt.countDocuments({ user: userId, recipient: true, seenAt: null }),
+    VideoMessageReceipt.aggregate([
+      { $match: { user: userId, seenAt: { $ne: null }, unseenNotes: { $gt: 0 } } },
+      { $group: { _id: null, n: { $sum: '$unseenNotes' } } },
+    ]),
   ])
   const replied = (senderRows[0]?.n || 0) + (receiverRows[0]?.n || 0)
-  return received + replied
+  return received + replied + groupNew + (groupNotes[0]?.n || 0)
 }
 
 /** Badge: unopened videos + each reply or reaction I have not opened yet. */
@@ -284,24 +412,31 @@ export const getVideoMessage = async (req, res) => {
     const doc = await loadForParticipant(req.params.id, userId)
     if (!doc) return res.status(404).json({ error: 'Video message not found' })
 
-    // Opening = seen. Receiver clears `seenAt`; sender clears "new replies" flag.
     const uid = String(userId)
-    const update = {}
-    if (String(doc.receiver) === uid && !doc.seenAt) update.seenAt = new Date()
-    if (String(doc.receiver) === uid && (doc.receiverUnseenNotes || 0) > 0) update.receiverUnseenNotes = 0
-    if (String(doc.sender) === uid && (doc.senderHasNewNotes || (doc.senderUnseenNotes || 0) > 0)) {
-      update.senderHasNewNotes = false
-      update.senderUnseenNotes = 0
-    }
-    if (Object.keys(update).length) {
-      await VideoMessage.updateOne({ _id: doc._id }, { $set: update })
-      Object.assign(doc, update)
-      if (update.seenAt) emitToUser(doc.sender, 'videoMessage:seen', { _id: String(doc._id), seenAt: update.seenAt })
+    if (doc.isGroup) {
+      await VideoMessageReceipt.updateOne(
+        { videoMessage: doc._id, user: userId },
+        { $set: { seenAt: new Date(), unseenNotes: 0 } },
+      )
+    } else {
+      const update = {}
+      if (String(doc.receiver) === uid && !doc.seenAt) update.seenAt = new Date()
+      if (String(doc.receiver) === uid && (doc.receiverUnseenNotes || 0) > 0) update.receiverUnseenNotes = 0
+      if (String(doc.sender) === uid && (doc.senderHasNewNotes || (doc.senderUnseenNotes || 0) > 0)) {
+        update.senderHasNewNotes = false
+        update.senderUnseenNotes = 0
+      }
+      if (Object.keys(update).length) {
+        await VideoMessage.updateOne({ _id: doc._id }, { $set: update })
+        Object.assign(doc, update)
+        if (update.seenAt) emitToUser(doc.sender, 'videoMessage:seen', { _id: String(doc._id), seenAt: update.seenAt })
+      }
     }
 
     await doc.populate([
       { path: 'sender', select: USER_SELECT },
       { path: 'receiver', select: USER_SELECT },
+      { path: 'participants', select: USER_SELECT },
     ])
 
     const notes = await VideoNote.find({ videoMessage: doc._id })
@@ -340,7 +475,7 @@ export const addReplyPrompt = async (req, res) => {
     }
     doc.markers = [...(doc.markers || []), marker].sort((a, b) => a.t - b.t)
     await doc.save()
-    emitToUser(doc.receiver, 'videoMessage:marker', {
+    emitToMembers(doc, userId, 'videoMessage:marker', {
       videoMessageId: String(doc._id),
       markers: doc.markers,
     })
@@ -368,7 +503,7 @@ export const removeReplyPrompt = async (req, res) => {
     doc.markers = list.filter((_, i) => i !== idx)
     await doc.save()
     const payload = { videoMessageId: String(doc._id), markers: doc.markers }
-    emitToUser(doc.receiver, 'videoMessage:marker', payload)
+    emitToMembers(doc, userId, 'videoMessage:marker', payload)
     return res.status(200).json({ markers: doc.markers })
   } catch (error) {
     console.error('[videoMessage] remove reply prompt error:', error)
@@ -421,6 +556,38 @@ export const addVideoNote = async (req, res) => {
     }
 
     const created = await VideoNote.create(note)
+    await created.populate('user', USER_SELECT)
+    const actorName = created.user?.name || created.user?.username || 'Someone'
+    const noteBody = created.type === 'reaction' ? `reacted ${created.reaction || ''} on a video` : 'replied on a video'
+    const basePayload = {
+      videoMessageId: String(doc._id),
+      note: created.toObject(),
+    }
+
+    if (doc.isGroup) {
+      await VideoMessage.updateOne({ _id: doc._id }, { $inc: { noteCount: 1 }, $set: { lastNoteAt: new Date() } })
+      const others = await VideoMessageReceipt.find({ videoMessage: doc._id, user: { $ne: userId } })
+        .select('user seenAt')
+        .lean()
+      const opened = others.filter((row) => row.seenAt).map((row) => row.user)
+      if (opened.length) {
+        await VideoMessageReceipt.updateMany(
+          { videoMessage: doc._id, user: { $in: opened } },
+          { $inc: { unseenNotes: 1 } },
+        )
+      }
+      for (const row of others) {
+        emitToUser(row.user, 'videoMessage:note', { ...basePayload, badge: !!row.seenAt })
+        queueVideoPush({
+          recipientId: row.user,
+          actorName,
+          body: noteBody,
+          videoId: doc._id,
+          noteId: created._id,
+        })
+      }
+      return res.status(201).json({ ...basePayload, badge: false })
+    }
 
     const otherId = String(doc.sender) === String(userId) ? doc.receiver : doc.sender
     const fromReceiver = String(userId) === String(doc.receiver)
@@ -437,19 +604,12 @@ export const addVideoNote = async (req, res) => {
     }
     await VideoMessage.updateOne({ _id: doc._id }, { $inc: inc, $set: set })
 
-    await created.populate('user', USER_SELECT)
-    const payload = {
-      videoMessageId: String(doc._id),
-      note: created.toObject(),
-      badge,
-    }
-
+    const payload = { ...basePayload, badge }
     emitToUser(otherId, 'videoMessage:note', payload)
-    const actorName = created.user?.name || created.user?.username || 'Someone'
     queueVideoPush({
       recipientId: otherId,
       actorName,
-      body: created.type === 'reaction' ? `reacted ${created.reaction || ''} on a video` : 'replied on a video',
+      body: noteBody,
       videoId: doc._id,
       noteId: created._id,
     })
@@ -496,11 +656,18 @@ export const deleteVideoNote = async (req, res) => {
     await VideoMessage.updateOne({ _id: doc._id, noteCount: { $gt: 0 } }, { $inc: { noteCount: -dropped } })
     if (removed.videoUrl) cleanupMediaInBackground([removed.videoUrl])
 
-    const otherId = iAmSender ? doc.receiver : doc.sender
     const payload = { videoMessageId: String(doc._id), noteId: String(noteId) }
-    emitToUser(otherId, 'videoMessage:noteDeleted', payload)
-    for (const kid of kids) {
-      emitToUser(otherId, 'videoMessage:noteDeleted', { videoMessageId: String(doc._id), noteId: String(kid._id) })
+    if (doc.isGroup) {
+      emitToMembers(doc, userId, 'videoMessage:noteDeleted', payload)
+      for (const kid of kids) {
+        emitToMembers(doc, userId, 'videoMessage:noteDeleted', { videoMessageId: String(doc._id), noteId: String(kid._id) })
+      }
+    } else {
+      const otherId = iAmSender ? doc.receiver : doc.sender
+      emitToUser(otherId, 'videoMessage:noteDeleted', payload)
+      for (const kid of kids) {
+        emitToUser(otherId, 'videoMessage:noteDeleted', { videoMessageId: String(doc._id), noteId: String(kid._id) })
+      }
     }
     return res.status(200).json(payload)
   } catch (error) {
@@ -521,22 +688,33 @@ export const deleteVideoMessage = async (req, res) => {
       .select('videoUrl')
       .limit(NOTES_PAGE_SIZE)
       .lean()
+    const receipts = doc.isGroup
+      ? await VideoMessageReceipt.find({ videoMessage: doc._id }).select('user seenAt unseenNotes recipient').lean()
+      : []
 
     await Promise.all([
       VideoMessage.deleteOne({ _id: doc._id }),
       VideoNote.deleteMany({ videoMessage: doc._id }),
+      doc.isGroup ? VideoMessageReceipt.deleteMany({ videoMessage: doc._id }) : Promise.resolve(),
     ])
 
     cleanupMediaInBackground([doc.videoUrl, doc.thumbnailUrl, ...noteUrls.map((n) => n.videoUrl)])
 
     const idStr = String(doc._id)
-    const tell = (uid) => {
-      const isReceiver = String(doc.receiver) === String(uid)
-      const unseen = isReceiver ? !doc.seenAt : !!doc.senderHasNewNotes
-      emitToUser(uid, 'videoMessage:deleted', { _id: idStr, unseen })
+    if (doc.isGroup) {
+      for (const row of receipts) {
+        const unseen = (row.recipient && !row.seenAt) || (row.unseenNotes || 0) > 0
+        emitToUser(row.user, 'videoMessage:deleted', { _id: idStr, unseen })
+      }
+    } else {
+      const tell = (uid) => {
+        const isReceiver = String(doc.receiver) === String(uid)
+        const unseen = isReceiver ? !doc.seenAt : !!doc.senderHasNewNotes
+        emitToUser(uid, 'videoMessage:deleted', { _id: idStr, unseen })
+      }
+      tell(doc.sender)
+      tell(doc.receiver)
     }
-    tell(doc.sender)
-    tell(doc.receiver)
     return res.status(200).json({ _id: idStr })
   } catch (error) {
     console.error('[videoMessage] delete error:', error)

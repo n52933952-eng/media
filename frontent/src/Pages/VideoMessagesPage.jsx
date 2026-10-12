@@ -27,13 +27,19 @@ import useShowToast from '../hooks/useShowToast'
 import API_BASE_URL from '../config/api'
 import { uploadMediaToR2 } from '../utils/directR2Upload'
 import { mediaDisplayUrl } from '../utils/mediaUrl.js'
-import { captureVideoThumb, fmtTime, otherParty, prepareLightVideo, uidOf } from '../utils/videoMessage.js'
+import { captureVideoThumb, fmtTime, otherParty, partyLabel, prepareLightVideo, uidOf } from '../utils/videoMessage.js'
 import VideoRecordModal from '../Components/VideoRecordModal.jsx'
 
 const PAGE = 15
 
 function unseenAmount(item, meId) {
   const me = String(meId)
+  if (item?.isGroup) {
+    let n = 0
+    if (uidOf(item.sender) !== me && !item.mySeenAt) n += 1
+    if ((item.myUnseenNotes || 0) > 0) n += item.myUnseenNotes
+    return n
+  }
   let n = 0
   if (uidOf(item.receiver) === me && !item.seenAt) n += 1
   if (uidOf(item.receiver) === me && (item.receiverUnseenNotes || 0) > 0) n += item.receiverUnseenNotes
@@ -88,6 +94,8 @@ const VideoMessagesPage = () => {
   const peopleSkipRef = useRef(0)
   const peopleReqRef = useRef(0)
   const [pickedUser, setPickedUser] = useState(null)
+  const [groupMode, setGroupMode] = useState(false)
+  const [pickedUsers, setPickedUsers] = useState([])
   const [pickedFile, setPickedFile] = useState(null)
   const [previewUrl, setPreviewUrl] = useState('')
   const [sending, setSending] = useState(false)
@@ -153,9 +161,11 @@ const VideoMessagesPage = () => {
                 ...x,
                 noteCount: (x.noteCount || 0) + 1,
                 ...(payload?.badge
-                  ? uidOf(x.sender) === String(user?._id)
-                    ? { senderHasNewNotes: true, senderUnseenNotes: (x.senderUnseenNotes || 0) + 1 }
-                    : { receiverUnseenNotes: (x.receiverUnseenNotes || 0) + 1 }
+                  ? x.isGroup
+                    ? { myUnseenNotes: (x.myUnseenNotes || 0) + 1 }
+                    : uidOf(x.sender) === String(user?._id)
+                      ? { senderHasNewNotes: true, senderUnseenNotes: (x.senderUnseenNotes || 0) + 1 }
+                      : { receiverUnseenNotes: (x.receiverUnseenNotes || 0) + 1 }
                   : {}),
               }
             : x,
@@ -259,7 +269,8 @@ const VideoMessagesPage = () => {
   }, [pickedFile])
 
   const handleSend = async () => {
-    if (!pickedUser?._id || !pickedFile || sending) return
+    const targets = groupMode ? pickedUsers : pickedUser ? [pickedUser] : []
+    if (!targets.length || !pickedFile || sending) return
     setSending(true)
     try {
       const duration = await videoDurationOf(pickedFile)
@@ -280,7 +291,9 @@ const VideoMessagesPage = () => {
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          receiverId: pickedUser._id,
+          ...(targets.length > 1
+            ? { memberIds: targets.map((p) => p._id) }
+            : { receiverId: targets[0]._id }),
           videoUrl,
           thumbnailUrl: thumbnailUrl || undefined,
           duration: Math.round(duration),
@@ -293,6 +306,8 @@ const VideoMessagesPage = () => {
       setQuery('')
       setPeople([])
       setPickedUser(null)
+      setPickedUsers([])
+      setGroupMode(false)
       setPickedFile(null)
       showToast('Sent', 'Video message sent', 'success')
     } catch (e) {
@@ -311,9 +326,9 @@ const VideoMessagesPage = () => {
           + Send video
         </Button>
       </Flex>
-      <Text fontSize="sm" color={muted} mb={4}>
-        Private 1-to-1. Reply inside any second of the video.
-      </Text>
+        <Text fontSize="sm" color={muted} mb={4}>
+          One person, or a group of up to 9 people you follow.
+        </Text>
 
       {loading ? (
         <Flex justify="center" py={16}><Spinner /></Flex>
@@ -381,12 +396,16 @@ const VideoMessagesPage = () => {
                 <Box flex="1" minW={0}>
                   <HStack>
                     <Text fontWeight={unseen ? 'bold' : 'semibold'} noOfLines={1}>
-                      {other?.name || other?.username || 'User'}
+                      {partyLabel(item, user?._id)}
                     </Text>
                     {unseen && <Badge colorScheme="blue">{fresh > 1 ? fresh : 'new'}</Badge>}
                   </HStack>
                   <Text fontSize="sm" color={muted}>
-                    {mine ? (item.seenAt ? 'Seen' : 'Not opened yet') : 'Sent you'} · {fmtTime(item.duration)} · {item.noteCount || 0} replies
+                    {item.isGroup
+                      ? `Group · ${item.memberCount || (item.members || []).length}`
+                      : mine
+                        ? (item.seenAt ? 'Seen' : 'Not opened yet')
+                        : 'Sent you'} · {fmtTime(item.duration)} · {item.noteCount || 0} replies
                   </Text>
                 </Box>
                 <Text fontSize="lg">▶</Text>
@@ -430,7 +449,28 @@ const VideoMessagesPage = () => {
           <ModalCloseButton />
           <ModalBody pb={6}>
             <Text fontSize="sm" mb={2}>To</Text>
-            {pickedUser ? (
+            <HStack mb={3} spacing={2}>
+              <Button size="xs" variant={groupMode ? 'outline' : 'solid'} colorScheme="blue" onClick={() => { setGroupMode(false); setPickedUsers([]) }}>
+                One person
+              </Button>
+              <Button size="xs" variant={groupMode ? 'solid' : 'outline'} colorScheme="blue" onClick={() => { setGroupMode(true); setPickedUser(null) }}>
+                Group
+              </Button>
+              {groupMode ? (
+                <Text fontSize="xs" color={muted}>{pickedUsers.length}/9</Text>
+              ) : null}
+            </HStack>
+            {groupMode && pickedUsers.length > 0 ? (
+              <Flex gap={2} mb={3} wrap="wrap">
+                {pickedUsers.map((p) => (
+                  <Flex key={p._id} align="center" gap={1} bg={hoverBg} borderRadius="full" px={2} py={1}>
+                    <Text fontSize="sm">{p.name || p.username}</Text>
+                    <Button size="xs" variant="ghost" onClick={() => setPickedUsers((prev) => prev.filter((x) => String(x._id) !== String(p._id)))}>✕</Button>
+                  </Flex>
+                ))}
+              </Flex>
+            ) : null}
+            {!groupMode && pickedUser ? (
               <Flex align="center" gap={2} mb={3}>
                 <Avatar size="sm" src={mediaDisplayUrl(pickedUser.profilePic)} name={pickedUser.name} />
                 <Text flex="1">{pickedUser.name || pickedUser.username}</Text>
@@ -473,10 +513,19 @@ const VideoMessagesPage = () => {
                         cursor="pointer"
                         _hover={{ bg: hoverBg }}
                         onClick={() => {
-                          setPickedUser(p)
-                          setPeople([])
-                          setPeopleMore(false)
-                          setQuery('')
+                          if (!groupMode) {
+                            setPickedUser(p)
+                            setPeople([])
+                            setPeopleMore(false)
+                            setQuery('')
+                            return
+                          }
+                          setPickedUsers((prev) => {
+                            const id = String(p._id)
+                            if (prev.some((x) => String(x._id) === id)) return prev.filter((x) => String(x._id) !== id)
+                            if (prev.length >= 9) return prev
+                            return [...prev, p]
+                          })
                         }}
                       >
                         <Avatar size="sm" src={mediaDisplayUrl(p.profilePic)} name={p.name} />
@@ -537,7 +586,7 @@ const VideoMessagesPage = () => {
             <Button
               colorScheme="blue"
               w="full"
-              isDisabled={!pickedUser || !pickedFile}
+              isDisabled={(groupMode ? pickedUsers.length < 1 : !pickedUser) || !pickedFile}
               isLoading={sending}
               loadingText={sendHint || 'Sending'}
               onClick={handleSend}

@@ -20,8 +20,12 @@ const markerSchema = new mongoose.Schema(
 const videoMessageSchema = new mongoose.Schema(
   {
     sender: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-    receiver: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-    // Both people on one field so inbox is one indexed query, not $or.
+    // Set for 1-to-1. A group leaves this empty and uses `participants`.
+    receiver: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+    isGroup: { type: Boolean, default: false },
+    // Sender plus up to 9 people they follow. Hard cap keeps every video one small read.
+    memberCount: { type: Number, default: 2, min: 2, max: 10 },
+    // Everyone on one field so inbox is one indexed query, not $or.
     participants: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
     videoUrl: { type: String, required: true },
     thumbnailUrl: { type: String, default: '' },

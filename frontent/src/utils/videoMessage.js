@@ -8,6 +8,20 @@ export function otherParty(item, meId) {
   return uidOf(item?.sender) === String(meId) ? item?.receiver : item?.sender
 }
 
+export function partyLabel(item, meId) {
+  if (!item?.isGroup) {
+    const other = otherParty(item, meId)
+    return other?.name || other?.username || 'User'
+  }
+  const names = (item.members || [])
+    .filter((m) => uidOf(m) && uidOf(m) !== String(meId || ''))
+    .map((m) => m.name || m.username)
+    .filter(Boolean)
+  if (!names.length) return 'Group'
+  const head = names.slice(0, 2).join(', ')
+  return names.length > 2 ? `${head} +${names.length - 2}` : head
+}
+
 /** Grab one jpeg frame so the inbox can show a picture, not a blank row. */
 export async function captureVideoThumb(file) {
   if (!file) return null
