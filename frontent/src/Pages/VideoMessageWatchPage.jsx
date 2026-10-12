@@ -34,6 +34,7 @@ const VideoMessageWatchPage = () => {
   const card = useColorModeValue('white', '#1c1c1c')
 
   const videoRef = useRef(null)
+  const frameRef = useRef(null)
   // One always-mounted reply player. We pre-load the next reply into it a few
   // seconds early so it starts the instant the playhead reaches its moment.
   const noteVideoRef = useRef(null)
@@ -68,6 +69,7 @@ const VideoMessageWatchPage = () => {
   const [recordOpen, setRecordOpen] = useState(false)
   const [replySaving, setReplySaving] = useState(false)
   const [askNow, setAskNow] = useState(null)
+  const [videoFull, setVideoFull] = useState(false)
 
   const other = item ? otherParty(item, user?._id) : null
   const iAmSender = item ? uidOf(item.sender) === String(user?._id) : false
@@ -96,6 +98,23 @@ const VideoMessageWatchPage = () => {
   useEffect(() => {
     load()
   }, [load])
+
+  useEffect(() => {
+    const onFs = () => setVideoFull(document.fullscreenElement === frameRef.current)
+    document.addEventListener('fullscreenchange', onFs)
+    return () => document.removeEventListener('fullscreenchange', onFs)
+  }, [])
+
+  const toggleVideoFull = () => {
+    const el = frameRef.current
+    if (!el) return
+    if (document.fullscreenElement) {
+      document.exitFullscreen?.()
+      return
+    }
+    const req = el.requestFullscreen || el.webkitRequestFullscreen
+    if (req) req.call(el).catch(() => {})
+  }
 
   useEffect(() => {
     if (!socket) return
@@ -641,12 +660,20 @@ const VideoMessageWatchPage = () => {
       <Flex flex={{ lg: '1' }} minH={{ lg: 0 }} direction={{ base: 'column', lg: 'row' }} align="stretch" overflow={{ lg: 'hidden' }}>
       <Box flex={{ base: '0 0 auto', lg: '1' }} minW={0} minH={{ lg: 0 }} display="flex" flexDirection="column">
       <Box
+        ref={frameRef}
         position="relative"
         bg="black"
         w="100%"
         flex={{ lg: '1' }}
         h={{ base: 'clamp(180px, 42vw, 300px)', lg: 'auto' }}
         minH={{ lg: '180px' }}
+        sx={{
+          '&:fullscreen, &:-webkit-full-screen': {
+            width: '100%',
+            height: '100%',
+            maxHeight: 'none',
+          },
+        }}
       >
         <video
           ref={videoRef}
@@ -700,7 +727,7 @@ const VideoMessageWatchPage = () => {
 
 
         {!iAmSender && !activeNote && (askNow || liveMarker?.type === 'reply') && (
-          <Box position="absolute" left="12px" right="12px" bottom="12px" bg="blackAlpha.800" color="white" px={3} py={2.5} borderRadius="xl">
+          <Box position="absolute" left="max(56px, calc(env(safe-area-inset-left, 0px) + 9vw + 18px))" right="12px" bottom="max(8px, env(safe-area-inset-bottom, 0px))" bg="blackAlpha.800" color="white" px={3} py={2.5} borderRadius="xl">
             <Text fontWeight="bold" fontSize="sm">Wants a reply or a reaction here</Text>
             <Text fontSize="xs" color="whiteAlpha.800">At {fmtTime((askNow || liveMarker)?.t)} · record a video or tap a reaction</Text>
           </Box>
@@ -761,6 +788,37 @@ const VideoMessageWatchPage = () => {
               <Text fontSize="5xl">{popReaction.reaction}</Text>
             </Flex>
           )}
+        </Box>
+        <Box
+          as="button"
+          type="button"
+          aria-label={videoFull ? 'Exit full video' : 'Watch full video'}
+          position="absolute"
+          left="max(8px, env(safe-area-inset-left, 0px))"
+          bottom="max(8px, env(safe-area-inset-bottom, 0px))"
+          zIndex={8}
+          w="clamp(36px, 9vw, 44px)"
+          h="clamp(36px, 9vw, 44px)"
+          minW="36px"
+          minH="36px"
+          flexShrink={0}
+          borderRadius="full"
+          bg="blackAlpha.600"
+          border="1px solid"
+          borderColor="whiteAlpha.400"
+          color="white"
+          fontSize="clamp(16px, 4.2vw, 20px)"
+          fontWeight="700"
+          lineHeight="1"
+          display="flex"
+          alignItems="center"
+          justifyContent="center"
+          onClick={(e) => {
+            e.stopPropagation()
+            toggleVideoFull()
+          }}
+        >
+          {videoFull ? '✕' : '⛶'}
         </Box>
       </Box>
 
