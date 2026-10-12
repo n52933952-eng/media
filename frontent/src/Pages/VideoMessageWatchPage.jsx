@@ -16,7 +16,7 @@ import useShowToast from '../hooks/useShowToast'
 import API_BASE_URL from '../config/api'
 import { uploadMediaToR2 } from '../utils/directR2Upload'
 import { mediaDisplayUrl } from '../utils/mediaUrl.js'
-import { fmtTime, otherParty, partyLabel, uidOf } from '../utils/videoMessage.js'
+import { fmtTime, otherParty, partyLabel, prepareLightVideo, uidOf } from '../utils/videoMessage.js'
 import VideoRecordModal from '../Components/VideoRecordModal.jsx'
 
 const REACTIONS = ['❤️', '😂', '🔥', '😮', '😢', '👏', '😍', '🎉', '👍', '💯', '🙏', '😭', '🤣', '😎', '💪', '✨']
