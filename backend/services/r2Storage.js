@@ -126,7 +126,7 @@ export async function uploadBuffer(buffer, mimetype, folder = 'uploads') {
 }
 
 /** Stream a file from disk to R2 (low RAM — safe for videos on small Render instances). */
-export async function uploadFromPath(filePath, mimetype, folder = 'uploads') {
+export async function uploadFromPath(filePath, mimetype, folder = 'uploads', options = {}) {
   if (!filePath) throw new Error('Empty upload path')
   const info = await stat(filePath)
   if (!info.isFile() || info.size <= 0) throw new Error('Empty upload file')
@@ -141,6 +141,7 @@ export async function uploadFromPath(filePath, mimetype, folder = 'uploads') {
       ContentLength: info.size,
       ContentType: mimetype || 'application/octet-stream',
       CacheControl: 'public, max-age=31536000, immutable',
+      ...(options.disposition ? { ContentDisposition: options.disposition } : {}),
     })
   )
   const url = buildPublicUrl(key)

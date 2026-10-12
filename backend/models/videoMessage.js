@@ -39,6 +39,9 @@ const videoMessageSchema = new mongoose.Schema(
     // How many replies/reactions the other person has not opened yet.
     senderUnseenNotes: { type: Number, default: 0, min: 0 },
     receiverUnseenNotes: { type: Number, default: 0, min: 0 },
+    // Finished download of this video plus its replies and reactions. Rebuilt when those change.
+    exportUrl: { type: String, default: '' },
+    exportHash: { type: String, default: '' },
   },
   { timestamps: true },
 )

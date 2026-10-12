@@ -71,6 +71,7 @@ const VideoMessageWatchPage = () => {
   const [replySaving, setReplySaving] = useState(false)
   const [askNow, setAskNow] = useState(null)
   const [videoFull, setVideoFull] = useState(false)
+  const [downloading, setDownloading] = useState(false)
 
   const other = item ? otherParty(item, user?._id) : null
   const face = item?.isGroup
@@ -583,6 +584,26 @@ const VideoMessageWatchPage = () => {
     }
   }
 
+  const downloadAll = async () => {
+    if (downloading) return
+    setDownloading(true)
+    showToast('Download', 'Preparing one video with the replies and reactions', 'info')
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/video-message/${id}/download`, { credentials: 'include' })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok || !data.url) throw new Error(data.error || 'Could not download')
+      const a = document.createElement('a')
+      a.href = data.url
+      a.target = '_blank'
+      a.rel = 'noopener'
+      a.click()
+    } catch (e) {
+      showToast('Error', e.message || 'Could not download', 'error')
+    } finally {
+      setDownloading(false)
+    }
+  }
+
   const deleteVideo = async () => {
     if (!window.confirm('Delete this video for both of you?')) return
     try {
@@ -632,6 +653,18 @@ const VideoMessageWatchPage = () => {
             {notes.length} replies
           </Text>
         </Box>
+        <Button
+          size="sm"
+          variant="ghost"
+          color="white"
+          flexShrink={0}
+          px={{ base: 2, sm: 3 }}
+          aria-label="Download video"
+          isLoading={downloading}
+          onClick={downloadAll}
+        >
+          ⬇
+        </Button>
         <Button size="sm" variant="ghost" color="red.300" flexShrink={0} px={{ base: 2, sm: 3 }} onClick={deleteVideo}>
           Delete
         </Button>

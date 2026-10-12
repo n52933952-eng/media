@@ -10,6 +10,7 @@ import {
   removeReplyPrompt,
   deleteVideoNote,
   deleteVideoMessage,
+  downloadVideoMessage,
 } from '../controller/videoMessage.js'
 
 const router = express.Router()
@@ -17,6 +18,7 @@ const router = express.Router()
 router.post('/', protectRoute, sendVideoMessage)
 router.get('/', protectRoute, listVideoMessages)
 router.get('/unseen-count', protectRoute, getVideoMessageUnseenCount)
+router.get('/:id/download', protectRoute, downloadVideoMessage)
 router.get('/:id', protectRoute, getVideoMessage)
 router.delete('/:id', protectRoute, deleteVideoMessage)
 router.post('/:id/notes', protectRoute, addVideoNote)

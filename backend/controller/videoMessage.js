@@ -6,6 +6,7 @@ import User from '../models/user.js'
 import Follow from '../models/follow.js'
 import { assertManagedMediaUrls } from '../services/r2Presign.js'
 import { deleteByUrl } from '../services/r2Storage.js'
+import { exportHashFor, needsMix, prepareMixedVideo } from '../services/videoMessageExport.js'
 import { getIO, getUserSelfRoomId } from '../socket/socket.js'
 
 /**
@@ -694,6 +695,30 @@ export const deleteVideoNote = async (req, res) => {
   }
 }
 
+// ───────────────────────────── download one mixed video ─────────────────────────────
+
+export const downloadVideoMessage = async (req, res) => {
+  try {
+    const doc = await loadForParticipant(req.params.id, req.user._id)
+    if (!doc) return res.status(404).json({ error: 'Video message not found' })
+    const notes = await VideoNote.find({ videoMessage: doc._id })
+      .sort({ t: 1, _id: 1 })
+      .limit(NOTES_PAGE_SIZE)
+      .lean()
+    if (!needsMix(notes)) return res.json({ url: doc.videoUrl })
+    const hash = exportHashFor(doc, notes)
+    if (doc.exportHash === hash && doc.exportUrl) return res.json({ url: doc.exportUrl })
+    const url = await prepareMixedVideo(doc, notes)
+    const previous = doc.exportUrl && doc.exportUrl !== url ? doc.exportUrl : ''
+    await VideoMessage.updateOne({ _id: doc._id }, { $set: { exportUrl: url, exportHash: hash } })
+    if (previous) cleanupMediaInBackground([previous])
+    return res.json({ url })
+  } catch (error) {
+    console.error('[videoMessage] download error:', error)
+    return res.status(500).json({ error: 'Could not prepare the download' })
+  }
+}
+
 // ───────────────────────────── delete whole video ─────────────────────────────
 
 export const deleteVideoMessage = async (req, res) => {
@@ -716,7 +741,7 @@ export const deleteVideoMessage = async (req, res) => {
       doc.isGroup ? VideoMessageReceipt.deleteMany({ videoMessage: doc._id }) : Promise.resolve(),
     ])
 
-    cleanupMediaInBackground([doc.videoUrl, doc.thumbnailUrl, ...noteUrls.map((n) => n.videoUrl)])
+    cleanupMediaInBackground([doc.videoUrl, doc.thumbnailUrl, doc.exportUrl, ...noteUrls.map((n) => n.videoUrl)])
 
     const idStr = String(doc._id)
     if (doc.isGroup) {
