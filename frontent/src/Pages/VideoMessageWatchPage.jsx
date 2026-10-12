@@ -46,6 +46,8 @@ const VideoMessageWatchPage = () => {
   const barRef = useRef(null)
   const dragRef = useRef(false)
   const durFixedRef = useRef(false)
+  const replyTRef = useRef(0)
+  const replyPrevRef = useRef(0)
   const askedRef = useRef(new Set())
   const resumePlayRef = useRef(false)
 
@@ -187,6 +189,11 @@ const VideoMessageWatchPage = () => {
       replyLockRef.current = true
       resumeAfterRef.current = resumeAfter
       shownRef.current.add(String(note._id))
+      replyTRef.current = 0
+      replyPrevRef.current = 0
+      for (const n of notes) {
+        if (String(n.onNote) === String(note._id)) shownRef.current.delete(String(n._id))
+      }
       if (seek && v) {
         try { v.currentTime = noteT } catch { /* ignore */ }
       }
@@ -213,7 +220,7 @@ const VideoMessageWatchPage = () => {
         else el.addEventListener('loadeddata', start)
       }
     },
-    [primeNote],
+    [primeNote, notes],
   )
 
   const handleTime = (t) => {
@@ -268,7 +275,7 @@ const VideoMessageWatchPage = () => {
       if (upcoming) primeNote(upcoming)
     }
     const react = notes.find((n) => {
-      if (n.type !== 'reaction') return false
+      if (n.type !== 'reaction' || n.onNote) return false
       const idn = String(n._id)
       if (shownRef.current.has(idn)) return false
       return n.t > prev - 0.08 && n.t <= t + 0.08
@@ -306,6 +313,7 @@ const VideoMessageWatchPage = () => {
     }
     if (!soft) {
       for (const n of notes) {
+        if (n.onNote) continue
         const idn = String(n._id)
         if ((Number(n.t) || 0) > at + 0.25) shownRef.current.delete(idn)
         else shownRef.current.add(idn)
@@ -317,8 +325,40 @@ const VideoMessageWatchPage = () => {
     if (!soft && keepPlaying) v.play().catch(() => {})
   }
 
+  const handleReplyTime = (t) => {
+    const parentId = String(activeNote?._id || '')
+    if (!parentId || activeNote?.type !== 'video') return
+    const prev = replyPrevRef.current
+    replyPrevRef.current = t
+    replyTRef.current = t
+    if (t + 0.05 < prev) {
+      for (const n of notes) {
+        if (String(n.onNote) === parentId && n.t > t + 0.2) shownRef.current.delete(String(n._id))
+      }
+      return
+    }
+    if (t - prev > 2.5) return
+    const react = notes.find((n) => {
+      if (n.type !== 'reaction' || String(n.onNote) !== parentId) return false
+      const idn = String(n._id)
+      if (shownRef.current.has(idn)) return false
+      return n.t > prev - 0.08 && n.t <= t + 0.08
+    })
+    if (!react) return
+    shownRef.current.add(String(react._id))
+    setPopReaction(react)
+    setTimeout(() => setPopReaction((cur) => (String(cur?._id) === String(react._id) ? null : cur)), 1600)
+  }
+
   const goToNote = (note) => {
     if (!note) return
+    if (note.type === 'reaction' && note.onNote) {
+      const parent = notes.find((n) => String(n._id) === String(note.onNote) && n.type === 'video')
+      if (parent) {
+        openOverlay(parent, { resumeAfter: true, seek: true })
+        return
+      }
+    }
     const t = Math.max(0, Number(note.t) || 0)
     if (note.type === 'video' && note.videoUrl) {
       openOverlay(note, { resumeAfter: true, seek: true })
@@ -382,19 +422,32 @@ const VideoMessageWatchPage = () => {
 
   const addReaction = async (emoji) => {
     if (busy) return
+    const reply = activeNote?.type === 'video' ? activeNote : null
+    const t = reply ? replyTRef.current || 0 : now
     setBusy(true)
     try {
       const res = await fetch(`${API_BASE_URL}/api/video-message/${id}/notes`, {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: 'reaction', reaction: emoji, t: now }),
+        body: JSON.stringify({
+          type: 'reaction',
+          reaction: emoji,
+          t,
+          ...(reply ? { onNote: reply._id } : {}),
+        }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Failed')
       if (data.note) {
         setNotes((prev) => [...prev, data.note].sort((a, b) => a.t - b.t))
-        openOverlay(data.note, { resumeAfter: true, seek: false })
+        if (data.note.onNote) {
+          shownRef.current.add(String(data.note._id))
+          setPopReaction(data.note)
+          setTimeout(() => setPopReaction((cur) => (String(cur?._id) === String(data.note._id) ? null : cur)), 1600)
+        } else {
+          openOverlay(data.note, { resumeAfter: true, seek: false })
+        }
       }
     } catch (e) {
       showToast('Error', e.message || 'Failed', 'error')
@@ -640,6 +693,7 @@ const VideoMessageWatchPage = () => {
             playsInline
             preload="auto"
             style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block', background: '#000' }}
+            onTimeUpdate={(e) => handleReplyTime(e.currentTarget.currentTime || 0)}
             onEnded={(e) => {
               const endedAt = e.currentTarget.currentTime || 0
               if (endedAt < 0.2) return
@@ -661,6 +715,11 @@ const VideoMessageWatchPage = () => {
               Close
             </Button>
           </Flex>
+          {popReaction && String(popReaction.onNote) === String(activeNote?._id) && (
+            <Flex position="absolute" inset={0} align="center" justify="center" pointerEvents="none">
+              <Text fontSize="5xl">{popReaction.reaction}</Text>
+            </Flex>
+          )}
         </Box>
       </Box>
 
@@ -736,7 +795,7 @@ const VideoMessageWatchPage = () => {
               }}
             />
           ))}
-          {notes.map((n) => (
+          {notes.filter((n) => !n.onNote).map((n) => (
             <Flex
               key={n._id}
               position="absolute"
@@ -858,7 +917,7 @@ const VideoMessageWatchPage = () => {
                 onClick={() => goToNote(n)}
               >
                 <Text w="44px" fontSize="sm" color={muted}>{fmtTime(n.t)}</Text>
-                <Text fontSize="sm">{n.type === 'reaction' ? n.reaction : 'Video reply'}</Text>
+                <Text fontSize="sm">{n.type === 'reaction' ? n.reaction : 'Video reply'}{n.onNote ? ' · on reply' : ''}</Text>
                 <Text fontSize="sm" color={muted} noOfLines={1} flex="1">
                   {n.user?.name || n.user?.username || ''}
                 </Text>

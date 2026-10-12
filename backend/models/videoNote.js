@@ -15,11 +15,14 @@ const videoNoteSchema = new mongoose.Schema(
     videoUrl: { type: String, default: '' },
     duration: { type: Number, default: 0, min: 0 },
     reaction: { type: String, default: '', maxlength: 8 },
+    // Set only for a reaction on a recorded reply. `t` is then seconds into that reply.
+    onNote: { type: mongoose.Schema.Types.ObjectId, ref: 'VideoNote', default: null },
   },
   { timestamps: true },
 )
 
 videoNoteSchema.index({ videoMessage: 1, t: 1, _id: 1 })
+videoNoteSchema.index({ onNote: 1 })
 
 const VideoNote = mongoose.model('VideoNote', videoNoteSchema)
 export default VideoNote

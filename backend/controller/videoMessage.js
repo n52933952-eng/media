@@ -384,19 +384,33 @@ export const addVideoNote = async (req, res) => {
     const doc = await loadForParticipant(req.params.id, userId)
     if (!doc) return res.status(404).json({ error: 'Video message not found' })
 
-    const { t, type, videoUrl, duration, reaction } = req.body || {}
+    const { t, type, videoUrl, duration, reaction, onNote } = req.body || {}
     const at = toNum(t, -1)
     if (at < 0) return res.status(400).json({ error: 'Invalid time' })
-    const safeT = doc.duration > 0 ? Math.min(doc.duration, at) : at
 
-    const note = { videoMessage: doc._id, user: userId, t: Math.round(safeT * 10) / 10 }
+    const note = { videoMessage: doc._id, user: userId }
 
     if (type === 'reaction') {
       const emoji = String(reaction || '').trim().slice(0, 8)
       if (!emoji) return res.status(400).json({ error: 'Reaction is required' })
       note.type = 'reaction'
       note.reaction = emoji
+      if (onNote) {
+        if (!isId(onNote)) return res.status(400).json({ error: 'Invalid reply' })
+        const parent = await VideoNote.findOne({ _id: onNote, videoMessage: doc._id, type: 'video' })
+          .select('_id duration')
+          .lean()
+        if (!parent) return res.status(400).json({ error: 'Reply not found' })
+        const cap = parent.duration > 0 ? parent.duration : MAX_NOTE_DURATION_SEC
+        note.onNote = parent._id
+        note.t = Math.round(Math.min(cap, at) * 10) / 10
+      } else {
+        const safeT = doc.duration > 0 ? Math.min(doc.duration, at) : at
+        note.t = Math.round(safeT * 10) / 10
+      }
     } else {
+      const safeT = doc.duration > 0 ? Math.min(doc.duration, at) : at
+      note.t = Math.round(safeT * 10) / 10
       try {
         ;[note.videoUrl] = assertManagedMediaUrls(videoUrl)
       } catch (e) {
@@ -473,12 +487,21 @@ export const deleteVideoNote = async (req, res) => {
     const removed = await VideoNote.findOneAndDelete({ _id: note._id, videoMessage: doc._id })
     if (!removed) return res.status(404).json({ error: 'Reply not found' })
 
-    await VideoMessage.updateOne({ _id: doc._id, noteCount: { $gt: 0 } }, { $inc: { noteCount: -1 } })
+    const kids = removed.type === 'video'
+      ? await VideoNote.find({ onNote: removed._id }).select('_id').lean()
+      : []
+    if (kids.length) await VideoNote.deleteMany({ onNote: removed._id })
+
+    const dropped = 1 + kids.length
+    await VideoMessage.updateOne({ _id: doc._id, noteCount: { $gt: 0 } }, { $inc: { noteCount: -dropped } })
     if (removed.videoUrl) cleanupMediaInBackground([removed.videoUrl])
 
     const otherId = iAmSender ? doc.receiver : doc.sender
     const payload = { videoMessageId: String(doc._id), noteId: String(noteId) }
     emitToUser(otherId, 'videoMessage:noteDeleted', payload)
+    for (const kid of kids) {
+      emitToUser(otherId, 'videoMessage:noteDeleted', { videoMessageId: String(doc._id), noteId: String(kid._id) })
+    }
     return res.status(200).json(payload)
   } catch (error) {
     console.error('[videoMessage] delete note error:', error)
