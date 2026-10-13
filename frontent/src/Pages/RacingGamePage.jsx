@@ -17,7 +17,6 @@ import {
   resetCarPosition,
   updateCarPosition,
   loadOpponentCarVisual,
-  OPPONENT_EXTRA_LIFT,
 } from '../game/racing/car.js'
 import { loadTrackModel, loadMapDecorations, checkGroundCollision } from '../game/racing/track.js'
 import { loadGates, updateGateFading, checkGateProximity, showFinishMessage } from '../game/racing/gates.js'
@@ -1158,8 +1157,8 @@ export default function RacingGamePage() {
     const pz = +pos.z
     if (!Number.isFinite(px) || !Number.isFinite(py) || !Number.isFinite(pz)) return
     model.visible = true
-    // Remote tyres are stuck to the body, so raise it until they meet the road.
-    oppTargetPosRef.current.set(px, py + OPPONENT_EXTRA_LIFT, pz)
+    oppTargetPosRef.current.set(px, py, pz)
+    if (model.position.y > 40) model.position.set(px, py, pz)
     const q =
       data.quaternion ||
       (data.qx !== undefined

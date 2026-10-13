@@ -62,14 +62,6 @@ export function cloneCarVisualScene(sourceScene) {
 const CAR_MODEL_SCALE = 4;
 /** Tyres rest a hair above the road so the body never scrapes on a bump. */
 const BODY_GROUND_GAP = 0.06;
-/**
- * The shell is lined up with the suspension fully stretched. On the road it
- * settles lower, so the other player's car (wheels glued to the body) sinks.
- * This lifts both models to the height they actually sit.
- */
-const RIDE_LIFT = 0.16;
-/** Extra lift for the remote car only. Its tyres cannot compress. */
-export const OPPONENT_EXTRA_LIFT = 0.14;
 
 /** Wheel nodes in the order the physics wheels are added (see wheelPositions). */
 const WHEEL_SLOT_PATTERNS = [
@@ -104,25 +96,6 @@ function measureBodyHalfWidth(model) {
  * drop it so the tyres touch the road. Matching the width is what keeps the tyres
  * visible beside the body — fit by wheel track instead and a wide body swallows them.
  */
-function measureScaledTireRadius(model) {
-  const box = new THREE.Box3();
-  const size = new THREE.Vector3();
-  let sum = 0;
-  let n = 0;
-  for (const wheel of findWheelNodes(model)) {
-    if (!wheel) continue;
-    box.setFromObject(wheel);
-    if (box.isEmpty()) continue;
-    box.getSize(size);
-    const radius = Math.max(size.y, size.z) / 2;
-    if (radius > 1e-4) {
-      sum += radius;
-      n += 1;
-    }
-  }
-  return n ? sum / n : WHEEL_RADIUS;
-}
-
 function applyCarBodyScale(model) {
   model.scale.set(1, 1, 1);
   model.position.set(0, 0, 0);
@@ -140,16 +113,14 @@ function applyCarBodyScale(model) {
   }
   model.updateMatrixWorld(true);
 
-  const tireRadius = measureScaledTireRadius(model);
   box.setFromObject(model);
   if (!box.isEmpty()) {
-    const lift = -(tireRadius + SUSPENSION_REST_LENGTH - BODY_GROUND_GAP - RIDE_LIFT) - box.min.y;
+    const lift = -(WHEEL_RADIUS + SUSPENSION_REST_LENGTH - BODY_GROUND_GAP) - box.min.y;
     for (const child of model.children) child.position.y += lift / scale;
     model.updateMatrixWorld(true);
   }
 
   polishCarMaterials(model);
-  return tireRadius;
 }
 
 /** Paint a little clearer, tyres stay matte. */
@@ -198,12 +169,12 @@ const WHEEL_X_OFFSET = 0.8;
 const WHEEL_Z_OFFSET = 1.5;
 
 // Physics tuning parameters
-// Holds the car on the road. Too soft and the gas pedal makes it hop.
-const SUSPENSION_STIFFNESS = 110;
-const SUSPENSION_DAMPING = 14;
-const SUSPENSION_COMPRESSION = 9;
-const ROLL_INFLUENCE = 0.08;
-const WHEEL_FRICTION = 48;
+// Holds the car without bouncing. The wheels, not the body, touch the road.
+const SUSPENSION_STIFFNESS = 80;
+const SUSPENSION_DAMPING = 10;
+const SUSPENSION_COMPRESSION = 4.4;
+const ROLL_INFLUENCE = 0.12;
+const WHEEL_FRICTION = 22;
 
 /**
  * These car GLBs bake an axle rod into the wheel mesh. One rear wheel is almost
@@ -275,53 +246,6 @@ function fitWheelMeshToPhysicsRadius(wheelMesh, targetRadius = WHEEL_RADIUS) {
   wheelMesh.scale.setScalar(targetRadius / approxR);
 }
 
-/**
- * Place each physics wheel on the visual hub (meters, chassis space).
- * matrixWorld includes the body scale, so undo that scale or the tyre lands outside the arch.
- */
-function syncWheelPhysicsToBody(vehicle, carModel) {
-  if (!vehicle || !carModel) return WHEEL_RADIUS;
-  carModel.updateMatrixWorld(true);
-  const inv = new THREE.Matrix4().copy(carModel.matrixWorld).invert();
-  const scale = carModel.scale.x || 1;
-  const box = new THREE.Box3();
-  const center = new THREE.Vector3();
-  const size = new THREE.Vector3();
-  const wheels = findWheelNodes(carModel);
-  let radiusSum = 0;
-  let n = 0;
-  const hubs = [];
-  for (const wheel of wheels) {
-    if (!wheel) {
-      hubs.push(null);
-      continue;
-    }
-    box.setFromObject(wheel);
-    box.getSize(size);
-    box.getCenter(center);
-    const radius = Math.max(size.y, size.z) / 2;
-    center.applyMatrix4(inv).multiplyScalar(scale);
-    hubs.push(center.clone());
-    if (radius > 1e-4) {
-      radiusSum += radius;
-      n += 1;
-    }
-  }
-  const radius = n ? radiusSum / n : WHEEL_RADIUS;
-  for (let i = 0; i < hubs.length; i++) {
-    const hub = hubs[i];
-    if (!hub) continue;
-    const info = vehicle.getWheelInfo(i);
-    const pt = info.get_m_chassisConnectionPointCS();
-    pt.setX(hub.x);
-    pt.setY(hub.y + SUSPENSION_REST_LENGTH);
-    pt.setZ(hub.z);
-    info.set_m_chassisConnectionPointCS(pt);
-    info.set_m_wheelsRadius(radius);
-  }
-  return radius;
-}
-
 // Reused for start-line / respawn lateral offset (host vs guest lanes)
 const _laneRight = new THREE.Vector3();
 const _laneForward = new THREE.Vector3();
@@ -358,8 +282,8 @@ function setLaneLateralFromGateQuaternion(quat, out) {
 
 // Steering parameters
 const MAX_STEERING_ANGLE = 0.15;
-const STEERING_SPEED = 3.4;
-const STEERING_RETURN_SPEED = 4.2; 
+const STEERING_SPEED = 2.6;
+const STEERING_RETURN_SPEED = 3.2; 
 
 // Modify createVehicle to accept a callback for when the car is fully loaded
 export function createVehicle(ammo, scene, physicsWorld, debugObjects, onCarLoaded, carColor = 'blue') {
@@ -378,9 +302,8 @@ export function createVehicle(ammo, scene, physicsWorld, debugObjects, onCarLoad
   };
   
   // Create chassis physics body with modified dimensions
-  // Short box so the shell never slams the road. The wheels hold the car up.
   const chassisShape = new ammo.btBoxShape(
-    new ammo.btVector3(VEHICLE_WIDTH/2, 0.12, VEHICLE_LENGTH/2 * 0.85)
+    new ammo.btVector3(VEHICLE_WIDTH/2, VEHICLE_HEIGHT/2 * 0.8, VEHICLE_LENGTH/2 * 0.9)
   );
   
   const chassisTransform = new ammo.btTransform();
@@ -402,7 +325,7 @@ export function createVehicle(ammo, scene, physicsWorld, debugObjects, onCarLoad
   carComponents.carBody.setFriction(0.1);
   carComponents.carBody.setRestitution(0.05);
   // Stronger angular damping reduces violent rolls / tumbles on curbs and barriers
-  carComponents.carBody.setDamping(0.18, 0.35);
+  carComponents.carBody.setDamping(0.3, 0.55);
   if (typeof carComponents.carBody.setCcdMotionThreshold === 'function') {
     carComponents.carBody.setCcdMotionThreshold(0.25);
   }
@@ -456,7 +379,7 @@ export function createVehicle(ammo, scene, physicsWorld, debugObjects, onCarLoad
     wheelInfo.set_m_wheelsDampingCompression(SUSPENSION_COMPRESSION);
     wheelInfo.set_m_frictionSlip(WHEEL_FRICTION);
     wheelInfo.set_m_rollInfluence(ROLL_INFLUENCE);
-    wheelInfo.set_m_maxSuspensionTravelCm(20); 
+    wheelInfo.set_m_maxSuspensionTravelCm(28); 
     
     // Add a placeholder for the wheel mesh
     carComponents.wheelMeshes.push(null);
@@ -514,7 +437,6 @@ function loadCarModel(ammo, scene, carComponents, wheelPositions, onModelLoaded,
   const applyGltfToPlayer = (gltf) => {
       const carModel = gltf.scene;
       applyCarBodyScale(carModel);
-      const tireRadius = syncWheelPhysicsToBody(carComponents.vehicle, carModel);
       carModel.visible = false;
       
       const wheelModelMeshes = findWheelNodes(carModel);
@@ -531,8 +453,7 @@ function loadCarModel(ammo, scene, carComponents, wheelPositions, onModelLoaded,
           // Add directly to scene so we can control it separately
           scene.add(wheelModelMeshes[i]);
           
-          // Match visual tire size to the hub we just measured on this body.
-          fitWheelMeshToPhysicsRadius(wheelModelMeshes[i], tireRadius);
+          fitWheelMeshToPhysicsRadius(wheelModelMeshes[i]);
           
           // Save reference
           carComponents.wheelMeshes[i] = wheelModelMeshes[i];
@@ -606,7 +527,6 @@ function loadFallbackCarModel(ammo, scene, carComponents, wheelPositions, onMode
 
       const carModel = gltf.scene;
       applyCarBodyScale(carModel);
-      const tireRadius = syncWheelPhysicsToBody(carComponents.vehicle, carModel);
       
       // Process wheel meshes (same as in loadCarModel)
       const wheelModelMeshes = findWheelNodes(carModel);
@@ -616,7 +536,7 @@ function loadFallbackCarModel(ammo, scene, carComponents, wheelPositions, onMode
           wheelModelMeshes[i].updateMatrixWorld(true);
           carModel.remove(wheelModelMeshes[i]);
           scene.add(wheelModelMeshes[i]);
-          fitWheelMeshToPhysicsRadius(wheelModelMeshes[i], tireRadius);
+          fitWheelMeshToPhysicsRadius(wheelModelMeshes[i]);
           carComponents.wheelMeshes[i] = wheelModelMeshes[i];
         } else {
           // Create default wheel
@@ -692,8 +612,8 @@ function calculateMaxSteeringAngle(speedKPH) {
   // Constants for steering behavior
   const MIN_SPEED = 0;   
   const MAX_SPEED = 150; 
-  const MIN_ANGLE = 0.32;
-  const MAX_ANGLE = 0.62; 
+  const MIN_ANGLE = 0.28;
+  const MAX_ANGLE = 0.52; 
   
   // Clamp the speed to avoid extreme values
   const clampedSpeed = Math.max(MIN_SPEED, Math.min(MAX_SPEED, speedKPH));
