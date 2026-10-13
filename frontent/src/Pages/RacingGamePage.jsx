@@ -1466,6 +1466,18 @@ export default function RacingGamePage() {
         if (opp.quaternion.dot(tgt) < 0) t.set(-tgt.x, -tgt.y, -tgt.z, -tgt.w)
         opp.quaternion.slerp(t, 0.22)
         opp.quaternion.normalize()
+        if (!opp.userData.spinWheels) {
+          const list = []
+          opp.traverse((node) => {
+            if (node.isMesh && /wheel/i.test(node.name || '')) list.push(node)
+          })
+          opp.userData.spinWheels = list
+          opp.userData.spinFrom = opp.position.clone()
+        }
+        const moved = opp.position.distanceTo(opp.userData.spinFrom)
+        opp.userData.spinFrom.copy(opp.position)
+        const spin = moved / 0.34
+        for (const wheel of opp.userData.spinWheels) wheel.rotateX(spin)
         opp.updateMatrixWorld(true)
       }
 

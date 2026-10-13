@@ -85,15 +85,15 @@ export function updatePhysics(deltaTime, ammo, physicsState, carState, debugObje
       }
     } else {
       targetDrive = 0;
-      brakingForce = 14;
+      brakingForce = 4;
     }
   } else {
     targetDrive = 0;
     brakingForce = maxBrakingForce;
   }
 
-  const rise = 2400 * deltaTime;
-  const fall = 3600 * deltaTime;
+  const rise = 1600 * deltaTime;
+  const fall = 2800 * deltaTime;
   driveForce = moveToward(driveForce, targetDrive, targetDrive > driveForce ? rise : fall);
   const engineForce = driveForce;
   

@@ -91,6 +91,38 @@ function measureBodyHalfWidth(model) {
   return box.isEmpty() ? 0 : Math.max(Math.abs(box.min.x), Math.abs(box.max.x));
 }
 
+/** Wheel centers in meters, after the body scale. Height is left to the suspension. */
+function measureWheelHubs(model) {
+  model.updateMatrixWorld(true);
+  const origin = new THREE.Vector3();
+  const invQuat = new THREE.Quaternion();
+  model.getWorldPosition(origin);
+  model.getWorldQuaternion(invQuat).invert();
+  const box = new THREE.Box3();
+  const center = new THREE.Vector3();
+  const size = new THREE.Vector3();
+  let radiusSum = 0;
+  let n = 0;
+  const hubs = findWheelNodes(model).map((wheel) => {
+    if (!wheel) return null;
+    box.setFromObject(wheel);
+    if (box.isEmpty()) return null;
+    box.getSize(size);
+    box.getCenter(center);
+    center.sub(origin).applyQuaternion(invQuat);
+    const radius = Math.max(size.y, size.z) / 2;
+    if (radius > 0.15 && radius < 0.6) {
+      radiusSum += radius;
+      n += 1;
+    }
+    return {
+      x: Math.max(-1.15, Math.min(1.15, center.x)),
+      z: Math.max(-2.1, Math.min(2.1, center.z)),
+    };
+  });
+  return { hubs, radius: n ? radiusSum / n : 0.34 };
+}
+
 /**
  * Fit any car GLB to the raycast vehicle: scale the body to the chassis width, then
  * drop it so the tyres touch the road. Matching the width is what keeps the tyres
@@ -113,14 +145,17 @@ function applyCarBodyScale(model) {
   }
   model.updateMatrixWorld(true);
 
+  const layout = measureWheelHubs(model);
   box.setFromObject(model);
   if (!box.isEmpty()) {
-    const lift = -(WHEEL_RADIUS + SUSPENSION_REST_LENGTH - BODY_GROUND_GAP) - box.min.y;
+    const lift = -(layout.radius + SUSPENSION_REST_LENGTH - BODY_GROUND_GAP) - box.min.y;
     for (const child of model.children) child.position.y += lift / scale;
     model.updateMatrixWorld(true);
   }
 
+  model.userData.wheelLayout = layout;
   polishCarMaterials(model);
+  return layout;
 }
 
 /** Paint a little clearer, tyres stay matte. */
@@ -243,7 +278,27 @@ function fitWheelMeshToPhysicsRadius(wheelMesh, targetRadius = WHEEL_RADIUS) {
 
   wheelMesh.geometry = geometry;
   wheelMesh.position.set(0, 0, 0);
-  wheelMesh.scale.setScalar(targetRadius / approxR);
+  const s = targetRadius / approxR;
+  // X is the axle, so a slightly narrower tyre tucks into the arch.
+  wheelMesh.scale.set(s * 0.78, s, s);
+}
+
+/** Keep the suspension height. Only slide each tyre under its own arch. */
+function placeWheelsInArches(vehicle, layout) {
+  const hubs = layout?.hubs;
+  if (!vehicle || !hubs) return;
+  const radius = layout.radius;
+  for (let i = 0; i < hubs.length; i++) {
+    const hub = hubs[i];
+    if (!hub) continue;
+    const info = vehicle.getWheelInfo(i);
+    const pt = info.get_m_chassisConnectionPointCS();
+    pt.setX(hub.x);
+    pt.setY(0);
+    pt.setZ(hub.z);
+    info.set_m_chassisConnectionPointCS(pt);
+    info.set_m_wheelsRadius(radius);
+  }
 }
 
 // Reused for start-line / respawn lateral offset (host vs guest lanes)
@@ -436,7 +491,8 @@ function loadCarModel(ammo, scene, carComponents, wheelPositions, onModelLoaded,
 
   const applyGltfToPlayer = (gltf) => {
       const carModel = gltf.scene;
-      applyCarBodyScale(carModel);
+      const layout = applyCarBodyScale(carModel);
+      placeWheelsInArches(carComponents.vehicle, layout);
       carModel.visible = false;
       
       const wheelModelMeshes = findWheelNodes(carModel);
@@ -453,7 +509,7 @@ function loadCarModel(ammo, scene, carComponents, wheelPositions, onModelLoaded,
           // Add directly to scene so we can control it separately
           scene.add(wheelModelMeshes[i]);
           
-          fitWheelMeshToPhysicsRadius(wheelModelMeshes[i]);
+          fitWheelMeshToPhysicsRadius(wheelModelMeshes[i], layout.radius);
           
           // Save reference
           carComponents.wheelMeshes[i] = wheelModelMeshes[i];
@@ -526,7 +582,8 @@ function loadFallbackCarModel(ammo, scene, carComponents, wheelPositions, onMode
       carComponents.wheelMeshes = [];
 
       const carModel = gltf.scene;
-      applyCarBodyScale(carModel);
+      const layout = applyCarBodyScale(carModel);
+      placeWheelsInArches(carComponents.vehicle, layout);
       
       // Process wheel meshes (same as in loadCarModel)
       const wheelModelMeshes = findWheelNodes(carModel);
@@ -536,7 +593,7 @@ function loadFallbackCarModel(ammo, scene, carComponents, wheelPositions, onMode
           wheelModelMeshes[i].updateMatrixWorld(true);
           carModel.remove(wheelModelMeshes[i]);
           scene.add(wheelModelMeshes[i]);
-          fitWheelMeshToPhysicsRadius(wheelModelMeshes[i]);
+          fitWheelMeshToPhysicsRadius(wheelModelMeshes[i], layout.radius);
           carComponents.wheelMeshes[i] = wheelModelMeshes[i];
         } else {
           // Create default wheel
