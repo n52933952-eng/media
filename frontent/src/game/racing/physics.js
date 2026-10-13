@@ -57,7 +57,7 @@ export function updatePhysics(deltaTime, ammo, physicsState, carState, debugObje
   
   // Calculate dot product using Three.js
   const dotForward = carForward.dot(velocityThree);
-  const maxEngineForce = 1700;
+  const maxEngineForce = 1500;
   const maxBrakingForce = 80;
   
   // Calculate car speed in km/h
@@ -97,14 +97,10 @@ export function updatePhysics(deltaTime, ammo, physicsState, carState, debugObje
   driveForce = moveToward(driveForce, targetDrive, targetDrive > driveForce ? rise : fall);
   const engineForce = driveForce;
   
-  // Apply forces to all wheels
+  // Power on every wheel, a little more at the back. Rear-only power lifts the nose and the car hops.
   for (let i = 0; i < vehicle.getNumWheels(); i++) {
-    // Engine force to rear wheels only
-    if (i >= 2) {
-      vehicle.applyEngineForce(engineForce, i);
-    }
-    
-    // Braking force to all wheels for better braking
+    const share = i < 2 ? 0.42 : 0.7;
+    vehicle.applyEngineForce(engineForce * share, i);
     vehicle.setBrake(brakingForce, i);
   }
 

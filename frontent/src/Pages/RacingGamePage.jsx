@@ -851,6 +851,7 @@ export default function RacingGamePage() {
       if (e.key==='s'||e.key==='ArrowDown')  keyStateRef.current.s = true
       if (e.key==='a'||e.key==='ArrowLeft')  keyStateRef.current.a = true
       if (e.key==='d'||e.key==='ArrowRight') keyStateRef.current.d = true
+      if (e.key==='w'||e.key==='a'||e.key==='s'||e.key==='d'||e.key.startsWith('Arrow')) e.preventDefault()
       if (e.key==='r') resetCar()
     }
     const up = (e) => {

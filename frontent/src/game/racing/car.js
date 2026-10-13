@@ -198,12 +198,12 @@ const WHEEL_X_OFFSET = 0.8;
 const WHEEL_Z_OFFSET = 1.5;
 
 // Physics tuning parameters
-// Soft enough to soak up the gas pedal, firm enough that the shell stays off the road.
-const SUSPENSION_STIFFNESS = 72;
-const SUSPENSION_DAMPING = 5.5;
-const SUSPENSION_COMPRESSION = 4.4;
-const ROLL_INFLUENCE = 0.1;
-const WHEEL_FRICTION = 12;
+// Holds the car on the road. Too soft and the gas pedal makes it hop.
+const SUSPENSION_STIFFNESS = 110;
+const SUSPENSION_DAMPING = 14;
+const SUSPENSION_COMPRESSION = 9;
+const ROLL_INFLUENCE = 0.08;
+const WHEEL_FRICTION = 48;
 
 /**
  * These car GLBs bake an axle rod into the wheel mesh. One rear wheel is almost
@@ -358,8 +358,8 @@ function setLaneLateralFromGateQuaternion(quat, out) {
 
 // Steering parameters
 const MAX_STEERING_ANGLE = 0.15;
-const STEERING_SPEED = 1.5;
-const STEERING_RETURN_SPEED = 2; 
+const STEERING_SPEED = 3.4;
+const STEERING_RETURN_SPEED = 4.2; 
 
 // Modify createVehicle to accept a callback for when the car is fully loaded
 export function createVehicle(ammo, scene, physicsWorld, debugObjects, onCarLoaded, carColor = 'blue') {
@@ -378,8 +378,9 @@ export function createVehicle(ammo, scene, physicsWorld, debugObjects, onCarLoad
   };
   
   // Create chassis physics body with modified dimensions
+  // Short box so the shell never slams the road. The wheels hold the car up.
   const chassisShape = new ammo.btBoxShape(
-    new ammo.btVector3(VEHICLE_WIDTH/2, VEHICLE_HEIGHT/2 * 0.8, VEHICLE_LENGTH/2 * 0.9)
+    new ammo.btVector3(VEHICLE_WIDTH/2, 0.12, VEHICLE_LENGTH/2 * 0.85)
   );
   
   const chassisTransform = new ammo.btTransform();
@@ -401,7 +402,7 @@ export function createVehicle(ammo, scene, physicsWorld, debugObjects, onCarLoad
   carComponents.carBody.setFriction(0.1);
   carComponents.carBody.setRestitution(0.05);
   // Stronger angular damping reduces violent rolls / tumbles on curbs and barriers
-  carComponents.carBody.setDamping(0.22, 1.15);
+  carComponents.carBody.setDamping(0.18, 0.35);
   if (typeof carComponents.carBody.setCcdMotionThreshold === 'function') {
     carComponents.carBody.setCcdMotionThreshold(0.25);
   }
@@ -455,8 +456,7 @@ export function createVehicle(ammo, scene, physicsWorld, debugObjects, onCarLoad
     wheelInfo.set_m_wheelsDampingCompression(SUSPENSION_COMPRESSION);
     wheelInfo.set_m_frictionSlip(WHEEL_FRICTION);
     wheelInfo.set_m_rollInfluence(ROLL_INFLUENCE);
-    // Room to squat when you accelerate, without slamming into a hard stop.
-    wheelInfo.set_m_maxSuspensionTravelCm(16); 
+    wheelInfo.set_m_maxSuspensionTravelCm(20); 
     
     // Add a placeholder for the wheel mesh
     carComponents.wheelMeshes.push(null);
@@ -692,8 +692,8 @@ function calculateMaxSteeringAngle(speedKPH) {
   // Constants for steering behavior
   const MIN_SPEED = 0;   
   const MAX_SPEED = 150; 
-  const MIN_ANGLE = 0.15;
-  const MAX_ANGLE = 0.4; 
+  const MIN_ANGLE = 0.32;
+  const MAX_ANGLE = 0.62; 
   
   // Clamp the speed to avoid extreme values
   const clampedSpeed = Math.max(MIN_SPEED, Math.min(MAX_SPEED, speedKPH));
