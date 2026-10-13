@@ -61,7 +61,15 @@ export function cloneCarVisualScene(sourceScene) {
 
 const CAR_MODEL_SCALE = 4;
 /** Tyres rest a hair above the road so the body never scrapes on a bump. */
-const BODY_GROUND_GAP = 0.08;
+const BODY_GROUND_GAP = 0.06;
+/**
+ * The shell is lined up with the suspension fully stretched. On the road it
+ * settles lower, so the other player's car (wheels glued to the body) sinks.
+ * This lifts both models to the height they actually sit.
+ */
+const RIDE_LIFT = 0.16;
+/** Extra lift for the remote car only. Its tyres cannot compress. */
+export const OPPONENT_EXTRA_LIFT = 0.14;
 
 /** Wheel nodes in the order the physics wheels are added (see wheelPositions). */
 const WHEEL_SLOT_PATTERNS = [
@@ -135,7 +143,7 @@ function applyCarBodyScale(model) {
   const tireRadius = measureScaledTireRadius(model);
   box.setFromObject(model);
   if (!box.isEmpty()) {
-    const lift = -(tireRadius + SUSPENSION_REST_LENGTH - BODY_GROUND_GAP) - box.min.y;
+    const lift = -(tireRadius + SUSPENSION_REST_LENGTH - BODY_GROUND_GAP - RIDE_LIFT) - box.min.y;
     for (const child of model.children) child.position.y += lift / scale;
     model.updateMatrixWorld(true);
   }
@@ -190,11 +198,10 @@ const WHEEL_X_OFFSET = 0.8;
 const WHEEL_Z_OFFSET = 1.5;
 
 // Physics tuning parameters
-// Gravity is -20. Bullet force is stiffness * sag * mass, so sag = gravity / (4 * stiffness).
-// Keep sag under BODY_GROUND_GAP or the shell drops into the road.
-const SUSPENSION_STIFFNESS = 170;
-const SUSPENSION_DAMPING = 18;
-const SUSPENSION_COMPRESSION = 10;
+// Soft enough to soak up the gas pedal, firm enough that the shell stays off the road.
+const SUSPENSION_STIFFNESS = 72;
+const SUSPENSION_DAMPING = 5.5;
+const SUSPENSION_COMPRESSION = 4.4;
 const ROLL_INFLUENCE = 0.1;
 const WHEEL_FRICTION = 12;
 
@@ -394,7 +401,7 @@ export function createVehicle(ammo, scene, physicsWorld, debugObjects, onCarLoad
   carComponents.carBody.setFriction(0.1);
   carComponents.carBody.setRestitution(0.05);
   // Stronger angular damping reduces violent rolls / tumbles on curbs and barriers
-  carComponents.carBody.setDamping(0.48, 0.72);
+  carComponents.carBody.setDamping(0.22, 1.15);
   if (typeof carComponents.carBody.setCcdMotionThreshold === 'function') {
     carComponents.carBody.setCcdMotionThreshold(0.25);
   }
@@ -448,8 +455,8 @@ export function createVehicle(ammo, scene, physicsWorld, debugObjects, onCarLoad
     wheelInfo.set_m_wheelsDampingCompression(SUSPENSION_COMPRESSION);
     wheelInfo.set_m_frictionSlip(WHEEL_FRICTION);
     wheelInfo.set_m_rollInfluence(ROLL_INFLUENCE);
-    // 6 cm. More travel lets the shell drop through the track on a bump.
-    wheelInfo.set_m_maxSuspensionTravelCm(6); 
+    // Room to squat when you accelerate, without slamming into a hard stop.
+    wheelInfo.set_m_maxSuspensionTravelCm(16); 
     
     // Add a placeholder for the wheel mesh
     carComponents.wheelMeshes.push(null);

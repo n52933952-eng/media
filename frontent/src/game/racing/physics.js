@@ -24,6 +24,17 @@ export function initPhysics(ammo) {
   return { physicsWorld, tmpTrans };
 }
 
+// Throttle eases in so a full press does not kick the rear wheels and hop the car.
+let driveForce = 0;
+const _carForward = new THREE.Vector3();
+const _velocity = new THREE.Vector3();
+
+function moveToward(current, target, maxDelta) {
+  if (current < target) return Math.min(target, current + maxDelta);
+  if (current > target) return Math.max(target, current - maxDelta);
+  return target;
+}
+
 // Update physics simulation
 export function updatePhysics(deltaTime, ammo, physicsState, carState, debugObjects, raceState) {
   const { physicsWorld, tmpTrans } = physicsState;
@@ -38,54 +49,53 @@ export function updatePhysics(deltaTime, ammo, physicsState, carState, debugObje
   const velocity = carBody.getLinearVelocity();
   
   // Get forward direction using Three.js
-  const carForward = new THREE.Vector3();
+  const carForward = _carForward;
   carModel.getWorldDirection(carForward);
   
   // Convert Ammo velocity to Three.js vector
-  const velocityThree = new THREE.Vector3(
-    velocity.x(), 
-    velocity.y(), 
-    velocity.z()
-  );
+  const velocityThree = _velocity.set(velocity.x(), velocity.y(), velocity.z());
   
   // Calculate dot product using Three.js
   const dotForward = carForward.dot(velocityThree);
-  const maxEngineForce = 2250;
-  const maxBrakingForce = 55;
+  const maxEngineForce = 1700;
+  const maxBrakingForce = 80;
   
   // Calculate car speed in km/h
   const speedKPH = velocityThree.length() * 3.6;
   
   // Check if the race has started before allowing engine forces
-  let engineForce = 0;
   let brakingForce = 0;
+  let targetDrive = 0;
   
   // Only allow movement if race has started and not finished
   if (raceState.raceStarted && !raceState.raceFinished) {
     // Handle key inputs with proper braking logic
     if (keyState.w) {
-      // Accelerate forward
-      engineForce = maxEngineForce;
+      targetDrive = maxEngineForce;
       brakingForce = 0;
     } else if (keyState.s) {
       if (dotForward > 0.1) {
         // Moving forward - apply brakes when S is pressed
-        engineForce = 0;
+        targetDrive = 0;
         brakingForce = maxBrakingForce;
       } else {
         // Stopped or moving backward - apply reverse
-        engineForce = -maxEngineForce / 2;
+        targetDrive = -maxEngineForce / 2;
         brakingForce = 0;
       }
     } else {
-      // No key pressed - engine off, light braking
-      engineForce = 0;
-      brakingForce = 20;
+      targetDrive = 0;
+      brakingForce = 14;
     }
   } else {
-    // Either countdown not over or race is finished - apply brakes
+    targetDrive = 0;
     brakingForce = maxBrakingForce;
   }
+
+  const rise = 2400 * deltaTime;
+  const fall = 3600 * deltaTime;
+  driveForce = moveToward(driveForce, targetDrive, targetDrive > driveForce ? rise : fall);
+  const engineForce = driveForce;
   
   // Apply forces to all wheels
   for (let i = 0; i < vehicle.getNumWheels(); i++) {

@@ -17,6 +17,7 @@ import {
   resetCarPosition,
   updateCarPosition,
   loadOpponentCarVisual,
+  OPPONENT_EXTRA_LIFT,
 } from '../game/racing/car.js'
 import { loadTrackModel, loadMapDecorations, checkGroundCollision } from '../game/racing/track.js'
 import { loadGates, updateGateFading, checkGateProximity, showFinishMessage } from '../game/racing/gates.js'
@@ -24,10 +25,10 @@ import { lockRaceLandscape, unlockRaceLandscape, isPortraitViewport } from '../u
 import { shouldSkipGameExitForLive } from '../services/liveBroadcastNav'
 
 // ─── Camera constants (same as reference game) ───────────────────────────────
-const CAMERA_DISTANCE  = 14
-const CAMERA_HEIGHT    = 8
-const CAMERA_LERP      = 0.1
-const CAMERA_LOOK_AHEAD = 6
+const CAMERA_DISTANCE  = 12
+const CAMERA_HEIGHT    = 4.6
+const CAMERA_LERP      = 0.12
+const CAMERA_LOOK_AHEAD = 10
 const MAX_SPEED_KPH    = 200
 const DEFAULT_MAP      = 'map1'
 
@@ -977,7 +978,7 @@ export default function RacingGamePage() {
     setupLighting(scene)
 
     // ── Camera ─────────────────────────────────────────────────────────────
-    const camera = new THREE.PerspectiveCamera(45, W/H, 0.5, 20000)
+    const camera = new THREE.PerspectiveCamera(58, W/H, 0.5, 20000)
     camera.position.set(0, 10, 20)
     cameraRef.current = camera
 
@@ -1156,7 +1157,8 @@ export default function RacingGamePage() {
     const pz = +pos.z
     if (!Number.isFinite(px) || !Number.isFinite(py) || !Number.isFinite(pz)) return
     model.visible = true
-    oppTargetPosRef.current.set(px, py, pz)
+    // Remote tyres are stuck to the body, so raise it until they meet the road.
+    oppTargetPosRef.current.set(px, py + OPPONENT_EXTRA_LIFT, pz)
     const q =
       data.quaternion ||
       (data.qx !== undefined
@@ -1277,9 +1279,14 @@ export default function RacingGamePage() {
     _camOffset.current.copy(_camDir.current).multiplyScalar(-CAMERA_DISTANCE)
     _camTarget.current.copy(car.position).add(_camOffset.current)
     _camTarget.current.y += CAMERA_HEIGHT
+    const prevY = cam.position.y
     cam.position.lerp(_camTarget.current, CAMERA_LERP)
+    // Keep the view steady when the suspension moves. Follow left/right faster than up/down.
+    cam.position.y = prevY + (_camTarget.current.y - prevY) * 0.1
+    // Look down the road, not at the bumper, so the car sits low and the street fills the view.
     _camOffset.current.copy(_camDir.current).multiplyScalar(CAMERA_LOOK_AHEAD)
     _camOffset.current.add(car.position)
+    _camOffset.current.y += 0.15
     cam.lookAt(_camOffset.current)
   }
 
@@ -1418,7 +1425,6 @@ export default function RacingGamePage() {
 
         checkGroundCollision(window.Ammo, carBodyRef.current, () => resetCar())
         checkFlipped(FIXED_PHYSICS_STEP)
-        updateCamera()
 
         // Gate check
         if (gateDataRef.current && carModelRef.current) {
@@ -1448,6 +1454,8 @@ export default function RacingGamePage() {
 
         accumRef.current -= FIXED_PHYSICS_STEP
       }
+
+      updateCamera()
 
       // Smooth remote car (reduces jitter / perceived clipping vs local car)
       const opp = oppModelRef.current
