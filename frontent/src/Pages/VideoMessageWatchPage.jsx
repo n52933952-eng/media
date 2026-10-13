@@ -1077,7 +1077,7 @@ const VideoMessageWatchPage = () => {
 
         <Box flex={{ lg: '1' }} minH={{ lg: 0 }} display="flex" flexDirection="column" overflow="hidden">
           {notes.length > 0 && (
-            <Text fontSize="sm" fontWeight="bold" mb={1} flexShrink={0}>Inside this video</Text>
+            <Text fontSize="sm" fontWeight="bold" mb={1} flexShrink={0}>Replies</Text>
           )}
           <Box flex={{ lg: '1' }} minH={{ lg: 0 }} maxH={{ base: '180px', lg: 'none' }} overflowY="auto" pr={1}>
             {notes.map((n) => (

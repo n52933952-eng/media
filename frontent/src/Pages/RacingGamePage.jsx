@@ -24,15 +24,15 @@ import { lockRaceLandscape, unlockRaceLandscape, isPortraitViewport } from '../u
 import { shouldSkipGameExitForLive } from '../services/liveBroadcastNav'
 
 // ─── Camera constants (same as reference game) ───────────────────────────────
-const CAMERA_DISTANCE  = 10
-const CAMERA_HEIGHT    = 5
+const CAMERA_DISTANCE  = 14
+const CAMERA_HEIGHT    = 8
 const CAMERA_LERP      = 0.1
-const CAMERA_LOOK_AHEAD = 2
+const CAMERA_LOOK_AHEAD = 6
 const MAX_SPEED_KPH    = 200
 const DEFAULT_MAP      = 'map1'
 
 /** World-space half spacing between host (left lane) and guest at the start line — car centers, meters */
-const START_LINE_LANE_OFFSET = 1.85
+const START_LINE_LANE_OFFSET = 3.2
 
 /** Pixels from top of viewport — must clear fixed app header (~72px) + gap so HUD is not hidden under it */
 const RACE_TOP_OFFSET_PX = 88
@@ -146,6 +146,7 @@ export default function RacingGamePage() {
   const exitRaceAndGoHomeRef = useRef(() => {})
   const assetsReadyRef = useRef(false)
   const playerCarReadyRef = useRef(false)
+  const opponentReadyRef = useRef(false)
   const raceReadySentRef = useRef(false)
   const bothPlayersReadyRef = useRef(false)
   const startSfxRef = useRef(null)
@@ -1026,15 +1027,20 @@ export default function RacingGamePage() {
     const lm = new THREE.LoadingManager()
     lm.onProgress = (_, loaded, total) => setLoadingPct(Math.round(loaded/total*100))
     lm.onLoad = () => {
-      // Wait until player car mesh + wheels are ready (car GLTF is on this manager too).
+      // Both cars, the track, and the gates share this manager.
+      // Do not start until the player car and the other car are actually in the scene.
       let attempts = 0
       const tryFinishLoading = () => {
-        if (playerCarReadyRef.current || carModelRef.current?.visible || attempts > 200) {
+        if (playerCarReadyRef.current && opponentReadyRef.current) {
           setLoading(false)
           setTimeout(() => { snapPlayerToStartLine() }, 100)
           return
         }
         attempts += 1
+        if (attempts > 200) {
+          setLoadingPhase('error')
+          return
+        }
         setTimeout(tryFinishLoading, 50)
       }
       tryFinishLoading()
@@ -1107,7 +1113,10 @@ export default function RacingGamePage() {
 
     // ── Opponent car first (clone before player detaches wheels from its GLTF) ─
     loadOpponentCarVisual(scene, oppColorRef.current, (oppRoot) => {
-      if (oppRoot) oppModelRef.current = oppRoot
+      if (oppRoot) {
+        oppModelRef.current = oppRoot
+        opponentReadyRef.current = true
+      }
     })
 
     // ── Player car (with physics) — GLTF tied to LoadingManager via car.js ─
@@ -1646,7 +1655,7 @@ export default function RacingGamePage() {
           {/* Status text */}
           {loadingPhase === 'error' ? (
             <div style={{ color:'#ff4444', fontWeight:700, fontSize:'1rem', textAlign:'center', maxWidth:340 }}>
-              Failed to load physics engine.<br/>
+              Failed to load the race.<br/>
               <span style={{ fontSize:'0.85rem', opacity:.7 }}>
                 Please check your connection and refresh.
               </span>

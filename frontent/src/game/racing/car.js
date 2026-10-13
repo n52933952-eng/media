@@ -61,7 +61,7 @@ export function cloneCarVisualScene(sourceScene) {
 
 const CAR_MODEL_SCALE = 4;
 /** Tyres rest a hair above the road so the body never scrapes on a bump. */
-const BODY_GROUND_GAP = 0.09;
+const BODY_GROUND_GAP = 0.08;
 
 /** Wheel nodes in the order the physics wheels are added (see wheelPositions). */
 const WHEEL_SLOT_PATTERNS = [
@@ -96,6 +96,25 @@ function measureBodyHalfWidth(model) {
  * drop it so the tyres touch the road. Matching the width is what keeps the tyres
  * visible beside the body — fit by wheel track instead and a wide body swallows them.
  */
+function measureScaledTireRadius(model) {
+  const box = new THREE.Box3();
+  const size = new THREE.Vector3();
+  let sum = 0;
+  let n = 0;
+  for (const wheel of findWheelNodes(model)) {
+    if (!wheel) continue;
+    box.setFromObject(wheel);
+    if (box.isEmpty()) continue;
+    box.getSize(size);
+    const radius = Math.max(size.y, size.z) / 2;
+    if (radius > 1e-4) {
+      sum += radius;
+      n += 1;
+    }
+  }
+  return n ? sum / n : WHEEL_RADIUS;
+}
+
 function applyCarBodyScale(model) {
   model.scale.set(1, 1, 1);
   model.position.set(0, 0, 0);
@@ -107,23 +126,43 @@ function applyCarBodyScale(model) {
   model.scale.setScalar(scale);
   model.updateMatrixWorld(true);
 
+  // Cut axle stubs before measuring height, or a long rod pulls the tire out of the arch.
+  for (const wheel of findWheelNodes(model)) {
+    if (wheel) trimWheelAxleStub(wheel);
+  }
+  model.updateMatrixWorld(true);
+
+  const tireRadius = measureScaledTireRadius(model);
   box.setFromObject(model);
   if (!box.isEmpty()) {
-    const lift = -(WHEEL_RADIUS + SUSPENSION_REST_LENGTH - BODY_GROUND_GAP) - box.min.y;
+    const lift = -(tireRadius + SUSPENSION_REST_LENGTH - BODY_GROUND_GAP) - box.min.y;
     for (const child of model.children) child.position.y += lift / scale;
     model.updateMatrixWorld(true);
   }
 
-  // Opponent cars keep wheels on the body, so trim stubs here too.
-  for (const wheel of findWheelNodes(model)) {
-    if (wheel) trimWheelAxleStub(wheel);
-  }
+  polishCarMaterials(model);
+  return tireRadius;
+}
 
+/** Paint a little clearer, tyres stay matte. */
+function polishCarMaterials(model) {
   model.traverse((node) => {
-    if (node.isMesh) {
-      node.castShadow = true;
-      node.receiveShadow = false;
-      node.frustumCulled = true;
+    if (!node.isMesh) return;
+    node.castShadow = true;
+    node.receiveShadow = false;
+    node.frustumCulled = true;
+    const wheel = /wheel/i.test(node.name || '');
+    const mats = Array.isArray(node.material) ? node.material : [node.material];
+    for (const mat of mats) {
+      if (!mat) continue;
+      if (wheel) {
+        if ('roughness' in mat) mat.roughness = 0.92;
+        if ('metalness' in mat) mat.metalness = 0.04;
+      } else {
+        if ('roughness' in mat) mat.roughness = 0.38;
+        if ('metalness' in mat) mat.metalness = 0.22;
+      }
+      mat.needsUpdate = true;
     }
   });
 }
@@ -151,16 +190,18 @@ const WHEEL_X_OFFSET = 0.8;
 const WHEEL_Z_OFFSET = 1.5;
 
 // Physics tuning parameters
-const SUSPENSION_STIFFNESS = 50;
-const SUSPENSION_DAMPING = 10;
-const SUSPENSION_COMPRESSION = 4.0;
+// Gravity is -20. Bullet force is stiffness * sag * mass, so sag = gravity / (4 * stiffness).
+// Keep sag under BODY_GROUND_GAP or the shell drops into the road.
+const SUSPENSION_STIFFNESS = 170;
+const SUSPENSION_DAMPING = 18;
+const SUSPENSION_COMPRESSION = 10;
 const ROLL_INFLUENCE = 0.1;
 const WHEEL_FRICTION = 12;
 
 /**
- * These car GLBs bake a short axle rod into each wheel mesh. From behind that looks
- * like a grey cylinder sticking out of the tyre. Keep only the middle band of the
- * mesh along the axle (x), which is the tyre itself.
+ * These car GLBs bake an axle rod into the wheel mesh. One rear wheel is almost
+ * 2 m of rod. The fat part (large distance from the axle in y/z) is the tyre.
+ * Clamp x to that band so the rod cannot stick out past the arch.
  */
 function trimWheelAxleStub(wheelMesh) {
   if (!wheelMesh?.geometry?.attributes?.position) return;
@@ -169,11 +210,22 @@ function trimWheelAxleStub(wheelMesh) {
   const count = position.count;
   if (count < 8) return;
 
-  const xs = new Float32Array(count);
-  for (let i = 0; i < count; i++) xs[i] = position.getX(i);
-  xs.sort();
-  const lo = xs[Math.floor(count * 0.1)];
-  const hi = xs[Math.floor(count * 0.9)];
+  let maxR = 0;
+  for (let i = 0; i < count; i++) {
+    const r = Math.hypot(position.getY(i), position.getZ(i));
+    if (r > maxR) maxR = r;
+  }
+  if (!(maxR > 1e-4)) return;
+
+  const tireR = maxR * 0.72;
+  let lo = Infinity;
+  let hi = -Infinity;
+  for (let i = 0; i < count; i++) {
+    if (Math.hypot(position.getY(i), position.getZ(i)) < tireR) continue;
+    const x = position.getX(i);
+    if (x < lo) lo = x;
+    if (x > hi) hi = x;
+  }
   if (!(hi > lo)) return;
 
   for (let i = 0; i < count; i++) {
@@ -204,14 +256,9 @@ function fitWheelMeshToPhysicsRadius(wheelMesh, targetRadius = WHEEL_RADIUS) {
   const approxR = Math.max(size.y, size.z) / 2;
   if (!(approxR > 1e-6) || !Number.isFinite(approxR)) return;
 
-  // Physics drives the mesh origin, and models often author each wheel at its place
-  // on the body, so move the tyre onto its own origin.
-  const position = geometry.attributes.position;
-  const xs = new Float32Array(position.count);
-  for (let i = 0; i < position.count; i++) xs[i] = position.getX(i);
-  xs.sort();
+  // Physics drives the mesh origin. Move the tyre (not the old axle) onto that origin.
   geometry.translate(
-    -xs[xs.length >> 1],
+    -(box.min.x + box.max.x) / 2,
     -(box.min.y + box.max.y) / 2,
     -(box.min.z + box.max.z) / 2
   );
@@ -219,6 +266,53 @@ function fitWheelMeshToPhysicsRadius(wheelMesh, targetRadius = WHEEL_RADIUS) {
   wheelMesh.geometry = geometry;
   wheelMesh.position.set(0, 0, 0);
   wheelMesh.scale.setScalar(targetRadius / approxR);
+}
+
+/**
+ * Place each physics wheel on the visual hub (meters, chassis space).
+ * matrixWorld includes the body scale, so undo that scale or the tyre lands outside the arch.
+ */
+function syncWheelPhysicsToBody(vehicle, carModel) {
+  if (!vehicle || !carModel) return WHEEL_RADIUS;
+  carModel.updateMatrixWorld(true);
+  const inv = new THREE.Matrix4().copy(carModel.matrixWorld).invert();
+  const scale = carModel.scale.x || 1;
+  const box = new THREE.Box3();
+  const center = new THREE.Vector3();
+  const size = new THREE.Vector3();
+  const wheels = findWheelNodes(carModel);
+  let radiusSum = 0;
+  let n = 0;
+  const hubs = [];
+  for (const wheel of wheels) {
+    if (!wheel) {
+      hubs.push(null);
+      continue;
+    }
+    box.setFromObject(wheel);
+    box.getSize(size);
+    box.getCenter(center);
+    const radius = Math.max(size.y, size.z) / 2;
+    center.applyMatrix4(inv).multiplyScalar(scale);
+    hubs.push(center.clone());
+    if (radius > 1e-4) {
+      radiusSum += radius;
+      n += 1;
+    }
+  }
+  const radius = n ? radiusSum / n : WHEEL_RADIUS;
+  for (let i = 0; i < hubs.length; i++) {
+    const hub = hubs[i];
+    if (!hub) continue;
+    const info = vehicle.getWheelInfo(i);
+    const pt = info.get_m_chassisConnectionPointCS();
+    pt.setX(hub.x);
+    pt.setY(hub.y + SUSPENSION_REST_LENGTH);
+    pt.setZ(hub.z);
+    info.set_m_chassisConnectionPointCS(pt);
+    info.set_m_wheelsRadius(radius);
+  }
+  return radius;
 }
 
 // Reused for start-line / respawn lateral offset (host vs guest lanes)
@@ -354,7 +448,8 @@ export function createVehicle(ammo, scene, physicsWorld, debugObjects, onCarLoad
     wheelInfo.set_m_wheelsDampingCompression(SUSPENSION_COMPRESSION);
     wheelInfo.set_m_frictionSlip(WHEEL_FRICTION);
     wheelInfo.set_m_rollInfluence(ROLL_INFLUENCE);
-    wheelInfo.set_m_maxSuspensionTravelCm(SUSPENSION_REST_LENGTH * 150); 
+    // 6 cm. More travel lets the shell drop through the track on a bump.
+    wheelInfo.set_m_maxSuspensionTravelCm(6); 
     
     // Add a placeholder for the wheel mesh
     carComponents.wheelMeshes.push(null);
@@ -412,6 +507,7 @@ function loadCarModel(ammo, scene, carComponents, wheelPositions, onModelLoaded,
   const applyGltfToPlayer = (gltf) => {
       const carModel = gltf.scene;
       applyCarBodyScale(carModel);
+      const tireRadius = syncWheelPhysicsToBody(carComponents.vehicle, carModel);
       carModel.visible = false;
       
       const wheelModelMeshes = findWheelNodes(carModel);
@@ -428,8 +524,8 @@ function loadCarModel(ammo, scene, carComponents, wheelPositions, onModelLoaded,
           // Add directly to scene so we can control it separately
           scene.add(wheelModelMeshes[i]);
           
-          // Match visual tire size to Bullet wheel radius (do not stack another ×4 on top of body scale)
-          fitWheelMeshToPhysicsRadius(wheelModelMeshes[i]);
+          // Match visual tire size to the hub we just measured on this body.
+          fitWheelMeshToPhysicsRadius(wheelModelMeshes[i], tireRadius);
           
           // Save reference
           carComponents.wheelMeshes[i] = wheelModelMeshes[i];
@@ -503,6 +599,7 @@ function loadFallbackCarModel(ammo, scene, carComponents, wheelPositions, onMode
 
       const carModel = gltf.scene;
       applyCarBodyScale(carModel);
+      const tireRadius = syncWheelPhysicsToBody(carComponents.vehicle, carModel);
       
       // Process wheel meshes (same as in loadCarModel)
       const wheelModelMeshes = findWheelNodes(carModel);
@@ -512,7 +609,7 @@ function loadFallbackCarModel(ammo, scene, carComponents, wheelPositions, onMode
           wheelModelMeshes[i].updateMatrixWorld(true);
           carModel.remove(wheelModelMeshes[i]);
           scene.add(wheelModelMeshes[i]);
-          fitWheelMeshToPhysicsRadius(wheelModelMeshes[i]);
+          fitWheelMeshToPhysicsRadius(wheelModelMeshes[i], tireRadius);
           carComponents.wheelMeshes[i] = wheelModelMeshes[i];
         } else {
           // Create default wheel
