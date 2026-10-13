@@ -57,7 +57,7 @@ export function updatePhysics(deltaTime, ammo, physicsState, carState, debugObje
   
   // Calculate dot product using Three.js
   const dotForward = carForward.dot(velocityThree);
-  const maxEngineForce = 2000;
+  const maxEngineForce = 1400;
   const maxBrakingForce = 80;
   
   // Calculate car speed in km/h
@@ -92,14 +92,15 @@ export function updatePhysics(deltaTime, ammo, physicsState, carState, debugObje
     brakingForce = maxBrakingForce;
   }
 
-  const rise = 1600 * deltaTime;
+  const rise = 900 * deltaTime;
   const fall = 2800 * deltaTime;
   driveForce = moveToward(driveForce, targetDrive, targetDrive > driveForce ? rise : fall);
   const engineForce = driveForce;
   
   for (let i = 0; i < vehicle.getNumWheels(); i++) {
-    if (i >= 2) vehicle.applyEngineForce(engineForce, i);
-    else vehicle.applyEngineForce(0, i);
+    // A little power on the front wheels keeps the nose from popping up.
+    const share = i < 2 ? 0.35 : 0.65;
+    vehicle.applyEngineForce(engineForce * share, i);
     vehicle.setBrake(brakingForce, i);
   }
 
