@@ -139,9 +139,15 @@ function applyCarBodyScale(model) {
   model.scale.setScalar(scale);
   model.updateMatrixWorld(true);
 
-  // Cut axle stubs before measuring height, or a long rod pulls the tire out of the arch.
+  // Cut axle stubs, then bring each tyre out and down so it shows beside the body.
+  // The bumper is almost as wide as the wheels, so from behind they were hidden.
   for (const wheel of findWheelNodes(model)) {
-    if (wheel) trimWheelAxleStub(wheel);
+    if (!wheel) continue;
+    trimWheelAxleStub(wheel);
+    const out = wheel.position.x >= 0 ? 1 : -1;
+    wheel.scale.multiplyScalar(1.2);
+    wheel.position.x += out * 0.16;
+    wheel.position.y -= 0.06;
   }
   model.updateMatrixWorld(true);
 
