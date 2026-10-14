@@ -209,7 +209,7 @@ const SUSPENSION_STIFFNESS = 90;
 const SUSPENSION_DAMPING = 12;
 const SUSPENSION_COMPRESSION = 8;
 const ROLL_INFLUENCE = 0.06;
-const WHEEL_FRICTION = 26;
+const WHEEL_FRICTION = 36;
 
 /**
  * These car GLBs bake an axle rod into the wheel mesh. One rear wheel is almost

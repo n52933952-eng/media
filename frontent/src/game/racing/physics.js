@@ -28,6 +28,8 @@ export function initPhysics(ammo) {
 let driveForce = 0;
 const _carForward = new THREE.Vector3();
 const _velocity = new THREE.Vector3();
+const _up = new THREE.Vector3(0, 1, 0);
+const _right = new THREE.Vector3();
 
 function moveToward(current, target, maxDelta) {
   if (current < target) return Math.min(target, current + maxDelta);
@@ -96,6 +98,25 @@ export function updatePhysics(deltaTime, ammo, physicsState, carState, debugObje
   const fall = 2800 * deltaTime;
   driveForce = moveToward(driveForce, targetDrive, targetDrive > driveForce ? rise : fall);
   const engineForce = driveForce;
+
+  // Pull sideways slide back in, so the car follows the road instead of drifting.
+  _right.crossVectors(_up, carForward);
+  if (_right.lengthSq() > 1e-6) {
+    _right.normalize();
+    const lateral = _right.dot(velocityThree);
+    const grip = Math.min(0.18, 5 * deltaTime);
+    velocityThree.addScaledVector(_right, -lateral * grip);
+    const planted = new ammo.btVector3(velocityThree.x, velocityThree.y, velocityThree.z);
+    carBody.setLinearVelocity(planted);
+    ammo.destroy(planted);
+  }
+  // A little extra push into the road at speed. Kept small so the gas pedal does not hop.
+  const stick = Math.min(1200, speedKPH * speedKPH * 0.08);
+  if (stick > 8) {
+    const down = new ammo.btVector3(0, -stick, 0);
+    carBody.applyCentralForce(down);
+    ammo.destroy(down);
+  }
   
   for (let i = 0; i < vehicle.getNumWheels(); i++) {
     // A little power on the front wheels keeps the nose from popping up.
