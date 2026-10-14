@@ -332,21 +332,6 @@ const Post = ({post: initialPost, postedBy, onDelete, onPostUpdated, visibleVide
     sendYouTubeCommand(channelFrameRef.current, func)
   }, [])
 
-  const expandChannelVideo = useCallback((e) => {
-    e.preventDefault()
-    e.stopPropagation()
-    const el = channelFrameRef.current?.parentElement
-    if (!el) return
-    const active = document.fullscreenElement || document.webkitFullscreenElement
-    if (active === el) {
-      const exit = document.exitFullscreen || document.webkitExitFullscreen
-      exit?.call(document)
-      return
-    }
-    const req = el.requestFullscreen || el.webkitRequestFullscreen
-    req?.call(el)
-  }, [])
-
   useEffect(() => {
     const onMessage = (event) => {
       const frame = channelFrameRef.current
@@ -2069,8 +2054,8 @@ const showToast = useShowToast()
       border="0.5px solid"
       borderColor="gray.light"
       my={2}
-      cursor={post?.img && (post.img.includes('youtube.com/embed') || post.img.includes('youtu.be')) ? 'default' : 'pointer'}
-      title={post?.img && (post.img.includes('youtube.com/embed') || post.img.includes('youtu.be')) ? undefined : 'Open post'}
+      cursor="pointer"
+      title="Open post"
       sx={{
         cursor: 'pointer !important',
         '& img, & video': { cursor: 'pointer !important' },
@@ -2117,17 +2102,7 @@ const showToast = useShowToast()
           height="0"
           overflow="hidden"
           bg="black"
-          data-no-navigate="true"
-          sx={{
-            '&:fullscreen, &:-webkit-full-screen': {
-              height: '100%',
-              paddingBottom: 0,
-            },
-          }}
-          onClick={(e) => {
-            e.preventDefault()
-            e.stopPropagation()
-          }}
+          cursor="pointer"
         >
           <iframe
             ref={channelFrameRef}
@@ -2147,44 +2122,34 @@ const showToast = useShowToast()
             allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share; fullscreen"
             allowFullScreen
           />
-          {/* Center only. Corners and the bottom bar stay free. */}
+          {/* Click the picture to open the post. The bottom bar stays free for YouTube. */}
           <Box
             position="absolute"
-            top="14%"
-            left="10%"
-            right="14%"
-            bottom="78px"
+            top={0}
+            left={0}
+            right={0}
+            bottom="30%"
+            zIndex={1}
+            cursor="pointer"
+            title="Open post"
+            onClick={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
+              goToPostDetail(e)
+            }}
+          />
+          {/* Middle still plays and pauses, and does not open the post. */}
+          <Box
+            position="absolute"
+            top="28%"
+            left="22%"
+            right="22%"
+            bottom="42%"
+            zIndex={2}
             cursor="pointer"
             title="Play or pause"
             onClick={toggleChannelPlayback}
           />
-          <Box
-            as="button"
-            type="button"
-            aria-label="Make video bigger"
-            title="Make video bigger"
-            position="absolute"
-            right="10px"
-            bottom="46px"
-            zIndex={2}
-            w="34px"
-            h="34px"
-            borderRadius="full"
-            display="flex"
-            alignItems="center"
-            justifyContent="center"
-            bg="rgba(0,0,0,0.55)"
-            color="white"
-            border="1px solid rgba(255,255,255,0.22)"
-            cursor="pointer"
-            transition="background 0.18s ease, transform 0.18s ease"
-            _hover={{ bg: 'rgba(0,0,0,0.78)', transform: 'scale(1.06)' }}
-            onClick={expandChannelVideo}
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <path d="M9 4H4v5M15 4h5v5M9 20H4v-5M15 20h5v-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          </Box>
         </Box>
       ) : post?.img && (post.img.match(/\.(mp4|webm|ogg|mov)$/i) || post.img.includes('/video/upload/')) ? (
         <Box
