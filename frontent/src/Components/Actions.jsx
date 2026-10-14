@@ -588,17 +588,21 @@ return (
 				e.stopPropagation()
 			}}
 		>
-			<Flex my={2} alignItems="center" minH="24px" w="100%" gap={showFeedExtras ? 0 : 3}>
-				<Flex alignItems="center" gap={showFeedExtras ? '48px' : 3} flexShrink={0}>
+			<Flex my={1} alignItems="center" minH="36px" w="100%" gap={showFeedExtras ? 0 : 2}>
+				<Flex alignItems="center" gap={showFeedExtras ? 2 : 1} flexShrink={0}>
 				{!(isMyChannelFeedCard && post?.postedBy?.username !== 'Football') && (
 				<Box
-					w="24px"
-					h="24px"
+					w="36px"
+					h="36px"
+					borderRadius="full"
 					display="flex"
 					alignItems="center"
 					justifyContent="center"
 					flexShrink={0}
 					cursor="pointer"
+					transition="background 0.18s ease, transform 0.18s ease"
+					_hover={{ bg: 'rgba(128,128,128,0.16)', transform: 'translateY(-1px)' }}
+					_active={{ transform: 'scale(0.94)' }}
 					onClick={handlelikeandunlike}
 				>
 				<svg
@@ -621,6 +625,24 @@ return (
 				)}
 
 				{!hideComments && (
+				<Box
+					w="36px"
+					h="36px"
+					borderRadius="full"
+					display="flex"
+					alignItems="center"
+					justifyContent="center"
+					flexShrink={0}
+					cursor="pointer"
+					transition="background 0.18s ease, transform 0.18s ease"
+					_hover={{ bg: 'rgba(128,128,128,0.16)', transform: 'translateY(-1px)' }}
+					_active={{ transform: 'scale(0.94)' }}
+					onClick={(e) => {
+						e.preventDefault()
+						e.stopPropagation()
+						onOpen()
+					}}
+				>
 				<svg
 					aria-label='Comment'
 					color=''
@@ -629,12 +651,7 @@ return (
 					role='img'
 					viewBox='0 0 24 24'
 					width='20'
-					style={{ cursor: 'pointer' }}
-				  onClick={(e) => {
-						e.preventDefault()
-						e.stopPropagation()
-						onOpen()
-					}}
+					style={{ display: 'block' }}
 				>
 					<title>Comment</title>
 					<path
@@ -645,6 +662,7 @@ return (
 						strokeWidth='2'
 					></path>
 				</svg>
+				</Box>
 				)}
 				</Flex>
 
@@ -655,6 +673,9 @@ return (
 				<Tooltip label="Share to feed" placement="top" hasArrow>
 					<Box
 						as="button"
+						w="36px"
+						h="36px"
+						borderRadius="full"
 						display="flex"
 						alignItems="center"
 						justifyContent="center"
@@ -662,6 +683,9 @@ return (
 						onClick={shareVideoToFeed}
 						cursor="pointer"
 						disabled={sharingToFeed}
+						transition="background 0.18s ease, transform 0.18s ease"
+						_hover={{ bg: 'rgba(128,128,128,0.16)', transform: 'translateY(-1px)' }}
+						_active={{ transform: 'scale(0.94)' }}
 					>
 						<Box
 							as="span"
@@ -676,19 +700,37 @@ return (
 				</Box>
 			)}
 			<Box flex="1" minW={0} display="flex" alignItems="center" justifyContent="center">
-				<ShareSVG onClick={openShareModal} disabled={!ENABLE_POST_SHARE_TO_CHAT} />
+				<Box
+					w="36px"
+					h="36px"
+					borderRadius="full"
+					display="flex"
+					alignItems="center"
+					justifyContent="center"
+					transition="background 0.18s ease, transform 0.18s ease"
+					_hover={{ bg: 'rgba(128,128,128,0.16)', transform: 'translateY(-1px)' }}
+					_active={{ transform: 'scale(0.94)' }}
+				>
+					<ShareSVG onClick={openShareModal} disabled={!ENABLE_POST_SHARE_TO_CHAT} />
+				</Box>
 			</Box>
 			{isCapsuleEligiblePost && (
 				<Box flex="1" minW={0} display="flex" alignItems="center" justifyContent="center">
 				<Tooltip label={capsuleSealed ? `Set: ${capsuleSelectedLabel || formatCapsuleCountdown(capsuleOpenAt)}` : 'Remind me later'} placement="top" hasArrow>
 					<Box
 						as="button"
+						w="36px"
+						h="36px"
+						borderRadius="full"
 						display="flex"
 						alignItems="center"
 						justifyContent="center"
 						onClick={(e) => { e.preventDefault(); e.stopPropagation(); if (user) onCapsuleOpen() }}
 						style={{ cursor: user ? 'pointer' : 'default', opacity: user ? 1 : 0.45 }}
 						title="Remind me later"
+						transition="background 0.18s ease, transform 0.18s ease"
+						_hover={{ bg: 'rgba(128,128,128,0.16)', transform: 'translateY(-1px)' }}
+						_active={{ transform: 'scale(0.94)' }}
 					>
 						<CapsuleSVG sealed={capsuleSealed} />
 					</Box>
@@ -699,6 +741,9 @@ return (
 				<Tooltip label="Get the app" placement="top" hasArrow>
 					<Box
 						as="button"
+						w="36px"
+						h="36px"
+						borderRadius="full"
 						display="flex"
 						alignItems="center"
 						justifyContent="center"
@@ -709,6 +754,9 @@ return (
 							openPlayStore()
 						}}
 						cursor="pointer"
+						transition="background 0.18s ease, transform 0.18s ease"
+						_hover={{ bg: 'rgba(128,128,128,0.16)', transform: 'translateY(-1px)' }}
+						_active={{ transform: 'scale(0.94)' }}
 					>
 						<GetAppLinkSVG />
 					</Box>
@@ -719,10 +767,10 @@ return (
 			</Flex>
 
 			{(!hideComments || !(isMyChannelFeedCard && post?.postedBy?.username !== 'Football')) && (
-			<Flex gap={2} alignItems="center" minH="18px">
+			<Flex gap={2} alignItems="center" minH="20px" mt="2px">
 				{!hideComments && (
 				<>
-				<Text color={"gray.light"} fontSize='sm'>
+				<Text color={"gray.light"} fontSize='sm' letterSpacing="0.01em">
 				{getReplyCount(post)} Comment
 				</Text>
 				<Box w={0.5} h={0.5} borderRadius={"full"} bg={"gray.light"}></Box>

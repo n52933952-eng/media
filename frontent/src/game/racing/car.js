@@ -60,8 +60,8 @@ export function cloneCarVisualScene(sourceScene) {
 }
 
 const CAR_MODEL_SCALE = 4;
-/** Tyres rest a hair above the road so the body never scrapes on a bump. */
-const BODY_GROUND_GAP = 0.06;
+/** 0 sits the tyre rubber on the road. A positive gap lifts the tyres off the street. */
+const BODY_GROUND_GAP = 0;
 
 /** Wheel nodes in the order the physics wheels are added (see wheelPositions). */
 const WHEEL_SLOT_PATTERNS = [
@@ -491,45 +491,32 @@ function loadCarModel(ammo, scene, carComponents, wheelPositions, onModelLoaded,
 
   const applyGltfToPlayer = (gltf) => {
       const carModel = gltf.scene;
-      const layout = applyCarBodyScale(carModel);
+      applyCarBodyScale(carModel);
       carModel.visible = false;
       
       const wheelModelMeshes = findWheelNodes(carModel);
-      
-      // Store reference to wheel meshes and detach them from car model
+
+      // Leave the tyres on the body, in the arches. Physics still drives the car,
+      // but the meshes stay where the model put them — same picture the other player sees.
       for (let i = 0; i < wheelModelMeshes.length; i++) {
         if (wheelModelMeshes[i]) {
-          // Get the original world matrix before removal to preserve transformations
-          wheelModelMeshes[i].updateMatrixWorld(true);
-          
-          // Remove from car model
-          carModel.remove(wheelModelMeshes[i]);
-          
-          // Add directly to scene so we can control it separately
-          scene.add(wheelModelMeshes[i]);
-          
-          fitWheelMeshToPhysicsRadius(wheelModelMeshes[i], layout.radius);
-          
-          // Save reference
-          carComponents.wheelMeshes[i] = wheelModelMeshes[i];
-          
+          const wheel = wheelModelMeshes[i];
+          wheel.userData.restQuat = wheel.quaternion.clone();
+          carComponents.wheelMeshes[i] = wheel;
           console.log(`Found and set up wheel: ${wheelPositions[i].name}`);
         } else {
           console.warn(`Could not find wheel mesh: ${wheelPositions[i].name}`);
-          
-          // Create a default wheel as fallback
           const wheelGeometry = new THREE.CylinderGeometry(
             WHEEL_RADIUS, WHEEL_RADIUS, WHEEL_WIDTH, 24
           );
-          wheelGeometry.rotateZ(Math.PI/2); 
-          
+          wheelGeometry.rotateZ(Math.PI/2);
           const wheelMaterial = new THREE.MeshStandardMaterial({ color: 0x222222 });
           const wheelMesh = new THREE.Mesh(wheelGeometry, wheelMaterial);
           wheelMesh.castShadow = true;
-          scene.add(wheelMesh);
-          // Geometry radius is already WHEEL_RADIUS — no extra ×4 (that made tires 1.6m vs physics 0.4m)
-          
-          // Use this default wheel
+          const pos = wheelPositions[i];
+          wheelMesh.position.set(pos.x, -SUSPENSION_REST_LENGTH, pos.z);
+          wheelMesh.userData.restQuat = wheelMesh.quaternion.clone();
+          carModel.add(wheelMesh);
           carComponents.wheelMeshes[i] = wheelMesh;
         }
       }
@@ -576,34 +563,33 @@ function loadFallbackCarModel(ammo, scene, carComponents, wheelPositions, onMode
         scene.remove(carComponents.carModel);
       }
       carComponents.wheelMeshes.forEach((w) => {
-        if (w) scene.remove(w);
+        if (w) w.parent?.remove(w);
       });
       carComponents.wheelMeshes = [];
 
       const carModel = gltf.scene;
-      const layout = applyCarBodyScale(carModel);
+      applyCarBodyScale(carModel);
       
       // Process wheel meshes (same as in loadCarModel)
       const wheelModelMeshes = findWheelNodes(carModel);
       
       for (let i = 0; i < wheelModelMeshes.length; i++) {
         if (wheelModelMeshes[i]) {
-          wheelModelMeshes[i].updateMatrixWorld(true);
-          carModel.remove(wheelModelMeshes[i]);
-          scene.add(wheelModelMeshes[i]);
-          fitWheelMeshToPhysicsRadius(wheelModelMeshes[i], layout.radius);
-          carComponents.wheelMeshes[i] = wheelModelMeshes[i];
+          const wheel = wheelModelMeshes[i];
+          wheel.userData.restQuat = wheel.quaternion.clone();
+          carComponents.wheelMeshes[i] = wheel;
         } else {
-          // Create default wheel
           const wheelGeometry = new THREE.CylinderGeometry(
             WHEEL_RADIUS, WHEEL_RADIUS, WHEEL_WIDTH, 24
           );
           wheelGeometry.rotateZ(Math.PI/2);
-          
           const wheelMaterial = new THREE.MeshStandardMaterial({ color: 0x222222 });
           const wheelMesh = new THREE.Mesh(wheelGeometry, wheelMaterial);
           wheelMesh.castShadow = true;
-          scene.add(wheelMesh);
+          const pos = wheelPositions[i];
+          wheelMesh.position.set(pos.x, -SUSPENSION_REST_LENGTH, pos.z);
+          wheelMesh.userData.restQuat = wheelMesh.quaternion.clone();
+          carModel.add(wheelMesh);
           carComponents.wheelMeshes[i] = wheelMesh;
         }
       }
@@ -735,26 +721,19 @@ export function updateCarPosition(ammo, vehicle, carModel, wheelMeshes) {
   const position = chassisWorldTrans.getOrigin();
   const quaternion = chassisWorldTrans.getRotation();
 
-  // Update car model position
+  // Update car model position. Tyres stay parented in the arches.
   carModel.position.set(position.x(), position.y(), position.z());
   carModel.quaternion.set(quaternion.x(), quaternion.y(), quaternion.z(), quaternion.w());
-  
-  // Update wheel transforms
+
   for (let i = 0; i < vehicle.getNumWheels(); i++) {
-    // Sync wheels with physics
-    vehicle.updateWheelTransform(i, true);
-    const transform = vehicle.getWheelInfo(i).get_m_worldTransform();
-    const wheelPosition = transform.getOrigin();
-    const wheelQuaternion = transform.getRotation();
-    
     const wm = wheelMeshes[i];
-    if (!wm) continue;
-    wm.position.set(wheelPosition.x(), wheelPosition.y(), wheelPosition.z());
-    wm.quaternion.set(
-      wheelQuaternion.x(),
-      wheelQuaternion.y(),
-      wheelQuaternion.z(),
-      wheelQuaternion.w()
-    );
+    if (!wm?.userData?.restQuat) continue;
+    const info = vehicle.getWheelInfo(i);
+    const spin = info.get_m_rotation();
+    const steer = i < 2 ? info.get_m_steering() : 0;
+    wm.quaternion.copy(wm.userData.restQuat);
+    if (steer) wm.rotateY(steer);
+    // Axle in Bullet is -X, so the mesh spins the other way around local +X.
+    wm.rotateX(-spin);
   }
 }

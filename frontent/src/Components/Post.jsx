@@ -332,6 +332,21 @@ const Post = ({post: initialPost, postedBy, onDelete, onPostUpdated, visibleVide
     sendYouTubeCommand(channelFrameRef.current, func)
   }, [])
 
+  const expandChannelVideo = useCallback((e) => {
+    e.preventDefault()
+    e.stopPropagation()
+    const el = channelFrameRef.current?.parentElement
+    if (!el) return
+    const active = document.fullscreenElement || document.webkitFullscreenElement
+    if (active === el) {
+      const exit = document.exitFullscreen || document.webkitExitFullscreen
+      exit?.call(document)
+      return
+    }
+    const req = el.requestFullscreen || el.webkitRequestFullscreen
+    req?.call(el)
+  }, [])
+
   useEffect(() => {
     const onMessage = (event) => {
       const frame = channelFrameRef.current
@@ -2101,7 +2116,14 @@ const showToast = useShowToast()
           paddingBottom="56.25%"
           height="0"
           overflow="hidden"
+          bg="black"
           data-no-navigate="true"
+          sx={{
+            '&:fullscreen, &:-webkit-full-screen': {
+              height: '100%',
+              paddingBottom: 0,
+            },
+          }}
           onClick={(e) => {
             e.preventDefault()
             e.stopPropagation()
@@ -2122,20 +2144,47 @@ const showToast = useShowToast()
             onLoad={(e) => {
               e.target.contentWindow?.postMessage(JSON.stringify({ event: 'listening' }), '*')
             }}
-            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share; fullscreen"
             allowFullScreen
           />
-          {/* Bottom of the player is left open so the progress bar and controls work. */}
+          {/* Center only. Corners and the bottom bar stay free. */}
           <Box
             position="absolute"
-            top={0}
-            left={0}
-            right={0}
-            bottom="30%"
+            top="14%"
+            left="10%"
+            right="14%"
+            bottom="78px"
             cursor="pointer"
-            title="Pause"
+            title="Play or pause"
             onClick={toggleChannelPlayback}
           />
+          <Box
+            as="button"
+            type="button"
+            aria-label="Make video bigger"
+            title="Make video bigger"
+            position="absolute"
+            right="10px"
+            bottom="46px"
+            zIndex={2}
+            w="34px"
+            h="34px"
+            borderRadius="full"
+            display="flex"
+            alignItems="center"
+            justifyContent="center"
+            bg="rgba(0,0,0,0.55)"
+            color="white"
+            border="1px solid rgba(255,255,255,0.22)"
+            cursor="pointer"
+            transition="background 0.18s ease, transform 0.18s ease"
+            _hover={{ bg: 'rgba(0,0,0,0.78)', transform: 'scale(1.06)' }}
+            onClick={expandChannelVideo}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M9 4H4v5M15 4h5v5M9 20H4v-5M15 20h5v-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </Box>
         </Box>
       ) : post?.img && (post.img.match(/\.(mp4|webm|ogg|mov)$/i) || post.img.includes('/video/upload/')) ? (
         <Box
