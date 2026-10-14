@@ -145,9 +145,11 @@ function applyCarBodyScale(model) {
     if (!wheel) continue;
     trimWheelAxleStub(wheel);
     const out = wheel.position.x >= 0 ? 1 : -1;
-    wheel.scale.multiplyScalar(1.2);
-    wheel.position.x += out * 0.16;
-    wheel.position.y -= 0.06;
+    // Fuller round, slimmer sidewall, still clear of the bumper.
+    wheel.scale.multiplyScalar(1.16);
+    wheel.scale.x *= 0.84;
+    wheel.position.x += out * 0.13;
+    wheel.position.y -= 0.075;
   }
   model.updateMatrixWorld(true);
 
@@ -176,8 +178,9 @@ function polishCarMaterials(model) {
     for (const mat of mats) {
       if (!mat) continue;
       if (wheel) {
-        if ('roughness' in mat) mat.roughness = 0.92;
-        if ('metalness' in mat) mat.metalness = 0.04;
+        if (mat.color) mat.color.multiplyScalar(mat.map ? 0.9 : 0.78);
+        if ('roughness' in mat) mat.roughness = 0.72;
+        if ('metalness' in mat) mat.metalness = 0.08;
       } else {
         if ('roughness' in mat) mat.roughness = 0.38;
         if ('metalness' in mat) mat.metalness = 0.22;
@@ -213,7 +216,7 @@ const WHEEL_Z_OFFSET = 1.5;
 // Holds the car without bouncing. The wheels, not the body, touch the road.
 const SUSPENSION_STIFFNESS = 90;
 const SUSPENSION_DAMPING = 12;
-const SUSPENSION_COMPRESSION = 8;
+const SUSPENSION_COMPRESSION = 12;
 const ROLL_INFLUENCE = 0.06;
 const WHEEL_FRICTION = 36;
 
@@ -386,7 +389,7 @@ export function createVehicle(ammo, scene, physicsWorld, debugObjects, onCarLoad
   carComponents.carBody.setFriction(0.1);
   carComponents.carBody.setRestitution(0.05);
   // Stronger angular damping reduces violent rolls / tumbles on curbs and barriers
-  carComponents.carBody.setDamping(0.3, 0.55);
+  carComponents.carBody.setDamping(0.3, 0.72);
   if (typeof carComponents.carBody.setCcdMotionThreshold === 'function') {
     carComponents.carBody.setCcdMotionThreshold(0.25);
   }

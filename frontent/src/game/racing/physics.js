@@ -94,24 +94,32 @@ export function updatePhysics(deltaTime, ammo, physicsState, carState, debugObje
     brakingForce = maxBrakingForce;
   }
 
-  const rise = 900 * deltaTime;
+  const rise = 520 * deltaTime;
   const fall = 2800 * deltaTime;
   driveForce = moveToward(driveForce, targetDrive, targetDrive > driveForce ? rise : fall);
   const engineForce = driveForce;
 
-  // Pull sideways slide back in, so the car follows the road instead of drifting.
-  _right.crossVectors(_up, carForward);
-  if (_right.lengthSq() > 1e-6) {
-    _right.normalize();
-    const lateral = _right.dot(velocityThree);
-    const grip = Math.min(0.18, 5 * deltaTime);
-    velocityThree.addScaledVector(_right, -lateral * grip);
-    const planted = new ammo.btVector3(velocityThree.x, velocityThree.y, velocityThree.z);
-    carBody.setLinearVelocity(planted);
-    ammo.destroy(planted);
+  // Pull sideways slide back in. Leave the up-down speed alone so gas does not bob the car.
+  const savedForwardY = carForward.y;
+  carForward.y = 0;
+  if (carForward.lengthSq() > 1e-6) {
+    carForward.normalize();
+    _right.crossVectors(_up, carForward);
+    const lateral = _right.x * velocity.x() + _right.z * velocity.z();
+    if (Math.abs(lateral) > 0.35) {
+      const grip = Math.min(0.12, 3.5 * deltaTime);
+      const planted = new ammo.btVector3(
+        velocity.x() - _right.x * lateral * grip,
+        velocity.y(),
+        velocity.z() - _right.z * lateral * grip
+      );
+      carBody.setLinearVelocity(planted);
+      ammo.destroy(planted);
+    }
   }
-  // A little extra push into the road at speed. Kept small so the gas pedal does not hop.
-  const stick = Math.min(1200, speedKPH * speedKPH * 0.08);
+  carForward.y = savedForwardY;
+  // Extra push into the road only once the car is already moving, so the launch stays level.
+  const stick = Math.min(800, Math.max(0, speedKPH - 22) * speedKPH * 0.045);
   if (stick > 8) {
     const down = new ammo.btVector3(0, -stick, 0);
     carBody.applyCentralForce(down);

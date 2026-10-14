@@ -1,5 +1,5 @@
 ﻿import React,{useEffect,useState,useContext, useCallback, useMemo, memo, useRef} from 'react'
-import{Flex,Avatar,Box,Text,Image,Button, VStack, HStack, Grid, GridItem, SimpleGrid, Spinner, useColorModeValue, useDisclosure, Menu, MenuButton, MenuList, MenuItem, IconButton, Tooltip} from '@chakra-ui/react'
+import{Flex,Avatar,Box,Text,Image,Button, VStack, HStack, Grid, GridItem, SimpleGrid, Spinner, useColorModeValue, useDisclosure, Menu, MenuButton, MenuList, MenuItem, IconButton, Tooltip, Portal} from '@chakra-ui/react'
 import { HiOutlineDotsHorizontal } from "react-icons/hi";
 import { MdOutlineDeleteOutline, MdPersonRemove } from "react-icons/md";
 import { BsThreeDotsVertical } from "react-icons/bs";
@@ -148,6 +148,82 @@ function sendYouTubeCommand(frame, func) {
   )
 }
 
+function FeedYoutube({ zoom, src, frameRef, onOpenPost, onTogglePlay, onToggleZoom }) {
+  const frame = (
+    <Box
+      position={zoom ? 'fixed' : 'relative'}
+      top={zoom ? '10vh' : undefined}
+      left={zoom ? '50%' : undefined}
+      transform={zoom ? 'translateX(-50%)' : undefined}
+      w={zoom ? 'min(960px, 94vw)' : undefined}
+      h={zoom ? 'min(540px, 72vh)' : 0}
+      paddingBottom={zoom ? 0 : '56.25%'}
+      zIndex={zoom ? 2000 : undefined}
+      overflow="hidden"
+      bg="black"
+      borderRadius={zoom ? '12px' : undefined}
+    >
+      <iframe
+        ref={frameRef}
+        src={src}
+        title="Live Stream"
+        style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', border: 'none' }}
+        onLoad={(e) => {
+          e.target.contentWindow?.postMessage(JSON.stringify({ event: 'listening' }), '*')
+        }}
+        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share; fullscreen"
+        allowFullScreen
+      />
+      {!zoom && (
+        <Box
+          position="absolute"
+          top={0}
+          left={0}
+          right="64px"
+          bottom="30%"
+          zIndex={1}
+          cursor="pointer"
+          title="Open post"
+          onClick={onOpenPost}
+        />
+      )}
+      <Box
+        position="absolute"
+        top="28%"
+        left="22%"
+        right="22%"
+        bottom="42%"
+        zIndex={2}
+        cursor="pointer"
+        title="Play or pause"
+        onClick={onTogglePlay}
+      />
+      <Box
+        position="absolute"
+        right="8px"
+        bottom="36px"
+        w="48px"
+        h="48px"
+        zIndex={3}
+        cursor="pointer"
+        aria-label={zoom ? 'Shrink video' : 'Zoom video'}
+        title={zoom ? 'Shrink video' : 'Zoom video'}
+        onClick={onToggleZoom}
+      />
+    </Box>
+  )
+  if (!zoom) return frame
+  return (
+    <>
+      <Box h="0" paddingBottom="56.25%" bg="black" />
+      <Portal>
+        <Box position="fixed" inset={0} bg="blackAlpha.700" zIndex={1390} onClick={onToggleZoom} />
+        {frame}
+      </Portal>
+    </>
+  )
+}
+
 const Post = ({post: initialPost, postedBy, onDelete, onPostUpdated, visibleVideoOnly = false, autoPlayMedia, showFeedExtras = true, isOwnProfile = true}) => {
     
   // Local state for this specific post (used when not in feed context)
@@ -160,6 +236,7 @@ const Post = ({post: initialPost, postedBy, onDelete, onPostUpdated, visibleVide
   const videoRef = useRef(null)
   const channelFrameRef = useRef(null)
   const channelPlayingRef = useRef(true)
+  const [ytFeedZoom, setYtFeedZoom] = useState(false)
   const [isVideoInView, setIsVideoInView] = useState(!visibleVideoOnly)
   const rawMediaUrl = String(post?.img || '')
   const mediaUrl = mediaDisplayUrl(rawMediaUrl)
@@ -330,6 +407,19 @@ const Post = ({post: initialPost, postedBy, onDelete, onPostUpdated, visibleVide
     const func = channelPlayingRef.current ? 'pauseVideo' : 'playVideo'
     channelPlayingRef.current = !channelPlayingRef.current
     sendYouTubeCommand(channelFrameRef.current, func)
+  }, [])
+
+  const openThisPost = useCallback((e) => {
+    e?.preventDefault?.()
+    e?.stopPropagation?.()
+    if (!post?._id || !postedBy?.username) return
+    navigate(`/${postedBy.username}/post/${post._id}`)
+  }, [navigate, postedBy?.username, post?._id])
+
+  const toggleFeedZoom = useCallback((e) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setYtFeedZoom((open) => !open)
   }, [])
 
   useEffect(() => {
@@ -1778,11 +1868,13 @@ const showToast = useShowToast()
          <>
            <Text
              ref={textRef}
+             cursor="pointer"
              noOfLines={shouldTruncate && !showFullText ? 4 : undefined}
              style={{
                wordBreak: 'break-word',
                whiteSpace: 'pre-wrap'
              }}
+             onClick={openThisPost}
            >
              {post.text}
            </Text>
@@ -2096,61 +2188,14 @@ const showToast = useShowToast()
           />
         </Box>
       ) : post?.img && (post.img.includes('youtube.com/embed') || post.img.includes('youtu.be')) ? (
-        <Box
-          position="relative"
-          paddingBottom="56.25%"
-          height="0"
-          overflow="hidden"
-          bg="black"
-          cursor="pointer"
-        >
-          <iframe
-            ref={channelFrameRef}
-            src={youtubeEmbedSrc(post.img)}
-            title="Live Stream"
-            style={{
-              position: 'absolute',
-              top: 0,
-              left: 0,
-              width: '100%',
-              height: '100%',
-              border: 'none',
-            }}
-            onLoad={(e) => {
-              e.target.contentWindow?.postMessage(JSON.stringify({ event: 'listening' }), '*')
-            }}
-            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share; fullscreen"
-            allowFullScreen
-          />
-          {/* Click the picture to open the post. The bottom bar stays free for YouTube. */}
-          <Box
-            position="absolute"
-            top={0}
-            left={0}
-            right={0}
-            bottom="30%"
-            zIndex={1}
-            cursor="pointer"
-            title="Open post"
-            onClick={(e) => {
-              e.preventDefault()
-              e.stopPropagation()
-              goToPostDetail(e)
-            }}
-          />
-          {/* Middle still plays and pauses, and does not open the post. */}
-          <Box
-            position="absolute"
-            top="28%"
-            left="22%"
-            right="22%"
-            bottom="42%"
-            zIndex={2}
-            cursor="pointer"
-            title="Play or pause"
-            onClick={toggleChannelPlayback}
-          />
-        </Box>
+        <FeedYoutube
+          zoom={ytFeedZoom}
+          src={youtubeEmbedSrc(post.img)}
+          frameRef={channelFrameRef}
+          onOpenPost={openThisPost}
+          onTogglePlay={toggleChannelPlayback}
+          onToggleZoom={toggleFeedZoom}
+        />
       ) : post?.img && (post.img.match(/\.(mp4|webm|ogg|mov)$/i) || post.img.includes('/video/upload/')) ? (
         <Box
           as="video"
