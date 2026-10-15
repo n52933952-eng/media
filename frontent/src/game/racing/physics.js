@@ -61,11 +61,12 @@ export function updatePhysics(deltaTime, ammo, physicsState, carState, debugObje
   
   // Calculate dot product using Three.js
   const dotForward = carForward.dot(velocityThree);
-  const maxEngineForce = 1400;
+  const maxEngineForce = 1850;
   const maxBrakingForce = 80;
   
-  // Calculate car speed in km/h
+  const speedHoriz = Math.hypot(velocityThree.x, velocityThree.z) * 3.6;
   const speedKPH = velocityThree.length() * 3.6;
+  const showSpeed = raceState.raceStarted && !raceState.raceFinished ? speedHoriz : 0;
   
   // Check if the race has started before allowing engine forces
   let brakingForce = 0;
@@ -96,7 +97,7 @@ export function updatePhysics(deltaTime, ammo, physicsState, carState, debugObje
     brakingForce = maxBrakingForce;
   }
 
-  const rise = 750 * deltaTime;
+  const rise = 1200 * deltaTime;
   const fall = 2800 * deltaTime;
   driveForce = moveToward(driveForce, targetDrive, targetDrive > driveForce ? rise : fall);
   const engineForce = driveForce;
@@ -160,7 +161,7 @@ export function updatePhysics(deltaTime, ammo, physicsState, carState, debugObje
   
   // Return both speed and the new steering angle
   return { 
-    currentSpeed: speedKPH,
+    currentSpeed: showSpeed,
     currentSteeringAngle: newSteeringAngle 
   };
 }
