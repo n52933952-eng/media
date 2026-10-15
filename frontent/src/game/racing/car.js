@@ -202,6 +202,53 @@ export function buildOpponentCarRoot(gltf) {
   return root;
 }
 
+/** Same size as the driving car. Kinematic, so your car bumps it like a wall and it is not pushed around. */
+let _hitTrans = null;
+let _hitOrigin = null;
+let _hitQuat = null;
+
+export function createOpponentHitBody(ammo, physicsWorld) {
+  const shape = new ammo.btBoxShape(
+    new ammo.btVector3(VEHICLE_WIDTH / 2, VEHICLE_HEIGHT / 2 * 0.8, VEHICLE_LENGTH / 2 * 0.9)
+  );
+  const transform = new ammo.btTransform();
+  transform.setIdentity();
+  transform.setOrigin(new ammo.btVector3(0, -80, 0));
+  const motion = new ammo.btDefaultMotionState(transform);
+  const inertia = new ammo.btVector3(0, 0, 0);
+  const info = new ammo.btRigidBodyConstructionInfo(0, motion, shape, inertia);
+  const body = new ammo.btRigidBody(info);
+  body.setFriction(0.9);
+  body.setRestitution(0.05);
+  body.setCollisionFlags(body.getCollisionFlags() | 2);
+  body.setActivationState(4);
+  physicsWorld.addRigidBody(body);
+  ammo.destroy(transform);
+  return body;
+}
+
+export function syncOpponentHitBody(ammo, body, model) {
+  if (!ammo || !body) return;
+  if (!_hitTrans) {
+    _hitTrans = new ammo.btTransform();
+    _hitOrigin = new ammo.btVector3(0, -80, 0);
+    _hitQuat = new ammo.btQuaternion(0, 0, 0, 1);
+  }
+  const live = !!(model && model.visible && model.position.y < 40 && model.position.y > -5);
+  if (live) {
+    _hitOrigin.setValue(model.position.x, model.position.y, model.position.z);
+    _hitQuat.setValue(model.quaternion.x, model.quaternion.y, model.quaternion.z, model.quaternion.w);
+  } else {
+    _hitOrigin.setValue(0, -80, 0);
+    _hitQuat.setValue(0, 0, 0, 1);
+  }
+  _hitTrans.setIdentity();
+  _hitTrans.setOrigin(_hitOrigin);
+  _hitTrans.setRotation(_hitQuat);
+  body.setWorldTransform(_hitTrans);
+  body.getMotionState().setWorldTransform(_hitTrans);
+}
+
 // Vehicle parameters
 const VEHICLE_WIDTH = 2.0;
 const VEHICLE_HEIGHT = 0.6;

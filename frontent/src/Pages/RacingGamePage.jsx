@@ -17,6 +17,8 @@ import {
   resetCarPosition,
   updateCarPosition,
   loadOpponentCarVisual,
+  createOpponentHitBody,
+  syncOpponentHitBody,
 } from '../game/racing/car.js'
 import { loadTrackModel, loadMapDecorations, checkGroundCollision } from '../game/racing/track.js'
 import { loadGates, updateGateFading, checkGateProximity, showFinishMessage } from '../game/racing/gates.js'
@@ -24,7 +26,7 @@ import { lockRaceLandscape, unlockRaceLandscape, isPortraitViewport } from '../u
 import { shouldSkipGameExitForLive } from '../services/liveBroadcastNav'
 
 // ─── Camera constants (same as reference game) ───────────────────────────────
-const CAMERA_DISTANCE  = 12
+const CAMERA_DISTANCE  = 10.5
 const CAMERA_HEIGHT    = 2.4
 const CAMERA_LERP      = 0.12
 const CAMERA_LOOK_AHEAD = 10
@@ -110,6 +112,7 @@ export default function RacingGamePage() {
   const wheelMeshesRef = useRef([])
   const carModelRef    = useRef(null)
   const oppModelRef    = useRef(null)
+  const oppHitRef      = useRef(null)
   const gateDataRef    = useRef(null)
   const steeringRef    = useRef(0)
   const keyStateRef    = useRef({ w:false, s:false, a:false, d:false })
@@ -1121,6 +1124,7 @@ export default function RacingGamePage() {
     })
 
     // ── Player car (with physics) — GLTF tied to LoadingManager via car.js ─
+    oppHitRef.current = createOpponentHitBody(window.Ammo, physics.physicsWorld)
     const carComps = createVehicle(window.Ammo, scene, physics.physicsWorld, [], (loaded) => {
       carBodyRef.current  = loaded.carBody
       vehicleRef.current  = loaded.vehicle
@@ -1399,6 +1403,7 @@ export default function RacingGamePage() {
       accumRef.current = Math.min(accumRef.current, FIXED_PHYSICS_STEP * 4)
 
       while (accumRef.current >= FIXED_PHYSICS_STEP) {
+        syncOpponentHitBody(window.Ammo, oppHitRef.current, oppModelRef.current)
         const result = updatePhysics(
           FIXED_PHYSICS_STEP, window.Ammo,
           phys,
