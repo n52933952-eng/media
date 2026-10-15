@@ -9,6 +9,13 @@ import { isVideoUrl, mediaDisplayUrl, videoPosterUrl } from '../utils/mediaUrl.j
 
 const PAGE_SIZE = 16
 
+function youtubeStillUrl(raw) {
+  const text = String(raw || '').trim()
+  const match = text.match(/(?:youtube\.com\/embed\/|youtube-nocookie\.com\/embed\/|youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/shorts\/|youtube\.com\/live\/|(?:ytimg\.com|img\.youtube\.com)\/vi\/)([^?&/]+)/i)
+  if (match?.[1]) return `https://i.ytimg.com/vi/${match[1]}/hqdefault.jpg`
+  return mediaDisplayUrl(text)
+}
+
 function clipWords(text, max = 10) {
   const words = String(text || '').trim().split(/\s+/).filter(Boolean)
   if (words.length === 0) return 'No posts yet'
@@ -166,7 +173,7 @@ const ExplorePage = () => {
           {users.map((item) => {
             const preview = item.latestPost
             const raw = String(preview?.img || '').trim()
-            const img = mediaDisplayUrl(raw)
+            const img = youtubeStillUrl(raw)
             const text = String(preview?.text || '').trim()
             const video = isVideoUrl(img)
             const poster = video ? videoPosterUrl(img) : ''

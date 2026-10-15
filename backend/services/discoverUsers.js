@@ -102,7 +102,7 @@ function youtubePreviewUrl(raw) {
   const text = String(raw || '')
   const match = text.match(/(?:youtube\.com\/embed\/|youtube-nocookie\.com\/embed\/|youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/shorts\/|youtube\.com\/live\/)([^?&/]+)/i)
   if (!match?.[1]) return ''
-  return `https://img.youtube.com/vi/${match[1]}/hqdefault.jpg`
+  return `https://i.ytimg.com/vi/${match[1]}/hqdefault.jpg`
 }
 
 function previewImage(img, images, linkThumb) {
@@ -112,6 +112,10 @@ function previewImage(img, images, linkThumb) {
   const thumb = String(linkThumb || '').trim()
   if (thumb && !/\/embed\/|player\.vimeo|dailymotion\.com/i.test(thumb)) return thumb
   return raw
+}
+
+export function toExplorePreviewImage(img, images, linkThumb) {
+  return previewImage(img, images, linkThumb)
 }
 
 /** Latest post this person wrote. A channel card they only turned on is not a post.
@@ -155,7 +159,7 @@ export async function attachLatestPostPreviews(users, hiddenObjectIds = []) {
   const byAuthor = new Map(rows.map((r) => [String(r._id), r]))
   return users.map((u) => {
     const row = byAuthor.get(String(u._id))
-    const img = row ? previewImage(row.img, row.images, row.linkThumb) : ''
+    const img = row ? toExplorePreviewImage(row.img, row.images, row.linkThumb) : ''
     return {
       ...u,
       latestPost: row
@@ -246,7 +250,7 @@ export async function findRecentDiscoverPosts(
       { hiddenByAdmin: { $ne: true } },
     ],
   })
-    .select('_id postedBy text img images createdAt')
+    .select('_id postedBy text img images linkThumb createdAt')
     .sort({ createdAt: -1 })
     .limit(scanLimit)
     .populate('postedBy', 'username name profilePic country')

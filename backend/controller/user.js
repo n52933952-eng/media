@@ -21,7 +21,7 @@ import { getIO, getUserSelfRoomId } from '../socket/socket.js'
 import { getFollowGraphIdsForUser, attachFollowGraphToUser, isViewerFollowingFollowee } from '../services/followGraph.js'
 import { invalidateUserAuthCache } from '../services/userAuthCache.js'
 import { invalidateUserFeedCache } from '../services/feedCache.js'
-import { sampleDiscoverUsers, attachLatestPostPreviews, findRecentDiscoverPosts } from '../services/discoverUsers.js'
+import { sampleDiscoverUsers, attachLatestPostPreviews, findRecentDiscoverPosts, toExplorePreviewImage } from '../services/discoverUsers.js'
 import { updateCommentDenormForUser, deleteCommentsByUser } from '../services/commentService.js'
 import { isAppAdmin } from '../services/appAdmin.js'
 
@@ -1139,7 +1139,11 @@ export const getExplorePeople = async (req, res) => {
                     latestPost: {
                         _id: post._id,
                         text: post.text || '',
-                        img: post.img || (Array.isArray(post.images) ? post.images[0] : '') || '',
+                        img: toExplorePreviewImage(
+                            post.img,
+                            post.images,
+                            post.linkThumb,
+                        ),
                         createdAt: post.createdAt,
                     },
                 })
