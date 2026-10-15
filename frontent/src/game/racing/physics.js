@@ -31,6 +31,7 @@ const _carForward = new THREE.Vector3();
 const _velocity = new THREE.Vector3();
 const _up = new THREE.Vector3(0, 1, 0);
 const _right = new THREE.Vector3();
+const _carDown = new THREE.Vector3();
 
 function moveToward(current, target, maxDelta) {
   if (current < target) return Math.min(target, current + maxDelta);
@@ -119,18 +120,22 @@ export function updatePhysics(deltaTime, ammo, physicsState, carState, debugObje
     }
   }
   carForward.y = savedForwardY;
-  // Extra push into the road grows slowly, so it does not bounce the car when you accelerate.
+  // Push into the road along the car, so a hill still has grip and the nose stays down.
   const downTarget = Math.min(420, Math.max(0, speedKPH - 35) * speedKPH * 0.018);
   downForce = moveToward(downForce, downTarget, 220 * deltaTime);
   if (downForce > 12) {
-    const down = new ammo.btVector3(0, -downForce, 0);
+    _carDown.set(0, -1, 0).applyQuaternion(carModel.quaternion);
+    const down = new ammo.btVector3(
+      _carDown.x * downForce,
+      _carDown.y * downForce,
+      _carDown.z * downForce
+    );
     carBody.applyCentralForce(down);
     ammo.destroy(down);
   }
   
   for (let i = 0; i < vehicle.getNumWheels(); i++) {
-    // A little more drive on the front wheels keeps the nose from lifting on gas.
-    const share = i < 2 ? 0.58 : 0.42;
+    const share = 0.5;
     vehicle.applyEngineForce(engineForce * share, i);
     vehicle.setBrake(brakingForce, i);
   }

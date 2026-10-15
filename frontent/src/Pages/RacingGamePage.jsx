@@ -1304,7 +1304,7 @@ export default function RacingGamePage() {
     })
     car.getWorldDirection(_camDir.current)
     // Ignore a small gas nod. A real hill still tilts the camera.
-    if (Math.abs(_camDir.current.y) < 0.12) _camDir.current.y = 0
+    if (Math.abs(_camDir.current.y) < 0.05) _camDir.current.y = 0
     if (_camDir.current.lengthSq() < 1e-8) _camDir.current.set(0, 0, 1)
     _camDir.current.normalize()
     _camOffset.current.copy(_camDir.current).multiplyScalar(-view.distance)
