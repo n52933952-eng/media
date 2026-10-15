@@ -34,7 +34,7 @@ const CAMERA_VIEWS = [
   { name: 'Behind', distance: CAMERA_DISTANCE, height: CAMERA_HEIGHT, lookAhead: CAMERA_LOOK_AHEAD, lookY: 0.15, hideCar: false, lerp: CAMERA_LERP },
   { name: 'Inside', distance: 0.25, height: 0.9, lookAhead: 16, lookY: 0.85, hideCar: true, lerp: 0.5 },
   { name: 'Above', distance: 8, height: 9, lookAhead: 7, lookY: 0.2, hideCar: false, lerp: 0.14 },
-  { name: 'Front', distance: -9, height: 1.7, lookAhead: 0, lookY: 0.55, hideCar: false, lerp: 0.2 },
+  { name: 'Rear', distance: CAMERA_DISTANCE, height: CAMERA_HEIGHT, lookAhead: CAMERA_LOOK_AHEAD, lookY: 0.15, hideCar: false, lerp: CAMERA_LERP, mirror: true },
 ]
 const MAX_SPEED_KPH    = 200
 const DEFAULT_MAP      = 'map1'
@@ -112,6 +112,8 @@ export default function RacingGamePage() {
   const rendererRef    = useRef(null)
   const sceneRef       = useRef(null)
   const cameraRef      = useRef(null)
+  const rearCamRef     = useRef(null)
+  const rearFrameRef   = useRef(null)
   const clockRef       = useRef(new THREE.Clock())
   const physicsRef     = useRef(null)        // { physicsWorld, tmpTrans }
   const carBodyRef     = useRef(null)
@@ -998,6 +1000,8 @@ export default function RacingGamePage() {
     const camera = new THREE.PerspectiveCamera(58, W/H, 0.5, 20000)
     camera.position.set(0, 10, 20)
     cameraRef.current = camera
+    const rearCam = new THREE.PerspectiveCamera(50, 2.4, 0.5, 20000)
+    rearCamRef.current = rearCam
 
     // ── Renderer ───────────────────────────────────────────────────────────
     const renderer = new THREE.WebGLRenderer({
@@ -1526,7 +1530,59 @@ export default function RacingGamePage() {
       }
 
       drawMinimap()
-      rendererRef.current?.render(sceneRef.current, cameraRef.current)
+      const renderer = rendererRef.current
+      const scene = sceneRef.current
+      const mainCam = cameraRef.current
+      if (renderer && scene && mainCam) {
+        renderer.setScissorTest(false)
+        renderer.render(scene, mainCam)
+        const mirrorOn = CAMERA_VIEWS[camViewRef.current]?.mirror
+        const frame = rearFrameRef.current
+        const rearCam = rearCamRef.current
+        const car = carModelRef.current
+        if (mirrorOn && frame && rearCam && car) {
+          const canvas = renderer.domElement
+          const cr = canvas.getBoundingClientRect()
+          const fr = frame.getBoundingClientRect()
+          if (cr.width > 8 && fr.width > 8) {
+            const scaleX = canvas.width / cr.width
+            const scaleY = canvas.height / cr.height
+            const vx = Math.max(0, Math.round((fr.left - cr.left) * scaleX))
+            const vy = Math.max(0, Math.round((cr.bottom - fr.bottom) * scaleY))
+            const vw = Math.max(1, Math.round(fr.width * scaleX))
+            const vh = Math.max(1, Math.round(fr.height * scaleY))
+            car.getWorldDirection(_camDir.current)
+            _camDir.current.y = 0
+            if (_camDir.current.lengthSq() < 1e-8) _camDir.current.set(0, 0, 1)
+            _camDir.current.normalize()
+            rearCam.position.copy(car.position).addScaledVector(_camDir.current, -0.6)
+            rearCam.position.y += 1.55
+            _camTarget.current.copy(car.position).addScaledVector(_camDir.current, -24)
+            _camTarget.current.y = car.position.y + 0.4
+            rearCam.aspect = vw / vh
+            rearCam.updateProjectionMatrix()
+            rearCam.lookAt(_camTarget.current)
+            const hidden = []
+            car.traverse((node) => {
+              if (node.isMesh && node.visible) {
+                hidden.push(node)
+                node.visible = false
+              }
+            })
+            renderer.setScissorTest(true)
+            renderer.setScissor(vx, vy, vw, vh)
+            renderer.setViewport(vx, vy, vw, vh)
+            const prevClear = renderer.autoClear
+            renderer.autoClear = false
+            renderer.clearDepth()
+            renderer.render(scene, rearCam)
+            renderer.autoClear = prevClear
+            renderer.setScissorTest(false)
+            renderer.setViewport(0, 0, canvas.width, canvas.height)
+            for (const node of hidden) node.visible = true
+          }
+        }
+      }
     } catch (e) {
       console.error('[RacingGame] render loop error', e)
       if (afRef.current) {
@@ -1678,6 +1734,23 @@ export default function RacingGamePage() {
             inset: 0,
             width: '100%',
             height: '100%',
+          }}
+        />
+        <div
+          ref={rearFrameRef}
+          style={{
+            display: camViewName === 'Rear' && !loading ? 'block' : 'none',
+            position: 'absolute',
+            top: 12,
+            left: '50%',
+            transform: 'translateX(-50%)',
+            width: 'min(360px, 46%)',
+            aspectRatio: '2.45 / 1',
+            border: '3px solid rgba(255,255,255,0.9)',
+            borderRadius: 4,
+            boxShadow: '0 0 0 5px rgba(0,0,0,0.65)',
+            pointerEvents: 'none',
+            zIndex: 4,
           }}
         />
       </div>
