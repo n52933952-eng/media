@@ -155,6 +155,7 @@ export default function RacingGamePage() {
   const _flipUp        = useRef(new THREE.Vector3())
   const _flipAxis      = useRef(new THREE.Vector3(0, 1, 0))
   const resizeCleanupRef = useRef(null)
+  const snapStartRef = useRef(null)
   const remoteAudioRef = useRef(null)
   const raceVoiceRoomRef = useRef(null)
   /** Prevents double teardown / navigate when disconnect + opponentLeft both fire */
@@ -1124,6 +1125,7 @@ export default function RacingGamePage() {
         lane
       )
     }
+    snapStartRef.current = snapPlayerToStartLine
 
     const gd = loadGates(DEFAULT_MAP, scene, lm, (loaded) => {
       gateDataRef.current = loaded
@@ -1243,6 +1245,7 @@ export default function RacingGamePage() {
     if (typeof window !== 'undefined' && window.matchMedia('(max-width: 991px)').matches) {
       lockRaceLandscape()
     }
+    snapStartRef.current?.()
     let val = 3
     setCountdown(val)
     const id = setInterval(() => {
@@ -1308,7 +1311,7 @@ export default function RacingGamePage() {
     if (_camDir.current.lengthSq() < 1e-8) _camDir.current.set(0, 0, 1)
     _camDir.current.normalize()
     const phoneView = window.innerWidth < 992
-    const distScale = phoneView ? 0.84 : 1
+    const distScale = phoneView ? 0.9 : 1
     const heightScale = phoneView ? 0.92 : 1
     if (phoneView && cam.fov !== 54) {
       cam.fov = 54
@@ -1326,12 +1329,12 @@ export default function RacingGamePage() {
       camLookYRef.current = car.position.y + view.lookY
     } else {
       const prevY = cam.position.y
-      cam.position.lerp(_camTarget.current, phoneView ? 0.08 : view.lerp)
-      cam.position.y = prevY + (_camTarget.current.y - prevY) * (phoneView ? 0.05 : 0.08)
+      cam.position.lerp(_camTarget.current, view.lerp)
+      cam.position.y = prevY + (_camTarget.current.y - prevY) * 0.08
       if (camLookYRef.current == null) camLookYRef.current = car.position.y + view.lookY
       camLookYRef.current += (car.position.y + view.lookY - camLookYRef.current) * 0.08
     }
-    _camOffset.current.copy(_camDir.current).multiplyScalar(view.lookAhead)
+    _camOffset.current.copy(_camDir.current).multiplyScalar(view.lookAhead * (phoneView ? 0.72 : 1))
     _camOffset.current.add(car.position)
     _camOffset.current.y = camLookYRef.current
     cam.lookAt(_camOffset.current)
