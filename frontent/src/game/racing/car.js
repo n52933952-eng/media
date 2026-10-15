@@ -769,6 +769,9 @@ export function resetCarPosition(ammo, carBody, vehicle, currentSteeringAngle, c
 }
 
 // Update car and wheel positions from physics
+const _bodyQuat = new THREE.Quaternion()
+const _bodyEuler = new THREE.Euler(0, 0, 0, 'YXZ')
+
 export function updateCarPosition(ammo, vehicle, carModel, wheelMeshes) {
   if (!vehicle || !carModel) return;
   
@@ -777,9 +780,20 @@ export function updateCarPosition(ammo, vehicle, carModel, wheelMeshes) {
   const position = chassisWorldTrans.getOrigin();
   const quaternion = chassisWorldTrans.getRotation();
 
-  // Update car model position. Tyres stay parented in the arches.
-  carModel.position.set(position.x(), position.y(), position.z());
-  carModel.quaternion.set(quaternion.x(), quaternion.y(), quaternion.z(), quaternion.w());
+  // Keep left/right instant. Ease the up-down and the nose so gas does not shake the picture.
+  const y = position.y()
+  if (carModel.userData.visY == null || Math.abs(y - carModel.userData.visY) > 1.5) carModel.userData.visY = y
+  carModel.userData.visY += (y - carModel.userData.visY) * 0.16
+  carModel.position.set(position.x(), carModel.userData.visY, position.z());
+
+  _bodyQuat.set(quaternion.x(), quaternion.y(), quaternion.z(), quaternion.w())
+  _bodyEuler.setFromQuaternion(_bodyQuat, 'YXZ')
+  if (carModel.userData.visPitch == null || Math.abs(_bodyEuler.x - carModel.userData.visPitch) > 0.6) {
+    carModel.userData.visPitch = _bodyEuler.x
+  }
+  carModel.userData.visPitch += (_bodyEuler.x - carModel.userData.visPitch) * 0.14
+  _bodyEuler.x = carModel.userData.visPitch
+  carModel.quaternion.setFromEuler(_bodyEuler)
 
   for (let i = 0; i < vehicle.getNumWheels(); i++) {
     const wm = wheelMeshes[i];
