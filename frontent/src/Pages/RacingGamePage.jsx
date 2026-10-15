@@ -25,7 +25,7 @@ import { shouldSkipGameExitForLive } from '../services/liveBroadcastNav'
 
 // ─── Camera constants (same as reference game) ───────────────────────────────
 const CAMERA_DISTANCE  = 12
-const CAMERA_HEIGHT    = 4.6
+const CAMERA_HEIGHT    = 2.4
 const CAMERA_LERP      = 0.12
 const CAMERA_LOOK_AHEAD = 10
 const MAX_SPEED_KPH    = 200
