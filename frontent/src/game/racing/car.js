@@ -769,9 +769,6 @@ export function resetCarPosition(ammo, carBody, vehicle, currentSteeringAngle, c
 }
 
 // Update car and wheel positions from physics
-const _bodyQuat = new THREE.Quaternion()
-const _bodyEuler = new THREE.Euler(0, 0, 0, 'YXZ')
-
 export function updateCarPosition(ammo, vehicle, carModel, wheelMeshes) {
   if (!vehicle || !carModel) return;
   
@@ -780,17 +777,9 @@ export function updateCarPosition(ammo, vehicle, carModel, wheelMeshes) {
   const position = chassisWorldTrans.getOrigin();
   const quaternion = chassisWorldTrans.getRotation();
 
-  // Sit on the real height. Only the nose is eased, so gas does not rock the car.
+  // Follow the chassis, including hills. A smoothed nose twists the car on a slope.
   carModel.position.set(position.x(), position.y(), position.z());
-
-  _bodyQuat.set(quaternion.x(), quaternion.y(), quaternion.z(), quaternion.w())
-  _bodyEuler.setFromQuaternion(_bodyQuat, 'YXZ')
-  if (carModel.userData.visPitch == null || Math.abs(_bodyEuler.x - carModel.userData.visPitch) > 0.45) {
-    carModel.userData.visPitch = _bodyEuler.x
-  }
-  carModel.userData.visPitch += (_bodyEuler.x - carModel.userData.visPitch) * 0.07
-  _bodyEuler.x = carModel.userData.visPitch
-  carModel.quaternion.setFromEuler(_bodyEuler)
+  carModel.quaternion.set(quaternion.x(), quaternion.y(), quaternion.z(), quaternion.w())
 
   for (let i = 0; i < vehicle.getNumWheels(); i++) {
     const wm = wheelMeshes[i];

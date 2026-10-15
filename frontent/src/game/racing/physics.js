@@ -117,20 +117,6 @@ export function updatePhysics(deltaTime, ammo, physicsState, carState, debugObje
       carBody.setLinearVelocity(planted);
       ammo.destroy(planted);
     }
-    // Cut the nose-up kick from the gas. Steering (turn) is left alone.
-    const angVel = carBody.getAngularVelocity();
-    const pitchRate = _right.x * angVel.x() + _right.y * angVel.y() + _right.z * angVel.z();
-    if (Math.abs(pitchRate) > 0.04) {
-      const cut = pitchRate * 0.72;
-      const damped = new ammo.btVector3(
-        angVel.x() - _right.x * cut,
-        angVel.y() - _right.y * cut,
-        angVel.z() - _right.z * cut
-      );
-      carBody.setAngularVelocity(damped);
-      ammo.destroy(damped);
-    }
-    ammo.destroy(angVel);
   }
   carForward.y = savedForwardY;
   // Extra push into the road grows slowly, so it does not bounce the car when you accelerate.

@@ -272,7 +272,7 @@ const ExplorePage = () => {
                 >
                   <Avatar
                     size="xs"
-                    src={item.profilePic}
+                    src={item.profilePic || item.latestPost?.channelPic}
                     name={item.name || item.username}
                     cursor="pointer"
                     onClick={() => item.username && navigate(`/${item.username}`)}
