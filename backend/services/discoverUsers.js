@@ -186,15 +186,15 @@ export async function attachLatestPostPreviews(users, hiddenObjectIds = []) {
     const turnedTime = turned?.createdAt ? new Date(turned.createdAt).getTime() : 0
     const row = turnedTime > ownTime ? turned : own
     const channelPic = turned ? (channelPicById.get(String(turned.channelUser)) || '') : ''
-    const profilePic = u.profilePic || channelPic || null
+    let img = row ? previewImage(row.img, row.images) : ''
+    if (img && (img === channelPic || img === u.profilePic)) img = ''
     return {
       ...u,
-      profilePic,
       latestPost: row
         ? {
             _id: row.postId,
             text: row.text || '',
-            img: previewImage(row.img, row.images),
+            img,
             createdAt: row.createdAt,
             channelPic: channelPic || null,
           }

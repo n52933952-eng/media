@@ -16,6 +16,22 @@ function clipWords(text, max = 10) {
   return `${words.slice(0, max).join(' ')} …`
 }
 
+const TEXT_FLAVORS = [
+  { light: '#E7F4FF', dark: '#10283A', accent: '#1DA1F2' },
+  { light: '#F3EEFF', dark: '#221838', accent: '#8B6CFF' },
+  { light: '#E8FBF2', dark: '#10281E', accent: '#1DBF73' },
+  { light: '#FFF3E6', dark: '#2C1C10', accent: '#F0A04B' },
+  { light: '#FDECEF', dark: '#2C141C', accent: '#E86B86' },
+  { light: '#E7F8F8', dark: '#102628', accent: '#2BB8C7' },
+]
+
+function textFlavor(seed) {
+  let n = 0
+  const s = String(seed || '')
+  for (let i = 0; i < s.length; i += 1) n = (n + s.charCodeAt(i) * (i + 1)) % TEXT_FLAVORS.length
+  return TEXT_FLAVORS[n]
+}
+
 const ExplorePage = () => {
   const { user: currentUser, setUser } = useContext(UserContext)
   const showToast = useShowToast()
@@ -34,7 +50,7 @@ const ExplorePage = () => {
   const border = useColorModeValue('gray.200', 'gray.700')
   const muted = useColorModeValue('gray.600', 'gray.400')
   const emptyBg = useColorModeValue('#EEF4FF', '#15202B')
-  const textBorder = useColorModeValue('blue.100', 'whiteAlpha.200')
+  const isDark = useColorModeValue(false, true)
 
   const load = useCallback(async (mode = 'reset') => {
     if (mode === 'more') {
@@ -154,14 +170,39 @@ const ExplorePage = () => {
             const text = String(preview?.text || '').trim()
             const video = isVideoUrl(img)
             const poster = video ? videoPosterUrl(img) : ''
+            const displayName = String(item.name || item.username || 'User').trim()
+            const avatarUrl = String(item.profilePic || '').trim()
+            const channelUrl = String(preview?.channelPic || '').trim()
+            const imgIsAvatar = !!raw && (raw === avatarUrl || raw === channelUrl || img === avatarUrl || img === channelUrl)
+            const photo = img && !imgIsAvatar ? img : ''
             const snippet = clipWords(text, 20)
             const wordCount = snippet.replace(' …', '').trim().split(/\s+/).filter(Boolean).length
             const shortQuote = wordCount <= 3
-            const isText = !img && !video
+            const sameAsName = !!text && (text === item.username || text === item.name || text === displayName)
+            const nameOnly = !photo && !video && (!text || sameAsName)
+            const flavor = textFlavor(String(item._id || displayName))
+            const letter = displayName[0]?.toUpperCase() || '?'
             return (
-              <Box key={item._id} position="relative" borderRadius="lg" overflow="hidden" bg={cardBg} borderWidth="1px" borderColor={border}>
+              <Box key={item._id}>
+                <Box borderRadius="full" overflow="hidden" bg={cardBg} borderWidth="1px" borderColor={border}>
                 {(() => {
-                  if (video && img) {
+                  if (nameOnly) {
+                    return (
+                      <Flex
+                        w="100%"
+                        pt="100%"
+                        position="relative"
+                        bg={emptyBg}
+                        cursor="pointer"
+                        onClick={() => item.username && navigate(`/${item.username}`)}
+                      >
+                        <Flex position="absolute" inset={0} align="center" justify="center">
+                          <Text color="blue.400" fontSize="5xl" fontWeight="extrabold" lineHeight="1">{letter}</Text>
+                        </Flex>
+                      </Flex>
+                    )
+                  }
+                  if (video && photo) {
                     return (
                       <Box
                         position="relative"
@@ -180,12 +221,12 @@ const ExplorePage = () => {
                             inset={0}
                             w="100%"
                             h="100%"
-                            objectFit="cover"
+                            objectFit="contain"
                           />
                         ) : (
                           <Box
                             as="video"
-                            src={img}
+                            src={photo}
                             muted
                             preload="metadata"
                             playsInline
@@ -193,7 +234,7 @@ const ExplorePage = () => {
                             inset={0}
                             w="100%"
                             h="100%"
-                            objectFit="cover"
+                            objectFit="contain"
                           />
                         )}
                         <Flex position="absolute" inset={0} align="center" justify="center" pointerEvents="none">
@@ -213,39 +254,42 @@ const ExplorePage = () => {
                       </Box>
                     )
                   }
-                  if (img) {
+                  if (photo) {
                     return (
                       <Box
                         w="100%"
                         pt="100%"
                         position="relative"
+                        bg={emptyBg}
                         cursor="pointer"
                         onClick={() => item.username && navigate(`/${item.username}`)}
                       >
-                        <Image src={img} alt="" position="absolute" inset={0} w="100%" h="100%" objectFit="cover" />
+                        <Image src={photo} alt="" position="absolute" inset={0} w="100%" h="100%" objectFit="contain" />
                       </Box>
                     )
                   }
                   return (
                     <Box
-                      bg={emptyBg}
-                      borderColor={textBorder}
+                      bg={isDark ? flavor.dark : flavor.light}
+                      borderColor={flavor.accent}
                       w="100%"
                       pt="100%"
                       position="relative"
+                      overflow="hidden"
                       cursor="pointer"
                       onClick={() => item.username && navigate(`/${item.username}`)}
                     >
-                      <Box position="absolute" left={0} top="16px" bottom="48px" w="3px" borderRadius="full" bg="blue.400" />
-                      <Text position="absolute" top={2} left={3} color="blue.400" fontSize="2xl" lineHeight="1" fontWeight="extrabold" opacity={0.55}>
+                      <Box position="absolute" top="-28px" right="-18px" w="84px" h="84px" borderRadius="full" bg={flavor.accent} opacity={0.22} />
+                      <Box position="absolute" bottom="-24px" left="-16px" w="62px" h="62px" borderRadius="full" bg={flavor.accent} opacity={0.16} />
+                      <Text position="absolute" top={1} left={3} color={flavor.accent} fontSize="4xl" lineHeight="1" fontWeight="extrabold" opacity={0.75}>
                         “
                       </Text>
                       <Text
                         position="absolute"
-                        top={8}
+                        top={10}
                         left={3}
-                        right={2}
-                        bottom="40px"
+                        right={3}
+                        bottom={3}
                         fontSize={shortQuote ? 'lg' : 'sm'}
                         fontWeight="bold"
                         lineHeight="1.35"
@@ -257,22 +301,11 @@ const ExplorePage = () => {
                     </Box>
                   )
                 })()}
-                <Flex
-                  position="absolute"
-                  left={0}
-                  right={0}
-                  bottom={0}
-                  align="center"
-                  gap={2}
-                  px={2}
-                  py={1.5}
-                  bg={isText ? 'transparent' : 'blackAlpha.600'}
-                  borderTopWidth={isText ? '1px' : 0}
-                  borderColor={textBorder}
-                >
+                </Box>
+                <Flex align="center" gap={2} px={1} pt={2}>
                   <Avatar
                     size="xs"
-                    src={item.profilePic || item.latestPost?.channelPic}
+                    src={item.profilePic || undefined}
                     name={item.name || item.username}
                     cursor="pointer"
                     onClick={() => item.username && navigate(`/${item.username}`)}
@@ -280,20 +313,20 @@ const ExplorePage = () => {
                   <Text
                     flex={1}
                     minW={0}
-                    fontSize="xs"
+                    fontSize="sm"
                     fontWeight="bold"
-                    color={isText ? undefined : 'white'}
                     noOfLines={1}
                     cursor="pointer"
                     onClick={() => item.username && navigate(`/${item.username}`)}
                   >
-                    {item.username ? `@${item.username}` : (item.name || 'User')}
+                    {displayName}
                   </Text>
                   <Button
                     size="xs"
                     minW="auto"
                     px={{ base: 2, md: 3 }}
                     flexShrink={0}
+                    borderRadius="full"
                     colorScheme="blue"
                     isLoading={followingId === String(item._id)}
                     onClick={() => follow(item)}

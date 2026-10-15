@@ -262,8 +262,8 @@ const WHEEL_Z_OFFSET = 1.5;
 // Physics tuning parameters
 // Holds the car without bouncing. The wheels, not the body, touch the road.
 const SUSPENSION_STIFFNESS = 90;
-const SUSPENSION_DAMPING = 12;
-const SUSPENSION_COMPRESSION = 20;
+const SUSPENSION_DAMPING = 16;
+const SUSPENSION_COMPRESSION = 28;
 const ROLL_INFLUENCE = 0.06;
 const WHEEL_FRICTION = 36;
 
@@ -769,6 +769,9 @@ export function resetCarPosition(ammo, carBody, vehicle, currentSteeringAngle, c
 }
 
 // Update car and wheel positions from physics
+const _bodyQuat = new THREE.Quaternion()
+const _bodyEuler = new THREE.Euler(0, 0, 0, 'YXZ')
+
 export function updateCarPosition(ammo, vehicle, carModel, wheelMeshes) {
   if (!vehicle || !carModel) return;
   
@@ -777,9 +780,20 @@ export function updateCarPosition(ammo, vehicle, carModel, wheelMeshes) {
   const position = chassisWorldTrans.getOrigin();
   const quaternion = chassisWorldTrans.getRotation();
 
-  // Follow the chassis, including hills. A smoothed nose twists the car on a slope.
+  // Real position, including hills. Only a tiny gas nod is eased so the nose does not rock.
   carModel.position.set(position.x(), position.y(), position.z());
-  carModel.quaternion.set(quaternion.x(), quaternion.y(), quaternion.z(), quaternion.w())
+  _bodyQuat.set(quaternion.x(), quaternion.y(), quaternion.z(), quaternion.w())
+  _bodyEuler.setFromQuaternion(_bodyQuat, 'YXZ')
+  const pitch = _bodyEuler.x
+  if (carModel.userData.visPitch == null) carModel.userData.visPitch = pitch
+  const pitchGap = pitch - carModel.userData.visPitch
+  if (Math.abs(pitch) > 0.2 || Math.abs(pitchGap) > 0.1) {
+    carModel.userData.visPitch = pitch
+  } else {
+    carModel.userData.visPitch += pitchGap * 0.2
+  }
+  _bodyEuler.x = carModel.userData.visPitch
+  carModel.quaternion.setFromEuler(_bodyEuler)
 
   for (let i = 0; i < vehicle.getNumWheels(); i++) {
     const wm = wheelMeshes[i];

@@ -129,8 +129,8 @@ export function updatePhysics(deltaTime, ammo, physicsState, carState, debugObje
   }
   
   for (let i = 0; i < vehicle.getNumWheels(); i++) {
-    // A little power on the front wheels keeps the nose from popping up.
-    const share = i < 2 ? 0.5 : 0.5;
+    // A little more drive on the front wheels keeps the nose from lifting on gas.
+    const share = i < 2 ? 0.58 : 0.42;
     vehicle.applyEngineForce(engineForce * share, i);
     vehicle.setBrake(brakingForce, i);
   }
