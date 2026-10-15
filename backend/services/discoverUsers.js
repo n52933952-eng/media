@@ -110,8 +110,7 @@ function previewImage(img, images) {
   return youtubePreviewUrl(raw) || raw
 }
 
-/** One latest normal post preview per user (uses postedBy + createdAt index).
- *  Also keeps a channel the person turned into their own post, with a real picture and avatar. */
+/** One latest post the person actually wrote. A channel they only turned on is not their post. */
 export async function attachLatestPostPreviews(users, hiddenObjectIds = []) {
   if (!Array.isArray(users) || users.length === 0) return []
   const ids = users
@@ -121,73 +120,37 @@ export async function attachLatestPostPreviews(users, hiddenObjectIds = []) {
   if (!ids.length) return users.map((u) => ({ ...u, latestPost: null }))
 
   const hidden = hiddenPostQueryFilter(hiddenObjectIds)
-  const idStrings = ids.map((id) => String(id))
-  const [rows, channelRows] = await Promise.all([
-    Post.aggregate([
-      {
-        $match: {
-          postedBy: { $in: ids },
-          hiddenByAdmin: { $ne: true },
-          ...hidden,
-          $or: [
-            { channelAddedBy: { $exists: false } },
-            { channelAddedBy: null },
-            { channelAddedBy: '' },
-          ],
-        },
+  const rows = await Post.aggregate([
+    {
+      $match: {
+        postedBy: { $in: ids },
+        hiddenByAdmin: { $ne: true },
+        ...hidden,
+        $or: [
+          { channelAddedBy: { $exists: false } },
+          { channelAddedBy: null },
+          { channelAddedBy: '' },
+        ],
       },
-      { $sort: { createdAt: -1 } },
-      {
-        $group: {
-          _id: '$postedBy',
-          postId: { $first: '$_id' },
-          text: { $first: '$text' },
-          img: { $first: '$img' },
-          images: { $first: '$images' },
-          createdAt: { $first: '$createdAt' },
-        },
+    },
+    { $sort: { createdAt: -1 } },
+    {
+      $group: {
+        _id: '$postedBy',
+        postId: { $first: '$_id' },
+        text: { $first: '$text' },
+        img: { $first: '$img' },
+        images: { $first: '$images' },
+        createdAt: { $first: '$createdAt' },
       },
-    ]),
-    Post.aggregate([
-      {
-        $match: {
-          channelAddedBy: { $in: idStrings },
-          hiddenByAdmin: { $ne: true },
-          ...hidden,
-        },
-      },
-      { $sort: { createdAt: -1 } },
-      {
-        $group: {
-          _id: '$channelAddedBy',
-          postId: { $first: '$_id' },
-          text: { $first: '$text' },
-          img: { $first: '$img' },
-          images: { $first: '$images' },
-          createdAt: { $first: '$createdAt' },
-          channelUser: { $first: '$postedBy' },
-        },
-      },
-    ]),
+    },
   ])
 
-  const channelUserIds = [...new Set(channelRows.map((r) => String(r.channelUser || '')).filter((id) => mongoose.Types.ObjectId.isValid(id)))]
-  const channelUsers = channelUserIds.length
-    ? await User.find({ _id: { $in: channelUserIds } }).select('_id profilePic').lean()
-    : []
-  const channelPicById = new Map(channelUsers.map((u) => [String(u._id), u.profilePic || '']))
-
   const byAuthor = new Map(rows.map((r) => [String(r._id), r]))
-  const byChannelAdder = new Map(channelRows.map((r) => [String(r._id), r]))
   return users.map((u) => {
-    const own = byAuthor.get(String(u._id))
-    const turned = byChannelAdder.get(String(u._id))
-    const ownTime = own?.createdAt ? new Date(own.createdAt).getTime() : 0
-    const turnedTime = turned?.createdAt ? new Date(turned.createdAt).getTime() : 0
-    const row = turnedTime > ownTime ? turned : own
-    const channelPic = turned ? (channelPicById.get(String(turned.channelUser)) || '') : ''
+    const row = byAuthor.get(String(u._id))
     let img = row ? previewImage(row.img, row.images) : ''
-    if (img && (img === channelPic || img === u.profilePic)) img = ''
+    if (img && img === u.profilePic) img = ''
     return {
       ...u,
       latestPost: row
@@ -196,7 +159,6 @@ export async function attachLatestPostPreviews(users, hiddenObjectIds = []) {
             text: row.text || '',
             img,
             createdAt: row.createdAt,
-            channelPic: channelPic || null,
           }
         : null,
     }

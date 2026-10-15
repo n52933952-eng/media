@@ -174,12 +174,13 @@ const ExplorePage = () => {
             const avatarUrl = String(item.profilePic || '').trim()
             const channelUrl = String(preview?.channelPic || '').trim()
             const imgIsAvatar = !!raw && (raw === avatarUrl || raw === channelUrl || img === avatarUrl || img === channelUrl)
-            const photo = img && !imgIsAvatar ? img : ''
-            const snippet = clipWords(text, 20)
+            const fromChannel = !!preview?.channelPic
+            const photo = img && !imgIsAvatar && !fromChannel ? img : ''
+            const snippet = clipWords(fromChannel ? '' : text, 20)
             const wordCount = snippet.replace(' …', '').trim().split(/\s+/).filter(Boolean).length
             const shortQuote = wordCount <= 3
             const sameAsName = !!text && (text === item.username || text === item.name || text === displayName)
-            const nameOnly = !photo && !video && (!text || sameAsName)
+            const nameOnly = fromChannel || (!photo && !video && (!text || sameAsName))
             const flavor = textFlavor(String(item._id || displayName))
             const letter = displayName[0]?.toUpperCase() || '?'
             return (
@@ -187,6 +188,20 @@ const ExplorePage = () => {
                 <Box borderRadius="full" overflow="hidden" bg={cardBg} borderWidth="1px" borderColor={border}>
                 {(() => {
                   if (nameOnly) {
+                    if (avatarUrl) {
+                      return (
+                        <Box
+                          w="100%"
+                          pt="100%"
+                          position="relative"
+                          bg={emptyBg}
+                          cursor="pointer"
+                          onClick={() => item.username && navigate(`/${item.username}`)}
+                        >
+                          <Image src={avatarUrl} alt="" position="absolute" inset={0} w="100%" h="100%" objectFit="contain" />
+                        </Box>
+                      )
+                    }
                     return (
                       <Flex
                         w="100%"
