@@ -263,7 +263,7 @@ const WHEEL_Z_OFFSET = 1.5;
 // Holds the car without bouncing. The wheels, not the body, touch the road.
 const SUSPENSION_STIFFNESS = 90;
 const SUSPENSION_DAMPING = 12;
-const SUSPENSION_COMPRESSION = 16;
+const SUSPENSION_COMPRESSION = 20;
 const ROLL_INFLUENCE = 0.06;
 const WHEEL_FRICTION = 36;
 
@@ -780,18 +780,15 @@ export function updateCarPosition(ammo, vehicle, carModel, wheelMeshes) {
   const position = chassisWorldTrans.getOrigin();
   const quaternion = chassisWorldTrans.getRotation();
 
-  // Keep left/right instant. Ease the up-down and the nose so gas does not shake the picture.
-  const y = position.y()
-  if (carModel.userData.visY == null || Math.abs(y - carModel.userData.visY) > 1.5) carModel.userData.visY = y
-  carModel.userData.visY += (y - carModel.userData.visY) * 0.16
-  carModel.position.set(position.x(), carModel.userData.visY, position.z());
+  // Sit on the real height. Only the nose is eased, so gas does not rock the car.
+  carModel.position.set(position.x(), position.y(), position.z());
 
   _bodyQuat.set(quaternion.x(), quaternion.y(), quaternion.z(), quaternion.w())
   _bodyEuler.setFromQuaternion(_bodyQuat, 'YXZ')
-  if (carModel.userData.visPitch == null || Math.abs(_bodyEuler.x - carModel.userData.visPitch) > 0.6) {
+  if (carModel.userData.visPitch == null || Math.abs(_bodyEuler.x - carModel.userData.visPitch) > 0.45) {
     carModel.userData.visPitch = _bodyEuler.x
   }
-  carModel.userData.visPitch += (_bodyEuler.x - carModel.userData.visPitch) * 0.14
+  carModel.userData.visPitch += (_bodyEuler.x - carModel.userData.visPitch) * 0.07
   _bodyEuler.x = carModel.userData.visPitch
   carModel.quaternion.setFromEuler(_bodyEuler)
 

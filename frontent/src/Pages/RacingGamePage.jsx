@@ -126,6 +126,7 @@ export default function RacingGamePage() {
   const steeringRef    = useRef(0)
   const camViewRef     = useRef(0)
   const camSnapRef     = useRef(false)
+  const camLookYRef    = useRef(null)
   const cycleCamRef    = useRef(() => {})
   const keyStateRef    = useRef({ w:false, s:false, a:false, d:false })
   const accumRef       = useRef(0)
@@ -1302,7 +1303,7 @@ export default function RacingGamePage() {
       if (node.isMesh) node.visible = !view.hideCar
     })
     car.getWorldDirection(_camDir.current)
-    _camDir.current.y *= 0.2
+    _camDir.current.y = 0
     if (_camDir.current.lengthSq() < 1e-8) _camDir.current.set(0, 0, 1)
     _camDir.current.normalize()
     _camOffset.current.copy(_camDir.current).multiplyScalar(-view.distance)
@@ -1311,14 +1312,17 @@ export default function RacingGamePage() {
     if (camSnapRef.current) {
       cam.position.copy(_camTarget.current)
       camSnapRef.current = false
+      camLookYRef.current = car.position.y + view.lookY
     } else {
       const prevY = cam.position.y
       cam.position.lerp(_camTarget.current, view.lerp)
-      cam.position.y = prevY + (_camTarget.current.y - prevY) * Math.min(0.35, view.lerp)
+      cam.position.y = prevY + (_camTarget.current.y - prevY) * 0.08
+      if (camLookYRef.current == null) camLookYRef.current = car.position.y + view.lookY
+      camLookYRef.current += (car.position.y + view.lookY - camLookYRef.current) * 0.08
     }
     _camOffset.current.copy(_camDir.current).multiplyScalar(view.lookAhead)
     _camOffset.current.add(car.position)
-    _camOffset.current.y += view.lookY
+    _camOffset.current.y = camLookYRef.current
     cam.lookAt(_camOffset.current)
   }
 

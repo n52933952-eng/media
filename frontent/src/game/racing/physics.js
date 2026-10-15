@@ -94,7 +94,7 @@ export function updatePhysics(deltaTime, ammo, physicsState, carState, debugObje
     brakingForce = maxBrakingForce;
   }
 
-  const rise = 380 * deltaTime;
+  const rise = 280 * deltaTime;
   const fall = 2800 * deltaTime;
   driveForce = moveToward(driveForce, targetDrive, targetDrive > driveForce ? rise : fall);
   const engineForce = driveForce;
@@ -128,7 +128,7 @@ export function updatePhysics(deltaTime, ammo, physicsState, carState, debugObje
   
   for (let i = 0; i < vehicle.getNumWheels(); i++) {
     // A little power on the front wheels keeps the nose from popping up.
-    const share = i < 2 ? 0.45 : 0.55;
+    const share = i < 2 ? 0.5 : 0.5;
     vehicle.applyEngineForce(engineForce * share, i);
     vehicle.setBrake(brakingForce, i);
   }
