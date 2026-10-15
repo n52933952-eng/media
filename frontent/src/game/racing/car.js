@@ -770,7 +770,7 @@ export function resetCarPosition(ammo, carBody, vehicle, currentSteeringAngle, c
 
 // Update car and wheel positions from physics
 export function updateCarPosition(ammo, vehicle, carModel, wheelMeshes) {
-  if (!vehicle || !carModel || !carModel.visible) return;
+  if (!vehicle || !carModel) return;
   
   // Update chassis transform
   const chassisWorldTrans = vehicle.getChassisWorldTransform();

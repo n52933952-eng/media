@@ -1293,7 +1293,10 @@ export default function RacingGamePage() {
     const car = carModelRef.current
     if (!cam || !car) return
     const view = CAMERA_VIEWS[camViewRef.current] || CAMERA_VIEWS[0]
-    car.visible = !view.hideCar
+    car.visible = true
+    car.traverse((node) => {
+      if (node.isMesh) node.visible = !view.hideCar
+    })
     car.getWorldDirection(_camDir.current)
     _camDir.current.y *= 0.2
     if (_camDir.current.lengthSq() < 1e-8) _camDir.current.set(0, 0, 1)
@@ -1320,7 +1323,13 @@ export default function RacingGamePage() {
     camViewRef.current = next
     camSnapRef.current = true
     const car = carModelRef.current
-    if (car) car.visible = !CAMERA_VIEWS[next].hideCar
+    if (car) {
+      car.visible = true
+      const hide = CAMERA_VIEWS[next].hideCar
+      car.traverse((node) => {
+        if (node.isMesh) node.visible = !hide
+      })
+    }
     setCamViewName(CAMERA_VIEWS[next].name)
   }
 
