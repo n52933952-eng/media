@@ -34,7 +34,7 @@ const CAMERA_VIEWS = [
   { name: 'Behind', distance: CAMERA_DISTANCE, height: CAMERA_HEIGHT, lookAhead: CAMERA_LOOK_AHEAD, lookY: 0.15, hideCar: false, lerp: CAMERA_LERP },
   { name: 'Inside', distance: 0.25, height: 0.9, lookAhead: 16, lookY: 0.85, hideCar: true, lerp: 0.5 },
   { name: 'Above', distance: 8, height: 9, lookAhead: 7, lookY: 0.2, hideCar: false, lerp: 0.14 },
-  { name: 'Rear', distance: CAMERA_DISTANCE, height: CAMERA_HEIGHT, lookAhead: CAMERA_LOOK_AHEAD, lookY: 0.15, hideCar: false, lerp: CAMERA_LERP, mirror: true },
+  { name: 'Front', distance: CAMERA_DISTANCE, height: CAMERA_HEIGHT, lookAhead: CAMERA_LOOK_AHEAD, lookY: 0.15, hideCar: false, lerp: CAMERA_LERP, mirror: true },
 ]
 const MAX_SPEED_KPH    = 200
 const DEFAULT_MAP      = 'map1'
@@ -1555,20 +1555,14 @@ export default function RacingGamePage() {
             _camDir.current.y = 0
             if (_camDir.current.lengthSq() < 1e-8) _camDir.current.set(0, 0, 1)
             _camDir.current.normalize()
-            rearCam.position.copy(car.position).addScaledVector(_camDir.current, -0.6)
-            rearCam.position.y += 1.55
-            _camTarget.current.copy(car.position).addScaledVector(_camDir.current, -24)
-            _camTarget.current.y = car.position.y + 0.4
+            rearCam.fov = 42
+            rearCam.position.copy(car.position).addScaledVector(_camDir.current, 7.2)
+            rearCam.position.y += 1.25
+            _camTarget.current.copy(car.position)
+            _camTarget.current.y += 0.45
             rearCam.aspect = vw / vh
             rearCam.updateProjectionMatrix()
             rearCam.lookAt(_camTarget.current)
-            const hidden = []
-            car.traverse((node) => {
-              if (node.isMesh && node.visible) {
-                hidden.push(node)
-                node.visible = false
-              }
-            })
             renderer.setScissorTest(true)
             renderer.setScissor(vx, vy, vw, vh)
             renderer.setViewport(vx, vy, vw, vh)
@@ -1579,7 +1573,6 @@ export default function RacingGamePage() {
             renderer.autoClear = prevClear
             renderer.setScissorTest(false)
             renderer.setViewport(0, 0, canvas.width, canvas.height)
-            for (const node of hidden) node.visible = true
           }
         }
       }
@@ -1739,13 +1732,13 @@ export default function RacingGamePage() {
         <div
           ref={rearFrameRef}
           style={{
-            display: camViewName === 'Rear' && !loading ? 'block' : 'none',
+            display: camViewName === 'Front' && !loading ? 'block' : 'none',
             position: 'absolute',
             top: 12,
             left: '50%',
             transform: 'translateX(-50%)',
-            width: 'min(360px, 46%)',
-            aspectRatio: '2.45 / 1',
+            width: 'min(520px, 64%)',
+            aspectRatio: '2.05 / 1',
             border: '3px solid rgba(255,255,255,0.9)',
             borderRadius: 4,
             boxShadow: '0 0 0 5px rgba(0,0,0,0.65)',
