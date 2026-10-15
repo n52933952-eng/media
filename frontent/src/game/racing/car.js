@@ -722,7 +722,7 @@ export function resetCarPosition(ammo, carBody, vehicle, currentSteeringAngle, c
   carBody.setAngularVelocity(zero);
   
   let ox = currentGatePosition.x;
-  let oy = currentGatePosition.y + 2;
+  let oy = currentGatePosition.y + 0.9;
   let oz = currentGatePosition.z;
   if (laneOffsetMeters) {
     setLaneLateralFromGateQuaternion(currentGateQuaternion, _laneRight);

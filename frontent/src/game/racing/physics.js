@@ -96,7 +96,7 @@ export function updatePhysics(deltaTime, ammo, physicsState, carState, debugObje
     brakingForce = maxBrakingForce;
   }
 
-  const rise = 280 * deltaTime;
+  const rise = 750 * deltaTime;
   const fall = 2800 * deltaTime;
   driveForce = moveToward(driveForce, targetDrive, targetDrive > driveForce ? rise : fall);
   const engineForce = driveForce;

@@ -847,13 +847,13 @@ export default function RacingGamePage() {
     onPointerDown: (e) => {
       e.preventDefault()
       e.stopPropagation()
+      try { e.currentTarget.setPointerCapture(e.pointerId) } catch { /* already captured */ }
       setDriveKey(key, true)
     },
     onPointerUp: (e) => {
       e.preventDefault()
       setDriveKey(key, false)
     },
-    onPointerLeave: () => setDriveKey(key, false),
     onPointerCancel: () => setDriveKey(key, false),
     ...extra,
     children: label,
@@ -1303,13 +1303,23 @@ export default function RacingGamePage() {
       if (node.isMesh) node.visible = !view.hideCar
     })
     car.getWorldDirection(_camDir.current)
-    // Ignore a small gas nod. A real hill still tilts the camera.
+    // Ignore a tiny gas nod. A real hill still tilts the camera.
     if (Math.abs(_camDir.current.y) < 0.05) _camDir.current.y = 0
     if (_camDir.current.lengthSq() < 1e-8) _camDir.current.set(0, 0, 1)
     _camDir.current.normalize()
-    _camOffset.current.copy(_camDir.current).multiplyScalar(-view.distance)
+    const phoneView = window.innerWidth < 992
+    const distScale = phoneView ? 0.72 : 1
+    const heightScale = phoneView ? 0.9 : 1
+    if (phoneView && cam.fov !== 50) {
+      cam.fov = 50
+      cam.updateProjectionMatrix()
+    } else if (!phoneView && cam.fov !== 58) {
+      cam.fov = 58
+      cam.updateProjectionMatrix()
+    }
+    _camOffset.current.copy(_camDir.current).multiplyScalar(-view.distance * distScale)
     _camTarget.current.copy(car.position).add(_camOffset.current)
-    _camTarget.current.y += view.height
+    _camTarget.current.y += view.height * heightScale
     if (camSnapRef.current) {
       cam.position.copy(_camTarget.current)
       camSnapRef.current = false
