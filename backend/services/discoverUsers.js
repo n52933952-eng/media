@@ -106,13 +106,16 @@ function youtubePreviewUrl(raw) {
 }
 
 function previewImage(img, images, linkThumb) {
+  const raw = String(img || (Array.isArray(images) ? images[0] : '') || '').trim()
+  const fromVideo = youtubePreviewUrl(raw)
+  if (fromVideo) return fromVideo
   const thumb = String(linkThumb || '').trim()
   if (thumb && !/\/embed\/|player\.vimeo|dailymotion\.com/i.test(thumb)) return thumb
-  const raw = String(img || (Array.isArray(images) ? images[0] : '') || '').trim()
-  return youtubePreviewUrl(raw) || raw
+  return raw
 }
 
-/** Latest post this person wrote, including a channel they turned into their own post. */
+/** Latest post this person wrote. A channel card they only turned on is not a post.
+ *  A channel they shared as their own post is a normal post and keeps its picture. */
 export async function attachLatestPostPreviews(users, hiddenObjectIds = []) {
   if (!Array.isArray(users) || users.length === 0) return []
   const ids = users
@@ -122,65 +125,36 @@ export async function attachLatestPostPreviews(users, hiddenObjectIds = []) {
   if (!ids.length) return users.map((u) => ({ ...u, latestPost: null }))
 
   const hidden = hiddenPostQueryFilter(hiddenObjectIds)
-  const idStrings = ids.map((id) => String(id))
-  const [rows, channelRows] = await Promise.all([
-    Post.aggregate([
-      {
-        $match: {
-          postedBy: { $in: ids },
-          hiddenByAdmin: { $ne: true },
-          ...hidden,
-          $or: [
-            { channelAddedBy: { $exists: false } },
-            { channelAddedBy: null },
-            { channelAddedBy: '' },
-          ],
-        },
+  const rows = await Post.aggregate([
+    {
+      $match: {
+        postedBy: { $in: ids },
+        hiddenByAdmin: { $ne: true },
+        ...hidden,
+        $or: [
+          { channelAddedBy: { $exists: false } },
+          { channelAddedBy: null },
+          { channelAddedBy: '' },
+        ],
       },
-      { $sort: { createdAt: -1 } },
-      {
-        $group: {
-          _id: '$postedBy',
-          postId: { $first: '$_id' },
-          text: { $first: '$text' },
-          img: { $first: '$img' },
-          images: { $first: '$images' },
-          linkThumb: { $first: '$linkThumb' },
-          createdAt: { $first: '$createdAt' },
-        },
+    },
+    { $sort: { createdAt: -1 } },
+    {
+      $group: {
+        _id: '$postedBy',
+        postId: { $first: '$_id' },
+        text: { $first: '$text' },
+        img: { $first: '$img' },
+        images: { $first: '$images' },
+        linkThumb: { $first: '$linkThumb' },
+        createdAt: { $first: '$createdAt' },
       },
-    ]),
-    Post.aggregate([
-      {
-        $match: {
-          channelAddedBy: { $in: idStrings },
-          hiddenByAdmin: { $ne: true },
-          ...hidden,
-        },
-      },
-      { $sort: { createdAt: -1 } },
-      {
-        $group: {
-          _id: '$channelAddedBy',
-          postId: { $first: '$_id' },
-          text: { $first: '$text' },
-          img: { $first: '$img' },
-          images: { $first: '$images' },
-          linkThumb: { $first: '$linkThumb' },
-          createdAt: { $first: '$createdAt' },
-        },
-      },
-    ]),
+    },
   ])
 
   const byAuthor = new Map(rows.map((r) => [String(r._id), r]))
-  const byChannel = new Map(channelRows.map((r) => [String(r._id), r]))
   return users.map((u) => {
-    const own = byAuthor.get(String(u._id))
-    const turned = byChannel.get(String(u._id))
-    const ownTime = own?.createdAt ? new Date(own.createdAt).getTime() : 0
-    const turnedTime = turned?.createdAt ? new Date(turned.createdAt).getTime() : 0
-    const row = turnedTime > ownTime ? turned : own
+    const row = byAuthor.get(String(u._id))
     const img = row ? previewImage(row.img, row.images, row.linkThumb) : ''
     return {
       ...u,
