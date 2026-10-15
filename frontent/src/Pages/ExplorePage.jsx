@@ -189,9 +189,27 @@ const ExplorePage = () => {
             const nameOnly = !photo && !video && (!text || sameAsName)
             const flavor = textFlavor(String(item._id || displayName))
             const letter = displayName[0]?.toUpperCase() || '?'
+            const postId = String(preview?._id || '')
+            const openProfile = () => item.username && navigate(`/${item.username}`)
+            const openPost = () => {
+              if (item.username && postId) {
+                navigate(`/${item.username}/post/${postId}`)
+                return
+              }
+              openProfile()
+            }
             return (
               <Box key={item._id}>
-                <Box borderRadius="full" overflow="hidden" bg={cardBg} borderWidth="1px" borderColor={border}>
+                <Box
+                  w="88%"
+                  mx="auto"
+                  borderRadius="full"
+                  overflow="hidden"
+                  bg={cardBg}
+                  borderWidth="1px"
+                  borderColor={border}
+                  boxShadow={isDark ? '0 8px 18px rgba(0,0,0,0.45)' : '0 6px 16px rgba(15,23,42,0.12)'}
+                >
                 {(() => {
                   if (nameOnly) {
                     if (avatarUrl) {
@@ -202,7 +220,7 @@ const ExplorePage = () => {
                           position="relative"
                           bg={emptyBg}
                           cursor="pointer"
-                          onClick={() => item.username && navigate(`/${item.username}`)}
+                          onClick={openPost}
                         >
                           <Image src={avatarUrl} alt="" position="absolute" inset={0} w="100%" h="100%" objectFit="contain" />
                         </Box>
@@ -215,7 +233,7 @@ const ExplorePage = () => {
                         position="relative"
                         bg={emptyBg}
                         cursor="pointer"
-                        onClick={() => item.username && navigate(`/${item.username}`)}
+                        onClick={openPost}
                       >
                         <Flex position="absolute" inset={0} align="center" justify="center">
                           <Text color="blue.400" fontSize="5xl" fontWeight="extrabold" lineHeight="1">{letter}</Text>
@@ -232,7 +250,7 @@ const ExplorePage = () => {
                         overflow="hidden"
                         bg="black"
                         cursor="pointer"
-                        onClick={() => item.username && navigate(`/${item.username}`)}
+                        onClick={openPost}
                       >
                         {poster ? (
                           <Image
@@ -283,7 +301,7 @@ const ExplorePage = () => {
                         position="relative"
                         bg={emptyBg}
                         cursor="pointer"
-                        onClick={() => item.username && navigate(`/${item.username}`)}
+                        onClick={openPost}
                       >
                         <Image src={photo} alt="" position="absolute" inset={0} w="100%" h="100%" objectFit="contain" />
                       </Box>
@@ -298,7 +316,7 @@ const ExplorePage = () => {
                       position="relative"
                       overflow="hidden"
                       cursor="pointer"
-                      onClick={() => item.username && navigate(`/${item.username}`)}
+                      onClick={openPost}
                     >
                       <Box position="absolute" top="-28px" right="-18px" w="84px" h="84px" borderRadius="full" bg={flavor.accent} opacity={0.22} />
                       <Box position="absolute" bottom="-24px" left="-16px" w="62px" h="62px" borderRadius="full" bg={flavor.accent} opacity={0.16} />
@@ -329,7 +347,7 @@ const ExplorePage = () => {
                     src={item.profilePic || undefined}
                     name={item.name || item.username}
                     cursor="pointer"
-                    onClick={() => item.username && navigate(`/${item.username}`)}
+                    onClick={openProfile}
                   />
                   <Text
                     flex={1}
@@ -338,7 +356,7 @@ const ExplorePage = () => {
                     fontWeight="bold"
                     noOfLines={1}
                     cursor="pointer"
-                    onClick={() => item.username && navigate(`/${item.username}`)}
+                    onClick={openProfile}
                   >
                     {displayName}
                   </Text>
