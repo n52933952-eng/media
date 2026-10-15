@@ -26,6 +26,7 @@ export function initPhysics(ammo) {
 
 // Throttle eases in so a full press does not kick the rear wheels and hop the car.
 let driveForce = 0;
+let downForce = 0;
 const _carForward = new THREE.Vector3();
 const _velocity = new THREE.Vector3();
 const _up = new THREE.Vector3(0, 1, 0);
@@ -106,8 +107,8 @@ export function updatePhysics(deltaTime, ammo, physicsState, carState, debugObje
     carForward.normalize();
     _right.crossVectors(_up, carForward);
     const lateral = _right.x * velocity.x() + _right.z * velocity.z();
-    if (Math.abs(lateral) > 0.35) {
-      const grip = Math.min(0.12, 3.5 * deltaTime);
+    if (Math.abs(lateral) > 1.2) {
+      const grip = Math.min(0.1, 3 * deltaTime);
       const planted = new ammo.btVector3(
         velocity.x() - _right.x * lateral * grip,
         velocity.y(),
@@ -116,12 +117,27 @@ export function updatePhysics(deltaTime, ammo, physicsState, carState, debugObje
       carBody.setLinearVelocity(planted);
       ammo.destroy(planted);
     }
+    // Cut the nose-up kick from the gas. Steering (turn) is left alone.
+    const angVel = carBody.getAngularVelocity();
+    const pitchRate = _right.x * angVel.x() + _right.y * angVel.y() + _right.z * angVel.z();
+    if (Math.abs(pitchRate) > 0.04) {
+      const cut = pitchRate * 0.72;
+      const damped = new ammo.btVector3(
+        angVel.x() - _right.x * cut,
+        angVel.y() - _right.y * cut,
+        angVel.z() - _right.z * cut
+      );
+      carBody.setAngularVelocity(damped);
+      ammo.destroy(damped);
+    }
+    ammo.destroy(angVel);
   }
   carForward.y = savedForwardY;
-  // Extra push into the road only once the car is already moving, so the launch stays level.
-  const stick = Math.min(800, Math.max(0, speedKPH - 22) * speedKPH * 0.045);
-  if (stick > 8) {
-    const down = new ammo.btVector3(0, -stick, 0);
+  // Extra push into the road grows slowly, so it does not bounce the car when you accelerate.
+  const downTarget = Math.min(420, Math.max(0, speedKPH - 35) * speedKPH * 0.018);
+  downForce = moveToward(downForce, downTarget, 220 * deltaTime);
+  if (downForce > 12) {
+    const down = new ammo.btVector3(0, -downForce, 0);
     carBody.applyCentralForce(down);
     ammo.destroy(down);
   }
