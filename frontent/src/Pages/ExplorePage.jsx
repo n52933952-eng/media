@@ -174,13 +174,12 @@ const ExplorePage = () => {
             const avatarUrl = String(item.profilePic || '').trim()
             const channelUrl = String(preview?.channelPic || '').trim()
             const imgIsAvatar = !!raw && (raw === avatarUrl || raw === channelUrl || img === avatarUrl || img === channelUrl)
-            const fromChannel = !!preview?.channelPic
-            const photo = img && !imgIsAvatar && !fromChannel ? img : ''
-            const snippet = clipWords(fromChannel ? '' : text, 20)
+            const photo = img && !imgIsAvatar ? img : ''
+            const snippet = clipWords(text, 20)
             const wordCount = snippet.replace(' …', '').trim().split(/\s+/).filter(Boolean).length
             const shortQuote = wordCount <= 3
             const sameAsName = !!text && (text === item.username || text === item.name || text === displayName)
-            const nameOnly = fromChannel || (!photo && !video && (!text || sameAsName))
+            const nameOnly = !photo && !video && (!text || sameAsName)
             const flavor = textFlavor(String(item._id || displayName))
             const letter = displayName[0]?.toUpperCase() || '?'
             return (
