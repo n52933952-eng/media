@@ -778,7 +778,17 @@ export function updateCarPosition(ammo, vehicle, carModel, wheelMeshes) {
   const quaternion = chassisWorldTrans.getRotation();
 
   // Sit on the real chassis so the car can follow a hill.
-  carModel.position.set(position.x(), position.y(), position.z());
+  // On a small screen, hide only a tiny gas bob so the car does not look like it shakes.
+  const realY = position.y()
+  const smallScreen = typeof window !== 'undefined' && window.innerWidth < 992
+  let drawY = realY
+  if (smallScreen) {
+    const prevY = carModel.userData.visY
+    if (prevY == null || Math.abs(realY - prevY) > 0.08) carModel.userData.visY = realY
+    else carModel.userData.visY = prevY + (realY - prevY) * 0.35
+    drawY = carModel.userData.visY
+  }
+  carModel.position.set(position.x(), drawY, position.z());
   carModel.quaternion.set(quaternion.x(), quaternion.y(), quaternion.z(), quaternion.w())
 
   for (let i = 0; i < vehicle.getNumWheels(); i++) {

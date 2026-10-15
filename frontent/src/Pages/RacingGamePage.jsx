@@ -156,6 +156,7 @@ export default function RacingGamePage() {
   const _flipAxis      = useRef(new THREE.Vector3(0, 1, 0))
   const resizeCleanupRef = useRef(null)
   const snapStartRef = useRef(null)
+  const resizeSizeRef = useRef({ w: 0, h: 0 })
   const remoteAudioRef = useRef(null)
   const raceVoiceRoomRef = useRef(null)
   /** Prevents double teardown / navigate when disconnect + opponentLeft both fire */
@@ -1023,6 +1024,9 @@ export default function RacingGamePage() {
       const w = container.clientWidth
       const h = container.clientHeight
       if (w < 8 || h < 8) return
+      if (Math.abs(w - resizeSizeRef.current.w) < 2 && Math.abs(h - resizeSizeRef.current.h) < 2) return
+      resizeSizeRef.current.w = w
+      resizeSizeRef.current.h = h
       cameraRef.current.aspect = w / h
       cameraRef.current.updateProjectionMatrix()
       rendererRef.current.setSize(w, h)
@@ -1306,23 +1310,19 @@ export default function RacingGamePage() {
       if (node.isMesh) node.visible = !view.hideCar
     })
     car.getWorldDirection(_camDir.current)
+    const smallScreen = window.innerWidth < 992
     // Ignore a tiny gas nod. A real hill still tilts the camera.
-    if (Math.abs(_camDir.current.y) < 0.05) _camDir.current.y = 0
+    if (Math.abs(_camDir.current.y) < (smallScreen ? 0.1 : 0.05)) _camDir.current.y = 0
     if (_camDir.current.lengthSq() < 1e-8) _camDir.current.set(0, 0, 1)
     _camDir.current.normalize()
-    const phoneView = window.innerWidth < 992
-    const distScale = phoneView ? 0.9 : 1
-    const heightScale = phoneView ? 0.92 : 1
-    if (phoneView && cam.fov !== 54) {
-      cam.fov = 54
-      cam.updateProjectionMatrix()
-    } else if (!phoneView && cam.fov !== 58) {
+    if (cam.fov !== 58) {
       cam.fov = 58
       cam.updateProjectionMatrix()
     }
-    _camOffset.current.copy(_camDir.current).multiplyScalar(-view.distance * distScale)
+    _camOffset.current.copy(_camDir.current).multiplyScalar(-view.distance)
     _camTarget.current.copy(car.position).add(_camOffset.current)
-    _camTarget.current.y += view.height * heightScale
+    _camTarget.current.y += view.height
+    const yFollow = smallScreen ? 0.04 : 0.08
     if (camSnapRef.current) {
       cam.position.copy(_camTarget.current)
       camSnapRef.current = false
@@ -1330,11 +1330,11 @@ export default function RacingGamePage() {
     } else {
       const prevY = cam.position.y
       cam.position.lerp(_camTarget.current, view.lerp)
-      cam.position.y = prevY + (_camTarget.current.y - prevY) * 0.08
+      cam.position.y = prevY + (_camTarget.current.y - prevY) * yFollow
       if (camLookYRef.current == null) camLookYRef.current = car.position.y + view.lookY
-      camLookYRef.current += (car.position.y + view.lookY - camLookYRef.current) * 0.08
+      camLookYRef.current += (car.position.y + view.lookY - camLookYRef.current) * yFollow
     }
-    _camOffset.current.copy(_camDir.current).multiplyScalar(view.lookAhead * (phoneView ? 0.72 : 1))
+    _camOffset.current.copy(_camDir.current).multiplyScalar(view.lookAhead)
     _camOffset.current.add(car.position)
     _camOffset.current.y = camLookYRef.current
     cam.lookAt(_camOffset.current)
