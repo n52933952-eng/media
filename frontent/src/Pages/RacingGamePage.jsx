@@ -30,6 +30,12 @@ const CAMERA_DISTANCE  = 10.5
 const CAMERA_HEIGHT    = 2.4
 const CAMERA_LERP      = 0.12
 const CAMERA_LOOK_AHEAD = 10
+const CAMERA_VIEWS = [
+  { name: 'Behind', distance: CAMERA_DISTANCE, height: CAMERA_HEIGHT, lookAhead: CAMERA_LOOK_AHEAD, lookY: 0.15, hideCar: false, lerp: CAMERA_LERP },
+  { name: 'Inside', distance: 0.25, height: 0.9, lookAhead: 16, lookY: 0.85, hideCar: true, lerp: 0.5 },
+  { name: 'Above', distance: 8, height: 9, lookAhead: 7, lookY: 0.2, hideCar: false, lerp: 0.14 },
+  { name: 'Front', distance: -9, height: 1.7, lookAhead: 0, lookY: 0.55, hideCar: false, lerp: 0.2 },
+]
 const MAX_SPEED_KPH    = 200
 const DEFAULT_MAP      = 'map1'
 
@@ -76,6 +82,7 @@ export default function RacingGamePage() {
   const [myGate,        setMyGate]        = useState(0)
   const [oppGate,       setOppGate]       = useState(0)
   const [raceTime,      setRaceTime]      = useState('00:00')
+  const [camViewName,   setCamViewName]   = useState('Behind')
   const [raceFinished,  setRaceFinished]  = useState(false)
   const [winner,        setWinner]        = useState(null)
   const [opponent,      setOpponent]      = useState(null)
@@ -115,6 +122,9 @@ export default function RacingGamePage() {
   const oppHitRef      = useRef(null)
   const gateDataRef    = useRef(null)
   const steeringRef    = useRef(0)
+  const camViewRef     = useRef(0)
+  const camSnapRef     = useRef(false)
+  const cycleCamRef    = useRef(() => {})
   const keyStateRef    = useRef({ w:false, s:false, a:false, d:false })
   const accumRef       = useRef(0)
   const afRef          = useRef(null)
@@ -855,6 +865,10 @@ export default function RacingGamePage() {
       if (e.key==='d'||e.key==='ArrowRight') keyStateRef.current.d = true
       if (e.key==='w'||e.key==='a'||e.key==='s'||e.key==='d'||e.key.startsWith('Arrow')) e.preventDefault()
       if (e.key==='r') resetCar()
+      if (e.key === 'Shift' && !e.repeat) {
+        e.preventDefault()
+        cycleCamRef.current()
+      }
     }
     const up = (e) => {
       if (e.key==='w'||e.key==='ArrowUp')    keyStateRef.current.w = false
@@ -1278,20 +1292,36 @@ export default function RacingGamePage() {
     const cam = cameraRef.current
     const car = carModelRef.current
     if (!cam || !car) return
-    // Reuse pre-allocated vectors to avoid GC pressure
+    const view = CAMERA_VIEWS[camViewRef.current] || CAMERA_VIEWS[0]
+    car.visible = !view.hideCar
     car.getWorldDirection(_camDir.current)
-    _camOffset.current.copy(_camDir.current).multiplyScalar(-CAMERA_DISTANCE)
+    _camDir.current.y *= 0.2
+    if (_camDir.current.lengthSq() < 1e-8) _camDir.current.set(0, 0, 1)
+    _camDir.current.normalize()
+    _camOffset.current.copy(_camDir.current).multiplyScalar(-view.distance)
     _camTarget.current.copy(car.position).add(_camOffset.current)
-    _camTarget.current.y += CAMERA_HEIGHT
-    const prevY = cam.position.y
-    cam.position.lerp(_camTarget.current, CAMERA_LERP)
-    // Keep the view steady when the suspension moves. Follow left/right faster than up/down.
-    cam.position.y = prevY + (_camTarget.current.y - prevY) * 0.1
-    // Look down the road, not at the bumper, so the car sits low and the street fills the view.
-    _camOffset.current.copy(_camDir.current).multiplyScalar(CAMERA_LOOK_AHEAD)
+    _camTarget.current.y += view.height
+    if (camSnapRef.current) {
+      cam.position.copy(_camTarget.current)
+      camSnapRef.current = false
+    } else {
+      const prevY = cam.position.y
+      cam.position.lerp(_camTarget.current, view.lerp)
+      cam.position.y = prevY + (_camTarget.current.y - prevY) * Math.min(0.35, view.lerp)
+    }
+    _camOffset.current.copy(_camDir.current).multiplyScalar(view.lookAhead)
     _camOffset.current.add(car.position)
-    _camOffset.current.y += 0.15
+    _camOffset.current.y += view.lookY
     cam.lookAt(_camOffset.current)
+  }
+
+  cycleCamRef.current = () => {
+    const next = (camViewRef.current + 1) % CAMERA_VIEWS.length
+    camViewRef.current = next
+    camSnapRef.current = true
+    const car = carModelRef.current
+    if (car) car.visible = !CAMERA_VIEWS[next].hideCar
+    setCamViewName(CAMERA_VIEWS[next].name)
   }
 
   // ─── Car flip check (auto-reset) ───────────────────────────────────────────
@@ -1848,6 +1878,30 @@ export default function RacingGamePage() {
         }}>
           {raceTime}
         </div>
+      )}
+
+      {!loading && raceLive && (
+        <button
+          type="button"
+          onClick={() => cycleCamRef.current()}
+          style={{
+            position: 'fixed',
+            top: `${raceHudTop + (mobileControls ? 36 : 58)}px`,
+            left: '50%',
+            transform: 'translateX(-50%)',
+            zIndex: 1000,
+            background: 'rgba(0,0,0,0.45)',
+            color: '#fff',
+            border: '1px solid rgba(255,255,255,0.2)',
+            borderRadius: '999px',
+            padding: '4px 12px',
+            fontFamily: 'Poppins,sans-serif',
+            fontSize: '12px',
+            cursor: 'pointer',
+          }}
+        >
+          {camViewName} · Shift
+        </button>
       )}
 
       {/* Speedometer — bottom right (offset from touch pedals on mobile) */}

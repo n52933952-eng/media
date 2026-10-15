@@ -263,7 +263,7 @@ const WHEEL_Z_OFFSET = 1.5;
 // Holds the car without bouncing. The wheels, not the body, touch the road.
 const SUSPENSION_STIFFNESS = 90;
 const SUSPENSION_DAMPING = 12;
-const SUSPENSION_COMPRESSION = 12;
+const SUSPENSION_COMPRESSION = 16;
 const ROLL_INFLUENCE = 0.06;
 const WHEEL_FRICTION = 36;
 
@@ -436,7 +436,7 @@ export function createVehicle(ammo, scene, physicsWorld, debugObjects, onCarLoad
   carComponents.carBody.setFriction(0.1);
   carComponents.carBody.setRestitution(0.05);
   // Stronger angular damping reduces violent rolls / tumbles on curbs and barriers
-  carComponents.carBody.setDamping(0.3, 0.72);
+  carComponents.carBody.setDamping(0.3, 0.9);
   if (typeof carComponents.carBody.setCcdMotionThreshold === 'function') {
     carComponents.carBody.setCcdMotionThreshold(0.25);
   }
