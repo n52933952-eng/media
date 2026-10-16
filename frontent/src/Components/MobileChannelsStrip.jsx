@@ -75,6 +75,7 @@ const MobileChannelsStrip = () => {
       setExpandedId(null)
       if (!result.posted) {
         showToast('Info', 'Already in your feed', 'info')
+        scrollToHomeFeed(result.postId, { requirePost: true })
         return
       }
       showToast('Success', `🔴 ${channel.name} added to your feed!`, 'success')
@@ -159,6 +160,7 @@ const MobileChannelsStrip = () => {
       }
       if (data.posted === false) {
         showToast('Info', 'Already in your feed', 'info')
+        scrollToHomeFeed(data.postId, { requirePost: true })
         return
       }
       showToast('Success', 'Added to your feed', 'success')

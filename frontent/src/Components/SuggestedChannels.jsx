@@ -8,6 +8,7 @@ import FootballIcon from './FootballIcon'
 import ChessChallenge from './ChessChallenge'
 import CardChallenge from './CardChallenge'
 import RaceChallenge from './RaceChallenge'
+import { scrollToHomeFeed } from '../utils/channelNavigation'
 
 const SuggestedChannels = () => {
     const { user } = useContext(UserContext)
@@ -233,6 +234,7 @@ const SuggestedChannels = () => {
                 window.scrollTo({ top: 0, behavior: 'smooth' })
             } else if (res.ok) {
                 showToast('Info', 'Already in your feed', 'info')
+                scrollToHomeFeed(data?.postId, { requirePost: true })
             } else {
                 showToast('Info', data.message || 'Already in feed', 'info')
             }
@@ -335,6 +337,7 @@ const SuggestedChannels = () => {
             }
             if (data.posted === false) {
                 showToast('Info', 'Already in your feed', 'info')
+                scrollToHomeFeed(data.postId, { requirePost: true })
                 return
             }
             showToast('Success', 'Added to your feed', 'success')
