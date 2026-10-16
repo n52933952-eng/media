@@ -2,7 +2,7 @@
 import jwt from 'jsonwebtoken'
 import VideoLink from '../models/videoLink.js'
 import { parseVideoLink, decorateChannel } from '../services/videoLinks.js'
-import { fetchPageThumb } from '../services/linkPreview.js'
+import { fetchPageThumb, fetchPagePreview } from '../services/linkPreview.js'
 
 const MAX_VIDEO_LINKS = 30
 const VIDEO_SHELF_USERNAME = 'VideoShelf'
@@ -184,6 +184,14 @@ export const getChannels = async (req, res) => {
       const user = await User.findById(userId).select('hiddenChannelIds').lean()
       hidden = Array.isArray(user?.hiddenChannelIds) ? user.hiddenChannelIds : []
       links = await VideoLink.find({ userId }).sort({ createdAt: -1 }).limit(MAX_VIDEO_LINKS).lean()
+      const pending = links.filter(linkNeedsPicture).slice(0, 8)
+      if (pending.length) {
+        const filled = new Map()
+        await Promise.all(pending.map(async (link) => {
+          filled.set(String(link._id), await withLinkPreview(link))
+        }))
+        links = links.map((link) => filled.get(String(link._id)) || link)
+      }
     }
     const hiddenSet = new Set(hidden.map(String))
     const channels = LIVE_CHANNELS
@@ -194,6 +202,27 @@ export const getChannels = async (req, res) => {
     console.error('📺 [getChannels] Error:', error)
     res.status(500).json({ error: error.message })
   }
+}
+
+function linkNeedsPicture(link) {
+  if (!link || (link.provider && link.provider !== 'link')) return false
+  if (!link.thumbnail) return true
+  const title = String(link.title || '')
+  return !title || title === 'Video' || /^[a-z0-9.-]+\.[a-z]{2,}$/i.test(title)
+}
+
+async function withLinkPreview(link) {
+  if (!link) return link
+  const plain = link.toObject ? link.toObject() : { ...link }
+  if (!linkNeedsPicture(plain)) return plain
+  const card = await fetchPagePreview(plain.url)
+  const title = card.title || plain.title || 'Video'
+  const thumbnail = card.thumbnail || plain.thumbnail || ''
+  if (title === plain.title && thumbnail === (plain.thumbnail || '')) return plain
+  if (plain._id) {
+    VideoLink.updateOne({ _id: plain._id }, { $set: { title, thumbnail } }).catch(() => {})
+  }
+  return { ...plain, title, thumbnail }
 }
 
 export const addVideoLink = async (req, res) => {
@@ -209,8 +238,13 @@ export const addVideoLink = async (req, res) => {
       return res.status(400).json({ error: `You can save up to ${MAX_VIDEO_LINKS} links` })
     }
     const existing = await VideoLink.findOne({ userId: req.user._id, url: parsed.url })
-    if (existing) return res.status(200).json({ link: existing, posted: false })
-    const link = await VideoLink.create({ userId: req.user._id, ...parsed })
+    if (existing) return res.status(200).json({ link: await withLinkPreview(existing), posted: false })
+    let fields = parsed
+    if (parsed.provider === 'link') {
+      const card = await fetchPagePreview(parsed.url)
+      fields = { ...parsed, thumbnail: card.thumbnail || '', title: card.title || parsed.title }
+    }
+    const link = await VideoLink.create({ userId: req.user._id, ...fields })
     res.status(200).json({ link })
   } catch (error) {
     if (error?.code === 11000) {
