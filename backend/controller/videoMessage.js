@@ -376,10 +376,13 @@ export const listVideoMessages = async (req, res) => {
 }
 
 async function countUnseenFor(userId) {
+  const uid = mongoose.Types.ObjectId.isValid(String(userId || ''))
+    ? new mongoose.Types.ObjectId(String(userId))
+    : userId
   const [received, senderRows, receiverRows, groupNew, groupNotes] = await Promise.all([
-    VideoMessage.countDocuments({ receiver: userId, seenAt: null }),
+    VideoMessage.countDocuments({ receiver: uid, seenAt: null }),
     VideoMessage.aggregate([
-      { $match: { sender: userId, $or: [{ senderUnseenNotes: { $gt: 0 } }, { senderHasNewNotes: true }] } },
+      { $match: { sender: uid, $or: [{ senderUnseenNotes: { $gt: 0 } }, { senderHasNewNotes: true }] } },
       {
         $group: {
           _id: null,
@@ -388,12 +391,12 @@ async function countUnseenFor(userId) {
       },
     ]),
     VideoMessage.aggregate([
-      { $match: { receiver: userId, seenAt: { $ne: null }, receiverUnseenNotes: { $gt: 0 } } },
+      { $match: { receiver: uid, seenAt: { $type: 'date' }, receiverUnseenNotes: { $gt: 0 } } },
       { $group: { _id: null, n: { $sum: '$receiverUnseenNotes' } } },
     ]),
-    VideoMessageReceipt.countDocuments({ user: userId, recipient: true, seenAt: null }).maxTimeMS(2500),
+    VideoMessageReceipt.countDocuments({ user: uid, recipient: true, seenAt: null }).maxTimeMS(2500),
     VideoMessageReceipt.aggregate([
-      { $match: { user: userId, seenAt: { $ne: null }, unseenNotes: { $gt: 0 } } },
+      { $match: { user: uid, seenAt: { $type: 'date' }, unseenNotes: { $gt: 0 } } },
       { $group: { _id: null, n: { $sum: '$unseenNotes' } } },
     ]).option({ maxTimeMS: 2500 }),
   ])
