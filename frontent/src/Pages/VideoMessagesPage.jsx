@@ -159,7 +159,7 @@ const VideoMessagesPage = () => {
           String(x._id) === id
             ? {
                 ...x,
-                noteCount: (x.noteCount || 0) + 1,
+                ...(payload?.note ? { noteCount: (x.noteCount || 0) + 1 } : {}),
                 ...(payload?.badge
                   ? x.isGroup
                     ? { myUnseenNotes: (x.myUnseenNotes || 0) + 1 }

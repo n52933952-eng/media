@@ -473,6 +473,44 @@ export const getVideoMessage = async (req, res) => {
   }
 }
 
+/** Same badge as a reaction: the other person, and only again after they already watched. */
+async function badgeWatchedOthers(doc, actorId) {
+  const videoMessageId = String(doc._id)
+  if (doc.isGroup) {
+    const others = await VideoMessageReceipt.find({ videoMessage: doc._id, user: { $ne: actorId } })
+      .select('user seenAt')
+      .maxTimeMS(2500)
+      .lean()
+    const opened = others.filter((row) => row.seenAt != null).map((row) => row.user)
+    if (opened.length) {
+      await VideoMessageReceipt.updateMany(
+        { videoMessage: doc._id, user: { $in: opened } },
+        { $inc: { unseenNotes: 1 } },
+      ).maxTimeMS(2500)
+    }
+    for (const row of others) {
+      emitToUser(row.user, 'videoMessage:note', { videoMessageId, badge: row.seenAt != null })
+    }
+    return
+  }
+  const senderId = idOf(doc.sender)
+  const receiverId = idOf(doc.receiver)
+  const otherId = idOf(actorId) === senderId ? receiverId : senderId
+  if (!otherId) return
+  if (receiverId && idOf(actorId) === receiverId) {
+    await VideoMessage.updateOne(
+      { _id: doc._id },
+      { $inc: { senderUnseenNotes: 1 }, $set: { senderHasNewNotes: true } },
+    )
+    emitToUser(otherId, 'videoMessage:note', { videoMessageId, badge: true })
+    return
+  }
+  const watched = await VideoMessage.exists({ _id: doc._id, seenAt: { $ne: null } })
+  if (!watched) return
+  await VideoMessage.updateOne({ _id: doc._id }, { $inc: { receiverUnseenNotes: 1 } })
+  emitToUser(otherId, 'videoMessage:note', { videoMessageId, badge: true })
+}
+
 /** Sender drops a text "Reply here" on a second. They do not record another video. */
 export const addReplyPrompt = async (req, res) => {
   try {
@@ -499,6 +537,7 @@ export const addReplyPrompt = async (req, res) => {
       videoMessageId: String(doc._id),
       markers: doc.markers,
     })
+    await badgeWatchedOthers(doc, userId)
     return res.status(201).json({ markers: doc.markers })
   } catch (error) {
     console.error('[videoMessage] reply prompt error:', error)
