@@ -49,6 +49,28 @@ async function emitNormalPost(authorId, post) {
   invalidateUserFeedCaches(recipientIds).catch(() => {})
 }
 
+/** Drop this viewer's channel card only, then a new one can take its place. */
+async function removeViewerChannelCard(postId, userId) {
+  const Post = (await import('../models/post.js')).default
+  const Like = (await import('../models/like.js')).default
+  const { deleteCommentsForPost } = await import('../services/commentService.js')
+  const { getIO } = await import('../socket/socket.js')
+  const { emitToUserIds } = await import('../services/postSocketEmit.js')
+  const { invalidateUserFeedCache } = await import('../services/feedCache.js')
+  if (!postId) return ''
+  const removed = await Post.findOneAndDelete({
+    _id: postId,
+    channelAddedBy: String(userId),
+  }).select('_id')
+  if (!removed) return ''
+  deleteCommentsForPost(removed._id).catch(() => {})
+  Like.deleteMany({ post: removed._id }).catch(() => {})
+  const io = getIO()
+  if (io) await emitToUserIds(io, [String(userId)], 'postDeleted', { postId: String(removed._id) })
+  invalidateUserFeedCache(userId).catch(() => {})
+  return String(removed._id)
+}
+
 export const createLiveStreamPost = async (req, res) => {
   try {
     let { channelId, streamIndex = 0, lang } = req.query
@@ -108,29 +130,9 @@ export const createLiveStreamPost = async (req, res) => {
       channelAddedBy: req.user._id.toString(),
     })
 
+    let replacedId = ''
     if (existingPost) {
-      console.log(`ℹ️ ${channelConfig.name} live stream post already exists for user`)
-      if (caption) existingPost.text = caption
-
-      // Do NOT bump updatedAt — that pinned the channel above newer user posts on refresh.
-      // Client applies a short-lived viewer boost so the card is still easy to find.
-      await invalidateUserFeedCache(req.user._id)
-
-      if (caption) await existingPost.save({ timestamps: false })
-      await existingPost.populate('postedBy', 'username profilePic name')
-      const postObj = existingPost.toObject ? existingPost.toObject() : existingPost
-
-      const io = getIO()
-      if (io && req.user && caption) {
-        await emitToUserIds(io, [req.user._id], 'postUpdated', { postId: existingPost._id, post: postObj })
-      }
-
-      return res.status(200).json({
-        message: `${channelConfig.name} live stream post already in feed`,
-        postId: existingPost._id,
-        post: postObj,
-        posted: false,
-      })
+      replacedId = await removeViewerChannelCard(existingPost._id, req.user._id)
     }
 
     const liveStreamPost = new Post({
@@ -161,6 +163,7 @@ export const createLiveStreamPost = async (req, res) => {
       postId: liveStreamPost._id,
       post: postObj,
       posted: true,
+      replacedId: replacedId || undefined,
       channel: channelConfig.name,
       language: streamConfig.language,
     })
@@ -319,20 +322,9 @@ async function watchEmbed({ userId, embedUrl, text, title }) {
     img: embedUrl,
     channelAddedBy: String(userId),
   })
+  let replacedId = ''
   if (existing) {
-    const captionChanged = !!(text && existing.text !== text)
-    if (captionChanged) {
-      existing.text = text
-      await existing.save({ timestamps: false })
-    }
-    await invalidateUserFeedCache(userId)
-    await existing.populate('postedBy', 'username profilePic name')
-    const postObj = existing.toObject()
-    if (captionChanged) {
-      const io = getIO()
-      if (io) await emitToUserIds(io, [userId], 'postUpdated', { postId: existing._id, post: postObj })
-    }
-    return { post: postObj, posted: false, postId: existing._id }
+    replacedId = await removeViewerChannelCard(existing._id, userId)
   }
   const post = new Post({
     postedBy: shelf._id,
@@ -347,7 +339,7 @@ async function watchEmbed({ userId, embedUrl, text, title }) {
   const postObj = post.toObject()
   const io = getIO()
   if (io) await emitToUserIds(io, [userId], 'newPost', postObj)
-  return { post: postObj, posted: true, postId: post._id }
+  return { post: postObj, posted: true, postId: post._id, replacedId: replacedId || undefined }
 }
 
 export const watchVideoLink = async (req, res) => {

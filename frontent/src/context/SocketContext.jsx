@@ -477,6 +477,7 @@ export const SocketContextProvider = ({ children }) => {
     })
     newSocket?.on('videoMessage:note', (data) => {
       if (data?.badge) setVideoMessageUnseenCount((n) => (n || 0) + 1)
+      fetchVideoMessageUnseen()
     })
     newSocket?.on('videoMessage:deleted', (data) => {
       if (data?.unseen) setVideoMessageUnseenCount((n) => Math.max(0, (n || 0) - 1))

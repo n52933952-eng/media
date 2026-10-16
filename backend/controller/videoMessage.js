@@ -59,6 +59,13 @@ const queueVideoPush = ({ recipientId, actorName, body, videoId, noteId }) => {
   }, PUSH_WAIT_MS)
 }
 
+const idOf = (value) => {
+  if (value == null || value === '') return ''
+  if (typeof value === 'object' && value._id != null && value._id !== value) return idOf(value._id)
+  if (typeof value.toHexString === 'function') return value.toHexString()
+  return String(value)
+}
+
 const emitToUser = (userId, event, payload) => {
   try {
     const io = getIO()
@@ -584,7 +591,7 @@ export const addVideoNote = async (req, res) => {
             .select('user seenAt')
             .maxTimeMS(2500)
             .lean()
-          const opened = others.filter((row) => row.seenAt).map((row) => row.user)
+          const opened = others.filter((row) => row.seenAt != null).map((row) => row.user)
           if (opened.length) {
             await VideoMessageReceipt.updateMany(
               { videoMessage: doc._id, user: { $in: opened } },
@@ -592,7 +599,8 @@ export const addVideoNote = async (req, res) => {
             ).maxTimeMS(2500)
           }
           for (const row of others) {
-            emitToUser(row.user, 'videoMessage:note', { ...basePayload, badge: !!row.seenAt })
+            // Already watched: a later reaction brings the badge back. Not watched yet: the new-video badge is enough.
+            emitToUser(row.user, 'videoMessage:note', { ...basePayload, badge: row.seenAt != null })
             queueVideoPush({
               recipientId: row.user,
               actorName,
@@ -608,18 +616,26 @@ export const addVideoNote = async (req, res) => {
       return
     }
 
-    const otherId = String(doc.sender) === String(userId) ? doc.receiver : doc.sender
-    const fromReceiver = String(userId) === String(doc.receiver)
+    const actorId = idOf(userId)
+    const senderId = idOf(doc.sender)
+    const receiverId = idOf(doc.receiver)
+    const otherId = actorId === senderId ? receiverId : senderId
+    const fromReceiver = !!receiverId && actorId === receiverId
     const inc = { noteCount: 1 }
     const set = { lastNoteAt: new Date() }
     let badge = false
     if (fromReceiver) {
+      // Sender already has the video. A new reaction still lights their badge.
       inc.senderUnseenNotes = 1
       set.senderHasNewNotes = true
       badge = true
-    } else if (doc.seenAt) {
-      inc.receiverUnseenNotes = 1
-      badge = true
+    } else if (otherId) {
+      const watched = await VideoMessage.exists({ _id: doc._id, seenAt: { $ne: null } })
+      if (watched) {
+        // Receiver already watched. A later reaction lights their badge again.
+        inc.receiverUnseenNotes = 1
+        badge = true
+      }
     }
     await VideoMessage.updateOne({ _id: doc._id }, { $inc: inc, $set: set })
 

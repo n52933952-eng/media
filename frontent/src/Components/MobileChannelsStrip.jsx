@@ -73,11 +73,6 @@ const MobileChannelsStrip = () => {
         return
       }
       setExpandedId(null)
-      if (!result.posted) {
-        showToast('Info', 'Already in your feed', 'info')
-        scrollToHomeFeed(result.postId, { requirePost: true })
-        return
-      }
       showToast('Success', `🔴 ${channel.name} added to your feed!`, 'success')
       scrollToHomeFeed(result.postId)
     } catch (e) {
@@ -156,11 +151,6 @@ const MobileChannelsStrip = () => {
       const data = await res.json()
       if (!res.ok) {
         showToast('Error', data.error || 'Could not add to feed', 'error')
-        return
-      }
-      if (data.posted === false) {
-        showToast('Info', 'Already in your feed', 'info')
-        scrollToHomeFeed(data.postId, { requirePost: true })
         return
       }
       showToast('Success', 'Added to your feed', 'success')
