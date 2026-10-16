@@ -49,7 +49,6 @@ const VideoMessageWatchPage = () => {
   const pinRef = useRef(0)
   const barRef = useRef(null)
   const dragRef = useRef(false)
-  const durFixedRef = useRef(false)
   const replyTRef = useRef(0)
   const replyPrevRef = useRef(0)
   const askedRef = useRef(new Set())
@@ -741,6 +740,7 @@ const VideoMessageWatchPage = () => {
           src={mediaDisplayUrl(item.videoUrl)}
           poster={item.thumbnailUrl ? mediaDisplayUrl(item.thumbnailUrl) : undefined}
           playsInline
+          autoPlay
           loop={false}
           preload="auto"
           style={{
@@ -755,20 +755,7 @@ const VideoMessageWatchPage = () => {
           onLoadedMetadata={(e) => {
             const v = e.currentTarget
             const known = takeFinite(v.duration) || takeFinite(item.duration)
-            if (known) {
-              setDuration(known)
-              return
-            }
-            if (durFixedRef.current) return
-            durFixedRef.current = true
-            const fix = () => {
-              v.removeEventListener('seeked', fix)
-              const d = takeFinite(v.duration)
-              try { v.currentTime = 0 } catch { /* ignore */ }
-              if (d) setDuration(d)
-            }
-            v.addEventListener('seeked', fix)
-            try { v.currentTime = 1e101 } catch { /* ignore */ }
+            if (known) setDuration(known)
           }}
           onDurationChange={(e) => {
             const d = takeFinite(e.currentTarget.duration) || takeFinite(item.duration)
