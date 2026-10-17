@@ -866,10 +866,11 @@ const VideoMessageWatchPage = () => {
 
 
         {!iAmSender && !activeNote && ((askNow?.type === 'reply' && !askNow.onNote) || liveMarker?.type === 'reply') && (
-          <Box position="absolute" left="max(56px, calc(env(safe-area-inset-left, 0px) + 9vw + 18px))" right="12px" bottom="max(8px, env(safe-area-inset-bottom, 0px))" bg="blackAlpha.800" color="white" px={3} py={2.5} borderRadius="xl">
-            <Text fontWeight="bold" fontSize="sm">Wants a reply or a reaction here</Text>
-            <Text fontSize="xs" color="whiteAlpha.800">At {fmtTime((askNow || liveMarker)?.t)} · record a video or tap a reaction</Text>
-          </Box>
+          <Flex position="absolute" top="12px" left="12px" right="12px" justify="center" pointerEvents="none" zIndex={7}>
+            <Box bg="blackAlpha.800" color="white" px={3} py={1.5} borderRadius="full" borderWidth="1px" borderColor="whiteAlpha.400" maxW="100%">
+              <Text fontSize="xs" fontWeight="700" noOfLines={1}>Reply here · {fmtTime((askNow || liveMarker)?.t)}</Text>
+            </Box>
+          </Flex>
         )}
         {iAmSender && liveMarker && !activeNote && liveMarker.type !== 'reply' && (
           <Box position="absolute" top="12px" left="12px" bg="blackAlpha.700" color="white" px={3} py={1} borderRadius="full" fontSize="sm">
@@ -991,10 +992,11 @@ const VideoMessageWatchPage = () => {
             </Button>
           </Flex>
           {askNow?.type === 'reply' && askNow.onNote && ((childNote && String(askNow.onNote) === String(childNote._id)) || (!childNote && String(askNow.onNote) === String(activeNote?._id))) ? (
-            <Box position="absolute" left="12px" right="12px" bottom="12px" bg="blackAlpha.800" color="white" px={3} py={2.5} borderRadius="xl" zIndex={6} pointerEvents="none">
-              <Text fontWeight="bold" fontSize="sm">Wants a reply or a reaction here</Text>
-              <Text fontSize="xs" color="whiteAlpha.800">At {fmtTime(askNow.t)} · record a video or tap a reaction</Text>
-            </Box>
+            <Flex position="absolute" top="46px" left="12px" right="12px" justify="center" pointerEvents="none" zIndex={6}>
+              <Box bg="blackAlpha.800" color="white" px={3} py={1.5} borderRadius="full" borderWidth="1px" borderColor="whiteAlpha.400" maxW="100%">
+                <Text fontSize="xs" fontWeight="700" noOfLines={1}>Reply here · {fmtTime(askNow.t)}</Text>
+              </Box>
+            </Flex>
           ) : null}
           {popReaction && String(popReaction.onNote) === String(activeNote?._id) && (
             <Flex position="absolute" inset={0} align="center" justify="center" pointerEvents="none">
