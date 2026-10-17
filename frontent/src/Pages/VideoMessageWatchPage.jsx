@@ -178,6 +178,35 @@ const VideoMessageWatchPage = () => {
     return marks.find((m) => !m.onNote && Math.abs((m.t || 0) - now) < 1.2) || null
   }, [item?.markers, now])
 
+  const [replyClock, setReplyClock] = useState(0)
+  const [childClock, setChildClock] = useState(0)
+  const videoReplyCount = useMemo(() => notes.filter((n) => n.type === 'video').length, [notes])
+
+  const askOnClock = (noteId, t) => (item?.markers || []).find((m) => {
+    if (m?.type !== 'reply') return false
+    const on = m.onNote ? String(m.onNote) : ''
+    if (on !== (noteId || '')) return false
+    const mt = Number(m.t) || 0
+    return t >= mt - 0.2 && t <= mt + 1.15
+  }) || null
+
+  const visibleAsk = childNote
+    ? askOnClock(String(childNote._id), childClock)
+    : activeNote?.type === 'video'
+      ? askOnClock(String(activeNote._id), replyClock)
+      : askOnClock('', now)
+
+  const playingSpot = () => {
+    if (childNote && childVideoRef.current) {
+      return { t: Number(childVideoRef.current.currentTime) || 0, onNote: childNote._id, reply: childNote }
+    }
+    if (activeNote?.type === 'video' && noteVideoRef.current) {
+      return { t: Number(noteVideoRef.current.currentTime) || 0, onNote: activeNote._id, reply: activeNote }
+    }
+    const v = videoRef.current
+    return { t: v ? Number(v.currentTime) || now : now, onNote: null, reply: null }
+  }
+
   /** Load a reply into the hidden player without showing it (pre-buffer). */
   const primeNote = useCallback((note) => {
     const el = noteVideoRef.current
@@ -424,6 +453,7 @@ const VideoMessageWatchPage = () => {
     const prev = replyPrevRef.current
     replyPrevRef.current = t
     replyTRef.current = t
+    setReplyClock((cur) => (Math.abs(cur - t) < 0.05 ? cur : t))
     if (t + 0.05 < prev) {
       for (const n of notes) {
         if (String(n.onNote) === parentId && n.t > t + 0.2) shownRef.current.delete(String(n._id))
@@ -509,8 +539,8 @@ const VideoMessageWatchPage = () => {
 
   const askReplyHere = async () => {
     if (busy || !iAmSender) return
-    const target = childNote || (activeNote?.type === 'video' ? activeNote : null)
-    const at = childNote ? (childTRef.current || 0) : target ? (replyTRef.current || 0) : now
+    const spot = playingSpot()
+    const at = Math.max(0, spot.t)
     setBusy(true)
     try {
       const res = await fetch(`${API_BASE_URL}/api/video-message/${id}/reply-prompt`, {
@@ -520,7 +550,7 @@ const VideoMessageWatchPage = () => {
         body: JSON.stringify({
           t: at,
           text: 'Reply here',
-          ...(target?._id ? { onNote: target._id } : {}),
+          ...(spot.onNote ? { onNote: spot.onNote } : {}),
         }),
       })
       const data = await res.json()
@@ -556,8 +586,9 @@ const VideoMessageWatchPage = () => {
 
   const addReaction = async (emoji) => {
     if (busy) return
-    const reply = childNote || (activeNote?.type === 'video' ? activeNote : null)
-    const t = childNote ? (childTRef.current || 0) : reply ? replyTRef.current || 0 : now
+    const spot = playingSpot()
+    const reply = spot.reply
+    const t = Math.max(0, spot.t)
     setBusy(true)
     try {
       const res = await fetch(`${API_BASE_URL}/api/video-message/${id}/notes`, {
@@ -615,7 +646,9 @@ const VideoMessageWatchPage = () => {
         return
       }
       const parentReply = activeNote?.type === 'video' && !activeNote.onNote ? activeNote : null
-      const pinnedAt = parentReply ? (replyTRef.current || 0) : pinRef.current
+      const pinnedAt = parentReply
+        ? Math.max(0, Number(noteVideoRef.current?.currentTime) || replyTRef.current || 0)
+        : pinRef.current
       const light = await prepareLightVideo(file, 'note')
       const videoUrl = await uploadMediaToR2(light, 'video-messages', { skipCompress: true })
       const res = await fetch(`${API_BASE_URL}/api/video-message/${id}/notes`, {
@@ -734,7 +767,7 @@ const VideoMessageWatchPage = () => {
             {partyLabel(item, user?._id)}
           </Text>
           <Text color="whiteAlpha.700" fontSize="xs" noOfLines={1} wordBreak="normal">
-            {notes.length} replies
+            {videoReplyCount === 1 ? '1 reply' : `${videoReplyCount} replies`}
           </Text>
         </Box>
         <Button
@@ -772,12 +805,15 @@ const VideoMessageWatchPage = () => {
           isDisabled={replySaving}
           onClick={() => {
             if (replySaving) return
-            const v = videoRef.current
-            const t = v ? v.currentTime || now : now
-            pinRef.current = activeNote?.type === 'video' && !activeNote.onNote ? (replyTRef.current || 0) : t
-            setNow(t)
-            v?.pause()
+            const spot = playingSpot()
+            const parentReply = activeNote?.type === 'video' && !activeNote.onNote ? activeNote : null
+            pinRef.current = parentReply
+              ? Math.max(0, Number(noteVideoRef.current?.currentTime) || 0)
+              : spot.t
+            setNow(spot.onNote ? now : spot.t)
+            videoRef.current?.pause()
             noteVideoRef.current?.pause()
+            childVideoRef.current?.pause()
             setPlaying(false)
             setRecordOpen(true)
           }}
@@ -793,11 +829,15 @@ const VideoMessageWatchPage = () => {
             color="white"
             borderColor="whiteAlpha.700"
             onClick={() => {
-              const v = videoRef.current
-              const t = v ? v.currentTime || now : now
-              pinRef.current = t
-              setNow(t)
-              v?.pause()
+              const spot = playingSpot()
+              const parentReply = activeNote?.type === 'video' && !activeNote.onNote ? activeNote : null
+              pinRef.current = parentReply
+                ? Math.max(0, Number(noteVideoRef.current?.currentTime) || 0)
+                : spot.t
+              setNow(spot.onNote ? now : spot.t)
+              videoRef.current?.pause()
+              noteVideoRef.current?.pause()
+              childVideoRef.current?.pause()
               setPlaying(false)
               fileRef.current?.click()
             }}
@@ -865,13 +905,13 @@ const VideoMessageWatchPage = () => {
         />
 
 
-        {!iAmSender && !activeNote && ((askNow?.type === 'reply' && !askNow.onNote) || liveMarker?.type === 'reply') && (
+        {!iAmSender && !activeNote && visibleAsk ? (
           <Flex position="absolute" top="12px" left="12px" right="12px" justify="center" pointerEvents="none" zIndex={7}>
             <Box bg="blackAlpha.800" color="white" px={3} py={1.5} borderRadius="full" borderWidth="1px" borderColor="whiteAlpha.400" maxW="100%">
-              <Text fontSize="xs" fontWeight="700" noOfLines={1}>Reply here · {fmtTime((askNow || liveMarker)?.t)}</Text>
+              <Text fontSize="xs" fontWeight="700" noOfLines={1}>Reply here · {fmtTime(visibleAsk.t)}</Text>
             </Box>
           </Flex>
-        )}
+        ) : null}
         {iAmSender && liveMarker && !activeNote && liveMarker.type !== 'reply' && (
           <Box position="absolute" top="12px" left="12px" bg="blackAlpha.700" color="white" px={3} py={1} borderRadius="full" fontSize="sm">
             {liveMarker.type === 'question' ? `❓ ${liveMarker.text || ''}` : `👀 ${liveMarker.text || 'Look here'}`}
@@ -940,7 +980,9 @@ const VideoMessageWatchPage = () => {
                 togglePlay()
               }}
               onTimeUpdate={(e) => {
-                const t = e.currentTarget.currentTime || 0
+                const el = e.currentTarget
+                const t = el.currentTime || 0
+                setChildClock((cur) => (Math.abs(cur - t) < 0.05 ? cur : t))
                 const prev = childPrevRef.current
                 childPrevRef.current = t
                 childTRef.current = t
@@ -991,10 +1033,10 @@ const VideoMessageWatchPage = () => {
               Close
             </Button>
           </Flex>
-          {askNow?.type === 'reply' && askNow.onNote && ((childNote && String(askNow.onNote) === String(childNote._id)) || (!childNote && String(askNow.onNote) === String(activeNote?._id))) ? (
+          {visibleAsk ? (
             <Flex position="absolute" top="46px" left="12px" right="12px" justify="center" pointerEvents="none" zIndex={6}>
               <Box bg="blackAlpha.800" color="white" px={3} py={1.5} borderRadius="full" borderWidth="1px" borderColor="whiteAlpha.400" maxW="100%">
-                <Text fontSize="xs" fontWeight="700" noOfLines={1}>Reply here · {fmtTime(askNow.t)}</Text>
+                <Text fontSize="xs" fontWeight="700" noOfLines={1}>Reply here · {fmtTime(visibleAsk.t)}</Text>
               </Box>
             </Flex>
           ) : null}
@@ -1263,8 +1305,8 @@ const VideoMessageWatchPage = () => {
 
         <Box
           display="grid"
-          gridTemplateColumns="repeat(10, minmax(0, 1fr))"
-          gap={{ base: 1.5, sm: 2 }}
+          gridTemplateColumns="repeat(5, minmax(0, 1fr))"
+          gap={2}
           mt={{ lg: 'auto' }}
           pt={3}
           pb={3}
@@ -1276,9 +1318,9 @@ const VideoMessageWatchPage = () => {
               variant="outline"
               borderRadius="full"
               w="100%"
-              h={{ base: '38px', sm: '44px' }}
+              h="46px"
               minW={0}
-              fontSize={{ base: '18px', sm: '22px' }}
+              fontSize="22px"
               p={0}
               onClick={() => addReaction(e)}
             >
