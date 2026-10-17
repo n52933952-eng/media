@@ -333,7 +333,7 @@ const VideoMessageWatchPage = () => {
       if (n.type !== 'reaction' || n.onNote) return false
       const idn = String(n._id)
       if (shownRef.current.has(idn)) return false
-      return n.t > prev - 0.08 && n.t <= t + 0.08
+      return Math.abs((Number(n.t) || 0) - t) <= 0.22
     })
     if (react) {
       shownRef.current.add(String(react._id))
@@ -446,7 +446,7 @@ const VideoMessageWatchPage = () => {
       if (n.type !== 'reaction' || String(n.onNote) !== parentId) return false
       const idn = String(n._id)
       if (shownRef.current.has(idn)) return false
-      return n.t > prev - 0.08 && n.t <= t + 0.08
+      return Math.abs((Number(n.t) || 0) - t) <= 0.22
     })
     if (!react) return
     shownRef.current.add(String(react._id))
@@ -720,6 +720,7 @@ const VideoMessageWatchPage = () => {
           px={{ base: 2, sm: 3 }}
           aria-label="Download video"
           isLoading={downloading}
+          loadingText="Downloading"
           onClick={downloadAll}
         >
           ⬇

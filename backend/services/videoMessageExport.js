@@ -111,7 +111,7 @@ async function countFrames(bin, file, mov) {
 }
 
 export function exportHashFor(doc, notes) {
-  const parts = ['mix6', String(doc?.videoUrl || ''), String(doc?.duration || 0)]
+  const parts = ['mix7', String(doc?.videoUrl || ''), String(doc?.duration || 0)]
   for (const n of notes || []) {
     parts.push([
       n._id,
@@ -278,7 +278,10 @@ async function encodeSegment({ bin, dir, index, input, ss, readDur, outDur, stre
   if (wholeFile && mov) args.push('-ignore_editlist', '1')
   else if (!wholeFile) args.push('-ss', String(Math.max(0, ss || 0)), '-t', String(readFor))
   args.push('-i', input)
-  for (const png of pngs) args.push('-loop', '1', '-t', String(playFor), '-i', png.file)
+  for (const png of pngs) {
+    const t0 = Math.max(0, Number(png.start) || 0).toFixed(2)
+    args.push('-itsoffset', t0, '-loop', '1', '-framerate', '24', '-t', '1.6', '-i', png.file)
+  }
   const setpts = wholeFile ? `setpts=N/${pace}/TB` : 'setpts=PTS-STARTPTS'
   const filters = [
     `[0:v]${setpts},scale=${OUT_W}:${OUT_H}:force_original_aspect_ratio=decrease,pad=${OUT_W}:${OUT_H}:(ow-iw)/2:(oh-ih)/2:black,fps=24,setsar=1,format=yuv420p[v0]`,
@@ -288,7 +291,7 @@ async function encodeSegment({ bin, dir, index, input, ss, readDur, outDur, stre
     const t0 = Math.max(0, Number(png.start) || 0).toFixed(2)
     const t1 = (Number(t0) + 1.6).toFixed(2)
     filters.push(`[${i + 1}:v]scale=140:140,format=rgba[e${i}]`)
-    filters.push(`[${last}][e${i}]overlay=(W-w)/2:(H-h)/2:enable='between(t\\,${t0}\\,${t1})'[v${i + 1}]`)
+    filters.push(`[${last}][e${i}]overlay=(W-w)/2:(H-h)/2:eof_action=pass:enable='gte(t\\,${t0})*lt(t\\,${t1})'[v${i + 1}]`)
     last = `v${i + 1}`
   })
   let audioMap = `${pngs.length + 1}:a`
