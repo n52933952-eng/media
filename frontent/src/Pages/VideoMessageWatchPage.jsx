@@ -228,10 +228,7 @@ const VideoMessageWatchPage = () => {
 
   const [replyClock, setReplyClock] = useState(0)
   const [childClock, setChildClock] = useState(0)
-  const videoReplyCount = useMemo(
-    () => notes.filter((n) => n.type === 'video' || (n.type !== 'reaction' && n.videoUrl)).length,
-    [notes],
-  )
+  const videoReplyCount = notes.length
 
   const askOnClock = (noteId, t) => (item?.markers || []).find((m) => {
     if (m?.type !== 'reply') return false

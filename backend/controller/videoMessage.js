@@ -350,7 +350,7 @@ export const listVideoMessages = async (req, res) => {
     if (pageIds.length) {
       try {
         const grouped = await VideoNote.aggregate([
-          { $match: { videoMessage: { $in: pageIds }, type: 'video' } },
+          { $match: { videoMessage: { $in: pageIds } } },
           { $group: { _id: '$videoMessage', n: { $sum: 1 } } },
         ]).option({ maxTimeMS: 2500 })
         replyCounts = new Map(grouped.map((row) => [String(row._id), row.n || 0]))
