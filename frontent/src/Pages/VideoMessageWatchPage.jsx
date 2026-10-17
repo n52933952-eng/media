@@ -21,6 +21,37 @@ import VideoRecordModal from '../Components/VideoRecordModal.jsx'
 
 const REACTIONS = ['❤️', '😂', '🔥', '😮', '😢', '👏', '😍', '🎉', '👍', '💯', '🙏', '😭', '🤣', '😎', '💪', '✨', '😘', '🤔', '😅', '🙌']
 
+function clusterBarPins(notes, markers, dur, barW) {
+  const span = Math.max(1, dur || 1)
+  const width = Math.max(80, barW || 360)
+  const pins = []
+  for (const n of notes || []) {
+    if (n?.onNote) continue
+    pins.push({
+      key: String(n._id),
+      t: Number(n.t) || 0,
+      kind: n.type === 'reaction' ? 'reaction' : 'video',
+      glyph: n.type === 'reaction' ? (n.reaction || '❤️') : '🎥',
+      note: n,
+    })
+  }
+  for (const m of markers || []) {
+    if (m?.onNote) continue
+    const t = Number(m.t) || 0
+    if (m.type === 'reply') pins.push({ key: `ask-${t}`, t, kind: 'ask', glyph: '↩' })
+    else pins.push({ key: `dot-${m.type || 'mark'}-${t}`, t, kind: 'dot', glyph: '' })
+  }
+  pins.sort((a, b) => a.t - b.t)
+  const groups = []
+  for (const pin of pins) {
+    const x = Math.max(8, Math.min(width - 8, (pin.t / span) * width))
+    const last = groups[groups.length - 1]
+    if (last && Math.abs(x - last.x) <= 18) last.items.push(pin)
+    else groups.push({ x, items: [pin] })
+  }
+  return groups
+}
+
 const VideoMessageWatchPage = () => {
   const { id } = useParams()
   const listPreview = useLocation().state?.preview
@@ -56,6 +87,23 @@ const VideoMessageWatchPage = () => {
   const childPrevRef = useRef(0)
   const askedRef = useRef(new Set())
   const resumePlayRef = useRef(false)
+  const reactTimerRef = useRef(null)
+
+  useEffect(() => {
+    let raf = 0
+    let last = 0
+    const loop = (ts) => {
+      raf = requestAnimationFrame(loop)
+      if (ts - last < 32) return
+      const v = videoRef.current
+      if (!v || v.paused || dragRef.current || replyLockRef.current) return
+      last = ts
+      const t = v.currentTime || 0
+      setNow((cur) => (Math.abs(cur - t) < 0.02 ? cur : t))
+    }
+    raf = requestAnimationFrame(loop)
+    return () => cancelAnimationFrame(raf)
+  }, [])
 
   const [item, setItem] = useState(listPreview?.videoUrl ? listPreview : null)
   const [notes, setNotes] = useState([])
@@ -180,7 +228,10 @@ const VideoMessageWatchPage = () => {
 
   const [replyClock, setReplyClock] = useState(0)
   const [childClock, setChildClock] = useState(0)
-  const videoReplyCount = useMemo(() => notes.filter((n) => n.type === 'video').length, [notes])
+  const videoReplyCount = useMemo(
+    () => notes.filter((n) => n.type === 'video' || (n.type !== 'reaction' && n.videoUrl)).length,
+    [notes],
+  )
 
   const askOnClock = (noteId, t) => (item?.markers || []).find((m) => {
     if (m?.type !== 'reply') return false
@@ -369,7 +420,10 @@ const VideoMessageWatchPage = () => {
     if (react) {
       shownRef.current.add(String(react._id))
       setPopReaction(react)
-      setTimeout(() => setPopReaction((cur) => (cur?._id === react._id ? null : cur)), 1600)
+      if (reactTimerRef.current) clearTimeout(reactTimerRef.current)
+      reactTimerRef.current = setTimeout(() => {
+        setPopReaction((cur) => (String(cur?._id) === String(react._id) ? null : cur))
+      }, 1600)
     }
   }
 
@@ -1132,52 +1186,121 @@ const VideoMessageWatchPage = () => {
             transform="translateX(-50%)"
             pointerEvents="none"
           />
-          {(item.markers || []).filter((m) => !m.onNote).map((m, i) => (
-            <Box
-              key={`m-${i}`}
-              position="absolute"
-              left={`${Math.min(98, (m.t / dur) * 100)}%`}
-              top="50%"
-              w="8px"
-              h="8px"
-              bg="yellow.300"
-              borderRadius="full"
-              transform="translate(-50%, -50%)"
-              zIndex={2}
-              onPointerDown={(e) => e.stopPropagation()}
-              onClick={(e) => {
-                e.stopPropagation()
-                seekTo(m.t)
-              }}
-            />
-          ))}
-          {notes.filter((n) => !n.onNote).map((n) => (
-            <Flex
-              key={n._id}
-              position="absolute"
-              left={`${Math.min(98, (n.t / dur) * 100)}%`}
-              top="50%"
-              transform="translate(-50%, -50%)"
-              w="22px"
-              h="22px"
-              borderRadius="full"
-              bg="white"
-              align="center"
-              justify="center"
-              fontSize="13px"
-              lineHeight="1"
-              boxShadow="0 1px 4px rgba(0,0,0,0.25)"
-              cursor="pointer"
-              zIndex={2}
-              onPointerDown={(e) => e.stopPropagation()}
-              onClick={(e) => {
-                e.stopPropagation()
-                goToNote(n)
-              }}
-            >
-              {n.type === 'reaction' ? n.reaction : '🎥'}
-            </Flex>
-          ))}
+          {clusterBarPins(notes, item.markers, dur, barRef.current?.clientWidth).map((group) => {
+            const faces = group.items.filter((pin) => pin.kind !== 'dot')
+            const left = `${Math.min(98, (group.items[0].t / dur) * 100)}%`
+            if (faces.length === 0 || (faces.length === 1 && group.items.length === 1 && faces[0].kind === 'ask')) {
+              return (
+                <Box
+                  key={group.items[0].key}
+                  position="absolute"
+                  left={left}
+                  top="50%"
+                  w="8px"
+                  h="8px"
+                  bg="yellow.300"
+                  borderRadius="full"
+                  transform="translate(-50%, -50%)"
+                  zIndex={2}
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    seekTo(group.items[0].t)
+                  }}
+                />
+              )
+            }
+            if (faces.length === 1) {
+              return (
+                <Flex
+                  key={faces[0].key}
+                  position="absolute"
+                  left={left}
+                  top="50%"
+                  transform="translate(-50%, -50%)"
+                  w="22px"
+                  h="22px"
+                  borderRadius="full"
+                  bg="white"
+                  align="center"
+                  justify="center"
+                  fontSize="13px"
+                  lineHeight="1"
+                  boxShadow="0 1px 4px rgba(0,0,0,0.25)"
+                  cursor="pointer"
+                  zIndex={2}
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    if (faces[0].note) goToNote(faces[0].note)
+                    else seekTo(faces[0].t)
+                  }}
+                >
+                  {faces[0].glyph}
+                </Flex>
+              )
+            }
+            const shown = faces.slice(0, 2)
+            const extra = faces.length - shown.length
+            return (
+              <Flex
+                key={faces[0].key}
+                position="absolute"
+                left={left}
+                top="50%"
+                transform="translate(-30%, -50%)"
+                h="20px"
+                w={`${20 + (shown.length - 1) * 10 + (extra > 0 ? 16 : 0)}px`}
+                zIndex={3}
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  seekTo(faces[0].t)
+                }}
+              >
+                {shown.map((pin, i) => (
+                  <Flex
+                    key={pin.key}
+                    position="absolute"
+                    left={`${i * 10}px`}
+                    top="0"
+                    w="20px"
+                    h="20px"
+                    borderRadius="full"
+                    bg={pin.kind === 'ask' ? 'yellow.300' : 'white'}
+                    border="1.5px solid"
+                    borderColor="black"
+                    align="center"
+                    justify="center"
+                    fontSize="11px"
+                    lineHeight="1"
+                    zIndex={shown.length - i}
+                  >
+                    {pin.glyph}
+                  </Flex>
+                ))}
+                {extra > 0 ? (
+                  <Flex
+                    position="absolute"
+                    left={`${shown.length * 10}px`}
+                    top="1px"
+                    w="18px"
+                    h="18px"
+                    borderRadius="full"
+                    bg="black"
+                    border="1.5px solid white"
+                    align="center"
+                    justify="center"
+                    color="white"
+                    fontSize="9px"
+                    fontWeight="800"
+                  >
+                    +{extra}
+                  </Flex>
+                ) : null}
+              </Flex>
+            )
+          })}
         </Box>
       </Box>
       </Box>

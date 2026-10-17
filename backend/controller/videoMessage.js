@@ -345,6 +345,19 @@ export const listVideoMessages = async (req, res) => {
 
     const hasMore = rows.length > limit
     const page = hasMore ? rows.slice(0, limit) : rows
+    const pageIds = page.map((row) => row._id)
+    let replyCounts = new Map()
+    if (pageIds.length) {
+      try {
+        const grouped = await VideoNote.aggregate([
+          { $match: { videoMessage: { $in: pageIds }, type: 'video' } },
+          { $group: { _id: '$videoMessage', n: { $sum: 1 } } },
+        ]).option({ maxTimeMS: 2500 })
+        replyCounts = new Map(grouped.map((row) => [String(row._id), row.n || 0]))
+      } catch (err) {
+        console.error('[videoMessage] reply count skipped:', err?.message || err)
+      }
+    }
     const groupIds = page.filter((row) => row.isGroup).map((row) => row._id)
     const receipts = groupIds.length
       ? await VideoMessageReceipt.find({ user: userId, videoMessage: { $in: groupIds } })
@@ -354,6 +367,8 @@ export const listVideoMessages = async (req, res) => {
     const mine = new Map(receipts.map((row) => [String(row.videoMessage), row]))
     const items = page.map((row) => {
       const pub = toPublic(row)
+      const counted = replyCounts.get(String(row._id))
+      if (counted != null) pub.noteCount = counted
       if (!row.isGroup) return pub
       const receipt = mine.get(String(row._id))
       return {
