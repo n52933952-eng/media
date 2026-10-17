@@ -391,13 +391,27 @@ const VideoMessageWatchPage = () => {
       for (const n of notes) {
         if (n.onNote) continue
         const idn = String(n._id)
-        if ((Number(n.t) || 0) > at + 0.25) shownRef.current.delete(idn)
+        const nt = Number(n.t) || 0
+        if (Math.abs(nt - at) <= 0.45 || nt > at + 0.25) shownRef.current.delete(idn)
         else shownRef.current.add(idn)
+      }
+    }
+    let here = null
+    if (!soft) {
+      for (const n of notes) {
+        if (n.onNote || n.type !== 'video' || !n.videoUrl) continue
+        const nt = Number(n.t) || 0
+        if (Math.abs(nt - at) > 0.45) continue
+        if (!here || nt < (Number(here.t) || 0)) here = n
       }
     }
     try { v.currentTime = at } catch { /* ignore */ }
     setNow(at)
     lastTRef.current = at
+    if (here) {
+      openOverlay(here, { resumeAfter: keepPlaying, seek: true })
+      return
+    }
     const atEnd = known && at >= known - 0.35
     if (!soft && keepPlaying && !atEnd) v.play().catch(() => {})
   }

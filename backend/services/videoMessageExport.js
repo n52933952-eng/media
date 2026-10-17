@@ -111,7 +111,7 @@ async function countFrames(bin, file, mov) {
 }
 
 export function exportHashFor(doc, notes) {
-  const parts = ['mix4', String(doc?.videoUrl || ''), String(doc?.duration || 0)]
+  const parts = ['mix5', String(doc?.videoUrl || ''), String(doc?.duration || 0)]
   for (const n of notes || []) {
     parts.push([
       n._id,
@@ -168,6 +168,20 @@ async function pngFor(dir, cache, emoji) {
     cache.set(code, '')
     return ''
   }
+}
+
+function childVideos(notes, parentId) {
+  return (notes || [])
+    .filter((n) => n.type === 'video' && n.videoUrl && String(n.onNote || '') === String(parentId))
+    .sort((a, b) => (Number(a.t) || 0) - (Number(b.t) || 0) || String(a._id).localeCompare(String(b._id)))
+    .slice(0, 10)
+}
+
+function reactionKids(notes, parentId) {
+  return (notes || [])
+    .filter((n) => n.type === 'reaction' && n.reaction && String(n.onNote || '') === String(parentId))
+    .slice(0, 8)
+    .map((n) => ({ emoji: n.reaction, start: Math.max(0, Number(n.t) || 0) }))
 }
 
 function reactionsBetween(list, start, end) {
@@ -324,6 +338,49 @@ async function concatSegments(bin, dir, files) {
   return out
 }
 
+async function encodeNoteFile({ bin, dir, index, note, reactions, cache }) {
+  const replyPath = join(dir, `reply-${index}.mp4`)
+  try {
+    await downloadTo(note.videoUrl, replyPath)
+  } catch (err) {
+    console.warn('[videoMessage] skip reply in download:', err?.message || err)
+    return null
+  }
+  const replyProbe = await probe(bin, replyPath)
+  const frames = await countFrames(bin, replyPath, replyProbe.mov)
+  const timing = replyTiming(note, replyProbe, frames)
+  if (!(timing.outDur > 0.15)) return null
+  const replyEncode = {
+    bin,
+    dir,
+    index,
+    input: replyPath,
+    ss: 0,
+    readDur: timing.outDur,
+    outDur: timing.outDur,
+    stretch: timing.stretch,
+    reactions,
+    cache,
+    hasAudio: replyProbe.hasAudio,
+    frameFps: replyProbe.fps,
+    mov: replyProbe.mov,
+  }
+  try {
+    return { file: await encodeSegment({ ...replyEncode, wholeFile: true }), dur: timing.outDur }
+  } catch (err) {
+    console.warn('[videoMessage] reply mix retry:', err?.message || err)
+    try {
+      return {
+        file: await encodeSegment({ ...replyEncode, wholeFile: true, mov: false, stretch: 1 }),
+        dur: timing.outDur,
+      }
+    } catch (err2) {
+      console.warn('[videoMessage] reply mix skipped:', err2?.message || err2)
+      return null
+    }
+  }
+}
+
 async function composeAndUpload(doc, notes) {
   const bin = await getFfmpegPath()
   if (!bin) throw new Error('Could not prepare the download')
@@ -356,47 +413,87 @@ async function composeAndUpload(doc, notes) {
         index += 1
         continue
       }
-      const note = piece.note
-      const replyPath = join(dir, `reply-${index}.mp4`)
-      try {
-        await downloadTo(note.videoUrl, replyPath)
-      } catch (err) {
-        console.warn('[videoMessage] skip reply in download:', err?.message || err)
-        continue
-      }
-      const replyProbe = await probe(bin, replyPath)
-      const frames = await countFrames(bin, replyPath, replyProbe.mov)
-      const timing = replyTiming(note, replyProbe, frames)
-      if (!(timing.outDur > 0.15)) continue
-      const replyEncode = {
+      const made = await encodeNoteFile({
         bin,
         dir,
         index,
-        input: replyPath,
-        ss: 0,
-        readDur: timing.outDur,
-        outDur: timing.outDur,
-        stretch: timing.stretch,
+        note: piece.note,
         reactions: piece.reactions,
         cache,
-        hasAudio: replyProbe.hasAudio,
-        frameFps: replyProbe.fps,
-        mov: replyProbe.mov,
+      })
+      if (!made) continue
+      index += 1
+      const nested = childVideos(notes, piece.note._id)
+      if (!nested.length) {
+        files.push(made.file)
+        continue
       }
-      let replyFile = ''
-      try {
-        replyFile = await encodeSegment({ ...replyEncode, wholeFile: true })
-      } catch (err) {
-        console.warn('[videoMessage] reply mix retry:', err?.message || err)
+      const before = files.length
+      const used = new Set()
+      let cursor = 0
+      let guard = 0
+      const span = made.dur
+      while (cursor < span - 0.08 && guard < 24) {
+        guard += 1
+        const next = nested.find((n) => !used.has(String(n._id)) && (Number(n.t) || 0) >= cursor - 0.05 && (Number(n.t) || 0) < span)
+        if (!next) break
+        const at = Math.min(span, Math.max(cursor, Number(next.t) || 0))
+        if (at - cursor > 0.12) {
+          try {
+            files.push(await encodeSegment({
+              bin,
+              dir,
+              index,
+              input: made.file,
+              ss: cursor,
+              readDur: at - cursor,
+              outDur: at - cursor,
+              reactions: [],
+              cache,
+              hasAudio: true,
+            }))
+            index += 1
+          } catch (err) {
+            console.warn('[videoMessage] reply slice skipped:', err?.message || err)
+          }
+        }
+        const chain = nested.filter((n) => !used.has(String(n._id)) && Math.abs((Number(n.t) || 0) - (Number(next.t) || 0)) < 0.8)
+        for (const child of chain) {
+          used.add(String(child._id))
+          const childMade = await encodeNoteFile({
+            bin,
+            dir,
+            index,
+            note: child,
+            reactions: reactionKids(notes, child._id),
+            cache,
+          })
+          if (!childMade) continue
+          files.push(childMade.file)
+          index += 1
+        }
+        cursor = at
+      }
+      if (span - cursor > 0.12) {
         try {
-          replyFile = await encodeSegment({ ...replyEncode, wholeFile: true, mov: false, stretch: 1 })
-        } catch (err2) {
-          console.warn('[videoMessage] reply mix skipped:', err2?.message || err2)
-          continue
+          files.push(await encodeSegment({
+            bin,
+            dir,
+            index,
+            input: made.file,
+            ss: cursor,
+            readDur: span - cursor,
+            outDur: span - cursor,
+            reactions: [],
+            cache,
+            hasAudio: true,
+          }))
+          index += 1
+        } catch (err) {
+          console.warn('[videoMessage] reply slice skipped:', err?.message || err)
         }
       }
-      files.push(replyFile)
-      index += 1
+      if (files.length === before) files.push(made.file)
     }
     if (!files.length) throw new Error('Could not prepare the download')
     const mixed = await concatSegments(bin, dir, files)
