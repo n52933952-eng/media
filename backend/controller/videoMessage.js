@@ -603,8 +603,6 @@ export const addVideoNote = async (req, res) => {
         note.t = Math.round(safeT * 10) / 10
       }
     } else {
-      const safeT = doc.duration > 0 ? Math.min(doc.duration, at) : at
-      note.t = Math.round(safeT * 10) / 10
       try {
         ;[note.videoUrl] = assertManagedMediaUrls(videoUrl)
       } catch (e) {
@@ -612,6 +610,19 @@ export const addVideoNote = async (req, res) => {
       }
       note.type = 'video'
       note.duration = Math.min(MAX_NOTE_DURATION_SEC, toNum(duration))
+      if (onNote) {
+        if (!isId(onNote)) return res.status(400).json({ error: 'Invalid reply' })
+        const parent = await VideoNote.findOne({ _id: onNote, videoMessage: doc._id, type: 'video', onNote: null })
+          .select('_id duration')
+          .lean()
+        if (!parent) return res.status(400).json({ error: 'Reply not found' })
+        const cap = parent.duration > 0 ? parent.duration : MAX_NOTE_DURATION_SEC
+        note.onNote = parent._id
+        note.t = Math.round(Math.min(cap, at) * 10) / 10
+      } else {
+        const safeT = doc.duration > 0 ? Math.min(doc.duration, at) : at
+        note.t = Math.round(safeT * 10) / 10
+      }
     }
 
     const created = await VideoNote.create(note)

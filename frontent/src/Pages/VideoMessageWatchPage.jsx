@@ -38,6 +38,7 @@ const VideoMessageWatchPage = () => {
   // One always-mounted reply player. We pre-load the next reply into it a few
   // seconds early so it starts the instant the playhead reaches its moment.
   const noteVideoRef = useRef(null)
+  const childVideoRef = useRef(null)
   const primedUrlRef = useRef('')
   const fileRef = useRef(null)
   const shownRef = useRef(new Set())
@@ -65,6 +66,7 @@ const VideoMessageWatchPage = () => {
   const [playing, setPlaying] = useState(false)
   const [busy, setBusy] = useState(false)
   const [activeNote, setActiveNote] = useState(null)
+  const [childNote, setChildNote] = useState(null)
   const [popReaction, setPopReaction] = useState(null)
   const [recordOpen, setRecordOpen] = useState(false)
   const [replySaving, setReplySaving] = useState(false)
@@ -77,7 +79,7 @@ const VideoMessageWatchPage = () => {
     ? (item.members || []).find((m) => uidOf(m) !== String(user?._id)) || null
     : other
   const iAmSender = item ? uidOf(item.sender) === String(user?._id) : false
-  const videoNotes = useMemo(() => notes.filter((n) => n.type === 'video' && n.videoUrl), [notes])
+  const videoNotes = useMemo(() => notes.filter((n) => n.type === 'video' && n.videoUrl && !n.onNote), [notes])
 
   const load = useCallback(async () => {
     let lastErr = null
@@ -202,6 +204,7 @@ const VideoMessageWatchPage = () => {
     setNow(land)
     replyLockRef.current = false
     setActiveNote(null)
+    setChildNote(null)
     const noteEl = noteVideoRef.current
     if (noteEl) {
       noteEl.loop = false
@@ -250,6 +253,7 @@ const VideoMessageWatchPage = () => {
       v?.pause()
       setPlaying(false)
       setActiveNote(note)
+      setChildNote(null)
       setNow(noteT)
       primeNote(note)
       const el = noteVideoRef.current
@@ -339,6 +343,14 @@ const VideoMessageWatchPage = () => {
   }
 
   const togglePlay = () => {
+    const nested = childNote ? childVideoRef.current : null
+    if (nested) {
+      noteVideoRef.current?.pause()
+      videoRef.current?.pause()
+      if (nested.paused) nested.play().catch(() => {})
+      else nested.pause()
+      return
+    }
     const reply = activeNote?.type === 'video' ? noteVideoRef.current : null
     if (reply) {
       videoRef.current?.pause()
@@ -367,7 +379,9 @@ const VideoMessageWatchPage = () => {
     if (replyLockRef.current) {
       replyLockRef.current = false
       setActiveNote(null)
+      setChildNote(null)
       try { noteVideoRef.current?.pause() } catch { /* ignore */ }
+      try { childVideoRef.current?.pause() } catch { /* ignore */ }
     }
     if (!soft) {
       if (finishedReplyRef.current) {
@@ -401,6 +415,19 @@ const VideoMessageWatchPage = () => {
       return
     }
     if (t - prev > 2.5) return
+    if (childNote) return
+    const child = notes.find((n) => {
+      if (n.type !== 'video' || !n.videoUrl || String(n.onNote) !== parentId) return false
+      const idn = String(n._id)
+      if (shownRef.current.has(idn)) return false
+      return n.t > prev - 0.08 && n.t <= t + 0.08
+    })
+    if (child) {
+      shownRef.current.add(String(child._id))
+      try { noteVideoRef.current?.pause() } catch { /* ignore */ }
+      setChildNote(child)
+      return
+    }
     const react = notes.find((n) => {
       if (n.type !== 'reaction' || String(n.onNote) !== parentId) return false
       const idn = String(n._id)
@@ -423,6 +450,11 @@ const VideoMessageWatchPage = () => {
       }
     }
     const t = Math.max(0, Number(note.t) || 0)
+    if (note.type === 'video' && note.onNote) {
+      const parent = notes.find((n) => String(n._id) === String(note.onNote) && n.type === 'video' && !n.onNote)
+      if (parent) openOverlay(parent, { resumeAfter: true, seek: true })
+      return
+    }
     if (note.type === 'video' && note.videoUrl) {
       openOverlay(note, { resumeAfter: true, seek: true })
       return
@@ -543,19 +575,33 @@ const VideoMessageWatchPage = () => {
         showToast('Error', 'Reply video must be 30 seconds or less', 'error')
         return
       }
+      const parentReply = activeNote?.type === 'video' && !activeNote.onNote ? activeNote : null
+      const pinnedAt = parentReply ? (replyTRef.current || 0) : pinRef.current
       const light = await prepareLightVideo(file, 'note')
       const videoUrl = await uploadMediaToR2(light, 'video-messages', { skipCompress: true })
       const res = await fetch(`${API_BASE_URL}/api/video-message/${id}/notes`, {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: 'video', videoUrl, duration: Math.round(durationSec), t: pinRef.current }),
+        body: JSON.stringify({
+          type: 'video',
+          videoUrl,
+          duration: Math.round(durationSec),
+          t: pinnedAt,
+          ...(parentReply ? { onNote: parentReply._id } : {}),
+        }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Failed')
       if (data.note) {
         setNotes((prev) => [...prev, data.note].sort((a, b) => a.t - b.t))
-        openOverlay(data.note, { resumeAfter: true, seek: true })
+        if (data.note.onNote && parentReply && String(activeNote?._id) === String(parentReply._id)) {
+          shownRef.current.add(String(data.note._id))
+          try { noteVideoRef.current?.pause() } catch { /* ignore */ }
+          setChildNote(data.note)
+        } else {
+          openOverlay(data.note.onNote ? parentReply || data.note : data.note, { resumeAfter: true, seek: true })
+        }
       }
       showToast('Saved', `Reply pinned at ${fmtTime(now)}`, 'success')
     } catch (e) {
@@ -685,9 +731,10 @@ const VideoMessageWatchPage = () => {
             if (replySaving) return
             const v = videoRef.current
             const t = v ? v.currentTime || now : now
-            pinRef.current = t
+            pinRef.current = activeNote?.type === 'video' && !activeNote.onNote ? (replyTRef.current || 0) : t
             setNow(t)
             v?.pause()
+            noteVideoRef.current?.pause()
             setPlaying(false)
             setRecordOpen(true)
           }}
@@ -836,6 +883,43 @@ const VideoMessageWatchPage = () => {
               else closeOverlay(true)
             }}
           />
+          {childNote?.videoUrl ? (
+            <video
+              ref={childVideoRef}
+              src={mediaDisplayUrl(childNote.videoUrl)}
+              playsInline
+              autoPlay
+              preload="auto"
+              style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain', background: '#000', zIndex: 5 }}
+              onClick={(e) => {
+                e.stopPropagation()
+                togglePlay()
+              }}
+              onEnded={(e) => {
+                const el = e.currentTarget
+                try { el.pause() } catch { /* ignore */ }
+                if ((el.currentTime || 0) < 0.2) return
+                const parentId = String(activeNote?._id || '')
+                const endedT = Number(childNote.t) || 0
+                const endedUrl = childNote.videoUrl || ''
+                const next = notes.find((n) => {
+                  if (n.type !== 'video' || !n.videoUrl || String(n.onNote) !== parentId) return false
+                  const idn = String(n._id)
+                  if (!idn || idn === String(childNote._id) || shownRef.current.has(idn)) return false
+                  if (endedUrl && n.videoUrl === endedUrl) return false
+                  return Math.abs((Number(n.t) || 0) - endedT) < 0.8
+                })
+                if (next) {
+                  shownRef.current.add(String(next._id))
+                  setChildNote(next)
+                  return
+                }
+                setChildNote(null)
+                const parentEl = noteVideoRef.current
+                if (parentEl) parentEl.play().catch(() => {})
+              }}
+            />
+          ) : null}
           <Flex position="absolute" top="10px" left="10px" right="10px" align="center" justify="space-between">
             <Text color="white" fontSize="xs" bg="blackAlpha.600" px={2.5} py={1} borderRadius="full" noOfLines={1}>
               Reply · {activeNote?.user?.name || activeNote?.user?.username || ''}
@@ -1021,6 +1105,7 @@ const VideoMessageWatchPage = () => {
           title={`Reply at ${fmtTime(now)}`}
           onReady={(file) => {
             if (file) addVideoNote(file, true)
+            else if (activeNote?.type === 'video') noteVideoRef.current?.play().catch(() => {})
             else videoRef.current?.play().catch(() => {})
           }}
         />
