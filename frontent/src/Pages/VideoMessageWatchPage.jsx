@@ -19,7 +19,7 @@ import { mediaDisplayUrl } from '../utils/mediaUrl.js'
 import { fmtTime, otherParty, partyLabel, prepareLightVideo, uidOf } from '../utils/videoMessage.js'
 import VideoRecordModal from '../Components/VideoRecordModal.jsx'
 
-const REACTIONS = ['❤️', '😂', '🔥', '😮', '😢', '👏', '😍', '🎉', '👍', '💯', '🙏', '😭', '🤣', '😎', '💪', '✨']
+const REACTIONS = ['❤️', '😂', '🔥', '😮', '😢', '👏', '😍', '🎉', '👍', '💯', '🙏', '😭', '🤣', '😎', '💪', '✨', '😘', '🤔', '😅', '🙌']
 
 const VideoMessageWatchPage = () => {
   const { id } = useParams()
@@ -1263,7 +1263,7 @@ const VideoMessageWatchPage = () => {
 
         <Box
           display="grid"
-          gridTemplateColumns="repeat(8, minmax(0, 1fr))"
+          gridTemplateColumns="repeat(10, minmax(0, 1fr))"
           gap={{ base: 1.5, sm: 2 }}
           mt={{ lg: 'auto' }}
           pt={3}
