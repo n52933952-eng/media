@@ -720,7 +720,10 @@ const VideoMessageWatchPage = () => {
           px={{ base: 2, sm: 3 }}
           aria-label="Download video"
           isLoading={downloading}
-          loadingText="Downloading"
+          w="32px"
+          minW="32px"
+          h="32px"
+          borderRadius="full"
           onClick={downloadAll}
         >
           ⬇

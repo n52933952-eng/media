@@ -111,7 +111,7 @@ async function countFrames(bin, file, mov) {
 }
 
 export function exportHashFor(doc, notes) {
-  const parts = ['mix7', String(doc?.videoUrl || ''), String(doc?.duration || 0)]
+  const parts = ['mix8', String(doc?.videoUrl || ''), String(doc?.duration || 0)]
   for (const n of notes || []) {
     parts.push([
       n._id,
@@ -263,7 +263,45 @@ function replyTiming(note, probeInfo, frames) {
   return { outDur, stretch, fps }
 }
 
-async function encodeSegment({ bin, dir, index, input, ss, readDur, outDur, stretch = 1, reactions, cache, hasAudio, wholeFile = false, frameFps = 30, mov = false }) {
+function emojiSlices(reactions, playFor) {
+  const span = Math.max(0.2, Number(playFor) || 0.2)
+  const show = 1.6
+  const marks = (reactions || [])
+    .map((r) => ({ emoji: r.emoji, start: Math.max(0, Number(r.start) || 0) }))
+    .filter((r) => r.emoji && r.start < span - 0.02)
+    .sort((a, b) => a.start - b.start)
+  if (!marks.length) return []
+  const points = [0, span]
+  for (const m of marks) {
+    points.push(Math.min(span, m.start))
+    points.push(Math.min(span, m.start + show))
+  }
+  const times = [...new Set(points.map((t) => Math.round(t * 100) / 100))].sort((a, b) => a - b)
+  const raw = []
+  for (let i = 0; i < times.length - 1; i++) {
+    const start = times[i]
+    const dur = Math.round((times[i + 1] - start) * 100) / 100
+    if (dur < 0.05) continue
+    const active = marks.filter((m) => m.start <= start + 0.03 && m.start + show > start + 0.05)
+    raw.push({
+      start,
+      dur,
+      reactions: active.slice(0, 4).map((m) => ({ emoji: m.emoji, start: 0 })),
+    })
+  }
+  const slices = []
+  for (const sl of raw) {
+    const prev = slices[slices.length - 1]
+    if (prev && sl.dur < 0.12 && !sl.reactions.length) {
+      prev.dur = Math.round((prev.dur + sl.dur) * 100) / 100
+      continue
+    }
+    slices.push({ ...sl, reactions: sl.reactions.slice() })
+  }
+  return slices
+}
+
+async function encodeCore({ bin, dir, index, input, ss, readDur, outDur, stretch = 1, reactions, cache, hasAudio, wholeFile = false, frameFps = 30, mov = false }) {
   const pngs = []
   for (const reaction of reactions || []) {
     const file = await pngFor(dir, cache, reaction.emoji)
@@ -278,20 +316,15 @@ async function encodeSegment({ bin, dir, index, input, ss, readDur, outDur, stre
   if (wholeFile && mov) args.push('-ignore_editlist', '1')
   else if (!wholeFile) args.push('-ss', String(Math.max(0, ss || 0)), '-t', String(readFor))
   args.push('-i', input)
-  for (const png of pngs) {
-    const t0 = Math.max(0, Number(png.start) || 0).toFixed(2)
-    args.push('-itsoffset', t0, '-loop', '1', '-framerate', '24', '-t', '1.6', '-i', png.file)
-  }
+  for (const png of pngs) args.push('-loop', '1', '-framerate', '24', '-t', String(playFor), '-i', png.file)
   const setpts = wholeFile ? `setpts=N/${pace}/TB` : 'setpts=PTS-STARTPTS'
   const filters = [
     `[0:v]${setpts},scale=${OUT_W}:${OUT_H}:force_original_aspect_ratio=decrease,pad=${OUT_W}:${OUT_H}:(ow-iw)/2:(oh-ih)/2:black,fps=24,setsar=1,format=yuv420p[v0]`,
   ]
   let last = 'v0'
   pngs.forEach((png, i) => {
-    const t0 = Math.max(0, Number(png.start) || 0).toFixed(2)
-    const t1 = (Number(t0) + 1.6).toFixed(2)
     filters.push(`[${i + 1}:v]scale=140:140,format=rgba[e${i}]`)
-    filters.push(`[${last}][e${i}]overlay=(W-w)/2:(H-h)/2:eof_action=pass:enable='gte(t\\,${t0})*lt(t\\,${t1})'[v${i + 1}]`)
+    filters.push(`[${last}][e${i}]overlay=(W-w)/2:(H-h)/2:eof_action=pass[v${i + 1}]`)
     last = `v${i + 1}`
   })
   let audioMap = `${pngs.length + 1}:a`
@@ -330,12 +363,54 @@ async function encodeSegment({ bin, dir, index, input, ss, readDur, outDur, stre
   return out
 }
 
-async function concatSegments(bin, dir, files) {
+async function encodeSegment(opts) {
+  const playFor = Math.max(0.2, Number(opts.outDur) || 0.2)
+  const slices = emojiSlices(opts.reactions, playFor)
+  if (!slices.length) return encodeCore({ ...opts, reactions: [] })
+  const bake = !!opts.wholeFile || Number(opts.stretch) > 1.01
+  let input = opts.input
+  let ss = Number(opts.ss) || 0
+  if (bake) {
+    input = await encodeCore({ ...opts, index: `${opts.index}-b`, reactions: [] })
+    ss = 0
+  }
+  const base = bake
+    ? { input, ss: 0, stretch: 1, wholeFile: false, mov: false, hasAudio: true, frameFps: 24 }
+    : { input, ss, stretch: 1, wholeFile: false, mov: false, hasAudio: !!opts.hasAudio, frameFps: opts.frameFps }
+  const one = slices.length === 1 && slices[0].start < 0.05 && slices[0].dur > playFor - 0.08
+  if (one) {
+    return encodeCore({
+      ...opts,
+      ...base,
+      ss: base.ss + slices[0].start,
+      readDur: slices[0].dur,
+      outDur: slices[0].dur,
+      index: opts.index,
+      reactions: slices[0].reactions,
+    })
+  }
+  const files = []
+  for (let i = 0; i < slices.length; i++) {
+    const sl = slices[i]
+    files.push(await encodeCore({
+      ...opts,
+      ...base,
+      index: `${opts.index}-e${i}`,
+      ss: base.ss + sl.start,
+      readDur: sl.dur,
+      outDur: sl.dur,
+      reactions: sl.reactions,
+    }))
+  }
+  return concatSegments(opts.bin, opts.dir, files, `mix-${opts.index}`)
+}
+
+async function concatSegments(bin, dir, files, name = 'all') {
   if (files.length === 1) return files[0]
-  const listPath = join(dir, 'list.txt')
+  const listPath = join(dir, `${name}.txt`)
   const body = files.map((file) => `file '${file.replace(/\\/g, '/')}'`).join('\n')
   await writeFile(listPath, body)
-  const out = join(dir, 'all.mp4')
+  const out = join(dir, `${name}.mp4`)
   try {
     await runFfmpeg([bin, '-y', '-f', 'concat', '-safe', '0', '-i', listPath, '-c', 'copy', '-movflags', '+faststart', out])
   } catch {
