@@ -111,7 +111,7 @@ async function countFrames(bin, file, mov) {
 }
 
 export function exportHashFor(doc, notes) {
-  const parts = ['mix5', String(doc?.videoUrl || ''), String(doc?.duration || 0)]
+  const parts = ['mix6', String(doc?.videoUrl || ''), String(doc?.duration || 0)]
   for (const n of notes || []) {
     parts.push([
       n._id,
@@ -180,15 +180,24 @@ function childVideos(notes, parentId) {
 function reactionKids(notes, parentId) {
   return (notes || [])
     .filter((n) => n.type === 'reaction' && n.reaction && String(n.onNote || '') === String(parentId))
-    .slice(0, 8)
+    .slice(0, 24)
     .map((n) => ({ emoji: n.reaction, start: Math.max(0, Number(n.t) || 0) }))
 }
 
 function reactionsBetween(list, start, end) {
     return list
     .filter((r) => r.t >= start - 0.05 && r.t < end)
-    .slice(0, 8)
+    .slice(0, 24)
     .map((r) => ({ emoji: r.reaction, start: Math.max(0, r.t - start) }))
+}
+
+/** A phone clip can be stretched longer than its saved length. Keep marks on the same picture. */
+function fileTime(note, fileDur, t) {
+  const at = Math.max(0, Number(t) || 0)
+  const meta = Number(note?.duration) || 0
+  const span = Number(fileDur) || 0
+  if (meta > 0.2 && span > meta * 1.4) return Math.min(Math.max(0, span - 0.05), at * (span / meta))
+  return at
 }
 
 function buildPieces(mainDur, notes) {
@@ -216,7 +225,7 @@ function buildPieces(mainDur, notes) {
       used.add(String(reply._id))
       const kids = (notes || [])
         .filter((n) => n.type === 'reaction' && n.reaction && String(n.onNote || '') === String(reply._id))
-        .slice(0, 8)
+        .slice(0, 24)
         .map((n) => ({ emoji: n.reaction, start: Math.max(0, Number(n.t) || 0) }))
       pieces.push({ kind: 'reply', note: reply, reactions: kids })
     }
@@ -350,6 +359,7 @@ async function encodeNoteFile({ bin, dir, index, note, reactions, cache }) {
   const frames = await countFrames(bin, replyPath, replyProbe.mov)
   const timing = replyTiming(note, replyProbe, frames)
   if (!(timing.outDur > 0.15)) return null
+  const scaled = (reactions || []).map((r) => ({ ...r, start: fileTime(note, timing.outDur, r.start) }))
   const replyEncode = {
     bin,
     dir,
@@ -359,7 +369,7 @@ async function encodeNoteFile({ bin, dir, index, note, reactions, cache }) {
     readDur: timing.outDur,
     outDur: timing.outDur,
     stretch: timing.stretch,
-    reactions,
+    reactions: scaled,
     cache,
     hasAudio: replyProbe.hasAudio,
     frameFps: replyProbe.fps,
@@ -435,9 +445,9 @@ async function composeAndUpload(doc, notes) {
       const span = made.dur
       while (cursor < span - 0.08 && guard < 24) {
         guard += 1
-        const next = nested.find((n) => !used.has(String(n._id)) && (Number(n.t) || 0) >= cursor - 0.05 && (Number(n.t) || 0) < span)
+        const next = nested.find((n) => !used.has(String(n._id)) && fileTime(piece.note, span, n.t) >= cursor - 0.05 && fileTime(piece.note, span, n.t) < span)
         if (!next) break
-        const at = Math.min(span, Math.max(cursor, Number(next.t) || 0))
+        const at = Math.min(span, Math.max(cursor, fileTime(piece.note, span, next.t)))
         if (at - cursor > 0.12) {
           try {
             files.push(await encodeSegment({
@@ -457,7 +467,7 @@ async function composeAndUpload(doc, notes) {
             console.warn('[videoMessage] reply slice skipped:', err?.message || err)
           }
         }
-        const chain = nested.filter((n) => !used.has(String(n._id)) && Math.abs((Number(n.t) || 0) - (Number(next.t) || 0)) < 0.8)
+        const chain = nested.filter((n) => !used.has(String(n._id)) && Math.abs(fileTime(piece.note, span, n.t) - fileTime(piece.note, span, next.t)) < 0.8)
         for (const child of chain) {
           used.add(String(child._id))
           const childMade = await encodeNoteFile({
