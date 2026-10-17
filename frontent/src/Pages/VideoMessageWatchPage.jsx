@@ -52,6 +52,8 @@ const VideoMessageWatchPage = () => {
   const dragRef = useRef(false)
   const replyTRef = useRef(0)
   const replyPrevRef = useRef(0)
+  const childTRef = useRef(0)
+  const childPrevRef = useRef(0)
   const askedRef = useRef(new Set())
   const resumePlayRef = useRef(false)
 
@@ -153,7 +155,7 @@ const VideoMessageWatchPage = () => {
       const asks = payload.markers.filter((m) => m?.type === 'reply')
       const last = asks[asks.length - 1]
       if (!last) return
-      setAskNow(last)
+      if (!last.onNote) setAskNow(last)
       showToast('Asked', 'They want a reply or a reaction here', 'info')
     }
     socket.on('videoMessage:note', onNote)
@@ -173,7 +175,7 @@ const VideoMessageWatchPage = () => {
 
   const liveMarker = useMemo(() => {
     const marks = item?.markers || []
-    return marks.find((m) => Math.abs((m.t || 0) - now) < 1.2) || null
+    return marks.find((m) => !m.onNote && Math.abs((m.t || 0) - now) < 1.2) || null
   }, [item?.markers, now])
 
   /** Load a reply into the hidden player without showing it (pre-buffer). */
@@ -301,7 +303,7 @@ const VideoMessageWatchPage = () => {
         if (n.t > t + 0.2) shownRef.current.delete(String(n._id))
       }
       for (const m of item?.markers || []) {
-        if (m.t > t + 0.2) askedRef.current.delete(String(m.t))
+        if (!m.onNote && m.t > t + 0.2) askedRef.current.delete(`:${m.t}`)
       }
       return
     }
@@ -309,11 +311,11 @@ const VideoMessageWatchPage = () => {
     if (t - prev > 2.5) return
     if (!iAmSender && !activeNote) {
       const ask = (item?.markers || []).find((m) => {
-        if (m?.type !== 'reply' || askedRef.current.has(String(m.t))) return false
+        if (m?.type !== 'reply' || m.onNote || askedRef.current.has(`:${m.t}`)) return false
         return m.t > prev - 0.08 && m.t <= t + 0.08
       })
       if (ask) {
-        askedRef.current.add(String(ask.t))
+        askedRef.current.add(`:${ask.t}`)
         setAskNow(ask)
       }
     }
@@ -426,9 +428,24 @@ const VideoMessageWatchPage = () => {
       for (const n of notes) {
         if (String(n.onNote) === parentId && n.t > t + 0.2) shownRef.current.delete(String(n._id))
       }
+      for (const m of item?.markers || []) {
+        if (String(m.onNote || '') === parentId && m.t > t + 0.2) askedRef.current.delete(`${m.onNote}:${m.t}`)
+      }
       return
     }
     if (t - prev > 2.5) return
+    if (!childNote && !iAmSender) {
+      const ask = (item?.markers || []).find((m) => {
+        if (m?.type !== 'reply' || String(m.onNote || '') !== parentId) return false
+        if (askedRef.current.has(`${m.onNote}:${m.t}`)) return false
+        const mt = Number(m.t) || 0
+        return mt > prev - 0.08 && mt <= t + 0.35
+      })
+      if (ask) {
+        askedRef.current.add(`${ask.onNote}:${ask.t}`)
+        setAskNow(ask)
+      }
+    }
     if (childNote) return
     const child = notes.find((n) => {
       if (n.type !== 'video' || !n.videoUrl || String(n.onNote) !== parentId) return false
@@ -439,6 +456,8 @@ const VideoMessageWatchPage = () => {
     if (child) {
       shownRef.current.add(String(child._id))
       try { noteVideoRef.current?.pause() } catch { /* ignore */ }
+      childPrevRef.current = 0
+      childTRef.current = 0
       setChildNote(child)
       return
     }
@@ -490,18 +509,24 @@ const VideoMessageWatchPage = () => {
 
   const askReplyHere = async () => {
     if (busy || !iAmSender) return
+    const target = childNote || (activeNote?.type === 'video' ? activeNote : null)
+    const at = childNote ? (childTRef.current || 0) : target ? (replyTRef.current || 0) : now
     setBusy(true)
     try {
       const res = await fetch(`${API_BASE_URL}/api/video-message/${id}/reply-prompt`, {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ t: now, text: 'Reply here' }),
+        body: JSON.stringify({
+          t: at,
+          text: 'Reply here',
+          ...(target?._id ? { onNote: target._id } : {}),
+        }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Failed')
       if (Array.isArray(data.markers)) setItem((prev) => (prev ? { ...prev, markers: data.markers } : prev))
-      showToast('Sent', `Asked for a reply at ${fmtTime(now)}`, 'success')
+      showToast('Sent', `Asked for a reply at ${fmtTime(at)}`, 'success')
     } catch (e) {
       showToast('Error', e.message || 'Failed', 'error')
     } finally {
@@ -509,7 +534,7 @@ const VideoMessageWatchPage = () => {
     }
   }
 
-  const removeReplyHere = async (t) => {
+  const removeReplyHere = async (t, onNote) => {
     if (busy || !iAmSender) return
     setBusy(true)
     try {
@@ -517,7 +542,7 @@ const VideoMessageWatchPage = () => {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ t }),
+        body: JSON.stringify({ t, ...(onNote ? { onNote } : {}) }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Failed to remove')
@@ -531,8 +556,8 @@ const VideoMessageWatchPage = () => {
 
   const addReaction = async (emoji) => {
     if (busy) return
-    const reply = activeNote?.type === 'video' ? activeNote : null
-    const t = reply ? replyTRef.current || 0 : now
+    const reply = childNote || (activeNote?.type === 'video' ? activeNote : null)
+    const t = childNote ? (childTRef.current || 0) : reply ? replyTRef.current || 0 : now
     setBusy(true)
     try {
       const res = await fetch(`${API_BASE_URL}/api/video-message/${id}/notes`, {
@@ -840,7 +865,7 @@ const VideoMessageWatchPage = () => {
         />
 
 
-        {!iAmSender && !activeNote && (askNow || liveMarker?.type === 'reply') && (
+        {!iAmSender && !activeNote && ((askNow?.type === 'reply' && !askNow.onNote) || liveMarker?.type === 'reply') && (
           <Box position="absolute" left="max(56px, calc(env(safe-area-inset-left, 0px) + 9vw + 18px))" right="12px" bottom="max(8px, env(safe-area-inset-bottom, 0px))" bg="blackAlpha.800" color="white" px={3} py={2.5} borderRadius="xl">
             <Text fontWeight="bold" fontSize="sm">Wants a reply or a reaction here</Text>
             <Text fontSize="xs" color="whiteAlpha.800">At {fmtTime((askNow || liveMarker)?.t)} · record a video or tap a reaction</Text>
@@ -913,6 +938,23 @@ const VideoMessageWatchPage = () => {
                 e.stopPropagation()
                 togglePlay()
               }}
+              onTimeUpdate={(e) => {
+                const t = e.currentTarget.currentTime || 0
+                const prev = childPrevRef.current
+                childPrevRef.current = t
+                childTRef.current = t
+                if (!childNote || iAmSender || t + 0.05 < prev || t - prev > 2.5) return
+                const noteId = String(childNote._id)
+                const ask = (item?.markers || []).find((m) => {
+                  if (m?.type !== 'reply' || String(m.onNote || '') !== noteId) return false
+                  if (askedRef.current.has(`${m.onNote}:${m.t}`)) return false
+                  const mt = Number(m.t) || 0
+                  return mt > prev - 0.08 && mt <= t + 0.35
+                })
+                if (!ask) return
+                askedRef.current.add(`${ask.onNote}:${ask.t}`)
+                setAskNow(ask)
+              }}
               onEnded={(e) => {
                 const el = e.currentTarget
                 try { el.pause() } catch { /* ignore */ }
@@ -929,6 +971,8 @@ const VideoMessageWatchPage = () => {
                 })
                 if (next) {
                   shownRef.current.add(String(next._id))
+                  childPrevRef.current = 0
+                  childTRef.current = 0
                   setChildNote(next)
                   return
                 }
@@ -946,6 +990,12 @@ const VideoMessageWatchPage = () => {
               Close
             </Button>
           </Flex>
+          {askNow?.type === 'reply' && askNow.onNote && ((childNote && String(askNow.onNote) === String(childNote._id)) || (!childNote && String(askNow.onNote) === String(activeNote?._id))) ? (
+            <Box position="absolute" left="12px" right="12px" bottom="12px" bg="blackAlpha.800" color="white" px={3} py={2.5} borderRadius="xl" zIndex={6} pointerEvents="none">
+              <Text fontWeight="bold" fontSize="sm">Wants a reply or a reaction here</Text>
+              <Text fontSize="xs" color="whiteAlpha.800">At {fmtTime(askNow.t)} · record a video or tap a reaction</Text>
+            </Box>
+          ) : null}
           {popReaction && String(popReaction.onNote) === String(activeNote?._id) && (
             <Flex position="absolute" inset={0} align="center" justify="center" pointerEvents="none">
               <Text fontSize="5xl">{popReaction.reaction}</Text>
@@ -1038,7 +1088,7 @@ const VideoMessageWatchPage = () => {
             transform="translateX(-50%)"
             pointerEvents="none"
           />
-          {(item.markers || []).map((m, i) => (
+          {(item.markers || []).filter((m) => !m.onNote).map((m, i) => (
             <Box
               key={`m-${i}`}
               position="absolute"
@@ -1139,6 +1189,13 @@ const VideoMessageWatchPage = () => {
                 py={1.5}
                 cursor="pointer"
                 onClick={() => {
+                  if (m.onNote) {
+                    const host = notes.find((n) => String(n._id) === String(m.onNote))
+                    if (host) {
+                      goToNote(host)
+                      return
+                    }
+                  }
                   setAskNow(m)
                   seekTo(m.t)
                   videoRef.current?.pause()
@@ -1146,7 +1203,7 @@ const VideoMessageWatchPage = () => {
                 }}
               >
                 <Text w="44px" fontSize="sm" color={muted}>{fmtTime(m.t)}</Text>
-                <Text fontSize="sm" flex="1">Reply or reaction here</Text>
+                <Text fontSize="sm" flex="1">{m.onNote ? `On reply · ${fmtTime(m.t)}` : 'Reply or reaction here'}</Text>
                 {iAmSender && (
                   <Button
                     size="xs"
@@ -1154,7 +1211,7 @@ const VideoMessageWatchPage = () => {
                     color={muted}
                     onClick={(e) => {
                       e.stopPropagation()
-                      removeReplyHere(m.t)
+                      removeReplyHere(m.t, m.onNote)
                     }}
                   >
                     ✕

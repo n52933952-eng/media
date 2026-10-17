@@ -525,11 +525,23 @@ export const addReplyPrompt = async (req, res) => {
     }
     const at = toNum(req.body?.t, -1)
     if (at < 0) return res.status(400).json({ error: 'Invalid time' })
-    const safeT = doc.duration > 0 ? Math.min(doc.duration, at) : at
+    let safeT = doc.duration > 0 ? Math.min(doc.duration, at) : at
+    let onNote = null
+    if (req.body?.onNote) {
+      if (!isId(req.body.onNote)) return res.status(400).json({ error: 'Invalid reply' })
+      const parent = await VideoNote.findOne({ _id: req.body.onNote, videoMessage: doc._id, type: 'video' })
+        .select('_id duration')
+        .lean()
+      if (!parent) return res.status(400).json({ error: 'Reply not found' })
+      const cap = parent.duration > 0 ? parent.duration : MAX_NOTE_DURATION_SEC
+      safeT = Math.min(cap, at)
+      onNote = parent._id
+    }
     const marker = {
       t: Math.round(safeT * 10) / 10,
       type: 'reply',
       text: String(req.body?.text || 'Reply here').trim().slice(0, 120) || 'Reply here',
+      onNote,
     }
     doc.markers = [...(doc.markers || []), marker].sort((a, b) => a.t - b.t)
     await doc.save()
@@ -556,8 +568,12 @@ export const removeReplyPrompt = async (req, res) => {
     }
     const at = toNum(req.body?.t, -1)
     if (at < 0) return res.status(400).json({ error: 'Invalid time' })
+    const want = isId(req.body?.onNote) ? String(req.body.onNote) : ''
     const list = doc.markers || []
-    const idx = list.findIndex((m) => m?.type === 'reply' && Math.abs(Number(m.t) - at) < 0.2)
+    const idx = list.findIndex((m) => {
+      if (m?.type !== 'reply' || Math.abs(Number(m.t) - at) >= 0.2) return false
+      return String(m.onNote || '') === want
+    })
     if (idx < 0) return res.status(404).json({ error: 'Reply prompt not found' })
     doc.markers = list.filter((_, i) => i !== idx)
     await doc.save()

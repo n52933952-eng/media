@@ -10,9 +10,11 @@ import mongoose from 'mongoose'
  */
 const markerSchema = new mongoose.Schema(
   {
-    t: { type: Number, required: true, min: 0 }, // seconds into the video
+    t: { type: Number, required: true, min: 0 }, // seconds into the video, or into the reply it sits on
     type: { type: String, enum: ['mark', 'question', 'reply'], default: 'mark' },
     text: { type: String, default: '', maxlength: 120 },
+    // Set when "Reply here" is on a recording, including a recording on a recording.
+    onNote: { type: mongoose.Schema.Types.ObjectId, default: null },
   },
   { _id: false },
 )
