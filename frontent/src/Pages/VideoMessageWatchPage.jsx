@@ -20,6 +20,44 @@ import { fmtTime, otherParty, partyLabel, prepareLightVideo, uidOf } from '../ut
 import VideoRecordModal from '../Components/VideoRecordModal.jsx'
 
 const REACTIONS = ['❤️', '😂', '🔥', '😮', '😢', '👏', '😍', '🎉', '👍', '💯', '🙏', '😭', '🤣', '😎', '💪', '✨', '😘', '🤔', '😅', '🙌']
+const REACT_SPOTS = [
+  [0.12, 0.18],
+  [0.70, 0.16],
+  [0.08, 0.44],
+  [0.68, 0.42],
+  [0.14, 0.70],
+  [0.66, 0.68],
+  [0.38, 0.12],
+  [0.36, 0.78],
+]
+
+function reactionSpots(notes) {
+  const groups = new Map()
+  for (const n of notes || []) {
+    if (n?.type !== 'reaction') continue
+    const key = n.onNote ? String(n.onNote) : ''
+    if (!groups.has(key)) groups.set(key, [])
+    groups.get(key).push(n)
+  }
+  const out = new Map()
+  for (const list of groups.values()) {
+    const sorted = list.slice().sort((a, b) => (Number(a.t) || 0) - (Number(b.t) || 0))
+    const placed = []
+    for (const m of sorted) {
+      const busy = new Set()
+      const t = Number(m.t) || 0
+      for (const prev of placed) {
+        if (t < prev.t + 1.6 && prev.t < t + 1.6) busy.add(prev.spot)
+      }
+      let spot = 0
+      while (busy.has(spot) && spot < REACT_SPOTS.length - 1) spot += 1
+      const [px, py] = REACT_SPOTS[spot]
+      placed.push({ t, spot })
+      out.set(String(m._id), { px, py })
+    }
+  }
+  return out
+}
 
 function clusterBarPins(notes, markers, dur, barW) {
   const span = Math.max(1, dur || 1)
@@ -91,6 +129,8 @@ const VideoMessageWatchPage = () => {
 
   const [item, setItem] = useState(listPreview?.videoUrl ? listPreview : null)
   const [notes, setNotes] = useState([])
+  const reactionSpot = useMemo(() => reactionSpots(notes), [notes])
+  const spotFor = (note) => reactionSpot.get(String(note?._id)) || { px: 0.38, py: 0.42 }
   const [loading, setLoading] = useState(!listPreview?.videoUrl)
   const [now, setNow] = useState(0)
   const [duration, setDuration] = useState(() => {
@@ -954,9 +994,17 @@ const VideoMessageWatchPage = () => {
         )}
 
         {popReaction && !activeNote && (
-          <Flex position="absolute" inset={0} align="center" justify="center" pointerEvents="none">
-            <Text fontSize="5xl">{popReaction.reaction}</Text>
-          </Flex>
+          <Text
+            position="absolute"
+            left={`calc((100% - 64px) * ${spotFor(popReaction).px})`}
+            top={`calc((100% - 64px) * ${spotFor(popReaction).py})`}
+            fontSize="5xl"
+            lineHeight="1"
+            pointerEvents="none"
+            zIndex={6}
+          >
+            {popReaction.reaction}
+          </Text>
         )}
 
         {/* Always mounted so the next reply can buffer before its moment. */}
@@ -1076,9 +1124,17 @@ const VideoMessageWatchPage = () => {
             </Flex>
           ) : null}
           {popReaction && String(popReaction.onNote) === String(activeNote?._id) && (
-            <Flex position="absolute" inset={0} align="center" justify="center" pointerEvents="none">
-              <Text fontSize="5xl">{popReaction.reaction}</Text>
-            </Flex>
+            <Text
+              position="absolute"
+              left={`calc((100% - 64px) * ${spotFor(popReaction).px})`}
+              top={`calc((100% - 64px) * ${spotFor(popReaction).py})`}
+              fontSize="5xl"
+              lineHeight="1"
+              pointerEvents="none"
+              zIndex={6}
+            >
+              {popReaction.reaction}
+            </Text>
           )}
         </Box>
         <Box
