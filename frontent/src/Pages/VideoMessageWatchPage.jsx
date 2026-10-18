@@ -89,22 +89,6 @@ const VideoMessageWatchPage = () => {
   const resumePlayRef = useRef(false)
   const reactTimerRef = useRef(null)
 
-  useEffect(() => {
-    let raf = 0
-    let last = 0
-    const loop = (ts) => {
-      raf = requestAnimationFrame(loop)
-      if (ts - last < 32) return
-      const v = videoRef.current
-      if (!v || v.paused || dragRef.current || replyLockRef.current) return
-      last = ts
-      const t = v.currentTime || 0
-      setNow((cur) => (Math.abs(cur - t) < 0.02 ? cur : t))
-    }
-    raf = requestAnimationFrame(loop)
-    return () => cancelAnimationFrame(raf)
-  }, [])
-
   const [item, setItem] = useState(listPreview?.videoUrl ? listPreview : null)
   const [notes, setNotes] = useState([])
   const [loading, setLoading] = useState(!listPreview?.videoUrl)

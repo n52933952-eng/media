@@ -111,7 +111,7 @@ async function countFrames(bin, file, mov) {
 }
 
 export function exportHashFor(doc, notes) {
-  const parts = ['mix8', String(doc?.videoUrl || ''), String(doc?.duration || 0)]
+  const parts = ['mix9', String(doc?.videoUrl || ''), String(doc?.duration || 0)]
   for (const n of notes || []) {
     parts.push([
       n._id,
@@ -263,13 +263,38 @@ function replyTiming(note, probeInfo, frames) {
   return { outDur, stretch, fps }
 }
 
+function placeReactions(marks) {
+  const spots = [
+    [0.12, 0.18],
+    [0.70, 0.16],
+    [0.08, 0.44],
+    [0.68, 0.42],
+    [0.14, 0.70],
+    [0.66, 0.68],
+    [0.38, 0.12],
+    [0.36, 0.78],
+  ]
+  const placed = []
+  for (const m of marks) {
+    const busy = new Set()
+    for (const prev of placed) {
+      if (m.start < prev.start + 1.6 && prev.start < m.start + 1.6) busy.add(prev.spot)
+    }
+    let spot = 0
+    while (busy.has(spot) && spot < spots.length - 1) spot += 1
+    const [px, py] = spots[spot]
+    placed.push({ ...m, px, py, spot })
+  }
+  return placed
+}
+
 function emojiSlices(reactions, playFor) {
   const span = Math.max(0.2, Number(playFor) || 0.2)
   const show = 1.6
-  const marks = (reactions || [])
+  const marks = placeReactions((reactions || [])
     .map((r) => ({ emoji: r.emoji, start: Math.max(0, Number(r.start) || 0) }))
     .filter((r) => r.emoji && r.start < span - 0.02)
-    .sort((a, b) => a.start - b.start)
+    .sort((a, b) => a.start - b.start))
   if (!marks.length) return []
   const points = [0, span]
   for (const m of marks) {
@@ -286,7 +311,7 @@ function emojiSlices(reactions, playFor) {
     raw.push({
       start,
       dur,
-      reactions: active.slice(0, 4).map((m) => ({ emoji: m.emoji, start: 0 })),
+      reactions: active.slice(0, 4).map((m) => ({ emoji: m.emoji, start: 0, px: m.px, py: m.py })),
     })
   }
   const slices = []
@@ -305,7 +330,7 @@ async function encodeCore({ bin, dir, index, input, ss, readDur, outDur, stretch
   const pngs = []
   for (const reaction of reactions || []) {
     const file = await pngFor(dir, cache, reaction.emoji)
-    if (file) pngs.push({ file, start: reaction.start })
+    if (file) pngs.push({ file, start: reaction.start, px: reaction.px, py: reaction.py })
   }
   const out = join(dir, `seg-${index}.mp4`)
   const playFor = Math.max(0.2, Number(outDur) || 0.2)
@@ -323,8 +348,10 @@ async function encodeCore({ bin, dir, index, input, ss, readDur, outDur, stretch
   ]
   let last = 'v0'
   pngs.forEach((png, i) => {
+    const px = Number.isFinite(Number(png.px)) ? Number(png.px) : 0.5
+    const py = Number.isFinite(Number(png.py)) ? Number(png.py) : 0.42
     filters.push(`[${i + 1}:v]scale=140:140,format=rgba[e${i}]`)
-    filters.push(`[${last}][e${i}]overlay=(W-w)/2:(H-h)/2:eof_action=pass[v${i + 1}]`)
+    filters.push(`[${last}][e${i}]overlay=(W-w)*${px.toFixed(3)}:(H-h)*${py.toFixed(3)}:eof_action=pass[v${i + 1}]`)
     last = `v${i + 1}`
   })
   let audioMap = `${pngs.length + 1}:a`
